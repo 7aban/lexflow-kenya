@@ -1,203 +1,480 @@
 import { useEffect, useMemo, useState } from 'react';
-import Login from './components/Login';
-import Toast from './components/Toast';
-import {
-  apiUrl,
-  createCaseNote,
-  createClient,
-  createMatter,
-  createTask,
-  createTimeEntry,
-  deleteDocument,
-  deleteUser,
-  downloadInvoicePdf,
-  generateInvoice,
-  getClients,
-  getCurrentUser,
-  getDashboard,
-  getInvoices,
-  getMatter,
-  getMatters,
-  getTasks,
-  getUsers,
-  globalSearch,
-  register,
-  sendMpesaStk,
-  sendWhatsAppReminders,
-  updateInvoiceStatus,
-  updateMatterStatus,
-  updateTask,
-  uploadMatterDocument,
-} from './api';
 
-const tabs = ['Dashboard', 'Matters', 'Tasks', 'Reports', 'Settings', 'Users'];
-const stages = ['Intake', 'Pleadings', 'Discovery', 'Hearing', 'Judgment', 'Appeal', 'Closed'];
-const C = { ink: '#111827', muted: '#6B7280', line: '#E5E7EB', navy: '#1B3A5C', gold: '#D4A34A', bg: '#F7F8FA', card: '#FFFFFF', red: '#B91C1C', green: '#047857' };
-const blankMatter = { clientId: '', title: '', practiceArea: '', assignedTo: '', billingType: 'hourly', billingRate: 15000, fixedFee: 0 };
-const roleCanBill = user => ['advocate', 'admin'].includes(user?.role);
-const roleCanAdmin = user => user?.role === 'admin';
+const API_BASE = 'http://localhost:5000/api';
+const COLORS = {
+  bg: '#F3F4F6',
+  panel: '#FFFFFF',
+  border: '#E5E7EB',
+  navy: '#1B3A5C',
+  gold: '#D4A34A',
+  text: '#111827',
+  muted: '#6B7280',
+  danger: '#B91C1C',
+  success: '#047857',
+};
 
-export default function App() {
-  const stored = safeJson(localStorage.getItem('lexflowSession'));
-  const [session, setSession] = useState(stored);
-  const [user, setUser] = useState(stored?.user || null);
-  const [view, setView] = useState('Dashboard');
-  const [toast, setToast] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [dashboard, setDashboard] = useState({});
-  const [clients, setClients] = useState([]);
-  const [matters, setMatters] = useState([]);
-  const [tasks, setTasks] = useState([]);
-  const [invoices, setInvoices] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [selectedMatterId, setSelectedMatterId] = useState('');
-  const [selectedMatter, setSelectedMatter] = useState(null);
-  const [search, setSearch] = useState('');
-  const [results, setResults] = useState([]);
-
-  const notify = (message, type = 'success') => setToast({ message, type });
-  const logout = () => { localStorage.removeItem('lexflowSession'); localStorage.removeItem('lexflowToken'); setSession(null); setUser(null); setSelectedMatter(null); };
-  const onLogin = nextSession => { localStorage.setItem('lexflowSession', JSON.stringify(nextSession)); localStorage.setItem('lexflowToken', nextSession.token); setSession(nextSession); setUser(nextSession.user); notify('Signed in successfully'); };
-
-  useEffect(() => {
-    const unauthorized = () => { logout(); setToast({ type: 'error', message: 'Your session expired. Please sign in again.' }); };
-    window.addEventListener('lexflow:unauthorized', unauthorized);
-    return () => window.removeEventListener('lexflow:unauthorized', unauthorized);
-  }, []);
-
-  useEffect(() => { if (session?.token) bootstrap(); }, [session?.token]);
-  useEffect(() => { if (selectedMatterId) loadMatter(selectedMatterId); }, [selectedMatterId]);
-  useEffect(() => {
-    if (!search.trim()) return setResults([]);
-    const id = setTimeout(() => globalSearch(search).then(setResults).catch(() => setResults([])), 250);
-    return () => clearTimeout(id);
-  }, [search]);
-
-  async function bootstrap() {
-    setBusy(true);
-    try {
-      const current = await getCurrentUser();
-      setUser(current);
-      await Promise.all([loadDashboard(), loadClients(), loadMatters(), loadTasks(), loadInvoices(), roleCanAdmin(current) ? loadUsers() : Promise.resolve()]);
-    } catch (err) { notify(err.message, 'error'); }
-    finally { setBusy(false); }
+function readSession() {
+  try {
+    const session = JSON.parse(localStorage.getItem('lexflowSession') || 'null');
+    if (session?.token) return session;
+    const token = localStorage.getItem('lexflowToken');
+    return token ? { token, user: null } : null;
+  } catch {
+    return null;
   }
-  const loadDashboard = async () => setDashboard(await getDashboard());
-  const loadClients = async () => setClients(await getClients());
-  const loadMatters = async () => setMatters(await getMatters());
-  const loadTasks = async () => setTasks(await getTasks());
-  const loadInvoices = async () => setInvoices(await getInvoices());
-  const loadUsers = async () => setUsers(await getUsers());
-  const loadMatter = async id => { const m = await getMatter(id); setSelectedMatter(m); };
+}
 
-  if (!session?.token) return <><Login onLogin={onLogin} /><Toast toast={toast} onClose={() => setToast(null)} /></>;
+function saveSession(session) {
+  localStorage.setItem('lexflowSession', JSON.stringify(session));
+  localStorage.setItem('lexflowToken', session.token);
+}
 
-  const visibleTabs = tabs.filter(t => (t !== 'Users' || roleCanAdmin(user)) && (user?.role !== 'assistant' || ['Dashboard', 'Matters', 'Tasks'].includes(t)));
+function clearSession() {
+  localStorage.removeItem('lexflowSession');
+  localStorage.removeItem('lexflowToken');
+}
 
-  return <div style={styles.shell}>
-    <aside style={styles.sidebar}>
-      <div style={styles.logo}><span style={styles.logoMark}>LF</span><div><strong>LexFlow Kenya</strong><small>{user?.fullName || user?.name} · {user?.role}</small></div></div>
-      <nav>{visibleTabs.map(t => <button key={t} onClick={() => setView(t)} style={{ ...styles.nav, ...(view === t ? styles.navActive : {}) }}>{t}</button>)}</nav>
-      <button onClick={logout} style={styles.logout}>Logout</button>
-    </aside>
-    <main style={styles.main}>
-      <header style={styles.topbar}>
-        <div style={{ position: 'relative', flex: 1 }}>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search matters and clients" style={styles.search} />
-          {!!results.length && <div style={styles.searchMenu}>{results.map(r => <button key={`${r.type}-${r.id}`} style={styles.searchItem} onClick={() => { if (r.matterId) { setSelectedMatterId(r.matterId); setView('Matters'); } setSearch(''); setResults([]); }}><strong>{r.title}</strong><span>{r.type} · {r.subtitle}</span></button>)}</div>}
+async function api(path, options = {}) {
+  const session = readSession();
+  const headers = { ...(options.headers || {}) };
+  if (!(options.body instanceof FormData)) headers['Content-Type'] = headers['Content-Type'] || 'application/json';
+  if (session?.token) headers.Authorization = `Bearer ${session.token}`;
+
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers,
+    body: options.body && !(options.body instanceof FormData) ? JSON.stringify(options.body) : options.body,
+  });
+
+  const contentType = response.headers.get('content-type') || '';
+  const data = contentType.includes('application/json') ? await response.json().catch(() => ({})) : await response.text();
+
+  if (response.status === 401) clearSession();
+  if (!response.ok) throw new Error(data?.error || `Request failed (${response.status})`);
+  return data;
+}
+
+function App() {
+  const [session, setSession] = useState(readSession);
+  const [user, setUser] = useState(session?.user || null);
+  const [view, setView] = useState('Dashboard');
+  const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
+  const [data, setData] = useState({ dashboard: {}, clients: [], matters: [], tasks: [], invoices: [] });
+
+  const isAuthed = Boolean(session?.token);
+  const canManage = ['admin', 'advocate'].includes(user?.role);
+  const isAdmin = user?.role === 'admin';
+
+  useEffect(() => {
+    if (!isAuthed) return;
+    loadEverything();
+  }, [isAuthed]);
+
+  async function loadEverything() {
+    setLoading(true);
+    setError('');
+    try {
+      const [currentUser, dashboard, clients, matters, tasks, invoices] = await Promise.all([
+        api('/auth/me'),
+        api('/dashboard'),
+        api('/clients'),
+        api('/matters'),
+        api('/tasks'),
+        api('/invoices'),
+      ]);
+      setUser(currentUser);
+      setData({ dashboard, clients, matters, tasks, invoices });
+    } catch (err) {
+      setError(err.message);
+      if (err.message.toLowerCase().includes('auth')) handleLogout();
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleLogin(nextSession) {
+    saveSession(nextSession);
+    setSession(nextSession);
+    setUser(nextSession.user || null);
+    setNotice('Signed in successfully.');
+  }
+
+  function handleLogout() {
+    clearSession();
+    setSession(null);
+    setUser(null);
+    setData({ dashboard: {}, clients: [], matters: [], tasks: [], invoices: [] });
+  }
+
+  if (!isAuthed) return <LoginPage onLogin={handleLogin} />;
+
+  return (
+    <div style={styles.shell}>
+      <aside style={styles.sidebar}>
+        <div style={styles.brandRow}>
+          <div style={styles.logo}>LF</div>
+          <div>
+            <strong>LexFlow Kenya</strong>
+            <small style={styles.sidebarMeta}>{user?.fullName || user?.name || 'Signed in'} · {user?.role || 'user'}</small>
+          </div>
         </div>
-        {busy && <span style={styles.muted}>Loading...</span>}
-      </header>
-      {view === 'Dashboard' && <Dashboard dashboard={dashboard} matters={matters} invoices={invoices} />}
-      {view === 'Matters' && <Matters user={user} clients={clients} matters={matters} selectedMatter={selectedMatter} setSelectedMatterId={setSelectedMatterId} refresh={async () => { await loadMatters(); if (selectedMatterId) await loadMatter(selectedMatterId); }} notify={notify} />}
-      {view === 'Tasks' && <Tasks tasks={tasks} matters={matters} refresh={loadTasks} notify={notify} />}
-      {view === 'Reports' && <Reports user={user} invoices={invoices} refresh={loadInvoices} notify={notify} />}
-      {view === 'Settings' && <Settings notify={notify} />}
-      {view === 'Users' && roleCanAdmin(user) && <Users users={users} refresh={loadUsers} notify={notify} />}
-    </main>
-    <Toast toast={toast} onClose={() => setToast(null)} />
-  </div>;
+
+        {['Dashboard', 'Matters', 'Tasks', 'Invoices', ...(isAdmin ? ['Users'] : [])].map(item => (
+          <button key={item} type="button" onClick={() => setView(item)} style={{ ...styles.navButton, ...(view === item ? styles.navButtonActive : {}) }}>
+            {item}
+          </button>
+        ))}
+
+        <button type="button" onClick={handleLogout} style={styles.logoutButton}>Logout</button>
+      </aside>
+
+      <main style={styles.main}>
+        <header style={styles.header}>
+          <div>
+            <h1 style={styles.pageTitle}>{view}</h1>
+            <p style={styles.subtle}>Kenyan law practice management for matters, time, invoices and clients.</p>
+          </div>
+          <button type="button" onClick={loadEverything} style={styles.secondaryButton}>{loading ? 'Refreshing...' : 'Refresh'}</button>
+        </header>
+
+        {notice && <Banner tone="success" onClose={() => setNotice('')}>{notice}</Banner>}
+        {error && <Banner tone="error" onClose={() => setError('')}>{error}</Banner>}
+
+        {view === 'Dashboard' && <Dashboard data={data} />}
+        {view === 'Matters' && <Matters data={data} canManage={canManage} onReload={loadEverything} setNotice={setNotice} setError={setError} />}
+        {view === 'Tasks' && <Tasks tasks={data.tasks} matters={data.matters} onReload={loadEverything} setNotice={setNotice} setError={setError} />}
+        {view === 'Invoices' && <Invoices invoices={data.invoices} isAdmin={isAdmin} onReload={loadEverything} setNotice={setNotice} setError={setError} />}
+        {view === 'Users' && isAdmin && <Users setNotice={setNotice} setError={setError} />}
+      </main>
+    </div>
+  );
 }
 
-function Dashboard({ dashboard, matters, invoices }) {
-  const outstanding = invoices.filter(i => i.status === 'Outstanding').reduce((s, i) => s + Number(i.amount || 0), 0);
-  return <section><h1>Dashboard</h1><div style={styles.grid4}>
-    <Stat label="Active Matters" value={dashboard.activeMattersCount || matters.length} />
-    <Stat label="Month Hours" value={Number(dashboard.monthHours || 0).toFixed(1)} />
-    <Stat label="Month Revenue" value={kes(dashboard.monthRevenue)} />
-    <Stat label="Outstanding" value={kes(outstanding)} />
-  </div><Panel title="Upcoming Court Dates">{(dashboard.upcomingEvents || []).map(e => <Row key={e.id} title={e.title} meta={`${e.date} ${e.time || ''}`} />)}{!(dashboard.upcomingEvents || []).length && <Empty text="No upcoming dates." />}</Panel></section>;
-}
-function Stat({ label, value }) { return <div style={styles.stat}><span>{label}</span><strong>{value}</strong></div>; }
+function LoginPage({ onLogin }) {
+  const [email, setEmail] = useState('admin@lexflow.co.ke');
+  const [password, setPassword] = useState('admin123');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
 
-function Matters({ user, clients, matters, selectedMatter, setSelectedMatterId, refresh, notify }) {
-  const [form, setForm] = useState(blankMatter);
+  async function submit(event) {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      const response = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Login failed');
+      onLogin(data);
+    } catch (err) {
+      setError(err.message || 'Login failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={styles.loginPage}>
+      <form onSubmit={submit} style={styles.loginCard}>
+        <div style={styles.loginBrand}>
+          <div style={styles.logo}>LF</div>
+          <div>
+            <h1 style={styles.loginTitle}>LexFlow Kenya</h1>
+            <p style={styles.loginSubtitle}>Sign in to manage your practice</p>
+          </div>
+        </div>
+
+        {error && <div style={styles.loginError}>{error}</div>}
+
+        <label style={styles.label}>Email</label>
+        <input style={styles.input} value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" />
+
+        <label style={styles.label}>Password</label>
+        <input style={styles.input} type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" />
+
+        <button type="submit" disabled={busy} style={styles.primaryButton}>{busy ? 'Signing in...' : 'Sign In'}</button>
+        <p style={styles.helperText}>Default admin: admin@lexflow.co.ke / admin123</p>
+      </form>
+    </div>
+  );
+}
+
+function Dashboard({ data }) {
+  const outstanding = data.invoices.filter(invoice => invoice.status === 'Outstanding').reduce((sum, invoice) => sum + Number(invoice.amount || 0), 0);
+  return (
+    <>
+      <div style={styles.statGrid}>
+        <Stat label="Active Matters" value={data.dashboard.activeMattersCount ?? data.matters.length} />
+        <Stat label="Month Hours" value={Number(data.dashboard.monthHours || 0).toFixed(1)} />
+        <Stat label="Month Revenue" value={kes(data.dashboard.monthRevenue)} />
+        <Stat label="Outstanding" value={kes(outstanding)} />
+      </div>
+      <Panel title="Recent Matters">
+        {data.matters.slice(0, 6).map(matter => <Item key={matter.id} title={matter.title} meta={`${matter.reference || matter.id} · ${matter.clientName || 'Client pending'} · ${matter.stage || 'Intake'}`} />)}
+        {!data.matters.length && <Empty>No matters yet.</Empty>}
+      </Panel>
+    </>
+  );
+}
+
+function Matters({ data, canManage, onReload, setNotice, setError }) {
+  const [selectedId, setSelectedId] = useState('');
+  const [form, setForm] = useState({ clientId: '', title: '', practiceArea: '', billingType: 'hourly', billingRate: 15000, fixedFee: 0 });
   const [time, setTime] = useState({ hours: 1, description: '', rate: 15000 });
-  const [note, setNote] = useState('');
-  const [task, setTask] = useState('');
-  const [invoiceBusy, setInvoiceBusy] = useState(false);
-  const canManage = roleCanBill(user);
-  const unbilled = (selectedMatter?.timeEntries || []).filter(t => !t.billed);
-  const hasOutstanding = (selectedMatter?.invoices || []).some(i => i.status === 'Outstanding');
-  const canGenerateInvoice = canManage && selectedMatter && !hasOutstanding && ((selectedMatter.billingType === 'fixed' && Number(selectedMatter.fixedFee) > 0) || unbilled.length > 0);
+  const selected = useMemo(() => data.matters.find(matter => matter.id === selectedId) || data.matters[0], [data.matters, selectedId]);
 
-  async function submitMatter(e) { e.preventDefault(); await createMatter(form); setForm(blankMatter); await refresh(); notify('Matter created'); }
-  async function changeStage(stage) { await updateMatterStatus(selectedMatter.id, { stage }); await refresh(); notify('Matter stage updated'); }
-  async function logTime(e) { e.preventDefault(); await createTimeEntry({ ...time, matterId: selectedMatter.id, attorney: user.fullName || user.name, rate: time.rate || selectedMatter.billingRate }); setTime({ hours: 1, description: '', rate: selectedMatter.billingRate || 15000 }); await refresh(); notify('Time logged'); }
-  async function addNote(e) { e.preventDefault(); await createCaseNote(selectedMatter.id, { content: note, author: user.fullName || user.name }); setNote(''); await refresh(); notify('Note saved'); }
-  async function addTask(e) { e.preventDefault(); await createTask({ matterId: selectedMatter.id, title: task }); setTask(''); await refresh(); notify('Task added'); }
-  async function uploadDoc(e) { const file = e.target.files?.[0]; if (!file) return; await uploadMatterDocument(selectedMatter.id, file); await refresh(); notify('Document uploaded'); e.target.value = ''; }
-  async function makeInvoice() { if (!window.confirm('Generate an invoice for this matter now?')) return; setInvoiceBusy(true); try { const invoice = await generateInvoice(selectedMatter.id); await refresh(); notify(`Invoice ${invoice.number || invoice.id} generated`); } catch (err) { notify(err.message, 'error'); } finally { setInvoiceBusy(false); } }
+  async function createMatter(event) {
+    event.preventDefault();
+    try {
+      await api('/matters', { method: 'POST', body: form });
+      setNotice('Matter created.');
+      setForm({ clientId: '', title: '', practiceArea: '', billingType: 'hourly', billingRate: 15000, fixedFee: 0 });
+      await onReload();
+    } catch (err) { setError(err.message); }
+  }
 
-  return <section><div style={styles.split}>
-    <div><h1>Matters</h1><Panel title="Matter List">{matters.map(m => <button key={m.id} style={styles.listButton} onClick={() => setSelectedMatterId(m.id)}><strong>{m.reference || m.id}</strong><span>{m.title} · {m.clientName || ''}</span></button>)}</Panel>{canManage && <Panel title="Create Matter"><form onSubmit={submitMatter} style={styles.formGrid}><Select value={form.clientId} onChange={clientId => setForm({ ...form, clientId })} options={clients.map(c => [c.id, c.name])} placeholder="Client" /><Input value={form.title} onChange={title => setForm({ ...form, title })} placeholder="Title" /><Input value={form.practiceArea} onChange={practiceArea => setForm({ ...form, practiceArea })} placeholder="Practice area" /><Select value={form.billingType} onChange={billingType => setForm({ ...form, billingType })} options={[['hourly', 'Hourly'], ['fixed', 'Fixed fee']]} /><Input type="number" value={form.billingType === 'fixed' ? form.fixedFee : form.billingRate} onChange={v => setForm({ ...form, [form.billingType === 'fixed' ? 'fixedFee' : 'billingRate']: Number(v) })} placeholder="Amount/rate" /><button style={styles.primary}>Create</button></form></Panel>}</div>
-    <div>{selectedMatter ? <Panel title={`${selectedMatter.reference || ''} ${selectedMatter.title}`}>{canManage && <div style={styles.inline}>{stages.map(s => <button key={s} onClick={() => changeStage(s)} disabled={selectedMatter.stage === s} style={selectedMatter.stage === s ? styles.pillActive : styles.pill}>{s}</button>)}</div>}<p style={styles.muted}>{selectedMatter.clientName} · {selectedMatter.practiceArea} · {selectedMatter.billingType}</p>
-      <h3>Time & Billing</h3><form onSubmit={logTime} style={styles.formGrid}><Input type="number" value={time.hours} onChange={hours => setTime({ ...time, hours })} placeholder="Hours" /><Input value={time.description} onChange={description => setTime({ ...time, description })} placeholder="Description" /><Input type="number" value={time.rate} onChange={rate => setTime({ ...time, rate })} placeholder="Rate" /><button style={styles.primary}>Log Time</button></form>
-      <div style={styles.table}>{(selectedMatter.timeEntries || []).map(t => <Row key={t.id} title={t.description || t.activity} meta={`${t.date} · ${t.hours}h · ${kes(Number(t.hours || 0) * Number(t.rate || 0))} · ${t.billed ? 'Billed' : 'Unbilled'}`} />)}</div>
-      {canGenerateInvoice && <button onClick={makeInvoice} disabled={invoiceBusy} style={styles.primary}>{invoiceBusy ? 'Generating...' : 'Generate Invoice'}</button>}
-      <h3>Invoice History</h3>{(selectedMatter.invoices || []).map(i => <Row key={i.id} title={`${i.number || i.id} · ${kes(i.amount)}`} meta={`${i.date} · due ${i.dueDate} · ${i.status}`} action={<button style={styles.link} onClick={() => downloadInvoicePdf(i.id, `${i.number || i.id}.pdf`)}>Download PDF</button>} />)}
-      <h3>Documents</h3>{canManage && <input type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={uploadDoc} />}{(selectedMatter.documents || []).map(d => <Row key={d.id} title={d.name} meta={`${d.type} · ${d.size}`} action={<span><a style={styles.link} href={apiUrl(`/api/documents/${d.id}/download`)}>Download</a>{canManage && <button style={styles.dangerLink} onClick={async () => { await deleteDocument(d.id); await refresh(); notify('Document deleted'); }}>Delete</button>}</span>} />)}
-      <h3>Tasks</h3><form onSubmit={addTask} style={styles.inline}><Input value={task} onChange={setTask} placeholder="Task title" /><button style={styles.primary}>Add</button></form>{(selectedMatter.tasks || []).map(t => <Row key={t.id} title={t.title} meta={t.completed ? 'Completed' : 'Open'} />)}
-      <h3>Case Notes</h3><form onSubmit={addNote} style={styles.inline}><Input value={note} onChange={setNote} placeholder="Add note" /><button style={styles.primary}>Save</button></form>{(selectedMatter.notes || []).map(n => <Row key={n.id} title={n.content} meta={`${n.author} · ${new Date(n.createdAt).toLocaleString()}`} />)}</Panel> : <Panel title="Matter Detail"><Empty text="Select a matter to view details." /></Panel>}</div>
-  </div></section>;
+  async function logTime(event) {
+    event.preventDefault();
+    if (!selected) return;
+    try {
+      await api('/time-entries', { method: 'POST', body: { ...time, matterId: selected.id } });
+      setNotice('Time entry logged.');
+      setTime({ hours: 1, description: '', rate: selected.billingRate || 15000 });
+      await onReload();
+    } catch (err) { setError(err.message); }
+  }
+
+  async function generateInvoice(matterId) {
+    try {
+      const invoice = await api('/invoices/generate', { method: 'POST', body: { matterId } });
+      setNotice(`Invoice ${invoice.number || invoice.id} generated.`);
+      await onReload();
+    } catch (err) { setError(err.message); }
+  }
+
+  return (
+    <div style={styles.twoColumn}>
+      <Panel title="Matter List">
+        {data.matters.map(matter => (
+          <button key={matter.id} type="button" onClick={() => setSelectedId(matter.id)} style={{ ...styles.listButton, ...(selected?.id === matter.id ? styles.listButtonActive : {}) }}>
+            <strong>{matter.title}</strong>
+            <span>{matter.reference || matter.id} · {matter.clientName || 'No client'} · {matter.stage || 'Intake'}</span>
+          </button>
+        ))}
+        {!data.matters.length && <Empty>No matters yet.</Empty>}
+      </Panel>
+
+      <div>
+        {canManage && (
+          <Panel title="Create Matter">
+            <form onSubmit={createMatter} style={styles.formGrid}>
+              <select style={styles.input} value={form.clientId} onChange={event => setForm({ ...form, clientId: event.target.value })} required>
+                <option value="">Select client</option>
+                {data.clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
+              </select>
+              <input style={styles.input} value={form.title} onChange={event => setForm({ ...form, title: event.target.value })} placeholder="Matter title" required />
+              <input style={styles.input} value={form.practiceArea} onChange={event => setForm({ ...form, practiceArea: event.target.value })} placeholder="Practice area" />
+              <select style={styles.input} value={form.billingType} onChange={event => setForm({ ...form, billingType: event.target.value })}>
+                <option value="hourly">Hourly</option>
+                <option value="fixed">Fixed fee</option>
+              </select>
+              <input style={styles.input} type="number" value={form.billingType === 'fixed' ? form.fixedFee : form.billingRate} onChange={event => setForm({ ...form, [form.billingType === 'fixed' ? 'fixedFee' : 'billingRate']: Number(event.target.value) })} placeholder="Rate or fee" />
+              <button style={styles.primaryButton}>Create</button>
+            </form>
+          </Panel>
+        )}
+
+        <Panel title={selected ? selected.title : 'Matter Detail'}>
+          {selected ? (
+            <>
+              <p style={styles.subtle}>{selected.reference || selected.id} · {selected.clientName || 'No client'} · {selected.practiceArea || 'General'} · {selected.billingType || 'hourly'}</p>
+              <form onSubmit={logTime} style={styles.formGrid}>
+                <input style={styles.input} type="number" min="0" step="0.1" value={time.hours} onChange={event => setTime({ ...time, hours: Number(event.target.value) })} placeholder="Hours" />
+                <input style={styles.input} value={time.description} onChange={event => setTime({ ...time, description: event.target.value })} placeholder="Work description" />
+                <input style={styles.input} type="number" value={time.rate} onChange={event => setTime({ ...time, rate: Number(event.target.value) })} placeholder="Rate" />
+                <button style={styles.primaryButton}>Log Time</button>
+              </form>
+              {canManage && <button type="button" onClick={() => generateInvoice(selected.id)} style={styles.secondaryButton}>Generate Invoice</button>}
+            </>
+          ) : <Empty>Select or create a matter.</Empty>}
+        </Panel>
+      </div>
+    </div>
+  );
 }
 
-function Tasks({ tasks, matters, refresh, notify }) {
+function Tasks({ tasks, matters, onReload, setNotice, setError }) {
   const [form, setForm] = useState({ matterId: '', title: '', dueDate: '' });
-  async function submit(e) { e.preventDefault(); await createTask(form); setForm({ matterId: '', title: '', dueDate: '' }); await refresh(); notify('Task created'); }
-  return <section><h1>Tasks</h1><Panel title="Create Task"><form onSubmit={submit} style={styles.formGrid}><Select value={form.matterId} onChange={matterId => setForm({ ...form, matterId })} options={matters.map(m => [m.id, m.title])} placeholder="Matter" /><Input value={form.title} onChange={title => setForm({ ...form, title })} placeholder="Title" /><Input type="date" value={form.dueDate} onChange={dueDate => setForm({ ...form, dueDate })} /><button style={styles.primary}>Create</button></form></Panel><Panel title="Open Tasks">{tasks.map(t => <Row key={t.id} title={t.title} meta={t.dueDate || 'No due date'} action={<button style={styles.link} onClick={async () => { await updateTask(t.id, { completed: !t.completed }); await refresh(); notify('Task updated'); }}>{t.completed ? 'Reopen' : 'Complete'}</button>} />)}</Panel></section>;
+  async function submit(event) {
+    event.preventDefault();
+    try {
+      await api('/tasks', { method: 'POST', body: form });
+      setForm({ matterId: '', title: '', dueDate: '' });
+      setNotice('Task created.');
+      await onReload();
+    } catch (err) { setError(err.message); }
+  }
+
+  return (
+    <>
+      <Panel title="Create Task">
+        <form onSubmit={submit} style={styles.formGrid}>
+          <select style={styles.input} value={form.matterId} onChange={event => setForm({ ...form, matterId: event.target.value })} required>
+            <option value="">Select matter</option>
+            {matters.map(matter => <option key={matter.id} value={matter.id}>{matter.title}</option>)}
+          </select>
+          <input style={styles.input} value={form.title} onChange={event => setForm({ ...form, title: event.target.value })} placeholder="Task title" required />
+          <input style={styles.input} type="date" value={form.dueDate} onChange={event => setForm({ ...form, dueDate: event.target.value })} />
+          <button style={styles.primaryButton}>Create</button>
+        </form>
+      </Panel>
+      <Panel title="Tasks">
+        {tasks.map(task => <Item key={task.id} title={task.title} meta={`${task.dueDate || 'No due date'} · ${task.completed ? 'Done' : 'Open'}`} />)}
+        {!tasks.length && <Empty>No tasks yet.</Empty>}
+      </Panel>
+    </>
+  );
 }
 
-function Reports({ user, invoices, refresh, notify }) {
-  async function setStatus(id, status) { await updateInvoiceStatus(id, status); await refresh(); notify('Invoice updated'); }
-  return <section><h1>Reports</h1><Panel title="Invoices">{invoices.map(i => <Row key={i.id} title={`${i.number || i.id} · ${i.clientName || ''}`} meta={`${i.matterTitle || ''} · ${kes(i.amount)} · ${i.status}`} action={<span><button style={styles.link} onClick={() => downloadInvoicePdf(i.id, `${i.number || i.id}.pdf`)}>PDF</button>{roleCanAdmin(user) && <select value={i.status} onChange={e => setStatus(i.id, e.target.value)} style={styles.selectSmall}><option>Outstanding</option><option>Paid</option><option>Overdue</option></select>}</span>} />)}</Panel><Panel title="Exports"><a style={styles.primaryLink} href={apiUrl('/api/exports/lsk.pdf')}>LSK PDF</a><a style={styles.primaryLink} href={apiUrl('/api/exports/lsk.xls')}>LSK Excel</a><a style={styles.primaryLink} href={apiUrl('/api/exports/itax.pdf')}>iTax PDF</a><a style={styles.primaryLink} href={apiUrl('/api/exports/itax.xls')}>iTax Excel</a></Panel></section>;
+function Invoices({ invoices, isAdmin, onReload, setNotice, setError }) {
+  async function updateStatus(id, status) {
+    try {
+      await api(`/invoices/${id}/status`, { method: 'PATCH', body: { status } });
+      setNotice('Invoice status updated.');
+      await onReload();
+    } catch (err) { setError(err.message); }
+  }
+
+  return (
+    <Panel title="Invoices">
+      {invoices.map(invoice => (
+        <div key={invoice.id} style={styles.invoiceRow}>
+          <div>
+            <strong>{invoice.number || invoice.id}</strong>
+            <span>{invoice.clientName || 'Client'} · {invoice.matterTitle || 'Matter'} · {kes(invoice.amount)} · {invoice.status}</span>
+          </div>
+          <div style={styles.actions}>
+            <a style={styles.linkButton} href={`${API_BASE}/invoices/${invoice.id}/pdf?token=${encodeURIComponent(readSession()?.token || '')}`} target="_blank" rel="noreferrer">PDF</a>
+            {isAdmin && <select style={styles.inputCompact} value={invoice.status} onChange={event => updateStatus(invoice.id, event.target.value)}><option>Outstanding</option><option>Paid</option><option>Overdue</option></select>}
+          </div>
+        </div>
+      ))}
+      {!invoices.length && <Empty>No invoices yet.</Empty>}
+    </Panel>
+  );
 }
 
-function Settings({ notify }) {
-  return <section><h1>Settings</h1><Panel title="Integrations"><button style={styles.primary} onClick={async () => { await sendWhatsAppReminders({ days: 3 }); notify('WhatsApp reminders queued'); }}>Queue WhatsApp Reminders</button><button style={styles.primary} onClick={async () => { await sendMpesaStk({ phone: '254700000000', amount: 1 }); notify('M-PESA STK push queued'); }}>Test M-PESA STK</button></Panel></section>;
-}
-
-function Users({ users, refresh, notify }) {
+function Users({ setNotice, setError }) {
+  const [users, setUsers] = useState([]);
   const [form, setForm] = useState({ email: '', password: '', fullName: '', role: 'assistant' });
-  async function submit(e) { e.preventDefault(); await register(form); setForm({ email: '', password: '', fullName: '', role: 'assistant' }); await refresh(); notify('User created'); }
-  return <section><h1>User Management</h1><Panel title="Create User"><form onSubmit={submit} style={styles.formGrid}><Input value={form.fullName} onChange={fullName => setForm({ ...form, fullName })} placeholder="Full name" /><Input value={form.email} onChange={email => setForm({ ...form, email })} placeholder="Email" /><Input type="password" value={form.password} onChange={password => setForm({ ...form, password })} placeholder="Password" /><Select value={form.role} onChange={role => setForm({ ...form, role })} options={[['assistant', 'Assistant'], ['advocate', 'Advocate'], ['admin', 'Admin']]} /><button style={styles.primary}>Create</button></form></Panel><Panel title="Users">{users.map(u => <Row key={u.id} title={u.fullName} meta={`${u.email} · ${u.role}`} action={<button style={styles.dangerLink} onClick={async () => { await deleteUser(u.id); await refresh(); notify('User deleted'); }}>Delete</button>} />)}</Panel></section>;
+
+  useEffect(() => { loadUsers(); }, []);
+
+  async function loadUsers() {
+    try { setUsers(await api('/auth/users')); }
+    catch (err) { setError(err.message); }
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    try {
+      await api('/auth/register', { method: 'POST', body: form });
+      setForm({ email: '', password: '', fullName: '', role: 'assistant' });
+      setNotice('User created.');
+      await loadUsers();
+    } catch (err) { setError(err.message); }
+  }
+
+  return (
+    <>
+      <Panel title="Create User">
+        <form onSubmit={submit} style={styles.formGrid}>
+          <input style={styles.input} value={form.fullName} onChange={event => setForm({ ...form, fullName: event.target.value })} placeholder="Full name" required />
+          <input style={styles.input} value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} placeholder="Email" required />
+          <input style={styles.input} type="password" value={form.password} onChange={event => setForm({ ...form, password: event.target.value })} placeholder="Password" required />
+          <select style={styles.input} value={form.role} onChange={event => setForm({ ...form, role: event.target.value })}><option value="assistant">Assistant</option><option value="advocate">Advocate</option><option value="admin">Admin</option></select>
+          <button style={styles.primaryButton}>Create</button>
+        </form>
+      </Panel>
+      <Panel title="Users">
+        {users.map(user => <Item key={user.id} title={user.fullName} meta={`${user.email} · ${user.role}`} />)}
+        {!users.length && <Empty>No users found.</Empty>}
+      </Panel>
+    </>
+  );
 }
 
-function Panel({ title, children }) { return <div style={styles.panel}><h2>{title}</h2>{children}</div>; }
-function Row({ title, meta, action }) { return <div style={styles.row}><div><strong>{title}</strong><span>{meta}</span></div>{action}</div>; }
-function Empty({ text }) { return <p style={styles.muted}>{text}</p>; }
-function Input({ value, onChange, type = 'text', placeholder = '' }) { return <input type={type} value={value || ''} placeholder={placeholder} onChange={e => onChange(e.target.value)} style={styles.input} />; }
-function Select({ value, onChange, options, placeholder }) { return <select value={value || ''} onChange={e => onChange(e.target.value)} style={styles.input}>{placeholder && <option value="">{placeholder}</option>}{options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>; }
-function kes(n) { return `KSh ${Number(n || 0).toLocaleString('en-KE')}`; }
-function safeJson(v) { try { return JSON.parse(v || 'null'); } catch { return null; } }
+function Stat({ label, value }) {
+  return <div style={styles.stat}><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function Panel({ title, children }) {
+  return <section style={styles.panel}><h2 style={styles.panelTitle}>{title}</h2>{children}</section>;
+}
+
+function Item({ title, meta }) {
+  return <div style={styles.item}><strong>{title}</strong><span>{meta}</span></div>;
+}
+
+function Empty({ children }) {
+  return <p style={styles.subtle}>{children}</p>;
+}
+
+function Banner({ children, tone, onClose }) {
+  const isError = tone === 'error';
+  return <div style={{ ...styles.banner, ...(isError ? styles.bannerError : styles.bannerSuccess) }}><span>{children}</span><button type="button" onClick={onClose} style={styles.bannerClose}>x</button></div>;
+}
+
+function kes(value) {
+  return `KSh ${Number(value || 0).toLocaleString('en-KE')}`;
+}
 
 const styles = {
-  shell: { display: 'flex', minHeight: '100vh', background: C.bg, color: C.ink, fontFamily: 'Inter, Segoe UI, system-ui, sans-serif' },
-  sidebar: { width: 245, background: C.navy, color: '#fff', padding: 18, display: 'flex', flexDirection: 'column', gap: 16 },
-  logo: { display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12 }, logoMark: { width: 36, height: 36, background: C.gold, borderRadius: 7, display: 'grid', placeItems: 'center', fontWeight: 800 },
-  nav: { width: '100%', textAlign: 'left', padding: '10px 12px', border: 0, borderRadius: 6, background: 'transparent', color: '#D1D5DB', cursor: 'pointer' }, navActive: { background: 'rgba(255,255,255,.14)', color: '#fff' }, logout: { marginTop: 'auto', padding: 10, border: '1px solid rgba(255,255,255,.25)', borderRadius: 6, background: 'transparent', color: '#fff' },
-  main: { flex: 1, padding: 24, overflow: 'auto' }, topbar: { display: 'flex', gap: 16, alignItems: 'center', marginBottom: 18 }, search: { width: '100%', padding: '11px 12px', border: `1px solid ${C.line}`, borderRadius: 7 }, searchMenu: { position: 'absolute', top: 44, left: 0, right: 0, background: '#fff', border: `1px solid ${C.line}`, borderRadius: 7, zIndex: 5, boxShadow: '0 10px 30px rgba(17,24,39,.12)' }, searchItem: { display: 'block', width: '100%', textAlign: 'left', padding: 10, border: 0, borderBottom: `1px solid ${C.line}`, background: '#fff' },
-  split: { display: 'grid', gridTemplateColumns: '360px minmax(0,1fr)', gap: 18 }, grid4: { display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: 14 }, stat: { background: '#fff', border: `1px solid ${C.line}`, borderRadius: 8, padding: 16 }, panel: { background: C.card, border: `1px solid ${C.line}`, borderRadius: 8, padding: 16, marginBottom: 16 }, row: { display: 'flex', justifyContent: 'space-between', gap: 12, padding: '10px 0', borderBottom: `1px solid ${C.line}` }, listButton: { display: 'block', width: '100%', textAlign: 'left', padding: 10, border: 0, borderBottom: `1px solid ${C.line}`, background: '#fff', cursor: 'pointer' },
-  formGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 10, alignItems: 'center' }, inline: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }, input: { padding: '9px 10px', border: `1px solid ${C.line}`, borderRadius: 6, font: 'inherit', minWidth: 0 }, primary: { border: 0, borderRadius: 6, background: C.navy, color: '#fff', padding: '9px 12px', fontWeight: 700, cursor: 'pointer' }, pill: { border: `1px solid ${C.line}`, borderRadius: 999, padding: '6px 10px', background: '#fff' }, pillActive: { border: `1px solid ${C.gold}`, borderRadius: 999, padding: '6px 10px', background: '#FFF7E6' },
-  link: { border: 0, background: 'transparent', color: C.navy, fontWeight: 700, cursor: 'pointer', marginLeft: 8 }, dangerLink: { border: 0, background: 'transparent', color: C.red, fontWeight: 700, cursor: 'pointer', marginLeft: 8 }, primaryLink: { display: 'inline-block', marginRight: 10, marginBottom: 10, borderRadius: 6, padding: '9px 12px', background: C.navy, color: '#fff', textDecoration: 'none', fontWeight: 700 }, muted: { color: C.muted }, table: { marginTop: 8 }, selectSmall: { marginLeft: 8, padding: 6, borderRadius: 6, border: `1px solid ${C.line}` }
+  shell: { minHeight: '100vh', display: 'flex', background: COLORS.bg, color: COLORS.text, fontFamily: 'Inter, Segoe UI, system-ui, sans-serif' },
+  sidebar: { width: 250, padding: 18, background: COLORS.navy, color: '#fff', display: 'flex', flexDirection: 'column', gap: 10 },
+  brandRow: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 },
+  logo: { width: 40, height: 40, borderRadius: 8, background: COLORS.gold, color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 800 },
+  sidebarMeta: { display: 'block', color: '#D1D5DB', fontSize: 12, marginTop: 2 },
+  navButton: { border: 0, borderRadius: 7, padding: '10px 12px', textAlign: 'left', background: 'transparent', color: '#D1D5DB', cursor: 'pointer', fontWeight: 700 },
+  navButtonActive: { background: 'rgba(255,255,255,0.14)', color: '#fff' },
+  logoutButton: { marginTop: 'auto', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 7, padding: '10px 12px', background: 'transparent', color: '#fff', cursor: 'pointer' },
+  main: { flex: 1, padding: 24, minWidth: 0 },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, marginBottom: 18 },
+  pageTitle: { margin: 0, fontSize: 26 },
+  subtle: { color: COLORS.muted, margin: '4px 0 0', lineHeight: 1.5 },
+  statGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 16 },
+  stat: { background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: 16, display: 'grid', gap: 8 },
+  panel: { background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: 16, marginBottom: 16 },
+  panelTitle: { margin: '0 0 12px', fontSize: 17 },
+  twoColumn: { display: 'grid', gridTemplateColumns: 'minmax(280px, 360px) minmax(0, 1fr)', gap: 16 },
+  listButton: { width: '100%', display: 'grid', gap: 4, textAlign: 'left', border: 0, borderBottom: `1px solid ${COLORS.border}`, background: '#fff', padding: '10px 6px', cursor: 'pointer' },
+  listButtonActive: { background: '#F8FAFC' },
+  item: { display: 'grid', gap: 4, padding: '10px 0', borderBottom: `1px solid ${COLORS.border}` },
+  invoiceRow: { display: 'flex', justifyContent: 'space-between', gap: 12, padding: '10px 0', borderBottom: `1px solid ${COLORS.border}` },
+  actions: { display: 'flex', alignItems: 'center', gap: 8 },
+  formGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, alignItems: 'center' },
+  input: { width: '100%', boxSizing: 'border-box', border: `1px solid ${COLORS.border}`, borderRadius: 7, padding: '10px 11px', font: 'inherit', background: '#fff' },
+  inputCompact: { border: `1px solid ${COLORS.border}`, borderRadius: 7, padding: '8px 9px', font: 'inherit', background: '#fff' },
+  primaryButton: { border: 0, borderRadius: 7, padding: '10px 12px', background: COLORS.navy, color: '#fff', fontWeight: 800, cursor: 'pointer' },
+  secondaryButton: { border: `1px solid ${COLORS.border}`, borderRadius: 7, padding: '10px 12px', background: '#fff', color: COLORS.navy, fontWeight: 800, cursor: 'pointer' },
+  linkButton: { borderRadius: 7, padding: '8px 10px', background: COLORS.navy, color: '#fff', textDecoration: 'none', fontWeight: 800, fontSize: 13 },
+  banner: { display: 'flex', justifyContent: 'space-between', gap: 12, borderRadius: 8, padding: '10px 12px', marginBottom: 14, fontWeight: 700 },
+  bannerSuccess: { background: '#ECFDF5', color: COLORS.success, border: '1px solid #A7F3D0' },
+  bannerError: { background: '#FEF2F2', color: COLORS.danger, border: '1px solid #FECACA' },
+  bannerClose: { border: 0, background: 'transparent', color: 'inherit', cursor: 'pointer', fontWeight: 800 },
+  loginPage: { minHeight: '100vh', background: COLORS.bg, display: 'grid', placeItems: 'center', padding: 24, fontFamily: 'Inter, Segoe UI, system-ui, sans-serif' },
+  loginCard: { width: 390, maxWidth: '100%', boxSizing: 'border-box', background: '#fff', border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 24 },
+  loginBrand: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 },
+  loginTitle: { margin: 0, fontSize: 19 },
+  loginSubtitle: { margin: '2px 0 0', color: COLORS.muted, fontSize: 13 },
+  label: { display: 'block', margin: '12px 0 6px', color: COLORS.muted, fontSize: 11, fontWeight: 800, textTransform: 'uppercase' },
+  loginError: { padding: '9px 11px', borderRadius: 7, background: '#FEF2F2', color: COLORS.danger, border: '1px solid #FECACA', fontSize: 13, marginBottom: 12 },
+  helperText: { color: COLORS.muted, fontSize: 12, margin: '12px 0 0' },
 };
+
+export default App;
