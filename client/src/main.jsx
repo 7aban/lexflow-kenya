@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { Suspense, lazy, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import App from './App.jsx';
 import Login from './components/Login.jsx';
+
+const App = lazy(() => import('./App.jsx'));
 
 function readStoredSession() {
   try {
@@ -17,6 +18,18 @@ function readStoredSession() {
 function saveSession(session) {
   localStorage.setItem('lexflowSession', JSON.stringify(session));
   localStorage.setItem('lexflowToken', session.token);
+}
+
+function StartupNotice({ children, tone = 'info' }) {
+  const colors = tone === 'error'
+    ? { bg: '#FEF2F2', text: '#991B1B', border: '#FECACA' }
+    : { bg: '#EFF6FF', text: '#1D4ED8', border: '#BFDBFE' };
+
+  return (
+    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24, background: '#F3F4F6', color: colors.text, font: '14px system-ui, sans-serif' }}>
+      <div style={{ padding: 14, borderRadius: 8, background: colors.bg, border: `1px solid ${colors.border}` }}>{children}</div>
+    </div>
+  );
 }
 
 function LoginFallback({ error, onLogin }) {
@@ -70,7 +83,9 @@ function Root() {
 
   return (
     <StartupBoundary onLogin={handleLogin}>
-      <App />
+      <Suspense fallback={<StartupNotice>Loading LexFlow...</StartupNotice>}>
+        <App />
+      </Suspense>
     </StartupBoundary>
   );
 }
