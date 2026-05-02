@@ -23,17 +23,18 @@ const theme = {
   amberBg: '#FFFBEB',
   blue: '#1D4ED8',
   blueBg: '#EFF6FF',
-  shadow: '0 18px 48px rgba(15, 27, 51, 0.11)',
+  shadow: '0 1px 3px rgba(0,0,0,0.08)',
+  shadowLift: '0 14px 32px rgba(15,27,51,0.12)',
 };
 
 const initialData = { dashboard: {}, clients: [], matters: [], tasks: [], invoices: [] };
 const nav = [
-  ['Dashboard', '01'],
-  ['Clients', '02'],
-  ['Matters', '03'],
-  ['Tasks', '04'],
-  ['Invoices', '05'],
-  ['Users', '06'],
+  ['Dashboard', 'DB'],
+  ['Clients', 'CL'],
+  ['Matters', 'MT'],
+  ['Tasks', 'TK'],
+  ['Invoices', 'IN'],
+  ['Users', 'US'],
 ];
 
 function readSession() {
@@ -199,7 +200,7 @@ export default function App() {
   };
 
   return (
-    <div style={styles.shell}>
+    <div className="lf-app-shell" style={styles.shell}>
       <StyleTag />
       <aside style={styles.sidebar}>
         <div style={styles.brandPanel}>
@@ -333,6 +334,16 @@ function Dashboard({ data }) {
         <div style={styles.heroFigure}>{kes(paid + outstanding)}</div>
       </section>
 
+      {overdueTasks > 0 && (
+        <div style={styles.warningPanel}>
+          <div style={styles.warningIcon}>!</div>
+          <div>
+            <strong>{overdueTasks} overdue task{overdueTasks === 1 ? '' : 's'} need attention.</strong>
+            <span>Review the task board and clear critical deadlines before the close of day.</span>
+          </div>
+        </div>
+      )}
+
       <div style={styles.statsGrid}>
         <Stat label="Active matters" value={data.dashboard.activeMattersCount ?? data.matters.length} tone="navy" />
         <Stat label="Month hours" value={Number(data.dashboard.monthHours || 0).toFixed(1)} tone="gold" />
@@ -417,44 +428,65 @@ function Users({ notify }) {
 function Card({ title, hint, action, children }) { return <section style={styles.card}><div style={styles.cardHead}><div><h2>{title}</h2>{hint && <p>{hint}</p>}</div>{action}</div>{children}</section>; }
 function Sub({ title, children }) { return <div style={styles.sub}><h3>{title}</h3>{children}</div>; }
 function Field({ label, children }) { return <label style={styles.field}><span>{label}</span>{children}</label>; }
-function Stat({ label, value, tone }) { const colors = { navy: theme.navy600, gold: theme.gold, green: theme.green, red: theme.red }; return <div style={styles.stat}><i style={{ background: colors[tone] || theme.navy600 }} /><span>{label}</span><strong>{value}</strong></div>; }
+function Stat({ label, value, tone }) { const colors = { navy: theme.navy600, gold: theme.gold, green: theme.green, red: theme.red }; const color = colors[tone] || theme.navy600; return <div style={{ ...styles.stat, borderLeftColor: color }}><i style={{ background: `${color}16`, color }}>{label.slice(0, 2).toUpperCase()}</i><span>{label}</span><strong>{value}</strong></div>; }
 function Badge({ tone = 'blue', children }) { const map = { green: [theme.greenBg, theme.green], amber: [theme.amberBg, theme.amber], red: [theme.redBg, theme.red], blue: [theme.blueBg, theme.blue] }; const [bg, color] = map[tone] || map.blue; return <span style={{ ...styles.badge, background: bg, color }}>{children}</span>; }
 function Alert({ tone, children }) { return <div style={{ ...styles.alert, ...(tone === 'danger' ? styles.alertDanger : {}) }}>{children}</div>; }
-function Toast({ toast, onClose }) { if (!toast) return null; const tone = toast.type === 'danger' ? 'red' : toast.type === 'success' ? 'green' : 'blue'; const map = { green: [theme.greenBg, theme.green], red: [theme.redBg, theme.red], blue: [theme.blueBg, theme.blue] }; const [bg, color] = map[tone]; return <div style={{ ...styles.toast, background: bg, color }}><strong>{toast.message}</strong><button onClick={onClose} style={styles.toastClose}>x</button></div>; }
-function Empty({ title, text }) { return <div style={styles.empty}><div>LF</div><strong>{title}</strong><span>{text}</span></div>; }
-function Skeleton({ rows = 4 }) { return <div style={styles.skeletonGrid}>{Array.from({ length: rows }).map((_, index) => <div key={index} style={styles.skeleton}><span /><span /><span /></div>)}</div>; }
+function Toast({ toast, onClose }) { if (!toast) return null; const tone = toast.type === 'danger' ? 'red' : toast.type === 'success' ? 'green' : toast.type === 'warning' ? 'amber' : 'blue'; const map = { green: [theme.greenBg, theme.green, '#A7F3D0'], red: [theme.redBg, theme.red, '#FECACA'], amber: [theme.amberBg, theme.amber, '#FDE68A'], blue: [theme.blueBg, theme.blue, '#BFDBFE'] }; const [bg, color, borderColor] = map[tone]; return <div style={{ ...styles.toast, background: bg, color, borderColor }} role="status" aria-live="polite"><strong>{toast.message}</strong><button type="button" aria-label="Dismiss notification" onClick={onClose} style={styles.toastClose}>x</button></div>; }
+function Empty({ title, text }) { return <div style={styles.empty}><div style={styles.emptyIcon}>LF</div><strong>{title}</strong><span>{text}</span></div>; }
+function Skeleton({ rows = 4 }) { return <div style={styles.skeletonGrid}>{Array.from({ length: rows }).map((_, index) => <div key={index} style={styles.skeleton}><span style={styles.skeletonLineLarge} /><span style={styles.skeletonLine} /><span style={styles.skeletonLineShort} /></div>)}</div>; }
 function Table({ columns, rows, empty }) { if (!rows.length) return <Empty title={empty} text="Once records exist, they will appear here." />; return <div style={styles.tableWrap}><table style={styles.table}><thead><tr>{columns.map(c => <th key={c}>{c}</th>)}</tr></thead><tbody>{rows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>)}</tbody></table></div>; }
 function statusTone(status) { return status === 'Paid' ? 'green' : status === 'Overdue' ? 'red' : 'amber'; }
 function kes(value) { return `KSh ${Number(value || 0).toLocaleString('en-KE')}`; }
 
 function StyleTag() { return <style>{`
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #F5F7FA; font: 400 13px/1.45 Segoe UI, Roboto, -apple-system, BlinkMacSystemFont, sans-serif; color: #101827; }
+  button, input, select { font: inherit; }
+  button { transition: background .16s ease, border-color .16s ease, color .16s ease, box-shadow .16s ease, transform .16s ease; }
+  button:not(:disabled):hover { transform: translateY(-1px); }
+  button:disabled { opacity: .5; cursor: not-allowed !important; transform: none !important; }
+  input:focus, select:focus { outline: 2px solid rgba(212,163,74,.25); border-color: #D4A34A !important; }
+  section:hover { box-shadow: 0 8px 22px rgba(15,27,51,.08); }
+  .lf-nav:hover { background: rgba(255,255,255,.08) !important; color: #fff !important; }
   @media (max-width: 980px) {
     #root .lf-app-shell { grid-template-columns: 1fr; }
+    #root aside { position: static; min-height: auto; }
+    #root main { padding: 16px; }
+    #root header { align-items: stretch; flex-direction: column; }
+    #root header input { width: 100% !important; }
   }
-  table th { text-align: left; padding: 12px 14px; background: #F3F4F6; color: #6B7280; font-size: 11px; text-transform: uppercase; letter-spacing: 0; }
-  table td { padding: 12px 14px; border-top: 1px solid #E5E7EB; vertical-align: middle; }
+  @keyframes lfPulse { 0% { opacity: .55; } 50% { opacity: 1; } 100% { opacity: .55; } }
+  @keyframes lfSlideIn { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
+  table th { text-align: left; padding: 9px 12px; background: #F3F4F6; color: #6B7280; font-size: 11px; text-transform: uppercase; letter-spacing: 0; font-weight: 700; }
+  table td { padding: 10px 12px; border-top: 1px solid #E5E7EB; vertical-align: middle; }
   table tr:nth-child(even) td { background: #FAFAFB; }
+  table tbody tr:hover td { background: #F8FAFC; }
+  label > span { color: #6B7280; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+  section h2 { margin: 0; font-size: 14px; font-weight: 700; color: #101827; }
+  section h3 { margin: 0 0 12px; font-size: 13px; font-weight: 700; color: #101827; }
+  section p { margin: 4px 0 0; color: #697386; font-size: 12px; }
 `}</style>; }
 
 const styles = {
-  shell: { minHeight: '100vh', display: 'grid', gridTemplateColumns: '292px minmax(0,1fr)', background: 'radial-gradient(circle at top right, rgba(212,163,74,.16), transparent 30%), #F5F7FA', color: theme.ink, fontFamily: 'Inter, Segoe UI, system-ui, sans-serif' },
-  sidebar: { background: `linear-gradient(180deg, ${theme.navy900}, ${theme.navy800})`, color: '#fff', padding: 24, display: 'flex', flexDirection: 'column', gap: 22, boxShadow: '10px 0 40px rgba(8,18,37,.18)' },
-  brandPanel: { display: 'flex', alignItems: 'center', gap: 12, padding: 14, border: '1px solid rgba(255,255,255,.10)', borderRadius: 18, background: 'rgba(255,255,255,.06)' },
-  logo: { width: 48, height: 48, borderRadius: 16, display: 'grid', placeItems: 'center', background: theme.gold, color: '#fff', fontWeight: 900, boxShadow: '0 18px 35px rgba(212,163,74,.22)' },
-  brand: { fontSize: 20, fontWeight: 900 }, brandSub: { fontSize: 12, color: '#AAB4C3', marginTop: 2 }, sideSectionLabel: { color: '#7F8CA3', fontSize: 11, fontWeight: 900, letterSpacing: 1, textTransform: 'uppercase' },
-  navList: { display: 'grid', gap: 8 }, navItem: { border: 0, background: 'transparent', color: '#CFD7E5', borderRadius: 14, padding: '12px 13px', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', fontWeight: 800, textAlign: 'left' }, navActive: { background: 'rgba(255,255,255,.11)', color: '#fff', boxShadow: `inset 3px 0 0 ${theme.gold}` }, navNumber: { width: 30, height: 30, borderRadius: 10, background: 'rgba(255,255,255,.08)', display: 'grid', placeItems: 'center', fontSize: 11, color: theme.gold },
-  timerCard: { marginTop: 'auto', padding: 16, borderRadius: 18, background: 'linear-gradient(135deg, rgba(212,163,74,.20), rgba(255,255,255,.06))', border: '1px solid rgba(255,255,255,.12)', display: 'grid', gap: 6 }, timerTop: { color: '#DDE5F1', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }, liveDot: { width: 8, height: 8, borderRadius: 999, background: '#22C55E', boxShadow: '0 0 0 5px rgba(34,197,94,.13)' },
-  userCard: { display: 'grid', gridTemplateColumns: '42px 1fr auto', gap: 10, alignItems: 'center', paddingTop: 16, borderTop: '1px solid rgba(255,255,255,.12)' }, avatar: { width: 42, height: 42, borderRadius: 14, background: '#243653', display: 'grid', placeItems: 'center', fontWeight: 900 }, userName: { fontWeight: 900, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, userRole: { color: '#AAB4C3', fontSize: 12, textTransform: 'capitalize' }, logout: { border: '1px solid rgba(255,255,255,.18)', color: '#fff', background: 'transparent', borderRadius: 10, padding: '8px 10px', cursor: 'pointer' },
-  main: { padding: 30, minWidth: 0 }, topbar: { display: 'flex', justifyContent: 'space-between', gap: 20, alignItems: 'center', marginBottom: 24 }, eyebrow: { color: theme.goldDark, fontSize: 11, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1 }, title: { margin: '4px 0 0', fontSize: 34 }, subtitle: { margin: '6px 0 0', color: theme.muted }, topActions: { display: 'flex', gap: 10 }, search: { width: 280, border: `1px solid ${theme.line}`, borderRadius: 14, padding: '12px 14px', background: '#fff' },
-  pageStack: { display: 'grid', gap: 18 }, heroCard: { borderRadius: 24, background: `linear-gradient(135deg, ${theme.navy800}, #203B61)`, color: '#fff', padding: 26, display: 'flex', justifyContent: 'space-between', gap: 20, alignItems: 'end', boxShadow: theme.shadow }, heroKicker: { color: theme.gold, fontSize: 12, fontWeight: 900, textTransform: 'uppercase' }, heroFigure: { fontSize: 26, fontWeight: 900, color: theme.gold },
-  statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 16 }, stat: { position: 'relative', overflow: 'hidden', background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 18, padding: 20, boxShadow: theme.shadow, display: 'grid', gap: 8 },
-  splitGrid: { display: 'grid', gridTemplateColumns: 'minmax(280px,.75fr) minmax(0,1.25fr)', gap: 18 }, dashboardGrid: { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 18 }, matterGrid: { display: 'grid', gridTemplateColumns: '340px minmax(0,1fr)', gap: 18 },
-  card: { background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 18, padding: '20px 22px', boxShadow: theme.shadow, minWidth: 0 }, cardHead: { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 16 },
-  formGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 12, alignItems: 'end' }, field: { display: 'grid', gap: 5 }, input: { width: '100%', border: `1px solid ${theme.line}`, borderRadius: 10, padding: '11px 12px', background: '#fff', fontSize: 13 }, primaryButton: { border: 0, borderRadius: 12, padding: '12px 14px', background: theme.navy600, color: '#fff', fontWeight: 900, cursor: 'pointer' }, goldButton: { border: 0, borderRadius: 12, padding: '10px 13px', background: theme.gold, color: '#fff', fontWeight: 900, cursor: 'pointer' }, ghostButton: { border: `1px solid ${theme.line}`, borderRadius: 12, padding: '11px 13px', background: '#fff', color: theme.navy600, fontWeight: 900, cursor: 'pointer' }, tinyButton: { border: `1px solid ${theme.line}`, borderRadius: 10, padding: '7px 10px', background: '#fff', cursor: 'pointer' },
-  tableWrap: { overflowX: 'auto', border: `1px solid ${theme.line}`, borderRadius: 14 }, table: { width: '100%', borderCollapse: 'collapse', fontSize: 13 }, badge: { display: 'inline-flex', padding: '5px 10px', borderRadius: 999, fontWeight: 900, fontSize: 12 }, link: { color: theme.navy600, fontWeight: 900, textDecoration: 'none' }, tableSelect: { border: `1px solid ${theme.line}`, borderRadius: 10, padding: '8px 9px' },
-  pipelineRow: { display: 'grid', gridTemplateColumns: '120px 1fr 34px', gap: 12, alignItems: 'center', marginBottom: 12 }, pipelineTrack: { height: 10, background: '#EEF2F7', borderRadius: 999, overflow: 'hidden' }, pipelineFill: { height: '100%', background: `linear-gradient(90deg, ${theme.gold}, #E8C271)`, borderRadius: 999 },
-  matterButton: { width: '100%', display: 'grid', gap: 4, textAlign: 'left', border: 0, borderBottom: `1px solid ${theme.line}`, background: '#fff', padding: '13px 9px', cursor: 'pointer' }, matterActive: { background: '#F8FAFC', boxShadow: `inset 4px 0 0 ${theme.gold}` }, detailStack: { display: 'grid', gap: 16 }, chips: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 9, color: theme.muted }, sub: { borderTop: `1px solid ${theme.line}`, paddingTop: 16 }, noteForm: { display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, marginBottom: 12 }, file: { marginBottom: 12 },
-  empty: { minHeight: 136, display: 'grid', placeItems: 'center', textAlign: 'center', color: theme.muted, gap: 5 }, skeletonGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 16 }, skeleton: { height: 130, borderRadius: 18, background: '#fff', border: `1px solid ${theme.line}`, boxShadow: theme.shadow },
-  toast: { position: 'fixed', top: 22, right: 22, zIndex: 10, display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', minWidth: 300, maxWidth: 420, padding: '13px 15px', borderRadius: 14, boxShadow: theme.shadow, border: `1px solid ${theme.line}` }, toastClose: { border: 0, background: 'transparent', color: 'inherit', fontWeight: 900, cursor: 'pointer' }, alert: { borderRadius: 12, padding: 12, background: theme.blueBg, color: theme.blue, fontWeight: 800 }, alertDanger: { background: theme.redBg, color: theme.red },
-  loginShell: { minHeight: '100vh', display: 'grid', gridTemplateColumns: 'minmax(0,1.05fr) minmax(360px,.95fr)', background: `linear-gradient(135deg, ${theme.navy900}, ${theme.navy700})`, color: '#fff' }, loginEditorial: { display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '54px 70px' }, loginBadge: { width: 'fit-content', color: theme.gold, border: '1px solid rgba(212,163,74,.35)', borderRadius: 999, padding: '8px 12px', fontSize: 12, fontWeight: 900, textTransform: 'uppercase' }, loginMetricRow: { display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14, marginTop: 28 }, loginCard: { alignSelf: 'center', justifySelf: 'center', width: 410, maxWidth: 'calc(100vw - 32px)', color: theme.ink, background: '#fff', borderRadius: 22, padding: 30, boxShadow: '0 30px 90px rgba(0,0,0,.30)' }, loginLogo: { width: 56, height: 56, borderRadius: 18, background: theme.gold, display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 900 }, loginHint: { marginTop: 12, color: theme.muted, fontSize: 12 },
+  shell: { minHeight: '100vh', display: 'grid', gridTemplateColumns: '220px minmax(0,1fr)', background: '#F5F7FA', color: theme.ink, fontFamily: 'Segoe UI, Roboto, -apple-system, BlinkMacSystemFont, sans-serif', fontSize: 13 },
+  sidebar: { position: 'sticky', top: 0, minHeight: '100vh', background: theme.navy800, color: '#fff', padding: 16, display: 'flex', flexDirection: 'column', gap: 16, boxShadow: '1px 0 0 rgba(255,255,255,.05)' },
+  brandPanel: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 8px 14px', borderBottom: '1px solid rgba(255,255,255,.10)' },
+  logo: { width: 36, height: 36, borderRadius: 8, display: 'grid', placeItems: 'center', background: theme.gold, color: '#fff', fontWeight: 900, fontSize: 13, boxShadow: '0 8px 18px rgba(212,163,74,.20)' },
+  brand: { fontSize: 16, fontWeight: 700, letterSpacing: 0 }, brandSub: { fontSize: 11, color: '#9CA8BA', marginTop: 2 }, sideSectionLabel: { color: '#7F8CA3', fontSize: 11, fontWeight: 700, letterSpacing: 0, textTransform: 'uppercase', padding: '0 8px' },
+  navList: { display: 'grid', gap: 4 }, navItem: { border: 0, borderLeft: '3px solid transparent', background: 'transparent', color: '#C9D3E2', borderRadius: 6, padding: '9px 10px', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontWeight: 600, textAlign: 'left' }, navActive: { background: 'rgba(255,255,255,.10)', color: '#fff', borderLeftColor: theme.gold }, navNumber: { width: 24, height: 24, borderRadius: 6, background: 'rgba(255,255,255,.08)', display: 'grid', placeItems: 'center', fontSize: 10, color: theme.gold, fontWeight: 800 },
+  timerCard: { marginTop: 'auto', padding: 12, borderRadius: 8, background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.10)', display: 'grid', gap: 4 }, timerTop: { color: '#DDE5F1', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }, liveDot: { width: 8, height: 8, borderRadius: 999, background: '#22C55E', boxShadow: '0 0 0 4px rgba(34,197,94,.13)' },
+  userCard: { display: 'grid', gridTemplateColumns: '34px 1fr auto', gap: 8, alignItems: 'center', paddingTop: 12, borderTop: '1px solid rgba(255,255,255,.10)' }, avatar: { width: 34, height: 34, borderRadius: 8, background: '#243653', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 12 }, userName: { fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }, userRole: { color: '#AAB4C3', fontSize: 11, textTransform: 'capitalize' }, logout: { border: '1px solid rgba(255,255,255,.18)', color: '#fff', background: 'transparent', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', fontSize: 12 },
+  main: { padding: 24, minWidth: 0 }, topbar: { display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', marginBottom: 20 }, eyebrow: { color: theme.goldDark, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0 }, title: { margin: '2px 0 0', fontSize: 20, fontWeight: 700, lineHeight: 1.2 }, subtitle: { margin: '5px 0 0', color: theme.muted, maxWidth: 680 }, topActions: { display: 'flex', gap: 8, alignItems: 'center' }, search: { width: 260, border: `1px solid ${theme.line}`, borderRadius: 6, padding: '7px 11px', background: '#fff', fontSize: 13 },
+  pageStack: { display: 'grid', gap: 16 }, heroCard: { borderRadius: 10, background: `linear-gradient(135deg, ${theme.navy800}, #1B3A5C)`, color: '#fff', padding: 24, display: 'flex', justifyContent: 'space-between', gap: 20, alignItems: 'end', boxShadow: theme.shadow }, heroKicker: { color: theme.gold, fontSize: 11, fontWeight: 700, textTransform: 'uppercase' }, heroFigure: { fontSize: 24, fontWeight: 700, color: theme.gold },
+  warningPanel: { display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 10, border: '1px solid #FDE68A', background: theme.amberBg, color: theme.amber, boxShadow: theme.shadow }, warningIcon: { width: 28, height: 28, borderRadius: 999, display: 'grid', placeItems: 'center', background: '#FDE68A', fontWeight: 900 }, 
+  statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 12 }, stat: { position: 'relative', overflow: 'hidden', background: '#fff', border: `1px solid ${theme.line}`, borderLeft: '4px solid', borderRadius: 10, padding: 16, boxShadow: theme.shadow, display: 'grid', gap: 6 }, 
+  splitGrid: { display: 'grid', gridTemplateColumns: 'minmax(260px,.72fr) minmax(0,1.28fr)', gap: 16 }, dashboardGrid: { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 16 }, matterGrid: { display: 'grid', gridTemplateColumns: '300px minmax(0,1fr)', gap: 16 },
+  card: { background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, padding: '18px 20px', boxShadow: theme.shadow, minWidth: 0, transition: 'box-shadow .16s ease, transform .16s ease' }, cardHead: { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 14 },
+  formGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 12, alignItems: 'end' }, field: { display: 'grid', gap: 5 }, input: { width: '100%', border: `1px solid ${theme.line}`, borderRadius: 6, padding: '7px 11px', background: '#fff', fontSize: 13 }, primaryButton: { border: 0, borderRadius: 6, padding: '7px 16px', background: theme.navy600, color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }, goldButton: { border: 0, borderRadius: 6, padding: '7px 16px', background: theme.gold, color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }, ghostButton: { border: `1px solid ${theme.line}`, borderRadius: 6, padding: '7px 16px', background: '#fff', color: theme.navy600, fontWeight: 700, cursor: 'pointer', fontSize: 13 }, tinyButton: { border: `1px solid ${theme.line}`, borderRadius: 6, padding: '4px 10px', background: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: theme.navy600 },
+  tableWrap: { overflowX: 'auto', border: `1px solid ${theme.line}`, borderRadius: 8 }, table: { width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 620 }, badge: { display: 'inline-flex', padding: '4px 8px', borderRadius: 999, fontWeight: 700, fontSize: 12 }, link: { color: theme.navy600, fontWeight: 700, textDecoration: 'none' }, tableSelect: { border: `1px solid ${theme.line}`, borderRadius: 6, padding: '5px 8px', fontSize: 12 },
+  pipelineRow: { display: 'grid', gridTemplateColumns: '116px 1fr 30px', gap: 10, alignItems: 'center', marginBottom: 10 }, pipelineTrack: { height: 8, background: '#EEF2F7', borderRadius: 999, overflow: 'hidden' }, pipelineFill: { height: '100%', background: theme.gold, borderRadius: 999 },
+  matterButton: { width: '100%', display: 'grid', gap: 4, textAlign: 'left', border: 0, borderLeft: '3px solid transparent', borderBottom: `1px solid ${theme.line}`, background: '#fff', padding: '12px 10px', cursor: 'pointer', borderRadius: 6 }, matterActive: { background: '#F8FAFC', borderLeftColor: theme.gold }, detailStack: { display: 'grid', gap: 16 }, chips: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, color: theme.muted }, sub: { borderTop: `1px solid ${theme.line}`, paddingTop: 16 }, noteForm: { display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, marginBottom: 12 }, file: { marginBottom: 12, fontSize: 12 },
+  empty: { minHeight: 136, display: 'grid', placeItems: 'center', textAlign: 'center', color: theme.muted, gap: 6, padding: 18 }, emptyIcon: { width: 42, height: 42, borderRadius: 10, display: 'grid', placeItems: 'center', background: '#F3F4F6', color: theme.navy600, fontWeight: 800 }, skeletonGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 12 }, skeleton: { height: 120, borderRadius: 10, background: '#fff', border: `1px solid ${theme.line}`, boxShadow: theme.shadow, padding: 16, display: 'grid', gap: 10, alignContent: 'start' }, skeletonLineLarge: { height: 18, width: '55%', borderRadius: 6, background: '#E5E7EB', animation: 'lfPulse 1.4s ease-in-out infinite' }, skeletonLine: { height: 12, width: '80%', borderRadius: 6, background: '#EEF2F7', animation: 'lfPulse 1.4s ease-in-out infinite' }, skeletonLineShort: { height: 12, width: '42%', borderRadius: 6, background: '#EEF2F7', animation: 'lfPulse 1.4s ease-in-out infinite' },
+  toast: { position: 'fixed', top: 22, right: 22, zIndex: 2000, display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', minWidth: 300, maxWidth: 420, padding: '12px 14px', borderRadius: 10, boxShadow: theme.shadowLift, border: '1px solid', animation: 'lfSlideIn .18s ease-out' }, toastClose: { border: 0, background: 'transparent', color: 'inherit', fontWeight: 900, cursor: 'pointer', fontSize: 16 }, alert: { borderRadius: 8, padding: 12, background: theme.blueBg, color: theme.blue, fontWeight: 700 }, alertDanger: { background: theme.redBg, color: theme.red },
+  loginShell: { minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24, background: 'linear-gradient(135deg, #F5F7FA, #EEF2F7)', color: '#fff' }, loginEditorial: { display: 'none' }, loginBadge: { display: 'none' }, loginMetricRow: { display: 'none' }, loginCard: { width: 410, maxWidth: 'calc(100vw - 32px)', color: theme.ink, background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 28, boxShadow: theme.shadowLift }, loginLogo: { width: 48, height: 48, borderRadius: 10, background: theme.gold, display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 900, marginBottom: 12 }, loginHint: { marginTop: 12, color: theme.muted, fontSize: 12 },
 };

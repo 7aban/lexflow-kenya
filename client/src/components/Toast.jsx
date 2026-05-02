@@ -9,15 +9,18 @@ export default function Toast({ toast, onClose }) {
   if (!toast) return null;
   const c = tones[toast.type] || tones.info;
   return (
-    <div style={{ ...styles.toast, background: c.bg, borderColor: c.border, color: c.text }} role="status" aria-live="polite">
+    <>
+      <style>{`@keyframes lfToastIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:translateX(0)}}`}</style>
+      <div style={{ ...styles.toast, background: c.bg, borderColor: c.border, color: c.text }} role="status" aria-live="polite">
       <div style={styles.message}>{toast.message}</div>
       <button type="button" aria-label="Dismiss notification" onClick={onClose} style={{ ...styles.close, color: c.text }}>x</button>
-    </div>
+      </div>
+    </>
   );
 }
 
 const styles = {
-  toast: { position: 'fixed', top: 22, right: 22, zIndex: 2000, width: 360, maxWidth: 'calc(100vw - 36px)', border: '1px solid', borderRadius: 10, boxShadow: '0 14px 35px rgba(15,27,51,0.18)', padding: '12px 14px', display: 'flex', gap: 12, alignItems: 'flex-start', fontFamily: 'Inter, Segoe UI, system-ui, sans-serif' },
+  toast: { position: 'fixed', top: 22, right: 22, zIndex: 2000, width: 360, maxWidth: 'calc(100vw - 36px)', border: '1px solid', borderRadius: 10, boxShadow: '0 14px 32px rgba(15,27,51,0.12)', padding: '12px 14px', display: 'flex', gap: 12, alignItems: 'flex-start', fontFamily: 'Segoe UI, Roboto, -apple-system, BlinkMacSystemFont, sans-serif', animation: 'lfToastIn .18s ease-out' },
   message: { flex: 1, fontSize: 13, lineHeight: 1.5, fontWeight: 700 },
   close: { border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 16, lineHeight: 1, fontWeight: 900 },
 };
