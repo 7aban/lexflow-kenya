@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, API_BASE, AUTH_FAILURE_MESSAGE, clearSession, readSession, saveSession } from './lib/apiClient.js';
+import { api, API_BASE, AUTH_FAILURE_MESSAGE, clearSession, getNotifications, markNotificationsRead, readSession, saveSession } from './lib/apiClient.js';
 import { defaultFirmSettings, styles, StyleTag, theme } from './theme.jsx';
 import { Logo, Skeleton, Toast } from './components/ui.jsx';
 import LoginPage from './components/LoginPage.jsx';
@@ -36,6 +36,9 @@ export default function App() {
   const [view, setView] = useState('Dashboard');
   const [search, setSearch] = useState('');
   const [quickLinksOpen, setQuickLinksOpen] = useState(true);
+  const [notifications, setNotifications] = useState([]);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [matterFocus, setMatterFocus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
   const [data, setData] = useState(initialData);
@@ -85,6 +88,13 @@ export default function App() {
   }, [authenticated]);
 
   useEffect(() => {
+    if (!authenticated || user?.role === 'client') return undefined;
+    loadNotifications();
+    const timer = window.setInterval(loadNotifications, 60000);
+    return () => window.clearInterval(timer);
+  }, [authenticated, user?.role]);
+
+  useEffect(() => {
     document.title = firm?.name || 'LexFlow Kenya';
   }, [firm?.name]);
 
@@ -120,6 +130,11 @@ export default function App() {
     setToast({ type: 'success', message: 'Welcome back. Your workspace is ready.' });
   }
 
+  async function loadNotifications() {
+    try { setNotifications(await getNotifications()); }
+    catch { /* Notifications should never block the workspace. */ }
+  }
+
   function acceptInvitationLogin(sessionData) {
     saveSession(sessionData);
     setSession(sessionData);
@@ -141,6 +156,17 @@ export default function App() {
         <Toast toast={toast} onClose={() => setToast(null)} />
       </>
     );
+  }
+
+  async function openNotification(notification) {
+    setNotificationsOpen(false);
+    if (notification.matterId) {
+      setMatterFocus({ matterId: notification.matterId, tab: 'Case notes', ts: Date.now() });
+      setView('Matters');
+      setNotifications(current => current.filter(item => item.matterId !== notification.matterId));
+      try { await markNotificationsRead({ matterId: notification.matterId }); }
+      catch { /* Keep navigation responsive even if read marking fails. */ }
+    }
   }
 
   if (!authenticated) {
@@ -234,6 +260,7 @@ export default function App() {
           </div>
           <div style={styles.topActions}>
             <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search workspace" style={styles.search} />
+            <NotificationBell notifications={notifications} open={notificationsOpen} setOpen={setNotificationsOpen} onOpen={openNotification} />
             <button type="button" onClick={refresh} disabled={loading} style={styles.ghostButton}>{loading ? 'Refreshing...' : 'Refresh'}</button>
           </div>
         </header>
@@ -241,7 +268,7 @@ export default function App() {
         {loading && <Skeleton />}
         {!loading && view === 'Dashboard' && <Dashboard data={data} />}
         {!loading && view === 'Clients' && <Clients clients={data.clients} matters={data.matters} canManage={canManage} isAdmin={isAdmin} reload={refresh} notify={setToast} />}
-        {!loading && view === 'Matters' && <Matters data={data} canManage={canManage} reload={refresh} notify={setToast} />}
+        {!loading && view === 'Matters' && <Matters data={data} canManage={canManage} reload={refresh} notify={setToast} focus={matterFocus} onMatterOpened={async matterId => { setNotifications(current => current.filter(item => item.matterId !== matterId)); try { await markNotificationsRead({ matterId }); } catch {} }} />}
         {!loading && view === 'Tasks' && <Tasks data={data} canManage={canManage} reload={refresh} notify={setToast} />}
         {!loading && view === 'Deadlines' && <DeadlineCenter data={data} canManage={canManage} notify={setToast} />}
         {!loading && view === 'Invoices' && <Invoices invoices={data.invoices} isAdmin={isAdmin} canManage={canManage} reload={refresh} notify={setToast} />}
@@ -251,6 +278,36 @@ export default function App() {
         {!loading && view === 'Audit Log' && isAdmin && <AuditLog notify={setToast} navigate={setView} />}
       </main>
       <Toast toast={toast} onClose={() => setToast(null)} />
+    </div>
+  );
+}
+
+function NotificationBell({ notifications, open, setOpen, onOpen }) {
+  const count = notifications.length;
+  return (
+    <div style={{ position: 'relative' }}>
+      <button type="button" aria-label="Client notifications" onClick={() => setOpen(!open)} style={{ ...styles.ghostButton, position: 'relative', padding: '7px 12px' }}>
+        <span aria-hidden="true">🔔</span>
+        {count > 0 && <span style={{ position: 'absolute', top: -6, right: -6, minWidth: 18, height: 18, borderRadius: 999, display: 'grid', placeItems: 'center', background: theme.red, color: '#fff', fontSize: 10, fontWeight: 900 }}>{count}</span>}
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 8px)', width: 360, maxWidth: 'calc(100vw - 32px)', zIndex: 2200, background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, boxShadow: theme.shadowLift, padding: 10, animation: 'lfDropIn .16s ease-out' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', padding: '4px 4px 10px' }}>
+            <strong>Client activity</strong>
+            <span style={styles.mutedText}>{count} unread</span>
+          </div>
+          {count ? notifications.map(item => (
+            <button key={item.id} type="button" onClick={() => onOpen(item)} style={{ width: '100%', textAlign: 'left', border: 0, borderTop: `1px solid ${theme.line}`, background: '#fff', padding: '10px 4px', cursor: 'pointer' }}>
+              <strong>{item.title || 'Client activity'}</strong>
+              <div style={{ color: theme.muted, fontSize: 12, marginTop: 3 }}>{item.clientName || 'Client'} / {item.matterTitle || item.reference || 'Matter'}</div>
+              <div style={{ color: theme.ink, fontSize: 12, marginTop: 5 }}>{item.body || '-'}</div>
+              <div style={{ color: theme.muted, fontSize: 11, marginTop: 5 }}>{item.createdAt ? new Date(item.createdAt).toLocaleString() : ''}</div>
+            </button>
+          )) : (
+            <div style={{ padding: 14, color: theme.muted, textAlign: 'center' }}>No unread client messages or uploads.</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

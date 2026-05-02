@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { API_BASE, api, fileToDataUrl, readSession } from '../lib/apiClient.js';
 import { styles, StyleTag, theme } from '../theme.jsx';
 import { Badge, Card, Empty, Field, kes, Logo, MeetingLink, Skeleton, Stat, statusTone, Table, Toast } from '../components/ui.jsx';
+import ClientChatWidget from '../components/ClientChatWidget.jsx';
 import MatterDocuments from '../components/MatterDocuments.jsx';
 
 const portalNav = [
@@ -24,7 +25,6 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
   const [view, setView] = useState('Dashboard');
   const [dashboard, setDashboard] = useState({ client: null, matters: [], documents: [], invoices: [], appearances: [], notices: [], paymentProofs: [] });
   const [selectedId, setSelectedId] = useState('');
-  const [message, setMessage] = useState('');
   const [uploading, setUploading] = useState(false);
   const [payment, setPayment] = useState({ invoiceId: '', method: 'M-PESA', reference: '', amount: '', note: '', file: null });
   const [loading, setLoading] = useState(true);
@@ -57,16 +57,6 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
   function switchView(next) {
     setView(next);
     if (next === 'Dashboard') load();
-  }
-
-  async function sendMessage(event) {
-    event.preventDefault();
-    if (!selected || !message.trim()) return;
-    try {
-      await api(`/matters/${selected.id}/notes`, { method: 'POST', body: { content: message } });
-      setMessage('');
-      notify({ type: 'success', message: 'Message sent to the firm.' });
-    } catch (err) { notify({ type: 'danger', message: err.message }); }
   }
 
   async function uploadDoc(event) {
@@ -158,9 +148,6 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
             proofs={dashboard.paymentProofs.filter(p => p.matterId === selected?.id)}
             uploadDoc={uploadDoc}
             uploading={uploading}
-            message={message}
-            setMessage={setMessage}
-            sendMessage={sendMessage}
             payment={payment}
             setPayment={setPayment}
             submitPayment={submitPayment}
@@ -171,6 +158,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
         {!loading && view === 'Documents' && <Documents documents={dashboard.documents} matters={dashboard.matters} />}
         {!loading && view === 'Account' && <Account user={user} client={dashboard.client} firm={firm} />}
       </main>
+      <ClientChatWidget firm={firm} matters={dashboard.matters} selectedMatterId={selected?.id || ''} user={user} notify={notify} />
       <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   );
@@ -204,7 +192,7 @@ function ClientDashboard({ data, stats, selectMatter }) {
   );
 }
 
-function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, events, proofs, uploadDoc, uploading, message, setMessage, sendMessage, payment, setPayment, submitPayment, notify }) {
+function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, events, proofs, uploadDoc, uploading, payment, setPayment, submitPayment, notify }) {
   if (!selected) return <Empty title="No matter selected" text="Your matter details will appear here once the firm shares a file." />;
   return (
     <div style={styles.matterGrid}>
@@ -232,9 +220,6 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
             <button style={styles.primaryButton}>Upload proof</button>
           </form>
           <Table columns={['Reference', 'Method', 'Amount', 'Uploaded']} rows={proofs.map(p => [p.reference, p.method, kes(p.amount), p.createdAt ? new Date(p.createdAt).toLocaleString() : '-'])} empty="No payment proof uploaded yet." />
-        </Card>
-        <Card title="Contact the firm" hint="Send a private message to the legal team">
-          <form onSubmit={sendMessage} style={styles.noteForm}><input style={styles.input} value={message} onChange={e => setMessage(e.target.value)} placeholder="Write a message about this matter" /><button style={styles.primaryButton}>Send</button></form>
         </Card>
       </div>
     </div>

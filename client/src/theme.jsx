@@ -44,6 +44,7 @@ export function StyleTag() { return <style>{`
   }
   @keyframes lfPulse { 0% { opacity: .55; } 50% { opacity: 1; } 100% { opacity: .55; } }
   @keyframes lfSlideIn { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
+  @keyframes lfDropIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
   table th { text-align: left; padding: 9px 12px; background: #F3F4F6; color: #6B7280; font-size: 11px; text-transform: uppercase; letter-spacing: 0; font-weight: 700; }
   table td { padding: 10px 12px; border-top: 1px solid #E5E7EB; vertical-align: middle; }
   table tr:nth-child(even) td { background: #FAFAFB; }

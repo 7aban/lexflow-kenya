@@ -183,6 +183,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS payment_proofs (id TEXT PRIMARY KEY, invoiceId TEXT, matterId TEXT, clientId TEXT, method TEXT, reference TEXT, amount REAL DEFAULT 0, note TEXT, fileName TEXT, mimeType TEXT, size TEXT, content BLOB, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS invitations (id TEXT PRIMARY KEY, email TEXT NOT NULL, clientId TEXT, token TEXT UNIQUE NOT NULL, status TEXT DEFAULT 'pending', createdBy TEXT, createdAt TEXT, expiresAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, userId TEXT, userName TEXT, role TEXT, action TEXT, entityType TEXT, entityId TEXT, summary TEXT, createdAt TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, userId TEXT NOT NULL, type TEXT, matterId TEXT, clientId TEXT, title TEXT, body TEXT, createdAt TEXT, readAt TEXT)`);
 
   await ensureClientUserSupport();
   await ensureColumn('appearances', 'meetingLink', 'TEXT');
@@ -234,6 +235,24 @@ async function logAudit(req, action, entityType, entityId, summary) {
     summary || '',
     new Date().toISOString(),
   ]);
+}
+
+async function notifyStaff(type, matterId, title, body, clientId = '') {
+  const staff = await all("SELECT id FROM users WHERE role IN ('admin','advocate','assistant')");
+  const createdAt = new Date().toISOString();
+  for (const user of staff) {
+    await run('INSERT INTO notifications (id,userId,type,matterId,clientId,title,body,createdAt,readAt) VALUES (?,?,?,?,?,?,?,?,?)', [
+      genId('NOTIF'),
+      user.id,
+      type || 'client_activity',
+      matterId || '',
+      clientId || '',
+      title || 'Client activity',
+      body || '',
+      createdAt,
+      '',
+    ]);
+  }
 }
 
 async function clientUploadsFolder(matterId, userId = '') {
@@ -537,6 +556,27 @@ app.get('/api/audit-logs', requireAdmin, async (req, res) => {
   res.json({ rows, total: countRow.count, limit, offset });
 });
 
+app.get('/api/notifications', requireStaff, async (req, res) => {
+  res.json(await all(`SELECT n.*, m.title matterTitle, m.reference, c.name clientName
+    FROM notifications n
+    LEFT JOIN matters m ON m.id=n.matterId
+    LEFT JOIN clients c ON c.id=COALESCE(n.clientId,m.clientId)
+    WHERE n.userId=? AND (n.readAt IS NULL OR n.readAt='')
+    ORDER BY n.createdAt DESC
+    LIMIT 50`, [req.user.userId]));
+});
+app.post('/api/notifications/read', requireStaff, async (req, res) => {
+  const now = new Date().toISOString();
+  if (req.body.matterId) {
+    await run("UPDATE notifications SET readAt=? WHERE userId=? AND matterId=? AND (readAt IS NULL OR readAt='')", [now, req.user.userId, req.body.matterId]);
+  } else if (req.body.id) {
+    await run("UPDATE notifications SET readAt=? WHERE userId=? AND id=? AND (readAt IS NULL OR readAt='')", [now, req.user.userId, req.body.id]);
+  } else {
+    return res.status(400).json({ error: 'id or matterId is required' });
+  }
+  res.json({ ok: true });
+});
+
 app.post('/api/notices', requireAdmin, async (req, res) => {
   const { title, content } = req.body;
   if (!title || !content) return res.status(400).json({ error: 'title and content are required' });
@@ -784,6 +824,7 @@ async function deleteMatterCascade(matterId) {
   await run('DELETE FROM integrations_log WHERE matterId=?', [matterId]);
   await run('DELETE FROM payment_proofs WHERE matterId=?', [matterId]);
   await run('DELETE FROM deadlines WHERE matterId=?', [matterId]);
+  await run('DELETE FROM notifications WHERE matterId=?', [matterId]);
   await run('DELETE FROM matters WHERE id=?', [matterId]);
 }
 app.delete('/api/matters/:id', requireAdvocateOrAdmin, async (req, res) => {
@@ -907,6 +948,10 @@ app.post('/api/matters/:id/documents', async (req, res) => {
   await run('INSERT INTO documents (id,matterId,name,type,mimeType,date,size,content,source,folderId) VALUES (?,?,?,?,?,?,?,?,?,?)', [id, req.params.id, name.replace(/[^\w .-]/g, '_'), type, mimeType, today(), `${Math.max(1, Math.round(buffer.length / 1024))} KB`, buffer, source, folderId || null]);
   const doc = await get('SELECT d.id,d.matterId,d.name,d.type,d.mimeType,d.date,d.size,d.source,d.folderId,f.name folderName FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=?', [id]);
   await logAudit(req, 'upload', 'document', id, `Uploaded document ${doc.name}`);
+  if (req.user.role === 'client') {
+    const matter = await get('SELECT m.title, m.reference, c.id clientId, c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.id=?', [req.params.id]);
+    await notifyStaff('client_document', req.params.id, 'Client uploaded a document', `${matter?.clientName || req.user.fullName || 'Client'} uploaded ${doc.name} for ${matter?.title || 'a matter'}.`, matter?.clientId || req.user.clientId || '');
+  }
   res.json(doc);
 });
 app.get('/api/documents/:id/download', async (req, res) => { const doc = await get('SELECT * FROM documents WHERE id=?', [req.params.id]); if (!doc) return res.status(404).json({ error: 'Document not found' }); if (!(await canAccessMatter(req, doc.matterId))) return res.status(403).json({ error: 'Document access denied' }); res.setHeader('Content-Type', doc.mimeType || 'application/octet-stream'); res.setHeader('Content-Disposition', `attachment; filename="${doc.name}"`); res.send(doc.content); });
@@ -925,7 +970,20 @@ app.patch('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
 app.delete('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => { const doc = await get('SELECT id,name,matterId FROM documents WHERE id=?', [req.params.id]); await run('DELETE FROM documents WHERE id=?', [req.params.id]); await logAudit(req, 'delete', 'document', req.params.id, `Deleted document ${doc?.name || req.params.id}`); res.json({ id: req.params.id, deleted: true }); });
 
 app.get('/api/matters/:id/notes', async (req, res) => { if (!(await canAccessMatter(req, req.params.id))) return res.status(403).json({ error: 'Matter access denied' }); if (req.user.role === 'client') return res.json([]); res.json(await all('SELECT * FROM case_notes WHERE matterId=? ORDER BY createdAt DESC', [req.params.id])); });
-app.post('/api/matters/:id/notes', async (req, res) => { if (!(await canAccessMatter(req, req.params.id))) return res.status(403).json({ error: 'Matter access denied' }); const id = genId('NOTE'); await run('INSERT INTO case_notes (id,matterId,content,author,createdAt) VALUES (?,?,?,?,?)', [id, req.params.id, req.body.content, req.user.role === 'client' ? req.user.fullName : (req.body.author || req.user.fullName || 'Unknown'), new Date().toISOString()]); res.json(await get('SELECT * FROM case_notes WHERE id=?', [id])); });
+app.post('/api/matters/:id/notes', async (req, res) => {
+  if (!(await canAccessMatter(req, req.params.id))) return res.status(403).json({ error: 'Matter access denied' });
+  const content = String(req.body.content || '').trim();
+  if (!content) return res.status(400).json({ error: 'Note content is required' });
+  const id = genId('NOTE');
+  const author = req.user.role === 'client' ? req.user.fullName : (req.body.author || req.user.fullName || 'Unknown');
+  await run('INSERT INTO case_notes (id,matterId,content,author,createdAt) VALUES (?,?,?,?,?)', [id, req.params.id, content, author, new Date().toISOString()]);
+  const note = await get('SELECT * FROM case_notes WHERE id=?', [id]);
+  if (req.user.role === 'client') {
+    const matter = await get('SELECT m.title, m.reference, c.id clientId, c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.id=?', [req.params.id]);
+    await notifyStaff('client_message', req.params.id, 'Client sent a message', `${matter?.clientName || author || 'Client'}: ${content.slice(0, 160)}`, matter?.clientId || req.user.clientId || '');
+  }
+  res.json(note);
+});
 
 app.get('/api/invoices', async (req, res) => {
   if (req.user.role === 'client') return res.json(await all(`SELECT i.*, m.title matterTitle, m.reference, c.name clientName FROM invoices i LEFT JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId WHERE i.clientId=? ORDER BY i.date DESC, i.number DESC`, [req.user.clientId || '']));

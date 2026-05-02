@@ -94,6 +94,8 @@ export const createDeadline = data => api('/deadlines', { method: 'POST', body: 
 export const updateDeadline = (id, data) => api(`/deadlines/${id}`, { method: 'PATCH', body: data });
 export const deleteDeadline = id => api(`/deadlines/${id}`, { method: 'DELETE' });
 export const getComplianceGuidance = () => api('/compliance-guidance');
+export const getNotifications = () => api('/notifications');
+export const markNotificationsRead = data => api('/notifications/read', { method: 'POST', body: data });
 export const getNotices = () => api('/notices');
 export const createNotice = data => api('/notices', { method: 'POST', body: data });
 export const deleteNotice = id => api(`/notices/${id}`, { method: 'DELETE' });
