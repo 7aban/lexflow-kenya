@@ -6,7 +6,6 @@ import LoginPage from './components/LoginPage.jsx';
 import AcceptInvitation from './views/AcceptInvitation.jsx';
 import AuditLog from './views/AuditLog.jsx';
 import ClientApp from './views/ClientApp.jsx';
-import CommunicationSettings from './views/CommunicationSettings.jsx';
 import Invitations from './views/Invitations.jsx';
 import { Clients, Dashboard, FirmSettings, Invoices, Matters, Tasks, Users } from './views/StaffViews.jsx';
 
@@ -18,7 +17,6 @@ const nav = [
   ['Tasks', 'TK'],
   ['Invoices', 'IN'],
   ['Firm Settings', 'FS'],
-  ['Communication', 'CM'],
   ['Users', 'US'],
   ['Invitations', 'IV'],
   ['Audit Log', 'AL'],
@@ -156,7 +154,7 @@ export default function App() {
     return <ClientApp user={user} firm={firm} logout={logout} notify={setToast} toast={toast} setToast={setToast} />;
   }
 
-  const visibleNav = nav.filter(([label]) => !['Users', 'Firm Settings', 'Communication', 'Invitations', 'Audit Log'].includes(label) || isAdmin);
+  const visibleNav = nav.filter(([label]) => !['Users', 'Firm Settings', 'Invitations', 'Audit Log'].includes(label) || isAdmin);
   const subtitles = {
     Dashboard: 'Command center for active work, hearings, billing and firm movement.',
     Clients: 'A polished directory for intake, contacts and relationship context.',
@@ -164,7 +162,6 @@ export default function App() {
     Tasks: 'Daily execution board for deadlines and delegated legal work.',
     Invoices: 'Receivables, invoice status and PDF export for client billing.',
     'Firm Settings': 'Client-ready branding, invoice identity and contact details.',
-    Communication: 'Automated WhatsApp and email reminders for court dates and invoices.',
     Users: 'Role-based access for advocates, assistants and administrators.',
     Invitations: 'Secure client portal onboarding links and invitation status.',
     'Audit Log': 'A secure activity trail for important changes and accountability.',
@@ -245,7 +242,6 @@ export default function App() {
         {!loading && view === 'Tasks' && <Tasks data={data} canManage={canManage} reload={refresh} notify={setToast} />}
         {!loading && view === 'Invoices' && <Invoices invoices={data.invoices} isAdmin={isAdmin} canManage={canManage} reload={refresh} notify={setToast} />}
         {!loading && view === 'Firm Settings' && isAdmin && <FirmSettings settings={firm} reload={refresh} notify={setToast} />}
-        {!loading && view === 'Communication' && isAdmin && <CommunicationSettings firm={firm} reload={refresh} notify={setToast} />}
         {!loading && view === 'Users' && isAdmin && <Users clients={data.clients} notify={setToast} />}
         {!loading && view === 'Invitations' && isAdmin && <Invitations clients={data.clients} notify={setToast} />}
         {!loading && view === 'Audit Log' && isAdmin && <AuditLog notify={setToast} navigate={setView} />}
