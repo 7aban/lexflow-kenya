@@ -80,6 +80,20 @@ export function getAuditLogs(params = {}) {
   return api(`/audit-logs${suffix}`);
 }
 
+function queryPath(path, params = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') query.set(key, value);
+  });
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return `${path}${suffix}`;
+}
+
+export const getDeadlines = (params = {}) => api(queryPath('/deadlines', params));
+export const createDeadline = data => api('/deadlines', { method: 'POST', body: data });
+export const updateDeadline = (id, data) => api(`/deadlines/${id}`, { method: 'PATCH', body: data });
+export const deleteDeadline = id => api(`/deadlines/${id}`, { method: 'DELETE' });
+export const getComplianceGuidance = () => api('/compliance-guidance');
 export const getNotices = () => api('/notices');
 export const createNotice = data => api('/notices', { method: 'POST', body: data });
 export const deleteNotice = id => api(`/notices/${id}`, { method: 'DELETE' });

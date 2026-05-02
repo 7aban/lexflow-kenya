@@ -6,6 +6,7 @@ import LoginPage from './components/LoginPage.jsx';
 import AcceptInvitation from './views/AcceptInvitation.jsx';
 import AuditLog from './views/AuditLog.jsx';
 import ClientApp from './views/ClientApp.jsx';
+import DeadlineCenter from './views/DeadlineCenter.jsx';
 import Invitations from './views/Invitations.jsx';
 import { Clients, Dashboard, FirmSettings, Invoices, Matters, Tasks, Users } from './views/StaffViews.jsx';
 
@@ -15,6 +16,7 @@ const nav = [
   ['Clients', 'CL'],
   ['Matters', 'MT'],
   ['Tasks', 'TK'],
+  ['Deadlines', 'DL'],
   ['Invoices', 'IN'],
   ['Firm Settings', 'FS'],
   ['Users', 'US'],
@@ -160,6 +162,7 @@ export default function App() {
     Clients: 'A polished directory for intake, contacts and relationship context.',
     Matters: 'Matter pipeline, billing, documents, notes and invoice actions.',
     Tasks: 'Daily execution board for deadlines and delegated legal work.',
+    Deadlines: 'Court, client, internal and statutory obligations in one timeline.',
     Invoices: 'Receivables, invoice status and PDF export for client billing.',
     'Firm Settings': 'Client-ready branding, invoice identity and contact details.',
     Users: 'Role-based access for advocates, assistants and administrators.',
@@ -240,6 +243,7 @@ export default function App() {
         {!loading && view === 'Clients' && <Clients clients={data.clients} matters={data.matters} canManage={canManage} isAdmin={isAdmin} reload={refresh} notify={setToast} />}
         {!loading && view === 'Matters' && <Matters data={data} canManage={canManage} reload={refresh} notify={setToast} />}
         {!loading && view === 'Tasks' && <Tasks data={data} canManage={canManage} reload={refresh} notify={setToast} />}
+        {!loading && view === 'Deadlines' && <DeadlineCenter data={data} canManage={canManage} notify={setToast} />}
         {!loading && view === 'Invoices' && <Invoices invoices={data.invoices} isAdmin={isAdmin} canManage={canManage} reload={refresh} notify={setToast} />}
         {!loading && view === 'Firm Settings' && isAdmin && <FirmSettings settings={firm} reload={refresh} notify={setToast} />}
         {!loading && view === 'Users' && isAdmin && <Users clients={data.clients} notify={setToast} />}

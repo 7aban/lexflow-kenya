@@ -179,6 +179,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS reminder_templates (id TEXT PRIMARY KEY, eventType TEXT NOT NULL, channel TEXT NOT NULL, subject TEXT, body TEXT NOT NULL, createdBy TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS reminder_logs (id TEXT PRIMARY KEY, templateId TEXT, clientId TEXT, matterId TEXT, invoiceId TEXT, channel TEXT, recipient TEXT, status TEXT, sentAt TEXT, errorMessage TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS firm_notices (id TEXT PRIMARY KEY, title TEXT, content TEXT, createdAt TEXT, createdBy TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS deadlines (id TEXT PRIMARY KEY, matterId TEXT, clientId TEXT, title TEXT NOT NULL, type TEXT DEFAULT 'internal', dueDate TEXT NOT NULL, owner TEXT, status TEXT DEFAULT 'Open', notes TEXT, createdBy TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS payment_proofs (id TEXT PRIMARY KEY, invoiceId TEXT, matterId TEXT, clientId TEXT, method TEXT, reference TEXT, amount REAL DEFAULT 0, note TEXT, fileName TEXT, mimeType TEXT, size TEXT, content BLOB, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS invitations (id TEXT PRIMARY KEY, email TEXT NOT NULL, clientId TEXT, token TEXT UNIQUE NOT NULL, status TEXT DEFAULT 'pending', createdBy TEXT, createdAt TEXT, expiresAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, userId TEXT, userName TEXT, role TEXT, action TEXT, entityType TEXT, entityId TEXT, summary TEXT, createdAt TEXT)`);
@@ -583,6 +584,72 @@ app.get('/api/dashboard', requireStaff, async (req, res) => {
   res.json({ activeMattersCount: active.count, monthHours: hours.hours, monthRevenue: hours.revenue, overdueTaskCount: overdue.count, upcomingEvents });
 });
 
+async function unifiedDeadlines() {
+  const rows = [];
+  const taskRows = await all(`SELECT t.id, t.title, t.dueDate, t.completed, t.assignee owner, m.id matterId, m.title matterTitle, m.reference, c.id clientId, c.name clientName
+    FROM tasks t LEFT JOIN matters m ON m.id=t.matterId LEFT JOIN clients c ON c.id=m.clientId WHERE t.dueDate<>''`);
+  rows.push(...taskRows.map(r => ({ id: `task:${r.id}`, sourceId: r.id, source: 'task', type: 'Internal Task', title: r.title, dueDate: r.dueDate, owner: r.owner || '', status: r.completed ? 'Done' : 'Open', matterId: r.matterId, matterTitle: r.matterTitle, reference: r.reference, clientId: r.clientId, clientName: r.clientName, notes: 'Task deadline' })));
+
+  const appearanceRows = await all(`SELECT a.id, a.title, a.type appearanceType, a.date dueDate, a.time, a.attorney owner, m.id matterId, m.title matterTitle, m.reference, c.id clientId, c.name clientName
+    FROM appearances a LEFT JOIN matters m ON m.id=a.matterId LEFT JOIN clients c ON c.id=m.clientId WHERE a.date<>''`);
+  rows.push(...appearanceRows.map(r => ({ id: `appearance:${r.id}`, sourceId: r.id, source: 'appearance', type: 'Court Date', title: r.title || r.appearanceType || 'Court appearance', dueDate: r.dueDate, owner: r.owner || '', status: 'Open', matterId: r.matterId, matterTitle: r.matterTitle, reference: r.reference, clientId: r.clientId, clientName: r.clientName, notes: r.time ? `Time: ${r.time}` : 'Court appearance' })));
+
+  const solRows = await all(`SELECT m.id matterId, m.title matterTitle, m.reference, m.solDate dueDate, m.assignedTo owner, c.id clientId, c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.solDate<>''`);
+  rows.push(...solRows.map(r => ({ id: `sol:${r.matterId}`, sourceId: r.matterId, source: 'matter', type: 'SOL / Limitation', title: `Limitation date: ${r.matterTitle}`, dueDate: r.dueDate, owner: r.owner || '', status: 'Open', matterId: r.matterId, matterTitle: r.matterTitle, reference: r.reference, clientId: r.clientId, clientName: r.clientName, notes: 'Statute of limitation date. Confirm the applicable law before relying on this date.' })));
+
+  const invoiceRows = await all(`SELECT i.id, i.number, i.dueDate, i.status, i.amount, m.id matterId, m.title matterTitle, m.reference, c.id clientId, c.name clientName FROM invoices i LEFT JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId WHERE i.dueDate<>'' AND i.status<>'Paid'`);
+  rows.push(...invoiceRows.map(r => ({ id: `invoice:${r.id}`, sourceId: r.id, source: 'invoice', type: 'Invoice Due', title: `Invoice ${r.number || r.id}`, dueDate: r.dueDate, owner: 'Accounts', status: r.status || 'Outstanding', matterId: r.matterId, matterTitle: r.matterTitle, reference: r.reference, clientId: r.clientId, clientName: r.clientName, notes: money(r.amount) })));
+
+  const customRows = await all(`SELECT d.*, m.title matterTitle, m.reference, c.name clientName FROM deadlines d LEFT JOIN matters m ON m.id=d.matterId LEFT JOIN clients c ON c.id=COALESCE(d.clientId,m.clientId)`);
+  rows.push(...customRows.map(r => ({ id: `custom:${r.id}`, sourceId: r.id, source: 'custom', type: r.type || 'Internal', title: r.title, dueDate: r.dueDate, owner: r.owner || '', status: r.status || 'Open', matterId: r.matterId, matterTitle: r.matterTitle, reference: r.reference, clientId: r.clientId, clientName: r.clientName, notes: r.notes || '' })));
+
+  return rows.sort((a, b) => String(a.dueDate || '').localeCompare(String(b.dueDate || '')));
+}
+
+app.get('/api/deadlines', requireStaff, async (req, res) => {
+  const rows = await unifiedDeadlines();
+  const type = req.query.type || '';
+  const status = req.query.status || '';
+  const filtered = rows.filter(row => (!type || row.type === type) && (!status || row.status === status));
+  res.json(filtered);
+});
+app.post('/api/deadlines', requireAdvocateOrAdmin, async (req, res) => {
+  const { title, dueDate, type = 'internal', matterId = '', clientId = '', owner = '', notes = '' } = req.body;
+  if (!title || !dueDate) return res.status(400).json({ error: 'title and dueDate are required' });
+  const id = genId('DL');
+  await run('INSERT INTO deadlines (id,matterId,clientId,title,type,dueDate,owner,status,notes,createdBy,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [id, matterId, clientId, title, type, dueDate, owner, 'Open', notes, req.user.userId || '', new Date().toISOString()]);
+  await logAudit(req, 'create', 'deadline', id, `Created ${type} deadline ${title}`);
+  res.json(await get('SELECT * FROM deadlines WHERE id=?', [id]));
+});
+app.patch('/api/deadlines/:id', requireAdvocateOrAdmin, async (req, res) => {
+  const fields = ['title', 'type', 'dueDate', 'owner', 'status', 'notes', 'matterId', 'clientId'];
+  const updates = fields.filter(f => req.body[f] !== undefined);
+  if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
+  await run(`UPDATE deadlines SET ${updates.map(f => `${f}=?`).join(',')} WHERE id=?`, [...updates.map(f => req.body[f]), req.params.id]);
+  const deadline = await get('SELECT * FROM deadlines WHERE id=?', [req.params.id]);
+  if (deadline) await logAudit(req, 'update', 'deadline', req.params.id, `Updated deadline ${deadline.title}`);
+  deadline ? res.json(deadline) : res.status(404).json({ error: 'Deadline not found' });
+});
+app.delete('/api/deadlines/:id', requireAdvocateOrAdmin, async (req, res) => {
+  const deadline = await get('SELECT * FROM deadlines WHERE id=?', [req.params.id]);
+  await run('DELETE FROM deadlines WHERE id=?', [req.params.id]);
+  await logAudit(req, 'delete', 'deadline', req.params.id, `Deleted deadline ${deadline?.title || req.params.id}`);
+  res.json({ id: req.params.id, deleted: true });
+});
+app.get('/api/compliance-guidance', requireStaff, async (req, res) => {
+  const deadlines = await unifiedDeadlines();
+  const next14 = addDays(14);
+  const overdue = deadlines.filter(d => d.status !== 'Done' && d.dueDate && d.dueDate < today()).length;
+  const soon = deadlines.filter(d => d.status !== 'Done' && d.dueDate >= today() && d.dueDate <= next14).length;
+  const highValue = await all(`SELECT m.id,m.title,c.name clientName,m.retainerBalance,m.totalBilled FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE COALESCE(m.totalBilled,0)+COALESCE(m.retainerBalance,0) >= 1000000`);
+  res.json([
+    { tone: overdue ? 'danger' : 'info', title: 'Deadline control', summary: overdue ? `${overdue} overdue deadline(s) require immediate review.` : `${soon} deadline(s) fall within the next 14 days.`, action: 'Open the Deadline Center daily and mark resolved items as done.' },
+    { tone: 'warning', title: 'KRA and statutory filings', summary: 'Keep monthly VAT/PAYE and annual return obligations visible as statutory deadlines.', action: 'Add recurring statutory deadlines for VAT, PAYE, NSSF/SHIF and company annual returns where applicable.' },
+    { tone: highValue.length ? 'warning' : 'info', title: 'AML review', summary: highValue.length ? `${highValue.length} high-value matter(s) may need source-of-funds review.` : 'No high-value matter flags found from current billing/retainer data.', action: 'For high-value or unusual matters, record source-of-funds notes and KYC documents before proceeding.' },
+    { tone: 'info', title: 'Limitation dates', summary: 'SOL dates are guidance fields and must be checked against the applicable statute and facts.', action: 'Confirm limitation periods during intake and add a statutory deadline where necessary.' },
+  ]);
+});
+
 app.get('/api/clients', requireStaff, async (req, res) => res.json(await all('SELECT * FROM clients ORDER BY name')));
 app.post('/api/clients', requireStaff, async (req, res) => {
   const id = genId('C');
@@ -606,6 +673,7 @@ app.delete('/api/clients/:id', requireAdvocateOrAdmin, async (req, res) => {
   await run('BEGIN TRANSACTION');
   try {
     for (const matter of matters) await deleteMatterCascade(matter.id);
+    await run('DELETE FROM deadlines WHERE clientId=?', [req.params.id]);
     await run('DELETE FROM clients WHERE id=?', [req.params.id]);
     await run('COMMIT');
     await logAudit(req, 'delete', 'client', req.params.id, `Deleted client ${client?.name || req.params.id} and ${matters.length} related matter(s)`);
@@ -715,6 +783,7 @@ async function deleteMatterCascade(matterId) {
   await run('DELETE FROM case_notes WHERE matterId=?', [matterId]);
   await run('DELETE FROM integrations_log WHERE matterId=?', [matterId]);
   await run('DELETE FROM payment_proofs WHERE matterId=?', [matterId]);
+  await run('DELETE FROM deadlines WHERE matterId=?', [matterId]);
   await run('DELETE FROM matters WHERE id=?', [matterId]);
 }
 app.delete('/api/matters/:id', requireAdvocateOrAdmin, async (req, res) => {
