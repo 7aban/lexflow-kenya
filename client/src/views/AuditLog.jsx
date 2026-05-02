@@ -5,7 +5,7 @@ import { Badge, Card, Empty, Field, Skeleton, Table } from '../components/ui.jsx
 
 const PAGE_SIZE = 50;
 const ACTIONS = ['', 'create', 'update', 'delete', 'archive', 'complete', 'bill_toggle', 'generate', 'status', 'upload'];
-const ENTITIES = ['', 'client', 'matter', 'task', 'time_entry', 'invoice', 'appearance', 'document', 'firm_settings', 'user'];
+const ENTITIES = ['', 'client', 'matter', 'task', 'time_entry', 'invoice', 'appearance', 'document', 'firm_settings', 'user', 'invitation'];
 const ENTITY_VIEW = {
   client: 'Clients',
   matter: 'Matters',

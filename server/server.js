@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const PDFDocument = require('pdfkit');
@@ -9,6 +10,7 @@ const PDFDocument = require('pdfkit');
 const app = express();
 const db = new sqlite3.Database(path.join(__dirname, 'lawfirm.db'));
 const JWT_SECRET = process.env.JWT_SECRET || 'lexflow-kenya-secret';
+const invitationAttempts = new Map();
 
 app.use(cors());
 app.use(express.json({ limit: '25mb' }));
@@ -71,6 +73,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS firm_settings (id TEXT PRIMARY KEY, name TEXT, logo TEXT, primaryColor TEXT, accentColor TEXT, websiteURL TEXT, email TEXT, phone TEXT, address TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS firm_notices (id TEXT PRIMARY KEY, title TEXT, content TEXT, createdAt TEXT, createdBy TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS payment_proofs (id TEXT PRIMARY KEY, invoiceId TEXT, matterId TEXT, clientId TEXT, method TEXT, reference TEXT, amount REAL DEFAULT 0, note TEXT, fileName TEXT, mimeType TEXT, size TEXT, content BLOB, createdAt TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS invitations (id TEXT PRIMARY KEY, email TEXT NOT NULL, clientId TEXT, token TEXT UNIQUE NOT NULL, status TEXT DEFAULT 'pending', createdBy TEXT, createdAt TEXT, expiresAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, userId TEXT, userName TEXT, role TEXT, action TEXT, entityType TEXT, entityId TEXT, summary TEXT, createdAt TEXT)`);
 
   await ensureClientUserSupport();
@@ -117,6 +120,35 @@ async function logAudit(req, action, entityType, entityId, summary) {
   ]);
 }
 
+function appBaseUrl(req) {
+  if (process.env.BASE_URL) return process.env.BASE_URL.replace(/\/$/, '');
+  const host = req.get('host') || '';
+  if (host.startsWith('localhost') || host.startsWith('127.0.0.1')) return 'http://localhost:5173';
+  return `${req.protocol}://${host || 'localhost:5173'}`;
+}
+
+function invitationUrl(req, token) {
+  return `${appBaseUrl(req)}/invite/${token}`;
+}
+
+function checkInvitationRateLimit(req, res) {
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  const now = Date.now();
+  const windowMs = 15 * 60 * 1000;
+  const current = invitationAttempts.get(ip) || { count: 0, resetAt: now + windowMs };
+  if (current.resetAt < now) {
+    current.count = 0;
+    current.resetAt = now + windowMs;
+  }
+  current.count += 1;
+  invitationAttempts.set(ip, current);
+  if (current.count > 10) {
+    res.status(429).json({ error: 'Too many invitation attempts. Please try again later.' });
+    return false;
+  }
+  return true;
+}
+
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -140,6 +172,37 @@ app.post('/api/auth/client-login', async (req, res) => {
 
 app.get('/api/firm-settings', async (req, res) => res.json(await getFirmSettings()));
 app.get('/api/notices', async (req, res) => res.json(await all('SELECT * FROM firm_notices ORDER BY createdAt DESC')));
+app.get('/api/invitations/:token', async (req, res) => {
+  const invitation = await get('SELECT email,status,expiresAt FROM invitations WHERE token=?', [req.params.token]);
+  if (!invitation) return res.status(404).json({ error: 'Invitation not found' });
+  if (invitation.status !== 'pending') return res.status(400).json({ error: `Invitation is ${invitation.status}` });
+  if (new Date(invitation.expiresAt).getTime() < Date.now()) {
+    await run("UPDATE invitations SET status='expired' WHERE token=?", [req.params.token]);
+    return res.status(400).json({ error: 'Invitation has expired' });
+  }
+  res.json({ valid: true, email: invitation.email });
+});
+app.post('/api/invitations/:token/accept', async (req, res) => {
+  if (!checkInvitationRateLimit(req, res)) return;
+  const invitation = await get('SELECT * FROM invitations WHERE token=?', [req.params.token]);
+  if (!invitation) return res.status(404).json({ error: 'Invitation not found' });
+  if (invitation.status !== 'pending') return res.status(400).json({ error: `Invitation is ${invitation.status}` });
+  if (new Date(invitation.expiresAt).getTime() < Date.now()) {
+    await run("UPDATE invitations SET status='expired' WHERE token=?", [req.params.token]);
+    return res.status(400).json({ error: 'Invitation has expired' });
+  }
+  const { password, fullName } = req.body;
+  if (!password || String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  const existing = await get('SELECT id FROM users WHERE lower(email)=lower(?)', [invitation.email]);
+  if (existing) return res.status(400).json({ error: 'A user with this email already exists' });
+  const id = genId('U');
+  const name = fullName || invitation.email.split('@')[0];
+  const createdAt = new Date().toISOString();
+  await run('INSERT INTO users (id,email,password,fullName,role,clientId,createdAt) VALUES (?,?,?,?,?,?,?)', [id, invitation.email, await bcrypt.hash(password, 10), name, 'client', invitation.clientId || '', createdAt]);
+  await run("UPDATE invitations SET status='used' WHERE token=?", [req.params.token]);
+  const token = jwt.sign({ userId: id, role: 'client', fullName: name, clientId: invitation.clientId || '' }, JWT_SECRET, { expiresIn: '8h' });
+  res.json({ message: 'Client portal account created.', token, user: { id, email: invitation.email, fullName: name, name, role: 'client', clientId: invitation.clientId || '' } });
+});
 app.put('/api/firm-settings', authenticate, requireAdmin, async (req, res) => {
   const settings = { ...defaultFirmSettings, ...req.body, id: 'default' };
   await run(`INSERT INTO firm_settings (id,name,logo,primaryColor,accentColor,websiteURL,email,phone,address)
@@ -176,6 +239,32 @@ app.delete('/api/auth/users/:id', requireAdmin, async (req, res) => {
   await run('DELETE FROM users WHERE id=?', [req.params.id]);
   await logAudit(req, 'delete', 'user', req.params.id, `Deleted user ${user?.email || req.params.id}`);
   res.json({ id: req.params.id, deleted: true });
+});
+
+app.post('/api/invitations', requireAdmin, async (req, res) => {
+  const email = String(req.body.email || '').trim().toLowerCase();
+  const clientId = req.body.clientId || '';
+  if (!email) return res.status(400).json({ error: 'email is required' });
+  if (clientId) {
+    const client = await get('SELECT id FROM clients WHERE id=?', [clientId]);
+    if (!client) return res.status(400).json({ error: 'Linked client not found' });
+  }
+  const existingUser = await get('SELECT id FROM users WHERE lower(email)=lower(?)', [email]);
+  if (existingUser) return res.status(400).json({ error: 'A user with this email already exists' });
+  const id = genId('INVITE');
+  const token = crypto.randomUUID();
+  const createdAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + 7 * 86400000).toISOString();
+  await run('INSERT INTO invitations (id,email,clientId,token,status,createdBy,createdAt,expiresAt) VALUES (?,?,?,?,?,?,?,?)', [id, email, clientId, token, 'pending', req.user.userId, createdAt, expiresAt]);
+  const invite = await get(`SELECT i.*, c.name clientName FROM invitations i LEFT JOIN clients c ON c.id=i.clientId WHERE i.id=?`, [id]);
+  const url = invitationUrl(req, token);
+  console.log(`[LexFlow] Invitation link for ${email}: ${url}`);
+  await logAudit(req, 'create', 'invitation', id, `Created client invitation for ${email}`);
+  res.json({ ...invite, url });
+});
+app.get('/api/invitations', requireAdmin, async (req, res) => {
+  const rows = await all(`SELECT i.*, c.name clientName FROM invitations i LEFT JOIN clients c ON c.id=i.clientId ORDER BY i.createdAt DESC`);
+  res.json(rows.map(row => ({ ...row, url: invitationUrl(req, row.token) })));
 });
 
 app.get('/api/audit-logs', requireAdmin, async (req, res) => {

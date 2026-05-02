@@ -67,11 +67,14 @@ export function Dashboard({ data }) {
   );
 }
 
-export function Clients({ clients, matters, canManage, reload, notify }) {
+export function Clients({ clients, matters, canManage, isAdmin = false, reload, notify }) {
   const [form, setForm] = useState({ name: '', type: 'Individual', contact: '', email: '', phone: '' });
   const [editing, setEditing] = useState(null);
   const [confirm, setConfirm] = useState(null);
   const [tooltip, setTooltip] = useState(null);
+  const [users, setUsers] = useState([]);
+  useEffect(() => { if (isAdmin) loadUsers(); }, [isAdmin]);
+  async function loadUsers() { try { setUsers(await api('/auth/users')); } catch { setUsers([]); } }
   async function submit(event) {
     event.preventDefault();
     try {
@@ -94,9 +97,22 @@ export function Clients({ clients, matters, canManage, reload, notify }) {
       await reload();
     } catch (err) { notify({ type: 'danger', message: err.message }); }
   }
-  return <div style={styles.splitGrid}><Card title={editing ? 'Edit client' : 'New client'} hint={editing ? 'Save client changes' : 'Intake record'}><form onSubmit={submit} style={styles.formGrid}><Field label="Name"><input required style={styles.input} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field><Field label="Type"><select style={styles.input} value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}><option>Individual</option><option>Company</option></select></Field><Field label="Contact"><input style={styles.input} value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} /></Field><Field label="Email"><input style={styles.input} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field><Field label="Phone"><input style={styles.input} value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></Field><button style={styles.primaryButton}>{editing ? 'Save changes' : 'Create client'}</button>{editing && <button type="button" style={styles.ghostButton} onClick={() => { setEditing(null); setForm({ name: '', type: 'Individual', contact: '', email: '', phone: '' }); }}>Cancel</button>}</form></Card><Card title="Client directory" hint={`${clients.length} records`}><Table columns={['Name', 'Type', 'Email', 'Phone', 'Status', 'Actions']} rows={clients.map(c => [<span key={c.id} onMouseMove={e => setTooltip({ x: e.clientX, y: e.clientY, title: c.name, lines: [`${c.type || 'Client'} / ${c.status || 'Active'}`, `${matters.filter(m => m.clientId === c.id).length} matter(s)`, `Joined ${c.joinDate || '-'}`], initial: (c.name || 'C').slice(0, 1) })} onMouseLeave={() => setTooltip(null)} style={styles.hoverName}>{c.name}</span>, c.type, c.email || '-', c.phone || '-', <Badge key={`${c.id}-status`} tone="green">{c.status || 'Active'}</Badge>, canManage ? <ActionGroup key={`${c.id}-actions`} actions={[['Edit', () => startEdit(c)], ['Delete', () => setConfirm({ title: 'Delete client?', message: 'Are you sure you want to delete this client? This will also remove all related matters.', onConfirm: () => deleteClient(c) })]]} /> : '-'])} empty="No clients yet." /></Card><ProfileTooltip tooltip={tooltip} /><ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} /></div>;
+  async function inviteClient(client) {
+    if (!client.email) return notify({ type: 'warning', message: 'Add the client email before generating an invitation.' });
+    try {
+      const invite = await api('/invitations', { method: 'POST', body: { email: client.email, clientId: client.id } });
+      await navigator.clipboard?.writeText(invite.url).catch(() => {});
+      notify({ type: 'success', message: 'Invitation generated. Link copied if clipboard access is available.' });
+    } catch (err) { notify({ type: 'danger', message: err.message }); }
+  }
+  function portalCell(client) {
+    if (!isAdmin) return '-';
+    const account = users.find(user => user.role === 'client' && user.clientId === client.id);
+    if (account) return <Badge tone="green">Active</Badge>;
+    return <button type="button" style={styles.tinyButton} onClick={() => inviteClient(client)}>Send Invitation</button>;
+  }
+  return <div style={styles.splitGrid}><Card title={editing ? 'Edit client' : 'New client'} hint={editing ? 'Save client changes' : 'Intake record'}><form onSubmit={submit} style={styles.formGrid}><Field label="Name"><input required style={styles.input} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field><Field label="Type"><select style={styles.input} value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}><option>Individual</option><option>Company</option></select></Field><Field label="Contact"><input style={styles.input} value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} /></Field><Field label="Email"><input style={styles.input} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field><Field label="Phone"><input style={styles.input} value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></Field><button style={styles.primaryButton}>{editing ? 'Save changes' : 'Create client'}</button>{editing && <button type="button" style={styles.ghostButton} onClick={() => { setEditing(null); setForm({ name: '', type: 'Individual', contact: '', email: '', phone: '' }); }}>Cancel</button>}</form></Card><Card title="Client directory" hint={`${clients.length} records`}><Table columns={['Name', 'Type', 'Email', 'Phone', 'Status', 'Portal', 'Actions']} rows={clients.map(c => [<span key={c.id} onMouseMove={e => setTooltip({ x: e.clientX, y: e.clientY, title: c.name, lines: [`${c.type || 'Client'} / ${c.status || 'Active'}`, `${matters.filter(m => m.clientId === c.id).length} matter(s)`, `Joined ${c.joinDate || '-'}`], initial: (c.name || 'C').slice(0, 1) })} onMouseLeave={() => setTooltip(null)} style={styles.hoverName}>{c.name}</span>, c.type, c.email || '-', c.phone || '-', <Badge key={`${c.id}-status`} tone="green">{c.status || 'Active'}</Badge>, portalCell(c), canManage ? <ActionGroup key={`${c.id}-actions`} actions={[[ 'Edit', () => startEdit(c)], ['Delete', () => setConfirm({ title: 'Delete client?', message: 'Are you sure you want to delete this client? This will also remove all related matters.', onConfirm: () => deleteClient(c) })]]} /> : '-'])} empty="No clients yet." /></Card><ProfileTooltip tooltip={tooltip} /><ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} /></div>;
 }
-
 export function Matters({ data, canManage, reload, notify }) {
   const [selectedId, setSelectedId] = useState('');
   const [detail, setDetail] = useState(null);

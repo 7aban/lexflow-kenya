@@ -84,4 +84,8 @@ export const getNotices = () => api('/notices');
 export const createNotice = data => api('/notices', { method: 'POST', body: data });
 export const deleteNotice = id => api(`/notices/${id}`, { method: 'DELETE' });
 export const uploadPaymentProof = data => api('/payment-proofs', { method: 'POST', body: data });
+export const getInvitations = () => api('/invitations');
+export const createInvitation = data => api('/invitations', { method: 'POST', body: data });
+export const verifyInvitation = token => api(`/invitations/${token}`);
+export const acceptInvitation = (token, data) => api(`/invitations/${token}/accept`, { method: 'POST', body: data });
 
