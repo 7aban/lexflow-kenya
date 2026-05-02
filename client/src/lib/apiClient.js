@@ -94,4 +94,7 @@ export const updateFolder = (folderId, data) => api(`/folders/${folderId}`, { me
 export const deleteFolder = folderId => api(`/folders/${folderId}`, { method: 'DELETE' });
 export const getMatterDocuments = (matterId, folderId = 'all') => api(`/matters/${matterId}/documents${folderId && folderId !== 'all' ? `?folderId=${encodeURIComponent(folderId)}` : ''}`);
 export const moveDocument = (docId, folderId) => api(`/documents/${docId}`, { method: 'PATCH', body: { folderId } });
+export const getReminderTemplates = () => api('/reminder-templates');
+export const updateReminderTemplate = (id, data) => api(`/reminder-templates/${id}`, { method: 'PUT', body: data });
+export const getReminderLogs = (limit = 100) => api(`/reminder-logs?limit=${encodeURIComponent(limit)}`);
 

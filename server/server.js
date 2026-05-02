@@ -6,11 +6,15 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const PDFDocument = require('pdfkit');
+const cron = require('node-cron');
+const nodemailer = require('nodemailer');
+const twilio = require('twilio');
 
 const app = express();
 const db = new sqlite3.Database(path.join(__dirname, 'lawfirm.db'));
 const JWT_SECRET = process.env.JWT_SECRET || 'lexflow-kenya-secret';
 const invitationAttempts = new Map();
+let reminderJobsStarted = false;
 
 app.use(cors());
 app.use(express.json({ limit: '25mb' }));
@@ -34,6 +38,68 @@ const defaultFirmSettings = {
   phone: '+254 700 123456',
   address: 'Nairobi, Kenya',
 };
+const defaultReminderSettings = {
+  remindersEnabled: true,
+  whatsappEnabled: false,
+  emailEnabled: false,
+  twilioSid: '',
+  twilioToken: '',
+  twilioFromNumber: '',
+  smtpHost: '',
+  smtpPort: '',
+  smtpUser: '',
+  smtpPass: '',
+};
+const defaultReminderTemplates = [
+  {
+    eventType: 'court_date_tomorrow',
+    channel: 'whatsapp',
+    subject: '',
+    body: 'Good evening {{clientName}}. This is a courteous reminder from {{firmName}} that {{matterTitle}} is listed for court tomorrow, {{courtDate}}, at {{courtTime}}. For any urgent clarification, contact us on {{firmPhone}}.',
+  },
+  {
+    eventType: 'court_date_tomorrow',
+    channel: 'email',
+    subject: 'Court reminder for {{matterTitle}}',
+    body: 'Dear {{clientName}},\n\nThis is a courteous reminder that {{matterTitle}} is listed for court tomorrow, {{courtDate}}, at {{courtTime}}.\n\nPlease contact {{firmName}} on {{firmPhone}} if you require any clarification.\n\nKind regards,\n{{firmName}}',
+  },
+  {
+    eventType: 'court_date_today',
+    channel: 'whatsapp',
+    subject: '',
+    body: 'Good morning {{clientName}}. {{matterTitle}} is listed for court today, {{courtDate}}, at {{courtTime}}. {{firmName}} will keep you updated. For urgent assistance call {{firmPhone}}.',
+  },
+  {
+    eventType: 'court_date_today',
+    channel: 'email',
+    subject: 'Court appearance today: {{matterTitle}}',
+    body: 'Dear {{clientName}},\n\n{{matterTitle}} is listed for court today, {{courtDate}}, at {{courtTime}}.\n\nWe will keep you updated on progress. For urgent assistance, contact us on {{firmPhone}}.\n\nKind regards,\n{{firmName}}',
+  },
+  {
+    eventType: 'invoice_overdue',
+    channel: 'whatsapp',
+    subject: '',
+    body: 'Dear {{clientName}}, this is a polite reminder from {{firmName}} that an invoice for {{matterTitle}} of {{invoiceAmount}} due on {{invoiceDueDate}} is overdue. Kindly contact us on {{firmPhone}} if you need assistance.',
+  },
+  {
+    eventType: 'invoice_overdue',
+    channel: 'email',
+    subject: 'Overdue invoice reminder - {{matterTitle}}',
+    body: 'Dear {{clientName}},\n\nThis is a polite reminder that an invoice for {{matterTitle}} amounting to {{invoiceAmount}} and due on {{invoiceDueDate}} is overdue.\n\nKindly contact us on {{firmPhone}} if you need assistance or have already made payment.\n\nKind regards,\n{{firmName}}',
+  },
+  {
+    eventType: 'invoice_outstanding',
+    channel: 'whatsapp',
+    subject: '',
+    body: 'Dear {{clientName}}, this is a gentle reminder from {{firmName}} that your invoice for {{matterTitle}} of {{invoiceAmount}} is due on {{invoiceDueDate}}. Thank you.',
+  },
+  {
+    eventType: 'invoice_outstanding',
+    channel: 'email',
+    subject: 'Upcoming invoice due date - {{matterTitle}}',
+    body: 'Dear {{clientName}},\n\nThis is a gentle reminder that your invoice for {{matterTitle}} amounting to {{invoiceAmount}} is due on {{invoiceDueDate}}.\n\nThank you for your attention.\n\nKind regards,\n{{firmName}}',
+  },
+];
 
 async function ensureColumn(table, column, definition) {
   const columns = await all(`PRAGMA table_info(${table})`);
@@ -55,7 +121,44 @@ async function ensureClientUserSupport() {
 
 async function getFirmSettings() {
   const settings = await get('SELECT * FROM firm_settings WHERE id=?', ['default']);
-  return { ...defaultFirmSettings, ...(settings || {}) };
+  const reminderSettings = await getReminderSettings();
+  return { ...defaultFirmSettings, ...(settings || {}), reminderSettings };
+}
+
+async function getReminderSettings() {
+  const settings = await get('SELECT * FROM reminder_settings WHERE id=?', ['default']).catch(() => null);
+  const merged = { ...defaultReminderSettings, ...(settings || {}) };
+  return {
+    ...merged,
+    remindersEnabled: Boolean(Number(merged.remindersEnabled)),
+    whatsappEnabled: Boolean(Number(merged.whatsappEnabled)),
+    emailEnabled: Boolean(Number(merged.emailEnabled)),
+  };
+}
+
+async function saveReminderSettings(settings) {
+  const merged = { ...defaultReminderSettings, ...settings, id: 'default' };
+  await run(`INSERT INTO reminder_settings (id,remindersEnabled,whatsappEnabled,emailEnabled,twilioSid,twilioToken,twilioFromNumber,smtpHost,smtpPort,smtpUser,smtpPass)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(id) DO UPDATE SET remindersEnabled=excluded.remindersEnabled, whatsappEnabled=excluded.whatsappEnabled, emailEnabled=excluded.emailEnabled, twilioSid=excluded.twilioSid, twilioToken=excluded.twilioToken, twilioFromNumber=excluded.twilioFromNumber, smtpHost=excluded.smtpHost, smtpPort=excluded.smtpPort, smtpUser=excluded.smtpUser, smtpPass=excluded.smtpPass`,
+    ['default', merged.remindersEnabled ? 1 : 0, merged.whatsappEnabled ? 1 : 0, merged.emailEnabled ? 1 : 0, merged.twilioSid || '', merged.twilioToken || '', merged.twilioFromNumber || '', merged.smtpHost || '', merged.smtpPort || '', merged.smtpUser || '', merged.smtpPass || '']);
+}
+
+function templateKey(template) {
+  return `${template.eventType}:${template.channel}`;
+}
+
+function defaultTemplateFor(eventType, channel) {
+  return defaultReminderTemplates.find(t => t.eventType === eventType && t.channel === channel);
+}
+
+async function seedReminderTemplates() {
+  for (const template of defaultReminderTemplates) {
+    const existing = await get('SELECT id FROM reminder_templates WHERE eventType=? AND channel=?', [template.eventType, template.channel]);
+    if (!existing) {
+      await run('INSERT INTO reminder_templates (id,eventType,channel,subject,body,createdBy,createdAt) VALUES (?,?,?,?,?,?,?)', [genId('RT'), template.eventType, template.channel, template.subject || '', template.body, 'system', new Date().toISOString()]);
+    }
+  }
 }
 
 async function initDb() {
@@ -72,6 +175,9 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS invoice_items (id TEXT PRIMARY KEY, invoiceId TEXT NOT NULL, timeEntryId TEXT, date TEXT, description TEXT, hours REAL DEFAULT 0, rate REAL DEFAULT 0, amount REAL DEFAULT 0)`);
   await run(`CREATE TABLE IF NOT EXISTS integrations_log (id TEXT PRIMARY KEY, type TEXT NOT NULL, matterId TEXT, clientId TEXT, recipient TEXT, message TEXT, status TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS firm_settings (id TEXT PRIMARY KEY, name TEXT, logo TEXT, primaryColor TEXT, accentColor TEXT, websiteURL TEXT, email TEXT, phone TEXT, address TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS reminder_settings (id TEXT PRIMARY KEY, remindersEnabled INTEGER DEFAULT 1, whatsappEnabled INTEGER DEFAULT 0, emailEnabled INTEGER DEFAULT 0, twilioSid TEXT, twilioToken TEXT, twilioFromNumber TEXT, smtpHost TEXT, smtpPort TEXT, smtpUser TEXT, smtpPass TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS reminder_templates (id TEXT PRIMARY KEY, eventType TEXT NOT NULL, channel TEXT NOT NULL, subject TEXT, body TEXT NOT NULL, createdBy TEXT, createdAt TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS reminder_logs (id TEXT PRIMARY KEY, templateId TEXT, clientId TEXT, matterId TEXT, invoiceId TEXT, channel TEXT, recipient TEXT, status TEXT, sentAt TEXT, errorMessage TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS firm_notices (id TEXT PRIMARY KEY, title TEXT, content TEXT, createdAt TEXT, createdBy TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS payment_proofs (id TEXT PRIMARY KEY, invoiceId TEXT, matterId TEXT, clientId TEXT, method TEXT, reference TEXT, amount REAL DEFAULT 0, note TEXT, fileName TEXT, mimeType TEXT, size TEXT, content BLOB, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS invitations (id TEXT PRIMARY KEY, email TEXT NOT NULL, clientId TEXT, token TEXT UNIQUE NOT NULL, status TEXT DEFAULT 'pending', createdBy TEXT, createdAt TEXT, expiresAt TEXT)`);
@@ -81,6 +187,8 @@ async function initDb() {
   await ensureColumn('appearances', 'meetingLink', 'TEXT');
   await ensureColumn('documents', 'source', "TEXT DEFAULT 'firm'");
   await ensureColumn('documents', 'folderId', 'TEXT');
+  await ensureColumn('reminder_logs', 'invoiceId', 'TEXT');
+  await seedReminderTemplates();
 
   const userCount = await get('SELECT COUNT(*) AS count FROM users');
   if (!userCount.count) {
@@ -167,6 +275,112 @@ function checkInvitationRateLimit(req, res) {
   return true;
 }
 
+function renderTemplate(text = '', values = {}) {
+  return String(text).replace(/\{\{(\w+)\}\}/g, (_, key) => values[key] ?? '');
+}
+
+async function logReminderAttempt({ templateId, clientId, matterId = '', invoiceId = '', channel, recipient, status, errorMessage = '' }) {
+  await run('INSERT INTO reminder_logs (id,templateId,clientId,matterId,invoiceId,channel,recipient,status,sentAt,errorMessage) VALUES (?,?,?,?,?,?,?,?,?,?)', [genId('REMLOG'), templateId || '', clientId || '', matterId || '', invoiceId || '', channel || '', recipient || '', status, new Date().toISOString(), errorMessage || '']);
+}
+
+async function sendWhatsApp(settings, phone, message) {
+  if (settings.twilioSid && settings.twilioToken && settings.twilioFromNumber) {
+    const client = twilio(settings.twilioSid, settings.twilioToken);
+    return client.messages.create({ from: settings.twilioFromNumber, to: phone.startsWith('whatsapp:') ? phone : `whatsapp:${phone}`, body: message });
+  }
+  console.log(`[WhatsApp Stub] To: ${phone} - ${message}`);
+  return { sid: `stub-${Date.now()}` };
+}
+
+async function sendEmail(settings, to, subject, body) {
+  if (settings.smtpHost && settings.smtpUser && settings.smtpPass) {
+    const transporter = nodemailer.createTransport({
+      host: settings.smtpHost,
+      port: Number(settings.smtpPort || 587),
+      secure: Number(settings.smtpPort || 587) === 465,
+      auth: { user: settings.smtpUser, pass: settings.smtpPass },
+    });
+    return transporter.sendMail({ from: settings.smtpUser, to, subject, text: body });
+  }
+  console.log(`[Email Stub] To: ${to} - Subject: ${subject} - ${body}`);
+  return { messageId: `stub-${Date.now()}` };
+}
+
+async function sendReminderForChannel({ eventType, channel, client, matter, invoice, appearance, firm, settings }) {
+  const template = await get('SELECT * FROM reminder_templates WHERE eventType=? AND channel=?', [eventType, channel]);
+  if (!template) return;
+  const values = {
+    clientName: client?.name || 'Client',
+    matterTitle: matter?.title || invoice?.matterTitle || 'your matter',
+    courtDate: appearance?.date || '',
+    courtTime: appearance?.time || 'TBA',
+    invoiceAmount: money(invoice?.amount || 0),
+    invoiceDueDate: invoice?.dueDate || '',
+    firmName: firm.name || defaultFirmSettings.name,
+    firmPhone: firm.phone || defaultFirmSettings.phone,
+  };
+  const recipient = channel === 'whatsapp' ? client?.phone : client?.email;
+  if (!recipient) return logReminderAttempt({ templateId: template.id, clientId: client?.id, matterId: matter?.id, invoiceId: invoice?.id, channel, recipient: '', status: 'failed', errorMessage: `Missing ${channel === 'whatsapp' ? 'phone' : 'email'}` });
+  try {
+    if (channel === 'whatsapp') await sendWhatsApp(settings, recipient, renderTemplate(template.body, values));
+    else await sendEmail(settings, recipient, renderTemplate(template.subject || 'Reminder from {{firmName}}', values), renderTemplate(template.body, values));
+    await logReminderAttempt({ templateId: template.id, clientId: client?.id, matterId: matter?.id, invoiceId: invoice?.id, channel, recipient, status: 'sent' });
+  } catch (err) {
+    await logReminderAttempt({ templateId: template.id, clientId: client?.id, matterId: matter?.id, invoiceId: invoice?.id, channel, recipient, status: 'failed', errorMessage: err.message });
+  }
+}
+
+async function sendReminder(eventType, context) {
+  const firm = await getFirmSettings();
+  const settings = firm.reminderSettings || defaultReminderSettings;
+  if (!settings.remindersEnabled) return;
+  if (settings.whatsappEnabled) await sendReminderForChannel({ ...context, eventType, channel: 'whatsapp', firm, settings });
+  if (settings.emailEnabled) await sendReminderForChannel({ ...context, eventType, channel: 'email', firm, settings });
+}
+
+async function runCourtReminders(eventType, date) {
+  const rows = await all(`SELECT a.*, m.title matterTitle, m.id matterId, m.clientId, c.name clientName, c.email clientEmail, c.phone clientPhone
+    FROM appearances a
+    LEFT JOIN matters m ON m.id=a.matterId
+    LEFT JOIN clients c ON c.id=m.clientId
+    WHERE a.date=?`, [date]);
+  for (const row of rows) {
+    await sendReminder(eventType, {
+      appearance: row,
+      matter: { id: row.matterId, title: row.matterTitle },
+      client: { id: row.clientId, name: row.clientName, email: row.clientEmail, phone: row.clientPhone },
+    });
+  }
+}
+
+async function runInvoiceReminders(eventType, whereSql, params = []) {
+  const rows = await all(`SELECT i.*, m.title matterTitle, m.id matterId, c.id clientId, c.name clientName, c.email clientEmail, c.phone clientPhone
+    FROM invoices i
+    LEFT JOIN matters m ON m.id=i.matterId
+    LEFT JOIN clients c ON c.id=i.clientId
+    WHERE ${whereSql}`, params);
+  for (const row of rows) {
+    await sendReminder(eventType, {
+      invoice: { ...row, id: row.id, matterTitle: row.matterTitle },
+      matter: { id: row.matterId, title: row.matterTitle },
+      client: { id: row.clientId, name: row.clientName, email: row.clientEmail, phone: row.clientPhone },
+    });
+  }
+}
+
+function startReminderJobs() {
+  if (reminderJobsStarted) return;
+  reminderJobsStarted = true;
+  cron.schedule('0 18 * * *', () => runCourtReminders('court_date_tomorrow', addDays(1)).catch(err => console.error('[LexFlow] Court reminder job failed', err)), { timezone: 'Africa/Nairobi' });
+  cron.schedule('0 7 * * *', () => runCourtReminders('court_date_today', today()).catch(err => console.error('[LexFlow] Court reminder job failed', err)), { timezone: 'Africa/Nairobi' });
+  cron.schedule('0 10 * * 1', () => runInvoiceReminders('invoice_overdue', "i.status='Overdue'").catch(err => console.error('[LexFlow] Invoice overdue job failed', err)), { timezone: 'Africa/Nairobi' });
+  cron.schedule('0 10 * * 5', () => runInvoiceReminders('invoice_outstanding', "i.status='Outstanding' AND i.dueDate<=? AND i.dueDate>=?", [addDays(7), today()]).catch(err => console.error('[LexFlow] Invoice outstanding job failed', err)), { timezone: 'Africa/Nairobi' });
+  if (process.env.REMINDER_CRON_TEST === '1') {
+    cron.schedule('* * * * *', () => runCourtReminders('court_date_tomorrow', addDays(1)).catch(err => console.error('[LexFlow] Test reminder job failed', err)), { timezone: 'Africa/Nairobi' });
+  }
+  console.log('[LexFlow] Reminder jobs scheduled.');
+}
+
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -227,6 +441,10 @@ app.put('/api/firm-settings', authenticate, requireAdmin, async (req, res) => {
     VALUES (?,?,?,?,?,?,?,?,?)
     ON CONFLICT(id) DO UPDATE SET name=excluded.name, logo=excluded.logo, primaryColor=excluded.primaryColor, accentColor=excluded.accentColor, websiteURL=excluded.websiteURL, email=excluded.email, phone=excluded.phone, address=excluded.address`,
     [settings.id, settings.name, settings.logo, settings.primaryColor, settings.accentColor, settings.websiteURL, settings.email, settings.phone, settings.address]);
+  if (req.body.reminderSettings) {
+    await saveReminderSettings(req.body.reminderSettings);
+    await logAudit(req, 'update', 'reminder_settings', 'default', 'Updated reminder channel settings');
+  }
   await logAudit(req, 'update', 'firm_settings', 'default', `Updated firm settings for ${settings.name}`);
   res.json(await getFirmSettings());
 });
@@ -315,6 +533,30 @@ app.delete('/api/notices/:id', requireAdmin, async (req, res) => {
   await run('DELETE FROM firm_notices WHERE id=?', [req.params.id]);
   await logAudit(req, 'delete', 'notice', req.params.id, `Deleted firm notice ${notice?.title || req.params.id}`);
   res.json({ id: req.params.id, deleted: true });
+});
+
+app.get('/api/reminder-templates', requireAdmin, async (req, res) => {
+  const rows = await all('SELECT * FROM reminder_templates ORDER BY eventType, channel');
+  res.json(rows.map(row => {
+    const defaults = defaultTemplateFor(row.eventType, row.channel) || {};
+    return { ...row, defaultSubject: defaults.subject || '', defaultBody: defaults.body || '' };
+  }));
+});
+app.put('/api/reminder-templates/:id', requireAdmin, async (req, res) => {
+  const current = await get('SELECT * FROM reminder_templates WHERE id=?', [req.params.id]);
+  if (!current) return res.status(404).json({ error: 'Template not found' });
+  const subject = req.body.subject ?? current.subject ?? '';
+  const body = req.body.body ?? current.body;
+  if (!body) return res.status(400).json({ error: 'Template body is required' });
+  await run('UPDATE reminder_templates SET subject=?, body=? WHERE id=?', [subject, body, req.params.id]);
+  await logAudit(req, 'update', 'reminder_template', req.params.id, `Updated ${current.eventType} ${current.channel} reminder template`);
+  const updated = await get('SELECT * FROM reminder_templates WHERE id=?', [req.params.id]);
+  const defaults = defaultTemplateFor(updated.eventType, updated.channel) || {};
+  res.json({ ...updated, defaultSubject: defaults.subject || '', defaultBody: defaults.body || '' });
+});
+app.get('/api/reminder-logs', requireAdmin, async (req, res) => {
+  const limit = Math.min(Math.max(Number(req.query.limit || 100), 1), 500);
+  res.json(await all('SELECT * FROM reminder_logs ORDER BY sentAt DESC LIMIT ?', [limit]));
 });
 
 app.get('/api/dashboard', requireStaff, async (req, res) => {
@@ -741,7 +983,10 @@ app.get('/api/exports/:type.:format', requireStaff, async (req, res) => { const 
 
 initDb().then(() => {
   const PORT = process.env.PORT || 5000;
-  app.listen(PORT, () => console.log(`LexFlow Kenya server running at http://localhost:${PORT}`));
+  app.listen(PORT, () => {
+    console.log(`LexFlow Kenya server running at http://localhost:${PORT}`);
+    startReminderJobs();
+  });
 }).catch(err => {
   console.error('Database initialisation failed', err);
   process.exit(1);
