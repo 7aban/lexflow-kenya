@@ -21,6 +21,17 @@ const today = () => new Date().toISOString().slice(0, 10);
 const addDays = days => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
 const invoiceNumber = () => `INV-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
 const money = amount => `KSh ${Number(amount || 0).toLocaleString('en-KE')}`;
+const defaultFirmSettings = {
+  id: 'default',
+  name: 'LexFlow Kenya',
+  logo: '',
+  primaryColor: '#0F1B33',
+  accentColor: '#D4A34A',
+  websiteURL: '',
+  email: 'accounts@lexflow.co.ke',
+  phone: '+254 700 123456',
+  address: 'Nairobi, Kenya',
+};
 
 async function ensureColumn(table, column, definition) {
   const columns = await all(`PRAGMA table_info(${table})`);
@@ -29,8 +40,24 @@ async function ensureColumn(table, column, definition) {
   }
 }
 
+async function ensureClientUserSupport() {
+  const schema = await get("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'");
+  if (schema?.sql && !schema.sql.includes("'client'")) {
+    await run('ALTER TABLE users RENAME TO users_old');
+    await run(`CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT UNIQUE, password TEXT, fullName TEXT, role TEXT CHECK(role IN ('advocate','assistant','admin','client')) DEFAULT 'assistant', clientId TEXT, createdAt TEXT)`);
+    await run('INSERT INTO users (id,email,password,fullName,role,createdAt) SELECT id,email,password,fullName,role,createdAt FROM users_old');
+    await run('DROP TABLE users_old');
+  }
+  await ensureColumn('users', 'clientId', 'TEXT');
+}
+
+async function getFirmSettings() {
+  const settings = await get('SELECT * FROM firm_settings WHERE id=?', ['default']);
+  return { ...defaultFirmSettings, ...(settings || {}) };
+}
+
 async function initDb() {
-  await run(`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT UNIQUE, password TEXT, fullName TEXT, role TEXT CHECK(role IN ('advocate','assistant','admin')) DEFAULT 'assistant', createdAt TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT UNIQUE, password TEXT, fullName TEXT, role TEXT CHECK(role IN ('advocate','assistant','admin','client')) DEFAULT 'assistant', clientId TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS clients (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT DEFAULT 'Individual', contact TEXT, email TEXT, phone TEXT, status TEXT DEFAULT 'Active', joinDate TEXT, conflictCleared INTEGER DEFAULT 0, retainer REAL DEFAULT 0)`);
   await run(`CREATE TABLE IF NOT EXISTS matters (id TEXT PRIMARY KEY, reference TEXT UNIQUE, clientId TEXT NOT NULL, title TEXT NOT NULL, practiceArea TEXT, stage TEXT DEFAULT 'Intake', assignedTo TEXT, paralegal TEXT, openDate TEXT, description TEXT, court TEXT, judge TEXT, caseNo TEXT, opposingCounsel TEXT, billingRate REAL DEFAULT 0, retainerBalance REAL DEFAULT 0, totalBilled REAL DEFAULT 0, priority TEXT DEFAULT 'Medium', solDate TEXT, billingType TEXT DEFAULT 'hourly', fixedFee REAL DEFAULT 0)`);
   await run(`CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT NOT NULL, completed INTEGER DEFAULT 0, assignee TEXT, dueDate TEXT, auto_generated INTEGER DEFAULT 0)`);
@@ -41,7 +68,9 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS invoices (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, clientId TEXT, number TEXT, date TEXT, amount REAL DEFAULT 0, status TEXT DEFAULT 'Outstanding', dueDate TEXT, description TEXT, source TEXT DEFAULT 'time')`);
   await run(`CREATE TABLE IF NOT EXISTS invoice_items (id TEXT PRIMARY KEY, invoiceId TEXT NOT NULL, timeEntryId TEXT, date TEXT, description TEXT, hours REAL DEFAULT 0, rate REAL DEFAULT 0, amount REAL DEFAULT 0)`);
   await run(`CREATE TABLE IF NOT EXISTS integrations_log (id TEXT PRIMARY KEY, type TEXT NOT NULL, matterId TEXT, clientId TEXT, recipient TEXT, message TEXT, status TEXT, createdAt TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS firm_settings (id TEXT PRIMARY KEY, name TEXT, logo TEXT, primaryColor TEXT, accentColor TEXT, websiteURL TEXT, email TEXT, phone TEXT, address TEXT)`);
 
+  await ensureClientUserSupport();
   await ensureColumn('appearances', 'meetingLink', 'TEXT');
 
   const userCount = await get('SELECT COUNT(*) AS count FROM users');
@@ -63,33 +92,60 @@ function authenticate(req, res, next) {
 }
 const requireAdmin = (req, res, next) => req.user?.role === 'admin' ? next() : res.status(403).json({ error: 'Admin access required' });
 const requireAdvocateOrAdmin = (req, res, next) => ['advocate', 'admin'].includes(req.user?.role) ? next() : res.status(403).json({ error: 'Advocate or admin access required' });
+const requireStaff = (req, res, next) => req.user?.role !== 'client' ? next() : res.status(403).json({ error: 'Staff access required' });
+async function canAccessMatter(req, matterId) {
+  if (req.user?.role !== 'client') return true;
+  const matter = await get('SELECT id FROM matters WHERE id=? AND clientId=?', [matterId, req.user.clientId || '']);
+  return Boolean(matter);
+}
 
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     const user = await get('SELECT * FROM users WHERE lower(email)=lower(?)', [email || '']);
     if (!user || !(await bcrypt.compare(password || '', user.password || ''))) return res.status(401).json({ error: 'Invalid email or password' });
-    const token = jwt.sign({ userId: user.id, role: user.role, fullName: user.fullName }, JWT_SECRET, { expiresIn: '8h' });
-    res.json({ token, user: { id: user.id, email: user.email, fullName: user.fullName, name: user.fullName, role: user.role } });
+    const token = jwt.sign({ userId: user.id, role: user.role, fullName: user.fullName, clientId: user.clientId || '' }, JWT_SECRET, { expiresIn: '8h' });
+    res.json({ token, user: { id: user.id, email: user.email, fullName: user.fullName, name: user.fullName, role: user.role, clientId: user.clientId || '' } });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/auth/client-login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const user = await get('SELECT * FROM users WHERE lower(email)=lower(?) AND role=?', [email || '', 'client']);
+    if (!user || !(await bcrypt.compare(password || '', user.password || ''))) return res.status(401).json({ error: 'Invalid client email or password' });
+    const token = jwt.sign({ userId: user.id, role: user.role, fullName: user.fullName, clientId: user.clientId || '' }, JWT_SECRET, { expiresIn: '8h' });
+    res.json({ token, user: { id: user.id, email: user.email, fullName: user.fullName, name: user.fullName, role: user.role, clientId: user.clientId || '' } });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/firm-settings', async (req, res) => res.json(await getFirmSettings()));
+app.put('/api/firm-settings', authenticate, requireAdmin, async (req, res) => {
+  const settings = { ...defaultFirmSettings, ...req.body, id: 'default' };
+  await run(`INSERT INTO firm_settings (id,name,logo,primaryColor,accentColor,websiteURL,email,phone,address)
+    VALUES (?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(id) DO UPDATE SET name=excluded.name, logo=excluded.logo, primaryColor=excluded.primaryColor, accentColor=excluded.accentColor, websiteURL=excluded.websiteURL, email=excluded.email, phone=excluded.phone, address=excluded.address`,
+    [settings.id, settings.name, settings.logo, settings.primaryColor, settings.accentColor, settings.websiteURL, settings.email, settings.phone, settings.address]);
+  res.json(await getFirmSettings());
 });
 
 app.use('/api', authenticate);
 
 app.get('/api/auth/me', async (req, res) => {
-  const user = await get('SELECT id,email,fullName,role,createdAt FROM users WHERE id=?', [req.user.userId]);
+  const user = await get('SELECT id,email,fullName,role,clientId,createdAt FROM users WHERE id=?', [req.user.userId]);
   user ? res.json({ ...user, name: user.fullName }) : res.status(404).json({ error: 'User not found' });
 });
-app.get('/api/auth/users', requireAdmin, async (req, res) => res.json(await all('SELECT id,email,fullName,role,createdAt FROM users ORDER BY createdAt DESC')));
+app.get('/api/auth/users', requireAdmin, async (req, res) => res.json(await all('SELECT id,email,fullName,role,clientId,createdAt FROM users ORDER BY createdAt DESC')));
 app.post('/api/auth/register', requireAdmin, async (req, res) => {
   try {
-    const { email, password, fullName, role = 'assistant' } = req.body;
+    const { email, password, fullName, role = 'assistant', clientId = '' } = req.body;
     if (!email || !password || !fullName) return res.status(400).json({ error: 'email, password and fullName are required' });
-    if (!['advocate', 'assistant', 'admin'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+    if (!['advocate', 'assistant', 'admin', 'client'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+    if (role === 'client' && !clientId) return res.status(400).json({ error: 'Client users must be linked to a client record' });
     const id = genId('U');
     const createdAt = new Date().toISOString();
-    await run('INSERT INTO users (id,email,password,fullName,role,createdAt) VALUES (?,?,?,?,?,?)', [id, email, await bcrypt.hash(password, 10), fullName, role, createdAt]);
-    res.json({ id, email, fullName, name: fullName, role, createdAt });
+    await run('INSERT INTO users (id,email,password,fullName,role,clientId,createdAt) VALUES (?,?,?,?,?,?,?)', [id, email, await bcrypt.hash(password, 10), fullName, role, role === 'client' ? clientId : '', createdAt]);
+    res.json({ id, email, fullName, name: fullName, role, clientId: role === 'client' ? clientId : '', createdAt });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 app.delete('/api/auth/users/:id', requireAdmin, async (req, res) => {
@@ -98,7 +154,7 @@ app.delete('/api/auth/users/:id', requireAdmin, async (req, res) => {
   res.json({ id: req.params.id, deleted: true });
 });
 
-app.get('/api/dashboard', async (req, res) => {
+app.get('/api/dashboard', requireStaff, async (req, res) => {
   const active = await get("SELECT COUNT(*) count FROM matters WHERE stage NOT IN ('Closed','On Hold')");
   const hours = await get("SELECT COALESCE(SUM(hours),0) hours, COALESCE(SUM(hours*rate),0) revenue FROM time_entries WHERE date LIKE ?", [`${today().slice(0, 7)}%`]);
   const overdue = await get('SELECT COUNT(*) count FROM tasks WHERE completed=0 AND dueDate < ?', [today()]);
@@ -106,8 +162,8 @@ app.get('/api/dashboard', async (req, res) => {
   res.json({ activeMattersCount: active.count, monthHours: hours.hours, monthRevenue: hours.revenue, overdueTaskCount: overdue.count, upcomingEvents });
 });
 
-app.get('/api/clients', async (req, res) => res.json(await all('SELECT * FROM clients ORDER BY name')));
-app.post('/api/clients', async (req, res) => {
+app.get('/api/clients', requireStaff, async (req, res) => res.json(await all('SELECT * FROM clients ORDER BY name')));
+app.post('/api/clients', requireStaff, async (req, res) => {
   const id = genId('C');
   await run('INSERT INTO clients (id,name,type,contact,email,phone,status,joinDate,conflictCleared,retainer) VALUES (?,?,?,?,?,?,?,?,?,?)', [id, req.body.name, req.body.type || 'Individual', req.body.contact || '', req.body.email || '', req.body.phone || '', 'Active', today(), 0, Number(req.body.retainer || 0)]);
   res.json(await get('SELECT * FROM clients WHERE id=?', [id]));
@@ -134,10 +190,16 @@ app.delete('/api/clients/:id', requireAdvocateOrAdmin, async (req, res) => {
   }
 });
 
-app.get('/api/matters', async (req, res) => res.json(await all('SELECT m.*, c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId ORDER BY openDate DESC')));
+app.get('/api/matters', async (req, res) => {
+  const clientId = req.user.role === 'client' ? req.user.clientId : req.query.clientId;
+  if (req.user.role === 'client' && !clientId) return res.json([]);
+  if (clientId) return res.json(await all('SELECT m.*, c.name clientName, (SELECT MIN(date) FROM appearances a WHERE a.matterId=m.id AND a.date>=?) nextCourtDate FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.clientId=? ORDER BY openDate DESC', [today(), clientId]));
+  res.json(await all('SELECT m.*, c.name clientName, (SELECT MIN(date) FROM appearances a WHERE a.matterId=m.id AND a.date>=?) nextCourtDate FROM matters m LEFT JOIN clients c ON c.id=m.clientId ORDER BY openDate DESC', [today()]));
+});
 app.get('/api/matters/:id', async (req, res) => {
   const matter = await get('SELECT m.*, c.name clientName, c.email clientEmail, c.phone clientPhone FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.id=?', [req.params.id]);
   if (!matter) return res.status(404).json({ error: 'Matter not found' });
+  if (req.user.role === 'client' && matter.clientId !== req.user.clientId) return res.status(403).json({ error: 'Matter access denied' });
   const [tasks, timeEntries, documents, notes, invoices, appearances] = await Promise.all([
     all('SELECT * FROM tasks WHERE matterId=? ORDER BY dueDate', [req.params.id]),
     all('SELECT * FROM time_entries WHERE matterId=? ORDER BY date DESC', [req.params.id]),
@@ -149,6 +211,7 @@ app.get('/api/matters/:id', async (req, res) => {
   res.json({ ...matter, tasks, timeEntries, documents, notes, invoices, appearances });
 });
 app.get('/api/matters/:id/suggestions', async (req, res) => {
+  if (req.user.role === 'client') return res.status(403).json({ error: 'Staff access required' });
   const matter = await get('SELECT m.*, c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.id=?', [req.params.id]);
   if (!matter) return res.status(404).json({ error: 'Matter not found' });
 
@@ -236,13 +299,13 @@ app.delete('/api/matters/:id', requireAdvocateOrAdmin, async (req, res) => {
   }
 });
 
-app.get('/api/tasks', async (req, res) => res.json(await all('SELECT * FROM tasks ORDER BY dueDate')));
-app.post('/api/tasks', async (req, res) => { const id = genId('T'); await run('INSERT INTO tasks (id,matterId,title,completed,assignee,dueDate,auto_generated) VALUES (?,?,?,?,?,?,?)', [id, req.body.matterId, req.body.title, req.body.completed ? 1 : 0, req.body.assignee || '', req.body.dueDate || '', 0]); res.json(await get('SELECT * FROM tasks WHERE id=?', [id])); });
+app.get('/api/tasks', requireStaff, async (req, res) => res.json(await all('SELECT * FROM tasks ORDER BY dueDate')));
+app.post('/api/tasks', requireStaff, async (req, res) => { const id = genId('T'); await run('INSERT INTO tasks (id,matterId,title,completed,assignee,dueDate,auto_generated) VALUES (?,?,?,?,?,?,?)', [id, req.body.matterId, req.body.title, req.body.completed ? 1 : 0, req.body.assignee || '', req.body.dueDate || '', 0]); res.json(await get('SELECT * FROM tasks WHERE id=?', [id])); });
 app.patch('/api/tasks/:id', requireAdvocateOrAdmin, async (req, res) => { await run('UPDATE tasks SET completed=COALESCE(?,completed), title=COALESCE(?,title), assignee=COALESCE(?,assignee), dueDate=COALESCE(?,dueDate) WHERE id=?', [req.body.completed === undefined ? null : (req.body.completed ? 1 : 0), req.body.title ?? null, req.body.assignee ?? null, req.body.dueDate ?? null, req.params.id]); res.json(await get('SELECT * FROM tasks WHERE id=?', [req.params.id])); });
 app.delete('/api/tasks/:id', requireAdvocateOrAdmin, async (req, res) => { await run('DELETE FROM tasks WHERE id=?', [req.params.id]); res.json({ id: req.params.id, deleted: true }); });
 
-app.get('/api/time-entries', async (req, res) => res.json(await all('SELECT * FROM time_entries ORDER BY date DESC')));
-app.post('/api/time-entries', async (req, res) => { const id = genId('TIME'); await run('INSERT INTO time_entries (id,matterId,attorney,date,hours,activity,description,rate,billed) VALUES (?,?,?,?,?,?,?,?,?)', [id, req.body.matterId, req.body.attorney || req.user.fullName || '', req.body.date || today(), Number(req.body.hours || 0), req.body.activity || '', req.body.description || '', Number(req.body.rate || 0), req.body.billed ? 1 : 0]); res.json(await get('SELECT * FROM time_entries WHERE id=?', [id])); });
+app.get('/api/time-entries', requireStaff, async (req, res) => res.json(await all('SELECT * FROM time_entries ORDER BY date DESC')));
+app.post('/api/time-entries', requireStaff, async (req, res) => { const id = genId('TIME'); await run('INSERT INTO time_entries (id,matterId,attorney,date,hours,activity,description,rate,billed) VALUES (?,?,?,?,?,?,?,?,?)', [id, req.body.matterId, req.body.attorney || req.user.fullName || '', req.body.date || today(), Number(req.body.hours || 0), req.body.activity || '', req.body.description || '', Number(req.body.rate || 0), req.body.billed ? 1 : 0]); res.json(await get('SELECT * FROM time_entries WHERE id=?', [id])); });
 app.patch('/api/time-entries/:id', requireAdvocateOrAdmin, async (req, res) => {
   const fields = ['matterId','attorney','date','hours','activity','description','rate','billed'];
   const updates = fields.filter(f => req.body[f] !== undefined);
@@ -253,9 +316,9 @@ app.patch('/api/time-entries/:id', requireAdvocateOrAdmin, async (req, res) => {
 });
 app.delete('/api/time-entries/:id', requireAdvocateOrAdmin, async (req, res) => { await run('DELETE FROM time_entries WHERE id=?', [req.params.id]); res.json({ id: req.params.id, deleted: true }); });
 
-app.get('/api/appearances', async (req, res) => res.json(await all('SELECT * FROM appearances ORDER BY date')));
-app.get('/api/appearances/upcoming', async (req, res) => res.json(await all('SELECT * FROM appearances WHERE date>=? ORDER BY date LIMIT 20', [today()])));
-app.post('/api/appearances', async (req, res) => { const id = genId('EV'); await run('INSERT INTO appearances (id,matterId,title,date,time,type,location,meetingLink,attorney,prepNote) VALUES (?,?,?,?,?,?,?,?,?,?)', [id, req.body.matterId, req.body.title, req.body.date, req.body.time || '9:00 AM', req.body.type || 'Hearing', req.body.location || '', req.body.meetingLink || '', req.body.attorney || '', req.body.prepNote || '']); res.json(await get('SELECT * FROM appearances WHERE id=?', [id])); });
+app.get('/api/appearances', requireStaff, async (req, res) => res.json(await all('SELECT * FROM appearances ORDER BY date')));
+app.get('/api/appearances/upcoming', requireStaff, async (req, res) => res.json(await all('SELECT * FROM appearances WHERE date>=? ORDER BY date LIMIT 20', [today()])));
+app.post('/api/appearances', requireAdvocateOrAdmin, async (req, res) => { const id = genId('EV'); await run('INSERT INTO appearances (id,matterId,title,date,time,type,location,meetingLink,attorney,prepNote) VALUES (?,?,?,?,?,?,?,?,?,?)', [id, req.body.matterId, req.body.title, req.body.date, req.body.time || '9:00 AM', req.body.type || 'Hearing', req.body.location || '', req.body.meetingLink || '', req.body.attorney || '', req.body.prepNote || '']); res.json(await get('SELECT * FROM appearances WHERE id=?', [id])); });
 app.patch('/api/appearances/:id', requireAdvocateOrAdmin, async (req, res) => {
   const fields = ['matterId','title','date','time','type','location','meetingLink','attorney','prepNote'];
   const updates = fields.filter(f => req.body[f] !== undefined);
@@ -276,13 +339,16 @@ app.post('/api/matters/:id/documents', requireAdvocateOrAdmin, async (req, res) 
   await run('INSERT INTO documents (id,matterId,name,type,mimeType,date,size,content) VALUES (?,?,?,?,?,?,?,?)', [id, req.params.id, name.replace(/[^\w .-]/g, '_'), mimeType.includes('pdf') ? 'PDF' : 'Word', mimeType, today(), `${Math.max(1, Math.round(buffer.length / 1024))} KB`, buffer]);
   res.json(await get('SELECT id,matterId,name,type,mimeType,date,size FROM documents WHERE id=?', [id]));
 });
-app.get('/api/documents/:id/download', async (req, res) => { const doc = await get('SELECT * FROM documents WHERE id=?', [req.params.id]); if (!doc) return res.status(404).json({ error: 'Document not found' }); res.setHeader('Content-Type', doc.mimeType || 'application/octet-stream'); res.setHeader('Content-Disposition', `attachment; filename="${doc.name}"`); res.send(doc.content); });
+app.get('/api/documents/:id/download', async (req, res) => { const doc = await get('SELECT * FROM documents WHERE id=?', [req.params.id]); if (!doc) return res.status(404).json({ error: 'Document not found' }); if (!(await canAccessMatter(req, doc.matterId))) return res.status(403).json({ error: 'Document access denied' }); res.setHeader('Content-Type', doc.mimeType || 'application/octet-stream'); res.setHeader('Content-Disposition', `attachment; filename="${doc.name}"`); res.send(doc.content); });
 app.delete('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => { await run('DELETE FROM documents WHERE id=?', [req.params.id]); res.json({ id: req.params.id, deleted: true }); });
 
-app.get('/api/matters/:id/notes', async (req, res) => res.json(await all('SELECT * FROM case_notes WHERE matterId=? ORDER BY createdAt DESC', [req.params.id])));
-app.post('/api/matters/:id/notes', async (req, res) => { const id = genId('NOTE'); await run('INSERT INTO case_notes (id,matterId,content,author,createdAt) VALUES (?,?,?,?,?)', [id, req.params.id, req.body.content, req.body.author || req.user.fullName || 'Unknown', new Date().toISOString()]); res.json(await get('SELECT * FROM case_notes WHERE id=?', [id])); });
+app.get('/api/matters/:id/notes', async (req, res) => { if (!(await canAccessMatter(req, req.params.id))) return res.status(403).json({ error: 'Matter access denied' }); res.json(await all('SELECT * FROM case_notes WHERE matterId=? ORDER BY createdAt DESC', [req.params.id])); });
+app.post('/api/matters/:id/notes', async (req, res) => { if (!(await canAccessMatter(req, req.params.id))) return res.status(403).json({ error: 'Matter access denied' }); const id = genId('NOTE'); await run('INSERT INTO case_notes (id,matterId,content,author,createdAt) VALUES (?,?,?,?,?)', [id, req.params.id, req.body.content, req.user.role === 'client' ? req.user.fullName : (req.body.author || req.user.fullName || 'Unknown'), new Date().toISOString()]); res.json(await get('SELECT * FROM case_notes WHERE id=?', [id])); });
 
-app.get('/api/invoices', async (req, res) => res.json(await all(`SELECT i.*, m.title matterTitle, m.reference, c.name clientName FROM invoices i LEFT JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId ORDER BY i.date DESC, i.number DESC`)));
+app.get('/api/invoices', async (req, res) => {
+  if (req.user.role === 'client') return res.json(await all(`SELECT i.*, m.title matterTitle, m.reference, c.name clientName FROM invoices i LEFT JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId WHERE i.clientId=? ORDER BY i.date DESC, i.number DESC`, [req.user.clientId || '']));
+  res.json(await all(`SELECT i.*, m.title matterTitle, m.reference, c.name clientName FROM invoices i LEFT JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId ORDER BY i.date DESC, i.number DESC`));
+});
 app.post('/api/invoices/generate', requireAdvocateOrAdmin, async (req, res) => {
   try {
     const matter = await get('SELECT * FROM matters WHERE id=?', [req.body.matterId]);
@@ -317,7 +383,7 @@ async function invoiceWithDetails(id) {
   invoice.items = await all('SELECT * FROM invoice_items WHERE invoiceId=? ORDER BY date', [id]);
   return invoice;
 }
-app.get('/api/invoices/:id', async (req, res) => { const invoice = await invoiceWithDetails(req.params.id); invoice ? res.json(invoice) : res.status(404).json({ error: 'Invoice not found' }); });
+app.get('/api/invoices/:id', async (req, res) => { const invoice = await invoiceWithDetails(req.params.id); if (!invoice) return res.status(404).json({ error: 'Invoice not found' }); if (req.user.role === 'client' && invoice.clientId !== req.user.clientId) return res.status(403).json({ error: 'Invoice access denied' }); res.json(invoice); });
 app.patch('/api/invoices/:id/status', requireAdmin, async (req, res) => { if (!['Paid', 'Outstanding', 'Overdue'].includes(req.body.status)) return res.status(400).json({ error: 'Invalid invoice status' }); await run('UPDATE invoices SET status=? WHERE id=?', [req.body.status, req.params.id]); res.json(await invoiceWithDetails(req.params.id)); });
 app.delete('/api/invoices/:id', requireAdvocateOrAdmin, async (req, res) => {
   const invoice = await get('SELECT * FROM invoices WHERE id=?', [req.params.id]);
@@ -330,6 +396,8 @@ app.delete('/api/invoices/:id', requireAdvocateOrAdmin, async (req, res) => {
 app.get('/api/invoices/:id/pdf', async (req, res) => {
   const invoice = await invoiceWithDetails(req.params.id);
   if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+  if (req.user.role === 'client' && invoice.clientId !== req.user.clientId) return res.status(403).json({ error: 'Invoice access denied' });
+  const firm = await getFirmSettings();
   const subtotal = Number(invoice.amount || 0);
   const vat = subtotal * 0.16;
   const total = subtotal + vat;
@@ -337,10 +405,14 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${invoice.number || invoice.id}.pdf"`);
   doc.pipe(res);
-  doc.rect(48, 42, 52, 52).fill('#1B3A5C');
-  doc.fillColor('#fff').fontSize(18).font('Helvetica-Bold').text('LF', 64, 60);
-  doc.fillColor('#111827').fontSize(22).text(req.query.firmName || 'LexFlow Kenya', 112, 46);
-  doc.fontSize(10).fillColor('#6B7280').font('Helvetica').text('Kenyan Law Practice Management', 112, 74);
+  doc.rect(48, 42, 52, 52).fill(firm.primaryColor || '#1B3A5C');
+  if (firm.logo && String(firm.logo).startsWith('data:image')) {
+    try { doc.image(Buffer.from(String(firm.logo).split(',').pop(), 'base64'), 52, 46, { fit: [44, 44] }); } catch { doc.fillColor('#fff').fontSize(18).font('Helvetica-Bold').text('LF', 64, 60); }
+  } else {
+    doc.fillColor('#fff').fontSize(18).font('Helvetica-Bold').text('LF', 64, 60);
+  }
+  doc.fillColor('#111827').fontSize(22).text(firm.name || 'LexFlow Kenya', 112, 46);
+  doc.fontSize(10).fillColor('#6B7280').font('Helvetica').text(firm.address || 'Kenyan Law Practice Management', 112, 74);
   doc.fillColor('#1B3A5C').fontSize(24).font('Helvetica-Bold').text('INVOICE', 400, 48, { align: 'right' });
   doc.moveTo(48, 112).lineTo(547, 112).strokeColor('#E5E7EB').stroke();
   doc.fillColor('#111827').fontSize(10).font('Helvetica-Bold').text('Bill To', 48, 132);
@@ -350,11 +422,24 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
   const top = 282; doc.rect(48, top, 499, 24).fill('#F3F4F6'); doc.fillColor('#374151').font('Helvetica-Bold').fontSize(9); doc.text('Date', 56, top + 8); doc.text('Description', 132, top + 8); doc.text('Hours', 330, top + 8, { width: 42, align: 'right' }); doc.text('Rate', 382, top + 8, { width: 70, align: 'right' }); doc.text('Amount', 465, top + 8, { width: 70, align: 'right' });
   let y = top + 36; doc.font('Helvetica').fontSize(9).fillColor('#111827'); for (const item of invoice.items || []) { if (y > 690) { doc.addPage(); y = 60; } doc.text(item.date || invoice.date, 56, y); doc.text(item.description || 'Legal Services', 132, y, { width: 185 }); doc.text(Number(item.hours || 0).toFixed(item.hours ? 2 : 0), 330, y, { width: 42, align: 'right' }); doc.text(money(item.rate), 382, y, { width: 70, align: 'right' }); doc.text(money(item.amount), 465, y, { width: 70, align: 'right' }); y += 24; }
   y = Math.max(y + 24, 610); [['Subtotal', subtotal], ['VAT (16%)', vat], ['Total', total]].forEach(([label, value], i) => { doc.font(i === 2 ? 'Helvetica-Bold' : 'Helvetica').fontSize(i === 2 ? 12 : 10).fillColor(i === 2 ? '#1B3A5C' : '#374151'); doc.text(label, 350, y + i * 22); doc.text(money(value), 440, y + i * 22, { width: 105, align: 'right' }); });
-  doc.font('Helvetica').fontSize(9).fillColor('#6B7280').text('LexFlow Kenya | Nairobi, Kenya | accounts@lexflow.co.ke | +254 700 123456', 48, 760, { align: 'center', width: 499 });
+  doc.font('Helvetica').fontSize(9).fillColor('#6B7280').text(`${firm.name || 'LexFlow Kenya'} | ${firm.address || 'Nairobi, Kenya'} | ${firm.email || 'accounts@lexflow.co.ke'} | ${firm.phone || '+254 700 123456'}`, 48, 760, { align: 'center', width: 499 });
   doc.end();
 });
 
-app.get('/api/search', async (req, res) => {
+app.get('/api/client/dashboard', async (req, res) => {
+  if (req.user.role !== 'client') return res.status(403).json({ error: 'Client access required' });
+  const client = await get('SELECT * FROM clients WHERE id=?', [req.user.clientId || '']);
+  const matters = await all('SELECT m.*, c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.clientId=? ORDER BY m.openDate DESC', [req.user.clientId || '']);
+  const matterIds = matters.map(m => m.id);
+  const placeholders = matterIds.map(() => '?').join(',');
+  const documents = matterIds.length ? await all(`SELECT id,matterId,name,type,mimeType,date,size FROM documents WHERE matterId IN (${placeholders}) ORDER BY date DESC`, matterIds) : [];
+  const invoices = await all(`SELECT i.*, m.title matterTitle, m.reference FROM invoices i LEFT JOIN matters m ON m.id=i.matterId WHERE i.clientId=? ORDER BY i.date DESC`, [req.user.clientId || '']);
+  const notes = matterIds.length ? await all(`SELECT * FROM case_notes WHERE matterId IN (${placeholders}) ORDER BY createdAt DESC LIMIT 20`, matterIds) : [];
+  const appearances = matterIds.length ? await all(`SELECT * FROM appearances WHERE matterId IN (${placeholders}) ORDER BY date`, matterIds) : [];
+  res.json({ client, matters, documents, invoices, notes, appearances });
+});
+
+app.get('/api/search', requireStaff, async (req, res) => {
   const q = `%${String(req.query.q || '').trim()}%`;
   if (q === '%%') return res.json([]);
   const matters = await all(`SELECT m.id,m.title,m.reference,c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.title LIKE ? OR m.reference LIKE ? OR c.name LIKE ? LIMIT 15`, [q, q, q]);
@@ -362,9 +447,9 @@ app.get('/api/search', async (req, res) => {
   res.json([...matters.map(m => ({ type: 'Matter', id: m.id, matterId: m.id, title: m.title, subtitle: `${m.reference || ''} ${m.clientName || ''}`.trim() })), ...clients.map(c => ({ type: 'Client', id: c.id, title: c.name, subtitle: `${c.email || ''} ${c.phone || ''}`.trim() }))]);
 });
 
-app.post('/api/mpesa/stk-push', async (req, res) => { const id = genId('MPESA'); await run('INSERT INTO integrations_log (id,type,matterId,clientId,recipient,message,status,createdAt) VALUES (?,?,?,?,?,?,?,?)', [id, 'mpesa', req.body.matterId || '', req.body.clientId || '', req.body.phone || '', `STK push amount ${req.body.amount}`, 'Queued', new Date().toISOString()]); res.json({ id, status: 'Queued', checkoutRequestId: `ws_CO_${Date.now()}`, message: 'STK push queued. Add Daraja credentials for live payments.' }); });
-app.post('/api/whatsapp/reminders', async (req, res) => { const rows = await all(`SELECT a.*,m.clientId,m.title matterTitle,c.name clientName,c.phone FROM appearances a LEFT JOIN matters m ON m.id=a.matterId LEFT JOIN clients c ON c.id=m.clientId WHERE a.date BETWEEN ? AND ?`, [today(), addDays(Number(req.body.days || 3))]); const reminders = rows.map(r => ({ id: genId('WA'), matterId: r.matterId, clientName: r.clientName, phone: r.phone, message: `Reminder: ${r.title} for ${r.matterTitle} is on ${r.date} at ${r.time || 'TBA'}.`, status: r.phone ? 'Queued' : 'Missing phone' })); res.json({ count: reminders.length, reminders }); });
-app.get('/api/exports/:type.:format', async (req, res) => { const rows = req.params.type === 'itax' ? await all(`SELECT i.number,i.date,c.name client,i.amount,i.status FROM invoices i LEFT JOIN clients c ON c.id=i.clientId`) : await all(`SELECT m.reference,m.title,c.name client,m.practiceArea,m.stage,m.totalBilled FROM matters m LEFT JOIN clients c ON c.id=m.clientId`); if (req.params.format === 'pdf') { const doc = new PDFDocument(); res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', `attachment; filename="${req.params.type}-report.pdf"`); doc.pipe(res); doc.fontSize(18).text(`${req.params.type.toUpperCase()} Report`); rows.forEach(r => doc.fontSize(10).text(Object.values(r).join(' | '))); doc.end(); } else { res.setHeader('Content-Type', 'application/vnd.ms-excel'); res.setHeader('Content-Disposition', `attachment; filename="${req.params.type}-report.xls"`); res.send(rows.map(r => Object.values(r).map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')); } });
+app.post('/api/mpesa/stk-push', requireStaff, async (req, res) => { const id = genId('MPESA'); await run('INSERT INTO integrations_log (id,type,matterId,clientId,recipient,message,status,createdAt) VALUES (?,?,?,?,?,?,?,?)', [id, 'mpesa', req.body.matterId || '', req.body.clientId || '', req.body.phone || '', `STK push amount ${req.body.amount}`, 'Queued', new Date().toISOString()]); res.json({ id, status: 'Queued', checkoutRequestId: `ws_CO_${Date.now()}`, message: 'STK push queued. Add Daraja credentials for live payments.' }); });
+app.post('/api/whatsapp/reminders', requireStaff, async (req, res) => { const rows = await all(`SELECT a.*,m.clientId,m.title matterTitle,c.name clientName,c.phone FROM appearances a LEFT JOIN matters m ON m.id=a.matterId LEFT JOIN clients c ON c.id=m.clientId WHERE a.date BETWEEN ? AND ?`, [today(), addDays(Number(req.body.days || 3))]); const reminders = rows.map(r => ({ id: genId('WA'), matterId: r.matterId, clientName: r.clientName, phone: r.phone, message: `Reminder: ${r.title} for ${r.matterTitle} is on ${r.date} at ${r.time || 'TBA'}.`, status: r.phone ? 'Queued' : 'Missing phone' })); res.json({ count: reminders.length, reminders }); });
+app.get('/api/exports/:type.:format', requireStaff, async (req, res) => { const rows = req.params.type === 'itax' ? await all(`SELECT i.number,i.date,c.name client,i.amount,i.status FROM invoices i LEFT JOIN clients c ON c.id=i.clientId`) : await all(`SELECT m.reference,m.title,c.name client,m.practiceArea,m.stage,m.totalBilled FROM matters m LEFT JOIN clients c ON c.id=m.clientId`); if (req.params.format === 'pdf') { const doc = new PDFDocument(); res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', `attachment; filename="${req.params.type}-report.pdf"`); doc.pipe(res); doc.fontSize(18).text(`${req.params.type.toUpperCase()} Report`); rows.forEach(r => doc.fontSize(10).text(Object.values(r).join(' | '))); doc.end(); } else { res.setHeader('Content-Type', 'application/vnd.ms-excel'); res.setHeader('Content-Disposition', `attachment; filename="${req.params.type}-report.xls"`); res.send(rows.map(r => Object.values(r).map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')); } });
 
 initDb().then(() => {
   const PORT = process.env.PORT || 5000;

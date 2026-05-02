@@ -27,21 +27,21 @@ const theme = {
   shadowLift: '0 14px 32px rgba(15,27,51,0.12)',
 };
 
-const initialData = { dashboard: {}, clients: [], matters: [], tasks: [], invoices: [] };
+const defaultFirmSettings = { name: 'LexFlow Kenya', logo: '', primaryColor: '#0F1B33', accentColor: '#D4A34A', websiteURL: '', email: 'accounts@lexflow.co.ke', phone: '+254 700 123456', address: 'Nairobi, Kenya' };
+const initialData = { dashboard: {}, clients: [], matters: [], tasks: [], invoices: [], firmSettings: defaultFirmSettings };
 const nav = [
   ['Dashboard', 'DB'],
   ['Clients', 'CL'],
   ['Matters', 'MT'],
   ['Tasks', 'TK'],
   ['Invoices', 'IN'],
+  ['Firm Settings', 'FS'],
   ['Users', 'US'],
 ];
 const legalResources = [
-  ['Kenya Law', 'https://kenyalaw.org'],
-  ['eKLR', 'https://www.eklr.go.ke'],
-  ['Judiciary CTS', 'https://cts.judiciary.go.ke'],
-  ['NCAJ', 'https://ncaj.go.ke'],
-  ['eCitizen', 'https://www.ecitizen.go.ke'],
+  ['eFiling CTS Judiciary', 'https://efiling.court.go.ke/auth', 'CT'],
+  ['eCitizen', 'https://www.ecitizen.go.ke', 'EC'],
+  ['Ardhi Sasa', 'https://ardhisasa.lands.go.ke/home', 'AS'],
 ];
 
 function readSession() {
@@ -127,6 +127,7 @@ export default function App() {
   const authenticated = Boolean(session?.token);
   const isAdmin = user?.role === 'admin';
   const canManage = ['admin', 'advocate'].includes(user?.role);
+  const firm = data.firmSettings || defaultFirmSettings;
 
   useEffect(() => {
     function handleAuthFailure(event) {
@@ -153,19 +154,27 @@ export default function App() {
     if (authenticated) refresh();
   }, [authenticated]);
 
+  useEffect(() => {
+    document.title = firm?.name || 'LexFlow Kenya';
+  }, [firm?.name]);
+
   async function refresh() {
     setLoading(true);
     try {
-      const [currentUser, dashboard, clients, matters, tasks, invoices] = await Promise.all([
-        api('/auth/me'),
+      const [currentUser, firmSettings] = await Promise.all([api('/auth/me'), api('/firm-settings')]);
+      setUser(currentUser);
+      if (currentUser.role === 'client') {
+        setData(current => ({ ...current, firmSettings }));
+        return;
+      }
+      const [dashboard, clients, matters, tasks, invoices] = await Promise.all([
         api('/dashboard'),
         api('/clients'),
         api('/matters'),
         api('/tasks'),
         api('/invoices'),
       ]);
-      setUser(currentUser);
-      setData({ dashboard, clients, matters, tasks, invoices });
+      setData({ dashboard, clients, matters, tasks, invoices, firmSettings });
     } catch (err) {
       if (err?.isAuthExpired) return;
       setToast({ type: 'danger', message: err.message });
@@ -197,13 +206,18 @@ export default function App() {
     );
   }
 
-  const visibleNav = nav.filter(([label]) => label !== 'Users' || isAdmin);
+  if (user?.role === 'client') {
+    return <ClientApp user={user} firm={firm} logout={logout} notify={setToast} toast={toast} setToast={setToast} />;
+  }
+
+  const visibleNav = nav.filter(([label]) => !['Users', 'Firm Settings'].includes(label) || isAdmin);
   const subtitles = {
     Dashboard: 'Command center for active work, hearings, billing and firm movement.',
     Clients: 'A polished directory for intake, contacts and relationship context.',
     Matters: 'Matter pipeline, billing, documents, notes and invoice actions.',
     Tasks: 'Daily execution board for deadlines and delegated legal work.',
     Invoices: 'Receivables, invoice status and PDF export for client billing.',
+    'Firm Settings': 'Client-ready branding, invoice identity and contact details.',
     Users: 'Role-based access for advocates, assistants and administrators.',
   };
 
@@ -212,10 +226,10 @@ export default function App() {
       <StyleTag />
       <aside style={styles.sidebar}>
         <div style={styles.brandPanel}>
-          <div style={styles.logo}>LF</div>
+          <Logo firm={firm} />
           <div>
-            <div style={styles.brand}>LexFlow</div>
-            <div style={styles.brandSub}>Kenya practice suite</div>
+            <div style={styles.brand}>{firm.name || 'LexFlow Kenya'}</div>
+            <div style={styles.brandSub}>Practice suite</div>
           </div>
         </div>
 
@@ -236,9 +250,9 @@ export default function App() {
           </button>
           {quickLinksOpen && (
             <div style={styles.quickLinksList}>
-              {legalResources.map(([name, href]) => (
+              {legalResources.map(([name, href, icon]) => (
                 <a key={name} className="lf-resource-link" style={styles.quickLink} href={href} target="_blank" rel="noopener noreferrer">
-                  <span style={styles.quickLinkIcon}>EX</span>
+                  <span style={styles.quickLinkIcon}>{icon || 'EX'}</span>
                   <span>{name}</span>
                 </a>
               ))}
@@ -265,7 +279,7 @@ export default function App() {
       <main style={styles.main}>
         <header style={styles.topbar}>
           <div>
-            <div style={styles.eyebrow}>LexFlow Kenya</div>
+            <div style={styles.eyebrow}>{firm.name || 'LexFlow Kenya'}</div>
             <h1 style={styles.title}>{view}</h1>
             <p style={styles.subtitle}>{subtitles[view]}</p>
           </div>
@@ -277,11 +291,12 @@ export default function App() {
 
         {loading && <Skeleton />}
         {!loading && view === 'Dashboard' && <Dashboard data={data} />}
-        {!loading && view === 'Clients' && <Clients clients={data.clients} canManage={canManage} reload={refresh} notify={setToast} />}
+        {!loading && view === 'Clients' && <Clients clients={data.clients} matters={data.matters} canManage={canManage} reload={refresh} notify={setToast} />}
         {!loading && view === 'Matters' && <Matters data={data} canManage={canManage} reload={refresh} notify={setToast} />}
         {!loading && view === 'Tasks' && <Tasks data={data} canManage={canManage} reload={refresh} notify={setToast} />}
         {!loading && view === 'Invoices' && <Invoices invoices={data.invoices} isAdmin={isAdmin} canManage={canManage} reload={refresh} notify={setToast} />}
-        {!loading && view === 'Users' && isAdmin && <Users notify={setToast} />}
+        {!loading && view === 'Firm Settings' && isAdmin && <FirmSettings settings={firm} reload={refresh} notify={setToast} />}
+        {!loading && view === 'Users' && isAdmin && <Users clients={data.clients} notify={setToast} />}
       </main>
       <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
@@ -339,6 +354,39 @@ function LoginPage({ onLogin }) {
       </form>
     </div>
   );
+}
+
+function ClientApp({ user, firm, logout, notify, toast, setToast }) {
+  const [dashboard, setDashboard] = useState({ matters: [], documents: [], invoices: [], notes: [], appearances: [] });
+  const [selectedId, setSelectedId] = useState('');
+  const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(true);
+  const selected = dashboard.matters.find(m => m.id === selectedId) || dashboard.matters[0];
+  const matterDocs = dashboard.documents.filter(d => d.matterId === selected?.id);
+  const matterInvoices = dashboard.invoices.filter(i => i.matterId === selected?.id);
+  const matterNotes = dashboard.notes.filter(n => n.matterId === selected?.id);
+  const matterEvents = dashboard.appearances.filter(a => a.matterId === selected?.id);
+
+  useEffect(() => { load(); }, []);
+  useEffect(() => { if (selected?.id) setSelectedId(selected.id); }, [selected?.id]);
+  async function load() {
+    setLoading(true);
+    try { setDashboard(await api('/client/dashboard')); }
+    catch (err) { notify({ type: 'danger', message: err.message }); }
+    finally { setLoading(false); }
+  }
+  async function sendMessage(event) {
+    event.preventDefault();
+    if (!selected || !message.trim()) return;
+    try {
+      await api(`/matters/${selected.id}/notes`, { method: 'POST', body: { content: message } });
+      setMessage('');
+      notify({ type: 'success', message: 'Message sent to the firm.' });
+      await load();
+    } catch (err) { notify({ type: 'danger', message: err.message }); }
+  }
+
+  return <div style={styles.clientShell}><StyleTag /><header style={styles.clientHeader}><div style={styles.clientBrand}><Logo firm={firm} /><div><strong>{firm.name || 'LexFlow Kenya'}</strong><span>Client portal</span></div></div><div style={styles.clientActions}>{firm.websiteURL && <a style={styles.ghostButton} href={firm.websiteURL} target="_blank" rel="noopener noreferrer">Visit our website</a>}<button type="button" style={styles.ghostButton} onClick={logout}>Sign out</button></div></header>{loading ? <Skeleton /> : <main style={styles.clientMain}><section style={styles.clientMatterList}><Card title="Your matters" hint={`${dashboard.matters.length} active file(s)`}>{dashboard.matters.length ? dashboard.matters.map(m => <button key={m.id} type="button" onClick={() => setSelectedId(m.id)} style={{ ...styles.matterButton, ...(selected?.id === m.id ? styles.matterActive : {}) }}><strong>{m.title}</strong><span>{m.reference || m.id}</span><small>{m.stage || 'Intake'}</small></button>) : <Empty title="No matters yet" text="Your matter list will appear here when the firm opens a file." />}</Card></section><section style={styles.pageStack}>{selected ? <><Card title={selected.title} hint={selected.reference || 'Matter overview'}><div style={styles.clientStatusGrid}><Badge tone="blue">{selected.stage || 'Intake'}</Badge><span>{selected.practiceArea || 'General'}</span><span>{selected.assignedTo || 'Firm team'}</span></div><p style={styles.clientDescription}>{selected.description || 'No description has been added yet.'}</p></Card><Card title="Timeline" hint="Upcoming appearances"><Table columns={['Event', 'Date', 'Time', 'Location', 'Virtual Court']} rows={matterEvents.map(a => [a.title || a.type || 'Appearance', a.date || '-', a.time || '-', a.location || '-', <MeetingLink key={a.id} event={a} />])} empty="No court dates shared yet." /></Card><Card title="Documents" hint="Download only"><Table columns={['Name', 'Type', 'Size', 'Download']} rows={matterDocs.map(d => [d.name, d.type, d.size, <a key={d.id} style={styles.link} href={`${API_BASE}/documents/${d.id}/download?token=${encodeURIComponent(readSession()?.token || '')}`}>Download</a>])} empty="No documents shared yet." /></Card><Card title="Invoices" hint="Billing history"><Table columns={['Invoice', 'Amount', 'Status', 'PDF']} rows={matterInvoices.map(i => [i.number || i.id, kes(i.amount), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <a key={`${i.id}-pdf`} style={styles.link} href={`${API_BASE}/invoices/${i.id}/pdf?token=${encodeURIComponent(readSession()?.token || '')}`}>PDF</a>])} empty="No invoices shared yet." /></Card><Card title="Contact the firm" hint="Message is saved to the matter notes"><form onSubmit={sendMessage} style={styles.noteForm}><input style={styles.input} value={message} onChange={e => setMessage(e.target.value)} placeholder="Write a message about this matter" /><button style={styles.primaryButton}>Send</button></form><Table columns={['Recent note', 'Author', 'Created']} rows={matterNotes.slice(0, 6).map(n => [n.content, n.author || '-', n.createdAt ? new Date(n.createdAt).toLocaleString() : '-'])} empty="No messages yet." /></Card></> : <Empty title="Select a matter" text="Your matter details will appear here." />}</section></main>}<Toast toast={toast} onClose={() => setToast(null)} /></div>;
 }
 
 function Dashboard({ data }) {
@@ -405,10 +453,11 @@ function Dashboard({ data }) {
   );
 }
 
-function Clients({ clients, canManage, reload, notify }) {
+function Clients({ clients, matters, canManage, reload, notify }) {
   const [form, setForm] = useState({ name: '', type: 'Individual', contact: '', email: '', phone: '' });
   const [editing, setEditing] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [tooltip, setTooltip] = useState(null);
   async function submit(event) {
     event.preventDefault();
     try {
@@ -431,7 +480,7 @@ function Clients({ clients, canManage, reload, notify }) {
       await reload();
     } catch (err) { notify({ type: 'danger', message: err.message }); }
   }
-  return <div style={styles.splitGrid}><Card title={editing ? 'Edit client' : 'New client'} hint={editing ? 'Save client changes' : 'Intake record'}><form onSubmit={submit} style={styles.formGrid}><Field label="Name"><input required style={styles.input} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field><Field label="Type"><select style={styles.input} value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}><option>Individual</option><option>Company</option></select></Field><Field label="Contact"><input style={styles.input} value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} /></Field><Field label="Email"><input style={styles.input} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field><Field label="Phone"><input style={styles.input} value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></Field><button style={styles.primaryButton}>{editing ? 'Save changes' : 'Create client'}</button>{editing && <button type="button" style={styles.ghostButton} onClick={() => { setEditing(null); setForm({ name: '', type: 'Individual', contact: '', email: '', phone: '' }); }}>Cancel</button>}</form></Card><Card title="Client directory" hint={`${clients.length} records`}><Table columns={['Name', 'Type', 'Email', 'Phone', 'Status', 'Actions']} rows={clients.map(c => [c.name, c.type, c.email || '-', c.phone || '-', <Badge key={c.id} tone="green">{c.status || 'Active'}</Badge>, canManage ? <ActionGroup key={`${c.id}-actions`} actions={[['Edit', () => startEdit(c)], ['Delete', () => setConfirm({ title: 'Delete client?', message: 'Are you sure you want to delete this client? This will also remove all related matters.', onConfirm: () => deleteClient(c) })]]} /> : '-'])} empty="No clients yet." /></Card><ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} /></div>;
+  return <div style={styles.splitGrid}><Card title={editing ? 'Edit client' : 'New client'} hint={editing ? 'Save client changes' : 'Intake record'}><form onSubmit={submit} style={styles.formGrid}><Field label="Name"><input required style={styles.input} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field><Field label="Type"><select style={styles.input} value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}><option>Individual</option><option>Company</option></select></Field><Field label="Contact"><input style={styles.input} value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} /></Field><Field label="Email"><input style={styles.input} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field><Field label="Phone"><input style={styles.input} value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></Field><button style={styles.primaryButton}>{editing ? 'Save changes' : 'Create client'}</button>{editing && <button type="button" style={styles.ghostButton} onClick={() => { setEditing(null); setForm({ name: '', type: 'Individual', contact: '', email: '', phone: '' }); }}>Cancel</button>}</form></Card><Card title="Client directory" hint={`${clients.length} records`}><Table columns={['Name', 'Type', 'Email', 'Phone', 'Status', 'Actions']} rows={clients.map(c => [<span key={c.id} onMouseMove={e => setTooltip({ x: e.clientX, y: e.clientY, title: c.name, lines: [`${c.type || 'Client'} / ${c.status || 'Active'}`, `${matters.filter(m => m.clientId === c.id).length} matter(s)`, `Joined ${c.joinDate || '-'}`], initial: (c.name || 'C').slice(0, 1) })} onMouseLeave={() => setTooltip(null)} style={styles.hoverName}>{c.name}</span>, c.type, c.email || '-', c.phone || '-', <Badge key={`${c.id}-status`} tone="green">{c.status || 'Active'}</Badge>, canManage ? <ActionGroup key={`${c.id}-actions`} actions={[['Edit', () => startEdit(c)], ['Delete', () => setConfirm({ title: 'Delete client?', message: 'Are you sure you want to delete this client? This will also remove all related matters.', onConfirm: () => deleteClient(c) })]]} /> : '-'])} empty="No clients yet." /></Card><ProfileTooltip tooltip={tooltip} /><ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} /></div>;
 }
 
 function Matters({ data, canManage, reload, notify }) {
@@ -444,6 +493,7 @@ function Matters({ data, canManage, reload, notify }) {
   const [editingEvent, setEditingEvent] = useState(null);
   const [editingTime, setEditingTime] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [tooltip, setTooltip] = useState(null);
   const [loading, setLoading] = useState(false);
   const emptyMatterForm = { clientId: '', title: '', practiceArea: '', stage: 'Intake', assignedTo: '', paralegal: '', description: '', court: '', judge: '', caseNo: '', opposingCounsel: '', priority: 'Medium', solDate: '', billingType: 'hourly', billingRate: 15000, fixedFee: 0, retainerBalance: 0 };
   const [form, setForm] = useState(emptyMatterForm);
@@ -492,7 +542,7 @@ function Matters({ data, canManage, reload, notify }) {
     <div style={styles.matterGrid}>
       <Card title="Matter list" hint={`${data.matters.length} active files`}>
         {data.matters.length ? data.matters.map(m => (
-          <button key={m.id} onClick={() => setSelectedId(m.id)} style={{ ...styles.matterButton, ...(selected?.id === m.id ? styles.matterActive : {}) }}>
+          <button key={m.id} onClick={() => setSelectedId(m.id)} onMouseMove={e => setTooltip({ x: e.clientX, y: e.clientY, title: m.title, lines: [m.reference || m.id, `Stage: ${m.stage || 'Intake'}`, `Priority: ${m.priority || 'Medium'}`, `Advocate: ${m.assignedTo || '-'}`, `Next court: ${nextCourtDate(m)}`], initial: (m.title || 'M').slice(0, 1) })} onMouseLeave={() => setTooltip(null)} style={{ ...styles.matterButton, ...(selected?.id === m.id ? styles.matterActive : {}) }}>
             <strong>{m.title}</strong>
             <span>{m.reference || m.id}</span>
             <small>{m.clientName || 'No client'} / {m.stage || 'Intake'}</small>
@@ -557,6 +607,7 @@ function Matters({ data, canManage, reload, notify }) {
           {!loading && !detail && <Empty title="Select a matter" text="Matter detail will appear here." />}
         </Card>
       </div>
+      <ProfileTooltip tooltip={tooltip} />
       <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
     </div>
   );
@@ -580,13 +631,32 @@ function Invoices({ invoices, isAdmin, canManage, reload, notify }) {
   return <><Card title="Invoice register" hint="Receivables"><Table columns={['Invoice', 'Client', 'Matter', 'Amount', 'Status', 'PDF', 'Actions']} rows={invoices.map(i => [i.number || i.id, i.clientName || '-', i.matterTitle || '-', kes(i.amount), isAdmin ? <select key={i.id} style={styles.tableSelect} value={i.status} onChange={e => setStatus(i.id, e.target.value)}><option>Outstanding</option><option>Paid</option><option>Overdue</option></select> : <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <a key={`${i.id}-pdf`} style={styles.link} href={`${API_BASE}/invoices/${i.id}/pdf?token=${encodeURIComponent(readSession()?.token || '')}`}>Download</a>, canManage && i.status !== 'Paid' ? <ActionGroup key={`${i.id}-actions`} actions={[['Delete', () => setConfirm({ title: 'Delete invoice?', message: 'Delete this invoice?', onConfirm: () => deleteInvoiceRecord(i) })]]} /> : '-'])} empty="No invoices yet." /></Card><ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} /></>;
 }
 
-function Users({ notify }) {
+function FirmSettings({ settings, reload, notify }) {
+  const [form, setForm] = useState({ ...defaultFirmSettings, ...settings });
+  useEffect(() => setForm({ ...defaultFirmSettings, ...settings }), [settings]);
+  async function chooseLogo(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setForm({ ...form, logo: await fileToDataUrl(file) });
+  }
+  async function submit(event) {
+    event.preventDefault();
+    try {
+      await api('/firm-settings', { method: 'PUT', body: form });
+      notify({ type: 'success', message: 'Firm settings saved.' });
+      await reload();
+    } catch (err) { notify({ type: 'danger', message: err.message }); }
+  }
+  return <Card title="Firm Settings" hint="Branding, invoice identity and client portal contact details"><form onSubmit={submit} style={styles.formGrid}><Field label="Firm Name"><input required style={styles.input} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field><Field label="Website URL"><input type="url" style={styles.input} value={form.websiteURL || ''} onChange={e => setForm({ ...form, websiteURL: e.target.value })} /></Field><Field label="Primary Color"><input type="color" style={styles.colorInput} value={form.primaryColor || '#0F1B33'} onChange={e => setForm({ ...form, primaryColor: e.target.value })} /></Field><Field label="Accent Color"><input type="color" style={styles.colorInput} value={form.accentColor || '#D4A34A'} onChange={e => setForm({ ...form, accentColor: e.target.value })} /></Field><Field label="Email"><input style={styles.input} value={form.email || ''} onChange={e => setForm({ ...form, email: e.target.value })} /></Field><Field label="Phone"><input style={styles.input} value={form.phone || ''} onChange={e => setForm({ ...form, phone: e.target.value })} /></Field><Field label="Address"><input style={styles.input} value={form.address || ''} onChange={e => setForm({ ...form, address: e.target.value })} /></Field><Field label="Logo"><input type="file" accept="image/*" style={styles.input} onChange={chooseLogo} /></Field><div className="lf-logo-preview" style={styles.logoPreview}>{form.logo ? <img src={form.logo} alt="Firm logo preview" /> : <span>⚖</span>}<button type="button" style={styles.tinyButton} onClick={() => setForm({ ...form, logo: '' })}>Clear logo</button></div><button style={styles.primaryButton}>Save settings</button></form></Card>;
+}
+
+function Users({ clients = [], notify }) {
   const [users, setUsers] = useState([]);
-  const [form, setForm] = useState({ email: '', password: '', fullName: '', role: 'assistant' });
+  const [form, setForm] = useState({ email: '', password: '', fullName: '', role: 'assistant', clientId: '' });
   useEffect(() => { load(); }, []);
   async function load() { try { setUsers(await api('/auth/users')); } catch (err) { notify({ type: 'danger', message: err.message }); } }
-  async function submit(event) { event.preventDefault(); try { await api('/auth/register', { method: 'POST', body: form }); setForm({ email: '', password: '', fullName: '', role: 'assistant' }); notify({ type: 'success', message: 'User created.' }); await load(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
-  return <div style={styles.splitGrid}><Card title="Create user" hint="Role-based access"><form onSubmit={submit} style={styles.formGrid}><Field label="Full name"><input required style={styles.input} value={form.fullName} onChange={e => setForm({ ...form, fullName: e.target.value })} /></Field><Field label="Email"><input required style={styles.input} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field><Field label="Password"><input required type="password" style={styles.input} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} /></Field><Field label="Role"><select style={styles.input} value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}><option value="assistant">Assistant</option><option value="advocate">Advocate</option><option value="admin">Admin</option></select></Field><button style={styles.primaryButton}>Create user</button></form></Card><Card title="Team" hint={`${users.length} users`}><Table columns={['Name', 'Email', 'Role']} rows={users.map(u => [u.fullName, u.email, <Badge key={u.id} tone="blue">{u.role}</Badge>])} empty="No users found." /></Card></div>;
+  async function submit(event) { event.preventDefault(); try { await api('/auth/register', { method: 'POST', body: form }); setForm({ email: '', password: '', fullName: '', role: 'assistant', clientId: '' }); notify({ type: 'success', message: 'User created.' }); await load(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
+  return <div style={styles.splitGrid}><Card title="Create user" hint="Role-based access"><form onSubmit={submit} style={styles.formGrid}><Field label="Full name"><input required style={styles.input} value={form.fullName} onChange={e => setForm({ ...form, fullName: e.target.value })} /></Field><Field label="Email"><input required style={styles.input} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field><Field label="Password"><input required type="password" style={styles.input} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} /></Field><Field label="Role"><select style={styles.input} value={form.role} onChange={e => setForm({ ...form, role: e.target.value, clientId: e.target.value === 'client' ? form.clientId : '' })}><option value="assistant">Assistant</option><option value="advocate">Advocate</option><option value="admin">Admin</option><option value="client">Client</option></select></Field>{form.role === 'client' && <Field label="Linked Client"><select required style={styles.input} value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })}><option value="">Select client</option>{clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>}<button style={styles.primaryButton}>Create user</button></form></Card><Card title="Team" hint={`${users.length} users`}><Table columns={['Name', 'Email', 'Role', 'Client']} rows={users.map(u => [u.fullName, u.email, <Badge key={u.id} tone="blue">{u.role}</Badge>, u.clientId ? clients.find(c => c.id === u.clientId)?.name || u.clientId : '-'])} empty="No users found." /></Card></div>;
 }
 
 function TaskEditorList({ tasks, canManage, editingTask, setEditingTask, saveTask, toggle, confirmDelete }) {
@@ -696,6 +766,16 @@ function MeetingLink({ event, dashboard = false }) {
   return <a style={styles.meetingLink} href={href} target="_blank" rel="noopener noreferrer"><span style={styles.videoBadge}>VC</span> Meeting Link</a>;
 }
 
+function Logo({ firm }) {
+  if (firm?.logo) return <div style={styles.logo}>{<img src={firm.logo} alt={`${firm.name || 'Firm'} logo`} style={styles.logoImage} />}</div>;
+  return <div style={styles.logo}>⚖</div>;
+}
+
+function ProfileTooltip({ tooltip }) {
+  if (!tooltip) return null;
+  return <div className="profile-tooltip" style={{ ...styles.profileTooltip, left: tooltip.x + 14, top: tooltip.y + 14 }}><div style={styles.tooltipAvatar}>{tooltip.initial}</div><div><strong>{tooltip.title}</strong>{tooltip.lines.map(line => <span key={line}>{line}</span>)}</div></div>;
+}
+
 function ActionGroup({ actions }) {
   return <div style={styles.actionGroup}>{actions.map(([label, onClick]) => <button key={label} type="button" onClick={onClick} style={label === 'Delete' ? styles.dangerTinyButton : styles.tinyButton}>{label}</button>)}</div>;
 }
@@ -748,6 +828,7 @@ function isTodayOrTomorrow(date) {
   const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
   return date === todayIso() || date === tomorrow;
 }
+function nextCourtDate(matter) { return matter?.nextCourtDate || '-'; }
 
 function StyleTag() { return <style>{`
   * { box-sizing: border-box; }
@@ -774,6 +855,8 @@ function StyleTag() { return <style>{`
   table tr:nth-child(even) td { background: #FAFAFB; }
   table tbody tr:hover td { background: #F8FAFC; }
   label > span { color: #6B7280; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+  .lf-app-shell .profile-tooltip span, body .profile-tooltip span { display: block; color: #697386; font-size: 12px; margin-top: 3px; }
+  .lf-logo-preview img { width: 42px; height: 42px; border-radius: 8px; object-fit: cover; border: 1px solid #E5E7EB; }
   section h2 { margin: 0; font-size: 14px; font-weight: 700; color: #101827; }
   section h3 { margin: 0 0 12px; font-size: 13px; font-weight: 700; color: #101827; }
   section p { margin: 4px 0 0; color: #697386; font-size: 12px; }
@@ -783,7 +866,7 @@ const styles = {
   shell: { minHeight: '100vh', display: 'grid', gridTemplateColumns: '220px minmax(0,1fr)', background: '#F5F7FA', color: theme.ink, fontFamily: 'Segoe UI, Roboto, -apple-system, BlinkMacSystemFont, sans-serif', fontSize: 13 },
   sidebar: { position: 'sticky', top: 0, minHeight: '100vh', background: theme.navy800, color: '#fff', padding: 16, display: 'flex', flexDirection: 'column', gap: 16, boxShadow: '1px 0 0 rgba(255,255,255,.05)' },
   brandPanel: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 8px 14px', borderBottom: '1px solid rgba(255,255,255,.10)' },
-  logo: { width: 36, height: 36, borderRadius: 8, display: 'grid', placeItems: 'center', background: theme.gold, color: '#fff', fontWeight: 900, fontSize: 13, boxShadow: '0 8px 18px rgba(212,163,74,.20)' },
+  logo: { width: 36, height: 36, borderRadius: 8, display: 'grid', placeItems: 'center', background: theme.gold, color: '#fff', fontWeight: 900, fontSize: 18, boxShadow: '0 8px 18px rgba(212,163,74,.20)', overflow: 'hidden' }, logoImage: { width: '100%', height: '100%', objectFit: 'cover' },
   brand: { fontSize: 16, fontWeight: 700, letterSpacing: 0 }, brandSub: { fontSize: 11, color: '#9CA8BA', marginTop: 2 }, sideSectionLabel: { color: '#7F8CA3', fontSize: 11, fontWeight: 700, letterSpacing: 0, textTransform: 'uppercase', padding: '0 8px' },
   navList: { display: 'grid', gap: 4 }, navItem: { border: 0, borderLeft: '3px solid transparent', background: 'transparent', color: '#C9D3E2', borderRadius: 6, padding: '9px 10px', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontWeight: 600, textAlign: 'left' }, navActive: { background: 'rgba(255,255,255,.10)', color: '#fff', borderLeftColor: theme.gold }, navNumber: { width: 24, height: 24, borderRadius: 6, background: 'rgba(255,255,255,.08)', display: 'grid', placeItems: 'center', fontSize: 10, color: theme.gold, fontWeight: 800 },
   quickLinksPanel: { display: 'grid', gap: 7, paddingTop: 2 }, quickLinksHeader: { border: 0, background: 'transparent', color: '#7F8CA3', borderRadius: 6, padding: '5px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: 10, fontWeight: 800, letterSpacing: .8, textTransform: 'uppercase' }, quickLinksChevron: { color: theme.gold, fontSize: 11, fontWeight: 900 }, quickLinksList: { display: 'grid', gap: 3 }, quickLink: { borderLeft: '3px solid transparent', color: '#C9D3E2', borderRadius: 6, padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 9, fontWeight: 600, textDecoration: 'none', transition: 'background .16s ease, color .16s ease' }, quickLinkIcon: { width: 24, height: 24, borderRadius: 6, background: 'rgba(255,255,255,.08)', display: 'grid', placeItems: 'center', fontSize: 9, color: theme.gold, fontWeight: 900 },
@@ -795,11 +878,12 @@ const styles = {
   statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 12 }, stat: { position: 'relative', overflow: 'hidden', background: '#fff', border: `1px solid ${theme.line}`, borderLeft: '4px solid', borderRadius: 10, padding: 16, boxShadow: theme.shadow, display: 'grid', gap: 6 }, 
   splitGrid: { display: 'grid', gridTemplateColumns: 'minmax(260px,.72fr) minmax(0,1.28fr)', gap: 16 }, dashboardGrid: { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 16 }, matterGrid: { display: 'grid', gridTemplateColumns: '300px minmax(0,1fr)', gap: 16 },
   card: { background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, padding: '18px 20px', boxShadow: theme.shadow, minWidth: 0, transition: 'box-shadow .16s ease, transform .16s ease' }, cardHead: { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 14 },
-  formGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 12, alignItems: 'end' }, field: { display: 'grid', gap: 5 }, input: { width: '100%', border: `1px solid ${theme.line}`, borderRadius: 6, padding: '7px 11px', background: '#fff', fontSize: 13 }, primaryButton: { border: 0, borderRadius: 6, padding: '7px 16px', background: theme.navy600, color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }, goldButton: { border: 0, borderRadius: 6, padding: '7px 16px', background: theme.gold, color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }, dangerButton: { border: 0, borderRadius: 6, padding: '7px 16px', background: theme.red, color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }, ghostButton: { border: `1px solid ${theme.line}`, borderRadius: 6, padding: '7px 16px', background: '#fff', color: theme.navy600, fontWeight: 700, cursor: 'pointer', fontSize: 13 }, actionGroup: { display: 'flex', flexWrap: 'wrap', gap: 6 }, tinyButton: { border: `1px solid ${theme.line}`, borderRadius: 6, padding: '4px 10px', background: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: theme.navy600 }, dangerTinyButton: { border: '1px solid #FECACA', borderRadius: 6, padding: '4px 10px', background: theme.redBg, cursor: 'pointer', fontSize: 12, fontWeight: 700, color: theme.red },
+  formGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 12, alignItems: 'end' }, field: { display: 'grid', gap: 5 }, input: { width: '100%', border: `1px solid ${theme.line}`, borderRadius: 6, padding: '7px 11px', background: '#fff', fontSize: 13 }, colorInput: { width: '100%', height: 36, border: `1px solid ${theme.line}`, borderRadius: 6, padding: 4, background: '#fff' }, primaryButton: { border: 0, borderRadius: 6, padding: '7px 16px', background: theme.navy600, color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }, goldButton: { border: 0, borderRadius: 6, padding: '7px 16px', background: theme.gold, color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }, dangerButton: { border: 0, borderRadius: 6, padding: '7px 16px', background: theme.red, color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }, ghostButton: { border: `1px solid ${theme.line}`, borderRadius: 6, padding: '7px 16px', background: '#fff', color: theme.navy600, fontWeight: 700, cursor: 'pointer', fontSize: 13, textDecoration: 'none' }, actionGroup: { display: 'flex', flexWrap: 'wrap', gap: 6 }, tinyButton: { border: `1px solid ${theme.line}`, borderRadius: 6, padding: '4px 10px', background: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: theme.navy600 }, dangerTinyButton: { border: '1px solid #FECACA', borderRadius: 6, padding: '4px 10px', background: theme.redBg, cursor: 'pointer', fontSize: 12, fontWeight: 700, color: theme.red },
   tableWrap: { overflowX: 'auto', border: `1px solid ${theme.line}`, borderRadius: 8 }, table: { width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 620 }, badge: { display: 'inline-flex', padding: '4px 8px', borderRadius: 999, fontWeight: 700, fontSize: 12 }, link: { color: theme.navy600, fontWeight: 700, textDecoration: 'none' }, meetingLink: { color: theme.navy600, fontWeight: 700, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }, videoBadge: { width: 22, height: 22, borderRadius: 6, display: 'inline-grid', placeItems: 'center', background: theme.blueBg, color: theme.blue, fontSize: 10, fontWeight: 900 }, joinButton: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, padding: '5px 10px', background: theme.green, color: '#fff', fontWeight: 800, fontSize: 12, textDecoration: 'none', whiteSpace: 'nowrap', boxShadow: '0 6px 14px rgba(4,120,87,.18)' }, mutedText: { color: theme.muted }, tableSelect: { border: `1px solid ${theme.line}`, borderRadius: 6, padding: '5px 8px', fontSize: 12 },
   pipelineRow: { display: 'grid', gridTemplateColumns: '116px 1fr 30px', gap: 10, alignItems: 'center', marginBottom: 10 }, pipelineTrack: { height: 8, background: '#EEF2F7', borderRadius: 999, overflow: 'hidden' }, pipelineFill: { height: '100%', background: theme.gold, borderRadius: 999 },
-  matterButton: { width: '100%', display: 'grid', gap: 4, textAlign: 'left', border: 0, borderLeft: '3px solid transparent', borderBottom: `1px solid ${theme.line}`, background: '#fff', padding: '12px 10px', cursor: 'pointer', borderRadius: 6 }, matterActive: { background: '#F8FAFC', borderLeftColor: theme.gold }, detailStack: { display: 'grid', gap: 16 }, chips: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, color: theme.muted }, tabList: { display: 'flex', gap: 4, borderBottom: `1px solid ${theme.line}` }, tabButton: { border: 0, borderBottom: '2px solid transparent', background: 'transparent', color: theme.muted, padding: '8px 12px', cursor: 'pointer', fontWeight: 700, fontSize: 13 }, tabActive: { color: theme.navy600, borderBottomColor: theme.gold }, assistantPanel: { display: 'grid', gap: 12 }, assistantIntro: { display: 'grid', gap: 4, padding: 14, borderRadius: 10, background: '#F8FAFC', border: `1px solid ${theme.line}`, color: theme.muted }, suggestionList: { display: 'grid', gap: 10 }, suggestionItem: { display: 'grid', gridTemplateColumns: '28px 1fr', gap: 10, alignItems: 'start', padding: '12px 14px', borderRadius: 10, border: `1px solid ${theme.line}`, background: '#fff', boxShadow: theme.shadow, lineHeight: 1.5 }, suggestionWarning: { background: theme.amberBg, borderColor: '#FDE68A', color: theme.amber }, suggestionGood: { background: theme.greenBg, borderColor: '#A7F3D0', color: theme.green }, suggestionIcon: { width: 28, height: 28, display: 'grid', placeItems: 'center', fontSize: 16 }, sub: { borderTop: `1px solid ${theme.line}`, paddingTop: 16 }, noteForm: { display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, marginBottom: 12 }, file: { marginBottom: 12, fontSize: 12 },
+  matterButton: { width: '100%', display: 'grid', gap: 4, textAlign: 'left', border: 0, borderLeft: '3px solid transparent', borderBottom: `1px solid ${theme.line}`, background: '#fff', padding: '12px 10px', cursor: 'pointer', borderRadius: 6 }, matterActive: { background: '#F8FAFC', borderLeftColor: theme.gold }, detailStack: { display: 'grid', gap: 16 }, chips: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, color: theme.muted }, tabList: { display: 'flex', gap: 4, borderBottom: `1px solid ${theme.line}` }, tabButton: { border: 0, borderBottom: '2px solid transparent', background: 'transparent', color: theme.muted, padding: '8px 12px', cursor: 'pointer', fontWeight: 700, fontSize: 13 }, tabActive: { color: theme.navy600, borderBottomColor: theme.gold }, assistantPanel: { display: 'grid', gap: 12 }, assistantIntro: { display: 'grid', gap: 4, padding: 14, borderRadius: 10, background: '#F8FAFC', border: `1px solid ${theme.line}`, color: theme.muted }, suggestionList: { display: 'grid', gap: 10 }, suggestionItem: { display: 'grid', gridTemplateColumns: '28px 1fr', gap: 10, alignItems: 'start', padding: '12px 14px', borderRadius: 10, border: `1px solid ${theme.line}`, background: '#fff', boxShadow: theme.shadow, lineHeight: 1.5 }, suggestionWarning: { background: theme.amberBg, borderColor: '#FDE68A', color: theme.amber }, suggestionGood: { background: theme.greenBg, borderColor: '#A7F3D0', color: theme.green }, suggestionIcon: { width: 28, height: 28, display: 'grid', placeItems: 'center', fontSize: 16 }, sub: { borderTop: `1px solid ${theme.line}`, paddingTop: 16 }, noteForm: { display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, marginBottom: 12 }, file: { marginBottom: 12, fontSize: 12 }, hoverName: { color: theme.navy600, fontWeight: 800, cursor: 'help' },
   empty: { minHeight: 136, display: 'grid', placeItems: 'center', textAlign: 'center', color: theme.muted, gap: 6, padding: 18 }, emptyIcon: { width: 42, height: 42, borderRadius: 10, display: 'grid', placeItems: 'center', background: '#F3F4F6', color: theme.navy600, fontWeight: 800 }, skeletonGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 12 }, skeleton: { height: 120, borderRadius: 10, background: '#fff', border: `1px solid ${theme.line}`, boxShadow: theme.shadow, padding: 16, display: 'grid', gap: 10, alignContent: 'start' }, skeletonLineLarge: { height: 18, width: '55%', borderRadius: 6, background: '#E5E7EB', animation: 'lfPulse 1.4s ease-in-out infinite' }, skeletonLine: { height: 12, width: '80%', borderRadius: 6, background: '#EEF2F7', animation: 'lfPulse 1.4s ease-in-out infinite' }, skeletonLineShort: { height: 12, width: '42%', borderRadius: 6, background: '#EEF2F7', animation: 'lfPulse 1.4s ease-in-out infinite' },
   toast: { position: 'fixed', top: 22, right: 22, zIndex: 2000, display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', minWidth: 300, maxWidth: 420, padding: '12px 14px', borderRadius: 10, boxShadow: theme.shadowLift, border: '1px solid', animation: 'lfSlideIn .18s ease-out' }, toastClose: { border: 0, background: 'transparent', color: 'inherit', fontWeight: 900, cursor: 'pointer', fontSize: 16 }, modalBackdrop: { position: 'fixed', inset: 0, zIndex: 3000, display: 'grid', placeItems: 'center', padding: 24, background: 'rgba(15,27,51,.28)', backdropFilter: 'blur(4px)' }, modalCard: { width: 420, maxWidth: '100%', background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, boxShadow: theme.shadowLift, padding: 18 }, modalHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 10 }, modalActions: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }, alert: { borderRadius: 8, padding: 12, background: theme.blueBg, color: theme.blue, fontWeight: 700 }, alertDanger: { background: theme.redBg, color: theme.red },
   loginShell: { minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24, background: 'linear-gradient(135deg, #F5F7FA, #EEF2F7)', color: '#fff' }, loginEditorial: { display: 'none' }, loginBadge: { display: 'none' }, loginMetricRow: { display: 'none' }, loginCard: { width: 410, maxWidth: 'calc(100vw - 32px)', color: theme.ink, background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 28, boxShadow: theme.shadowLift }, loginLogo: { width: 48, height: 48, borderRadius: 10, background: theme.gold, display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 900, marginBottom: 12 }, loginHint: { marginTop: 12, color: theme.muted, fontSize: 12 },
+  logoPreview: { display: 'flex', alignItems: 'center', gap: 10, minHeight: 36 }, clientShell: { minHeight: '100vh', background: '#F5F7FA' }, clientHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, padding: '16px 24px', background: '#fff', borderBottom: `1px solid ${theme.line}`, boxShadow: theme.shadow }, clientBrand: { display: 'flex', alignItems: 'center', gap: 10 }, clientActions: { display: 'flex', alignItems: 'center', gap: 8 }, clientMain: { display: 'grid', gridTemplateColumns: '300px minmax(0,1fr)', gap: 16, padding: 24 }, clientMatterList: { minWidth: 0 }, clientStatusGrid: { display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }, clientDescription: { color: theme.muted, marginTop: 12 }, profileTooltip: { position: 'fixed', zIndex: 5000, pointerEvents: 'none', width: 260, display: 'grid', gridTemplateColumns: '42px 1fr', gap: 10, background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 12, boxShadow: theme.shadowLift }, tooltipAvatar: { width: 42, height: 42, borderRadius: 10, background: theme.navy600, color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 900 },
 };

@@ -60,11 +60,15 @@ const fileToDataUrl = file => new Promise((resolve, reject) => {
 });
 
 export const login = body => req('POST', '/api/auth/login', body);
+export const clientLogin = body => req('POST', '/api/auth/client-login', body);
 export const register = body => req('POST', '/api/auth/register', body);
 export const getCurrentUser = () => req('GET', '/api/auth/me');
 export const getUsers = () => req('GET', '/api/auth/users');
 export const deleteUser = id => req('DELETE', `/api/auth/users/${id}`);
 export const globalSearch = q => req('GET', `/api/search?q=${encodeURIComponent(q)}`);
+export const getFirmSettings = () => req('GET', '/api/firm-settings');
+export const updateFirmSettings = data => req('PUT', '/api/firm-settings', data);
+export const getClientDashboard = () => req('GET', '/api/client/dashboard');
 
 export const getClients = () => req('GET', '/api/clients');
 export const createClient = body => req('POST', '/api/clients', body);
