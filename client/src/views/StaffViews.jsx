@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { API_BASE, api, fileToDataUrl, readSession } from '../lib/apiClient.js';
-import { defaultFirmSettings, styles } from '../theme.jsx';
+import { defaultFirmSettings, styles, theme } from '../theme.jsx';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, Skeleton, Stat, statusTone, Sub, Table } from '../components/ui.jsx';
 import MatterDocuments from '../components/MatterDocuments.jsx';
+import TaskTimer, { taskTimerActive } from '../components/TaskTimer.jsx';
 
 export function Dashboard({ data }) {
   const outstanding = data.invoices.filter(i => i.status === 'Outstanding').reduce((sum, i) => sum + Number(i.amount || 0), 0);
@@ -137,6 +138,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   const emptyEventForm = { title: '', date: '', time: '9:00 AM', type: 'Hearing', location: '', meetingLink: '', attorney: '', prepNote: '' };
   const [eventForm, setEventForm] = useState(emptyEventForm);
   const [note, setNote] = useState('');
+  const [taskTimer, setTaskTimer] = useState(null);
   const selected = data.matters.find(m => m.id === selectedId) || data.matters[0];
 
   useEffect(() => { if (selected?.id) { setSelectedId(selected.id); loadDetail(selected.id); } else { setDetail(null); setSuggestions([]); } }, [selected?.id]);
@@ -237,7 +239,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
                     <button style={styles.primaryButton}>Log time</button>
                   </form>
                   <Sub title="Time entries"><TimeEntryEditorList entries={detail.timeEntries || []} canManage={canManage} editingTime={editingTime} setEditingTime={setEditingTime} saveTimeEntry={saveTimeEntry} confirmDelete={entry => setConfirm({ title: 'Delete time entry?', message: 'Delete this time entry?', onConfirm: () => deleteTimeEntryRecord(entry) })} /></Sub>
-                  <Sub title="Tasks"><TaskEditorList tasks={detail.tasks || []} canManage={canManage} editingTask={editingTask} setEditingTask={setEditingTask} saveTask={saveTask} confirmDelete={task => setConfirm({ title: 'Delete task?', message: 'Delete this task?', onConfirm: () => deleteTaskRecord(task) })} /></Sub>
+                  <Sub title="Tasks"><TaskEditorList tasks={detail.tasks || []} entries={detail.timeEntries || []} matter={detail} canManage={canManage} editingTask={editingTask} setEditingTask={setEditingTask} saveTask={saveTask} taskTimer={taskTimer} setTaskTimer={setTaskTimer} notify={notify} onTimerSaved={async () => { await loadDetail(detail.id); await reload(); }} confirmDelete={task => setConfirm({ title: 'Delete task?', message: 'Delete this task?', onConfirm: () => deleteTaskRecord(task) })} /></Sub>
                   <Sub title="Court appearances">{canManage && <form onSubmit={createEvent} style={{ ...styles.formGrid, marginBottom: 12 }}><Field label="Title"><input required style={styles.input} value={eventForm.title} onChange={e => setEventForm({ ...eventForm, title: e.target.value })} /></Field><Field label="Date"><input required type="date" style={styles.input} value={eventForm.date} onChange={e => setEventForm({ ...eventForm, date: e.target.value })} /></Field><Field label="Time"><input style={styles.input} value={eventForm.time} onChange={e => setEventForm({ ...eventForm, time: e.target.value })} /></Field><Field label="Type"><input style={styles.input} value={eventForm.type} onChange={e => setEventForm({ ...eventForm, type: e.target.value })} /></Field><Field label="Location"><input style={styles.input} value={eventForm.location} onChange={e => setEventForm({ ...eventForm, location: e.target.value })} /></Field><Field label="Meeting Link"><input type="url" placeholder="https://..." style={styles.input} value={eventForm.meetingLink} onChange={e => setEventForm({ ...eventForm, meetingLink: e.target.value })} /></Field><button style={styles.ghostButton}>Schedule event</button></form>}<AppearanceEditorList events={detail.appearances || []} canManage={canManage} editingEvent={editingEvent} setEditingEvent={setEditingEvent} saveEvent={saveEvent} confirmDelete={event => setConfirm({ title: 'Delete appearance?', message: 'Delete this court appearance?', onConfirm: () => deleteEventRecord(event) })} /></Sub>
                   <Sub title="Documents"><MatterDocuments matterId={detail.id} canManage={canManage} notify={notify} /></Sub>
                   <Sub title="Case notes"><form onSubmit={addNote} style={styles.noteForm}><input style={styles.input} value={note} onChange={e => setNote(e.target.value)} placeholder="Add a note" /><button style={styles.ghostButton}>Save note</button></form><Table columns={['Note', 'Author', 'Created']} rows={(detail.notes || []).map(n => [n.content, n.author || '-', n.createdAt ? new Date(n.createdAt).toLocaleString() : '-'])} empty="No notes yet." /></Sub>
@@ -324,20 +326,23 @@ export function Users({ clients = [], notify }) {
   return <div style={styles.splitGrid}><Card title="Create user" hint="Role-based access"><form onSubmit={submit} style={styles.formGrid}><Field label="Full name"><input required style={styles.input} value={form.fullName} onChange={e => setForm({ ...form, fullName: e.target.value })} /></Field><Field label="Email"><input required style={styles.input} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field><Field label="Password"><input required type="password" style={styles.input} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} /></Field><Field label="Role"><select style={styles.input} value={form.role} onChange={e => setForm({ ...form, role: e.target.value, clientId: e.target.value === 'client' ? form.clientId : '' })}><option value="assistant">Assistant</option><option value="advocate">Advocate</option><option value="admin">Admin</option><option value="client">Client</option></select></Field>{form.role === 'client' && <><Field label="Linked Client"><select required style={styles.input} value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })}><option value="">Select client</option>{clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field><div style={styles.formHelper}>Client users can view only the linked client's matters, documents, invoices, and messages. Share credentials manually after creating the account.</div></>}<button style={styles.primaryButton}>Create user</button></form></Card><Card title="Team" hint={`${users.length} users`}><Table columns={['Name', 'Email', 'Role', 'Client']} rows={users.map(u => [u.fullName, u.email, <Badge key={u.id} tone="blue">{u.role}</Badge>, u.clientId ? clients.find(c => c.id === u.clientId)?.name || u.clientId : '-'])} empty="No users found." /></Card></div>;
 }
 
-function TaskEditorList({ tasks, canManage, editingTask, setEditingTask, saveTask, toggle, confirmDelete }) {
+function TaskEditorList({ tasks, entries = [], matter, canManage, editingTask, setEditingTask, saveTask, toggle, confirmDelete, taskTimer, setTaskTimer, notify, onTimerSaved }) {
   if (!tasks.length) return <Empty title="No tasks yet." text="Once records exist, they will appear here." />;
   return (
     <div style={styles.tableWrap}>
       <table style={styles.table}>
-        <thead><tr>{['Task', 'Assignee', 'Due', 'Status', 'Actions'].map(h => <th key={h}>{h}</th>)}</tr></thead>
+        <thead><tr>{['Task', 'Assignee', 'Due', 'Status', 'Timer', 'Actions'].map(h => <th key={h}>{h}</th>)}</tr></thead>
         <tbody>{tasks.map(task => {
           const editing = editingTask?.id === task.id;
+          const taskEntries = entries.filter(entry => entry.taskId === task.id);
+          const isTiming = taskTimerActive(taskTimer, task.id);
           return (
-            <tr key={task.id}>
-              <td>{editing ? <input style={styles.input} value={editingTask.title || ''} onChange={e => setEditingTask({ ...editingTask, title: e.target.value })} /> : task.title}</td>
+            <tr key={task.id} style={{ borderLeft: `4px solid ${isTiming ? theme.green : 'transparent'}`, transition: 'border-color .18s ease, background .18s ease' }}>
+              <td>{editing ? <input style={styles.input} value={editingTask.title || ''} onChange={e => setEditingTask({ ...editingTask, title: e.target.value })} /> : <div style={{ display: 'grid', gap: 3 }}><strong>{task.title}</strong>{taskEntries.length > 0 && <small style={{ color: theme.muted }}>{taskEntries.reduce((sum, entry) => sum + Number(entry.hours || 0), 0).toFixed(2)} hours logged from {taskEntries.length} entr{taskEntries.length === 1 ? 'y' : 'ies'}</small>}</div>}</td>
               <td>{editing ? <input style={styles.input} value={editingTask.assignee || ''} onChange={e => setEditingTask({ ...editingTask, assignee: e.target.value })} /> : task.assignee || '-'}</td>
               <td>{editing ? <input type="date" style={styles.input} value={editingTask.dueDate || ''} onChange={e => setEditingTask({ ...editingTask, dueDate: e.target.value })} /> : task.dueDate || '-'}</td>
               <td><Badge tone={task.completed ? 'green' : 'amber'}>{task.completed ? 'Done' : 'Open'}</Badge></td>
+              <td>{canManage && matter ? <TaskTimer task={{ ...task, timeEntries: taskEntries }} matterId={matter.id} matterRate={matter.billingRate || 15000} timer={taskTimer} setTimer={setTaskTimer} notify={notify} onSaved={onTimerSaved} /> : '-'}</td>
               <td>{canManage ? editing ? <ActionGroup actions={[['Save', () => saveTask(task, editingTask)], ['Cancel', () => setEditingTask(null)]]} /> : <ActionGroup actions={[[task.completed ? 'Reopen' : 'Complete', () => toggle ? toggle(task) : saveTask(task, { completed: !task.completed })], ['Edit', () => setEditingTask({ ...task })], ['Delete', () => confirmDelete(task)]]} /> : '-'}</td>
             </tr>
           );
@@ -383,7 +388,7 @@ function TimeEntryEditorList({ entries, canManage, editingTime, setEditingTime, 
           return (
             <tr key={entry.id}>
               <td>{editing ? <input type="date" style={styles.input} value={editingTime.date || ''} onChange={e => setEditingTime({ ...editingTime, date: e.target.value })} /> : entry.date || '-'}</td>
-              <td>{editing ? <input style={styles.input} value={editingTime.description || ''} onChange={e => setEditingTime({ ...editingTime, description: e.target.value })} /> : entry.description || entry.activity || '-'}</td>
+              <td>{editing ? <input style={styles.input} value={editingTime.description || ''} onChange={e => setEditingTime({ ...editingTime, description: e.target.value })} /> : <span>{entry.description || entry.activity || '-'}{entry.taskId ? <small style={{ display: 'block', color: theme.muted }}>Task: {entry.taskId}</small> : null}</span>}</td>
               <td>{editing ? <input type="number" step="0.1" style={styles.input} value={editingTime.hours || 0} onChange={e => setEditingTime({ ...editingTime, hours: Number(e.target.value) })} /> : Number(entry.hours || 0).toFixed(1)}</td>
               <td>{editing ? <input type="number" style={styles.input} value={editingTime.rate || 0} onChange={e => setEditingTime({ ...editingTime, rate: Number(e.target.value) })} /> : kes(entry.rate)}</td>
               <td><Badge tone={entry.billed ? 'green' : 'amber'}>{entry.billed ? 'Billed' : 'Unbilled'}</Badge></td>

@@ -195,6 +195,7 @@ async function initDb() {
   await ensureColumn('matters', 'courtRemindersEnabled', "TEXT DEFAULT 'firm_default'");
   await ensureColumn('matters', 'invoiceRemindersEnabled', "TEXT DEFAULT 'firm_default'");
   await ensureColumn('reminder_logs', 'invoiceId', 'TEXT');
+  await ensureColumn('time_entries', 'taskId', 'TEXT');
   await seedReminderTemplates();
 
   const userCount = await get('SELECT COUNT(*) AS count FROM users');
@@ -848,11 +849,29 @@ app.patch('/api/tasks/:id', requireAdvocateOrAdmin, async (req, res) => { await 
 app.delete('/api/tasks/:id', requireAdvocateOrAdmin, async (req, res) => { const task = await get('SELECT * FROM tasks WHERE id=?', [req.params.id]); await run('DELETE FROM tasks WHERE id=?', [req.params.id]); await logAudit(req, 'delete', 'task', req.params.id, `Deleted task ${task?.title || req.params.id}`); res.json({ id: req.params.id, deleted: true }); });
 
 app.get('/api/time-entries', requireStaff, async (req, res) => res.json(await all('SELECT * FROM time_entries ORDER BY date DESC')));
-app.post('/api/time-entries', requireStaff, async (req, res) => { const id = genId('TIME'); await run('INSERT INTO time_entries (id,matterId,attorney,date,hours,activity,description,rate,billed) VALUES (?,?,?,?,?,?,?,?,?)', [id, req.body.matterId, req.body.attorney || req.user.fullName || '', req.body.date || today(), Number(req.body.hours || 0), req.body.activity || '', req.body.description || '', Number(req.body.rate || 0), req.body.billed ? 1 : 0]); const entry = await get('SELECT * FROM time_entries WHERE id=?', [id]); await logAudit(req, 'create', 'time_entry', id, `Logged ${entry.hours} hour(s) for matter ${entry.matterId}`); res.json(entry); });
+app.post('/api/time-entries', requireStaff, async (req, res) => {
+  const taskId = req.body.taskId || '';
+  if (taskId) {
+    const task = await get('SELECT id,matterId,title FROM tasks WHERE id=?', [taskId]);
+    if (!task) return res.status(400).json({ error: 'Task not found' });
+    if (task.matterId !== req.body.matterId) return res.status(400).json({ error: 'Task does not belong to this matter' });
+  }
+  const id = genId('TIME');
+  await run('INSERT INTO time_entries (id,matterId,taskId,attorney,date,hours,activity,description,rate,billed) VALUES (?,?,?,?,?,?,?,?,?,?)', [id, req.body.matterId, taskId, req.body.attorney || req.user.fullName || '', req.body.date || today(), Number(req.body.hours || 0), req.body.activity || '', req.body.description || '', Number(req.body.rate || 0), req.body.billed ? 1 : 0]);
+  const entry = await get('SELECT * FROM time_entries WHERE id=?', [id]);
+  await logAudit(req, 'create', 'time_entry', id, `Logged ${entry.hours} hour(s) for matter ${entry.matterId}${entry.taskId ? ` task ${entry.taskId}` : ''}`);
+  res.json(entry);
+});
 app.patch('/api/time-entries/:id', requireAdvocateOrAdmin, async (req, res) => {
-  const fields = ['matterId','attorney','date','hours','activity','description','rate','billed'];
+  const fields = ['matterId','taskId','attorney','date','hours','activity','description','rate','billed'];
   const updates = fields.filter(f => req.body[f] !== undefined);
   if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
+  if (req.body.taskId) {
+    const matterId = req.body.matterId || (await get('SELECT matterId FROM time_entries WHERE id=?', [req.params.id]))?.matterId;
+    const task = await get('SELECT id,matterId FROM tasks WHERE id=?', [req.body.taskId]);
+    if (!task) return res.status(400).json({ error: 'Task not found' });
+    if (task.matterId !== matterId) return res.status(400).json({ error: 'Task does not belong to this matter' });
+  }
   await run(`UPDATE time_entries SET ${updates.map(f => `${f}=?`).join(',')} WHERE id=?`, [...updates.map(f => ['hours','rate'].includes(f) ? Number(req.body[f] || 0) : f === 'billed' ? (req.body[f] ? 1 : 0) : req.body[f]), req.params.id]);
   const entry = await get('SELECT * FROM time_entries WHERE id=?', [req.params.id]);
   if (entry) await logAudit(req, req.body.billed !== undefined ? 'bill_toggle' : 'update', 'time_entry', req.params.id, `${req.body.billed !== undefined ? (entry.billed ? 'Marked billed' : 'Marked unbilled') : 'Updated'} time entry for matter ${entry.matterId}`);
