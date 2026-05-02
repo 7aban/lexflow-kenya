@@ -42,34 +42,36 @@ export default function LoginPage({ firm, onLogin }) {
     }
   }
 
+  const modeCopy = mode === 'client'
+    ? { title: 'Client Portal', hint: 'Access your case files, notices, invoices and shared documents.', placeholder: 'client@example.com', button: 'Enter client portal' }
+    : { title: 'Welcome back', hint: 'Enter your advocate credentials to manage the firm workspace.', placeholder: 'admin@lexflow.co.ke', button: 'Sign in securely' };
+
   return (
     <div style={{ ...styles.loginShell, '--lf-primary': firm?.primaryColor || theme.navy800, '--lf-accent': firm?.accentColor || theme.gold }}>
       <StyleTag />
-      <div style={styles.loginEditorial}>
-        <div style={styles.loginBadge}>Kenyan law practice OS</div>
-        <h1>Move matters from intake to invoice with calm control.</h1>
-        <p>{firmName} brings clients, matters, deadlines, billing and documents into one focused workspace for modern chambers.</p>
-        <div style={styles.loginMetricRow}>
-          <div><strong>LSK</strong><span>ready reports</span></div>
-          <div><strong>16%</strong><span>VAT invoices</span></div>
-          <div><strong>JWT</strong><span>secure access</span></div>
-        </div>
-      </div>
       <form onSubmit={submit} style={styles.loginCard}>
-        <div style={styles.loginLogo}>{firm?.logo ? <img src={firm.logo} alt={`${firmName} logo`} style={styles.logoImage} /> : '⚖'}</div>
-        <h2>{mode === 'client' ? 'Client Portal' : 'Welcome back'}</h2>
-        <p>{mode === 'client' ? `Access your ${firmName} matter portal.` : `Sign in to your ${firmName} workspace.`}</p>
+        <div style={{ display: 'grid', placeItems: 'center', textAlign: 'center', gap: 8 }}>
+          <div style={styles.loginLogo}>{firm?.logo ? <img src={firm.logo} alt={`${firmName} logo`} style={styles.logoImage} /> : 'LF'}</div>
+          <div>
+            <h1 style={{ margin: 0, fontSize: 24, color: theme.ink }}>{firmName}</h1>
+            <p style={{ margin: '5px 0 0', color: theme.muted }}>{modeCopy.hint}</p>
+          </div>
+        </div>
         <div style={styles.loginModeSwitch} role="tablist" aria-label="Login type">
           <button type="button" onClick={() => setMode('staff')} style={{ ...styles.loginModeButton, ...(mode === 'staff' ? styles.loginModeActive : {}) }}>Staff Login</button>
           <button type="button" onClick={() => setMode('client')} style={{ ...styles.loginModeButton, ...(mode === 'client' ? styles.loginModeActive : {}) }}>Client Portal</button>
         </div>
+        <h2 style={{ margin: '14px 0 4px', fontSize: 18 }}>{modeCopy.title}</h2>
         {error && <Alert tone="danger">{error}</Alert>}
-        <Field label="Email"><input style={styles.input} value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" /></Field>
-        <Field label="Password"><input style={styles.input} type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" /></Field>
-        <button disabled={busy} style={{ ...styles.primaryButton, width: '100%', marginTop: 16 }}>{busy ? 'Signing in...' : mode === 'client' ? 'Enter client portal' : 'Sign in securely'}</button>
+        <Field label="Email">
+          <input style={styles.input} value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" placeholder={modeCopy.placeholder} />
+        </Field>
+        <Field label="Password">
+          <input style={styles.input} type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" placeholder={mode === 'client' ? 'Portal password' : 'Workspace password'} />
+        </Field>
+        <button disabled={busy} style={{ ...styles.primaryButton, width: '100%', marginTop: 16 }}>{busy ? 'Signing in...' : modeCopy.button}</button>
         {mode === 'staff' && <div style={styles.loginHint}>admin@lexflow.co.ke / admin123</div>}
       </form>
     </div>
   );
 }
-

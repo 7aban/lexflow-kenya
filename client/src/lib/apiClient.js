@@ -80,3 +80,8 @@ export function getAuditLogs(params = {}) {
   return api(`/audit-logs${suffix}`);
 }
 
+export const getNotices = () => api('/notices');
+export const createNotice = data => api('/notices', { method: 'POST', body: data });
+export const deleteNotice = id => api(`/notices/${id}`, { method: 'DELETE' });
+export const uploadPaymentProof = data => api('/payment-proofs', { method: 'POST', body: data });
+

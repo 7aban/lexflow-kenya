@@ -69,10 +69,13 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS invoice_items (id TEXT PRIMARY KEY, invoiceId TEXT NOT NULL, timeEntryId TEXT, date TEXT, description TEXT, hours REAL DEFAULT 0, rate REAL DEFAULT 0, amount REAL DEFAULT 0)`);
   await run(`CREATE TABLE IF NOT EXISTS integrations_log (id TEXT PRIMARY KEY, type TEXT NOT NULL, matterId TEXT, clientId TEXT, recipient TEXT, message TEXT, status TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS firm_settings (id TEXT PRIMARY KEY, name TEXT, logo TEXT, primaryColor TEXT, accentColor TEXT, websiteURL TEXT, email TEXT, phone TEXT, address TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS firm_notices (id TEXT PRIMARY KEY, title TEXT, content TEXT, createdAt TEXT, createdBy TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS payment_proofs (id TEXT PRIMARY KEY, invoiceId TEXT, matterId TEXT, clientId TEXT, method TEXT, reference TEXT, amount REAL DEFAULT 0, note TEXT, fileName TEXT, mimeType TEXT, size TEXT, content BLOB, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, userId TEXT, userName TEXT, role TEXT, action TEXT, entityType TEXT, entityId TEXT, summary TEXT, createdAt TEXT)`);
 
   await ensureClientUserSupport();
   await ensureColumn('appearances', 'meetingLink', 'TEXT');
+  await ensureColumn('documents', 'source', "TEXT DEFAULT 'firm'");
 
   const userCount = await get('SELECT COUNT(*) AS count FROM users');
   if (!userCount.count) {
@@ -136,6 +139,7 @@ app.post('/api/auth/client-login', async (req, res) => {
 });
 
 app.get('/api/firm-settings', async (req, res) => res.json(await getFirmSettings()));
+app.get('/api/notices', async (req, res) => res.json(await all('SELECT * FROM firm_notices ORDER BY createdAt DESC')));
 app.put('/api/firm-settings', authenticate, requireAdmin, async (req, res) => {
   const settings = { ...defaultFirmSettings, ...req.body, id: 'default' };
   await run(`INSERT INTO firm_settings (id,name,logo,primaryColor,accentColor,websiteURL,email,phone,address)
@@ -189,6 +193,21 @@ app.get('/api/audit-logs', requireAdmin, async (req, res) => {
   const rows = await all(`SELECT * FROM audit_logs ${where} ORDER BY createdAt DESC LIMIT ? OFFSET ?`, [...params, limit, offset]);
   const countRow = await get(`SELECT COUNT(*) count FROM audit_logs ${where}`, params);
   res.json({ rows, total: countRow.count, limit, offset });
+});
+
+app.post('/api/notices', requireAdmin, async (req, res) => {
+  const { title, content } = req.body;
+  if (!title || !content) return res.status(400).json({ error: 'title and content are required' });
+  const id = genId('NOTICE');
+  await run('INSERT INTO firm_notices (id,title,content,createdAt,createdBy) VALUES (?,?,?,?,?)', [id, title, content, new Date().toISOString(), req.user.fullName || 'Admin']);
+  await logAudit(req, 'create', 'notice', id, `Created firm notice ${title}`);
+  res.json(await get('SELECT * FROM firm_notices WHERE id=?', [id]));
+});
+app.delete('/api/notices/:id', requireAdmin, async (req, res) => {
+  const notice = await get('SELECT * FROM firm_notices WHERE id=?', [req.params.id]);
+  await run('DELETE FROM firm_notices WHERE id=?', [req.params.id]);
+  await logAudit(req, 'delete', 'notice', req.params.id, `Deleted firm notice ${notice?.title || req.params.id}`);
+  res.json({ id: req.params.id, deleted: true });
 });
 
 app.get('/api/dashboard', requireStaff, async (req, res) => {
@@ -245,8 +264,8 @@ app.get('/api/matters/:id', async (req, res) => {
   const [tasks, timeEntries, documents, notes, invoices, appearances] = await Promise.all([
     all('SELECT * FROM tasks WHERE matterId=? ORDER BY dueDate', [req.params.id]),
     all('SELECT * FROM time_entries WHERE matterId=? ORDER BY date DESC', [req.params.id]),
-    all('SELECT id,matterId,name,type,mimeType,date,size FROM documents WHERE matterId=? ORDER BY date DESC', [req.params.id]),
-    all('SELECT * FROM case_notes WHERE matterId=? ORDER BY createdAt DESC', [req.params.id]),
+    all('SELECT id,matterId,name,type,mimeType,date,size,source FROM documents WHERE matterId=? ORDER BY date DESC', [req.params.id]),
+    req.user.role === 'client' ? Promise.resolve([]) : all('SELECT * FROM case_notes WHERE matterId=? ORDER BY createdAt DESC', [req.params.id]),
     all('SELECT * FROM invoices WHERE matterId=? ORDER BY date DESC', [req.params.id]),
     all('SELECT * FROM appearances WHERE matterId=? ORDER BY date', [req.params.id])
   ]);
@@ -329,6 +348,7 @@ async function deleteMatterCascade(matterId) {
   await run('DELETE FROM documents WHERE matterId=?', [matterId]);
   await run('DELETE FROM case_notes WHERE matterId=?', [matterId]);
   await run('DELETE FROM integrations_log WHERE matterId=?', [matterId]);
+  await run('DELETE FROM payment_proofs WHERE matterId=?', [matterId]);
   await run('DELETE FROM matters WHERE id=?', [matterId]);
 }
 app.delete('/api/matters/:id', requireAdvocateOrAdmin, async (req, res) => {
@@ -378,22 +398,30 @@ app.patch('/api/appearances/:id', requireAdvocateOrAdmin, async (req, res) => {
 });
 app.delete('/api/appearances/:id', requireAdvocateOrAdmin, async (req, res) => { const event = await get('SELECT * FROM appearances WHERE id=?', [req.params.id]); await run('DELETE FROM appearances WHERE id=?', [req.params.id]); await logAudit(req, 'delete', 'appearance', req.params.id, `Deleted appearance ${event?.title || event?.type || req.params.id}`); res.json({ id: req.params.id, deleted: true }); });
 
-app.post('/api/matters/:id/documents', requireAdvocateOrAdmin, async (req, res) => {
+app.post('/api/matters/:id/documents', async (req, res) => {
+  if (req.user.role === 'client') {
+    if (!(await canAccessMatter(req, req.params.id))) return res.status(403).json({ error: 'Matter access denied' });
+  } else if (!['advocate', 'admin'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Advocate or admin access required' });
+  }
   const { name, mimeType, data } = req.body;
   if (!name || !data) return res.status(400).json({ error: 'name and data are required' });
   const allowed = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
-  if (!allowed.includes(mimeType)) return res.status(400).json({ error: 'Only PDF and Word documents are supported' });
+  const imageAllowed = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+  if (![...allowed, ...imageAllowed].includes(mimeType)) return res.status(400).json({ error: 'Only PDF, Word and image documents are supported' });
   const id = genId('DOC');
   const buffer = Buffer.from(String(data).split(',').pop(), 'base64');
-  await run('INSERT INTO documents (id,matterId,name,type,mimeType,date,size,content) VALUES (?,?,?,?,?,?,?,?)', [id, req.params.id, name.replace(/[^\w .-]/g, '_'), mimeType.includes('pdf') ? 'PDF' : 'Word', mimeType, today(), `${Math.max(1, Math.round(buffer.length / 1024))} KB`, buffer]);
-  const doc = await get('SELECT id,matterId,name,type,mimeType,date,size FROM documents WHERE id=?', [id]);
+  const source = req.user.role === 'client' ? 'client' : 'firm';
+  const type = imageAllowed.includes(mimeType) ? 'Image' : mimeType.includes('pdf') ? 'PDF' : 'Word';
+  await run('INSERT INTO documents (id,matterId,name,type,mimeType,date,size,content,source) VALUES (?,?,?,?,?,?,?,?,?)', [id, req.params.id, name.replace(/[^\w .-]/g, '_'), type, mimeType, today(), `${Math.max(1, Math.round(buffer.length / 1024))} KB`, buffer, source]);
+  const doc = await get('SELECT id,matterId,name,type,mimeType,date,size,source FROM documents WHERE id=?', [id]);
   await logAudit(req, 'upload', 'document', id, `Uploaded document ${doc.name}`);
   res.json(doc);
 });
 app.get('/api/documents/:id/download', async (req, res) => { const doc = await get('SELECT * FROM documents WHERE id=?', [req.params.id]); if (!doc) return res.status(404).json({ error: 'Document not found' }); if (!(await canAccessMatter(req, doc.matterId))) return res.status(403).json({ error: 'Document access denied' }); res.setHeader('Content-Type', doc.mimeType || 'application/octet-stream'); res.setHeader('Content-Disposition', `attachment; filename="${doc.name}"`); res.send(doc.content); });
 app.delete('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => { const doc = await get('SELECT id,name,matterId FROM documents WHERE id=?', [req.params.id]); await run('DELETE FROM documents WHERE id=?', [req.params.id]); await logAudit(req, 'delete', 'document', req.params.id, `Deleted document ${doc?.name || req.params.id}`); res.json({ id: req.params.id, deleted: true }); });
 
-app.get('/api/matters/:id/notes', async (req, res) => { if (!(await canAccessMatter(req, req.params.id))) return res.status(403).json({ error: 'Matter access denied' }); res.json(await all('SELECT * FROM case_notes WHERE matterId=? ORDER BY createdAt DESC', [req.params.id])); });
+app.get('/api/matters/:id/notes', async (req, res) => { if (!(await canAccessMatter(req, req.params.id))) return res.status(403).json({ error: 'Matter access denied' }); if (req.user.role === 'client') return res.json([]); res.json(await all('SELECT * FROM case_notes WHERE matterId=? ORDER BY createdAt DESC', [req.params.id])); });
 app.post('/api/matters/:id/notes', async (req, res) => { if (!(await canAccessMatter(req, req.params.id))) return res.status(403).json({ error: 'Matter access denied' }); const id = genId('NOTE'); await run('INSERT INTO case_notes (id,matterId,content,author,createdAt) VALUES (?,?,?,?,?)', [id, req.params.id, req.body.content, req.user.role === 'client' ? req.user.fullName : (req.body.author || req.user.fullName || 'Unknown'), new Date().toISOString()]); res.json(await get('SELECT * FROM case_notes WHERE id=?', [id])); });
 
 app.get('/api/invoices', async (req, res) => {
@@ -485,11 +513,42 @@ app.get('/api/client/dashboard', async (req, res) => {
   const matters = await all('SELECT m.*, c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.clientId=? ORDER BY m.openDate DESC', [req.user.clientId || '']);
   const matterIds = matters.map(m => m.id);
   const placeholders = matterIds.map(() => '?').join(',');
-  const documents = matterIds.length ? await all(`SELECT id,matterId,name,type,mimeType,date,size FROM documents WHERE matterId IN (${placeholders}) ORDER BY date DESC`, matterIds) : [];
+  const documents = matterIds.length ? await all(`SELECT id,matterId,name,type,mimeType,date,size,source FROM documents WHERE matterId IN (${placeholders}) ORDER BY date DESC`, matterIds) : [];
   const invoices = await all(`SELECT i.*, m.title matterTitle, m.reference FROM invoices i LEFT JOIN matters m ON m.id=i.matterId WHERE i.clientId=? ORDER BY i.date DESC`, [req.user.clientId || '']);
-  const notes = matterIds.length ? await all(`SELECT * FROM case_notes WHERE matterId IN (${placeholders}) ORDER BY createdAt DESC LIMIT 20`, matterIds) : [];
   const appearances = matterIds.length ? await all(`SELECT * FROM appearances WHERE matterId IN (${placeholders}) ORDER BY date`, matterIds) : [];
-  res.json({ client, matters, documents, invoices, notes, appearances });
+  const notices = await all('SELECT * FROM firm_notices ORDER BY createdAt DESC LIMIT 20');
+  const paymentProofs = await all('SELECT id,invoiceId,matterId,clientId,method,reference,amount,note,fileName,mimeType,size,createdAt FROM payment_proofs WHERE clientId=? ORDER BY createdAt DESC', [req.user.clientId || '']);
+  res.json({ client, matters, documents, invoices, notes: [], appearances, notices, paymentProofs });
+});
+
+app.post('/api/payment-proofs', async (req, res) => {
+  if (req.user.role !== 'client') return res.status(403).json({ error: 'Client access required' });
+  const { invoiceId, matterId, method = 'M-PESA', reference, amount, note = '', fileName, mimeType, data } = req.body;
+  if (!matterId || !reference) return res.status(400).json({ error: 'matterId and reference are required' });
+  if (!(await canAccessMatter(req, matterId))) return res.status(403).json({ error: 'Matter access denied' });
+  if (invoiceId) {
+    const invoice = await get('SELECT id,clientId,matterId FROM invoices WHERE id=?', [invoiceId]);
+    if (!invoice || invoice.clientId !== req.user.clientId || invoice.matterId !== matterId) return res.status(403).json({ error: 'Invoice access denied' });
+  }
+  const id = genId('PAY');
+  const buffer = data ? Buffer.from(String(data).split(',').pop(), 'base64') : null;
+  await run('INSERT INTO payment_proofs (id,invoiceId,matterId,clientId,method,reference,amount,note,fileName,mimeType,size,content,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', [
+    id,
+    invoiceId || '',
+    matterId,
+    req.user.clientId || '',
+    method,
+    reference,
+    Number(amount || 0),
+    note,
+    fileName ? fileName.replace(/[^\w .-]/g, '_') : '',
+    mimeType || '',
+    buffer ? `${Math.max(1, Math.round(buffer.length / 1024))} KB` : '',
+    buffer,
+    new Date().toISOString(),
+  ]);
+  await logAudit(req, 'upload', 'payment_proof', id, `Uploaded payment proof ${reference} for matter ${matterId}`);
+  res.json(await get('SELECT id,invoiceId,matterId,clientId,method,reference,amount,note,fileName,mimeType,size,createdAt FROM payment_proofs WHERE id=?', [id]));
 });
 
 app.get('/api/search', requireStaff, async (req, res) => {
