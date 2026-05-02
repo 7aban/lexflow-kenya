@@ -88,4 +88,10 @@ export const getInvitations = () => api('/invitations');
 export const createInvitation = data => api('/invitations', { method: 'POST', body: data });
 export const verifyInvitation = token => api(`/invitations/${token}`);
 export const acceptInvitation = (token, data) => api(`/invitations/${token}/accept`, { method: 'POST', body: data });
+export const getMatterFolders = matterId => api(`/matters/${matterId}/folders`);
+export const createFolder = (matterId, data) => api(`/matters/${matterId}/folders`, { method: 'POST', body: data });
+export const updateFolder = (folderId, data) => api(`/folders/${folderId}`, { method: 'PATCH', body: data });
+export const deleteFolder = folderId => api(`/folders/${folderId}`, { method: 'DELETE' });
+export const getMatterDocuments = (matterId, folderId = 'all') => api(`/matters/${matterId}/documents${folderId && folderId !== 'all' ? `?folderId=${encodeURIComponent(folderId)}` : ''}`);
+export const moveDocument = (docId, folderId) => api(`/documents/${docId}`, { method: 'PATCH', body: { folderId } });
 

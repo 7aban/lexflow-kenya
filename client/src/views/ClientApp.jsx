@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { API_BASE, api, fileToDataUrl, readSession } from '../lib/apiClient.js';
 import { styles, StyleTag, theme } from '../theme.jsx';
 import { Badge, Card, Empty, Field, kes, Logo, MeetingLink, Skeleton, Stat, statusTone, Table, Toast } from '../components/ui.jsx';
+import MatterDocuments from '../components/MatterDocuments.jsx';
 
 const portalNav = [
   ['Dashboard', 'DB'],
@@ -163,6 +164,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
             payment={payment}
             setPayment={setPayment}
             submitPayment={submitPayment}
+            notify={notify}
           />
         )}
         {!loading && view === 'Notices' && <Notices notices={dashboard.notices} />}
@@ -202,7 +204,7 @@ function ClientDashboard({ data, stats, selectMatter }) {
   );
 }
 
-function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, events, proofs, uploadDoc, uploading, message, setMessage, sendMessage, payment, setPayment, submitPayment }) {
+function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, events, proofs, uploadDoc, uploading, message, setMessage, sendMessage, payment, setPayment, submitPayment, notify }) {
   if (!selected) return <Empty title="No matter selected" text="Your matter details will appear here once the firm shares a file." />;
   return (
     <div style={styles.matterGrid}>
@@ -217,10 +219,7 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
         <Card title="Court appearances" hint="Virtual court links appear on hearing days">
           <Table columns={['Event', 'Date', 'Time', 'Location', 'Virtual Court']} rows={events.map(a => [a.title || a.type || 'Appearance', a.date || '-', a.time || '-', a.location || '-', <MeetingLink key={a.id} event={a} />])} empty="No court dates shared yet." />
         </Card>
-        <Card title="Documents" hint="Download shared documents or upload files for the firm">
-          <input style={styles.file} type="file" accept=".pdf,.doc,.docx,image/*" disabled={uploading} onChange={uploadDoc} />
-          <Table columns={['Name', 'Source', 'Type', 'Size', 'Download']} rows={docs.map(d => [d.name, <Badge key={`${d.id}-source`} tone={d.source === 'client' ? 'green' : 'blue'}>{d.source === 'client' ? 'Shared by you' : 'Firm'}</Badge>, d.type, d.size, <a key={d.id} style={styles.link} href={`${API_BASE}/documents/${d.id}/download?token=${tokenQuery()}`}>Download</a>])} empty="No documents shared yet." />
-        </Card>
+        <MatterDocuments matterId={selected.id} clientMode notify={notify} />
         <Card title="Invoices and payment proof" hint="Upload M-PESA or bank transfer confirmation">
           <Table columns={['Invoice', 'Amount', 'Status', 'PDF']} rows={invoices.map(i => [i.number || i.id, kes(i.amount), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <a key={`${i.id}-pdf`} style={styles.link} href={`${API_BASE}/invoices/${i.id}/pdf?token=${tokenQuery()}`}>PDF</a>])} empty="No invoices shared yet." />
           <form onSubmit={submitPayment} style={{ ...styles.formGrid, marginTop: 14 }}>

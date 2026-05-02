@@ -65,6 +65,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT NOT NULL, completed INTEGER DEFAULT 0, assignee TEXT, dueDate TEXT, auto_generated INTEGER DEFAULT 0)`);
   await run(`CREATE TABLE IF NOT EXISTS time_entries (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, attorney TEXT, date TEXT, hours REAL DEFAULT 0, activity TEXT, description TEXT, rate REAL DEFAULT 0, billed INTEGER DEFAULT 0)`);
   await run(`CREATE TABLE IF NOT EXISTS appearances (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT, date TEXT, time TEXT, type TEXT, location TEXT, meetingLink TEXT, attorney TEXT, prepNote TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS folders (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT NOT NULL, createdBy TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT, type TEXT, mimeType TEXT, date TEXT, size TEXT, content BLOB)`);
   await run(`CREATE TABLE IF NOT EXISTS case_notes (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, content TEXT NOT NULL, author TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS invoices (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, clientId TEXT, number TEXT, date TEXT, amount REAL DEFAULT 0, status TEXT DEFAULT 'Outstanding', dueDate TEXT, description TEXT, source TEXT DEFAULT 'time')`);
@@ -79,6 +80,7 @@ async function initDb() {
   await ensureClientUserSupport();
   await ensureColumn('appearances', 'meetingLink', 'TEXT');
   await ensureColumn('documents', 'source', "TEXT DEFAULT 'firm'");
+  await ensureColumn('documents', 'folderId', 'TEXT');
 
   const userCount = await get('SELECT COUNT(*) AS count FROM users');
   if (!userCount.count) {
@@ -118,6 +120,22 @@ async function logAudit(req, action, entityType, entityId, summary) {
     summary || '',
     new Date().toISOString(),
   ]);
+}
+
+async function clientUploadsFolder(matterId, userId = '') {
+  let folder = await get('SELECT * FROM folders WHERE matterId=? AND lower(name)=lower(?)', [matterId, 'Client Uploads']);
+  if (!folder) {
+    const id = genId('FOL');
+    await run('INSERT INTO folders (id,matterId,name,createdBy,createdAt) VALUES (?,?,?,?,?)', [id, matterId, 'Client Uploads', userId, new Date().toISOString()]);
+    folder = await get('SELECT * FROM folders WHERE id=?', [id]);
+  }
+  return folder;
+}
+
+async function matterFolders(matterId) {
+  const folders = await all(`SELECT f.*, (SELECT COUNT(*) FROM documents d WHERE d.folderId=f.id) documentCount FROM folders f WHERE f.matterId=? ORDER BY CASE WHEN lower(f.name)=lower('Client Uploads') THEN 0 ELSE 1 END, lower(f.name)`, [matterId]);
+  const uncategorised = await get('SELECT COUNT(*) documentCount FROM documents WHERE matterId=? AND (folderId IS NULL OR folderId="")', [matterId]);
+  return [{ id: 'all', matterId, name: 'All Documents', virtual: true }, { id: 'uncategorised', matterId, name: 'Uncategorised', virtual: true, documentCount: uncategorised.documentCount || 0 }, ...folders];
 }
 
 function appBaseUrl(req) {
@@ -353,7 +371,7 @@ app.get('/api/matters/:id', async (req, res) => {
   const [tasks, timeEntries, documents, notes, invoices, appearances] = await Promise.all([
     all('SELECT * FROM tasks WHERE matterId=? ORDER BY dueDate', [req.params.id]),
     all('SELECT * FROM time_entries WHERE matterId=? ORDER BY date DESC', [req.params.id]),
-    all('SELECT id,matterId,name,type,mimeType,date,size,source FROM documents WHERE matterId=? ORDER BY date DESC', [req.params.id]),
+    all('SELECT d.id,d.matterId,d.name,d.type,d.mimeType,d.date,d.size,d.source,d.folderId,f.name folderName FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.matterId=? ORDER BY d.date DESC', [req.params.id]),
     req.user.role === 'client' ? Promise.resolve([]) : all('SELECT * FROM case_notes WHERE matterId=? ORDER BY createdAt DESC', [req.params.id]),
     all('SELECT * FROM invoices WHERE matterId=? ORDER BY date DESC', [req.params.id]),
     all('SELECT * FROM appearances WHERE matterId=? ORDER BY date', [req.params.id])
@@ -435,6 +453,7 @@ async function deleteMatterCascade(matterId) {
   await run('DELETE FROM time_entries WHERE matterId=?', [matterId]);
   await run('DELETE FROM appearances WHERE matterId=?', [matterId]);
   await run('DELETE FROM documents WHERE matterId=?', [matterId]);
+  await run('DELETE FROM folders WHERE matterId=?', [matterId]);
   await run('DELETE FROM case_notes WHERE matterId=?', [matterId]);
   await run('DELETE FROM integrations_log WHERE matterId=?', [matterId]);
   await run('DELETE FROM payment_proofs WHERE matterId=?', [matterId]);
@@ -487,6 +506,53 @@ app.patch('/api/appearances/:id', requireAdvocateOrAdmin, async (req, res) => {
 });
 app.delete('/api/appearances/:id', requireAdvocateOrAdmin, async (req, res) => { const event = await get('SELECT * FROM appearances WHERE id=?', [req.params.id]); await run('DELETE FROM appearances WHERE id=?', [req.params.id]); await logAudit(req, 'delete', 'appearance', req.params.id, `Deleted appearance ${event?.title || event?.type || req.params.id}`); res.json({ id: req.params.id, deleted: true }); });
 
+app.get('/api/matters/:id/folders', async (req, res) => {
+  if (!(await canAccessMatter(req, req.params.id))) return res.status(403).json({ error: 'Matter access denied' });
+  res.json(await matterFolders(req.params.id));
+});
+app.post('/api/matters/:id/folders', requireAdvocateOrAdmin, async (req, res) => {
+  const name = String(req.body.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Folder name is required' });
+  const matter = await get('SELECT id FROM matters WHERE id=?', [req.params.id]);
+  if (!matter) return res.status(404).json({ error: 'Matter not found' });
+  const existing = await get('SELECT id FROM folders WHERE matterId=? AND lower(name)=lower(?)', [req.params.id, name]);
+  if (existing) return res.status(400).json({ error: 'Folder already exists for this matter' });
+  const id = genId('FOL');
+  await run('INSERT INTO folders (id,matterId,name,createdBy,createdAt) VALUES (?,?,?,?,?)', [id, req.params.id, name, req.user.userId || '', new Date().toISOString()]);
+  await logAudit(req, 'create', 'folder', id, `Created folder ${name}`);
+  res.json(await get('SELECT * FROM folders WHERE id=?', [id]));
+});
+app.patch('/api/folders/:id', requireAdvocateOrAdmin, async (req, res) => {
+  const name = String(req.body.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Folder name is required' });
+  const folder = await get('SELECT * FROM folders WHERE id=?', [req.params.id]);
+  if (!folder) return res.status(404).json({ error: 'Folder not found' });
+  const existing = await get('SELECT id FROM folders WHERE matterId=? AND lower(name)=lower(?) AND id<>?', [folder.matterId, name, req.params.id]);
+  if (existing) return res.status(400).json({ error: 'Folder already exists for this matter' });
+  await run('UPDATE folders SET name=? WHERE id=?', [name, req.params.id]);
+  await logAudit(req, 'update', 'folder', req.params.id, `Renamed folder ${folder.name} to ${name}`);
+  res.json(await get('SELECT * FROM folders WHERE id=?', [req.params.id]));
+});
+app.delete('/api/folders/:id', requireAdvocateOrAdmin, async (req, res) => {
+  const folder = await get('SELECT * FROM folders WHERE id=?', [req.params.id]);
+  if (!folder) return res.status(404).json({ error: 'Folder not found' });
+  const count = await get('SELECT COUNT(*) count FROM documents WHERE folderId=?', [req.params.id]);
+  if (count.count) return res.status(400).json({ error: 'Folder must be empty before it can be deleted' });
+  await run('DELETE FROM folders WHERE id=?', [req.params.id]);
+  await logAudit(req, 'delete', 'folder', req.params.id, `Deleted folder ${folder.name}`);
+  res.json({ id: req.params.id, deleted: true });
+});
+app.get('/api/matters/:id/documents', async (req, res) => {
+  if (!(await canAccessMatter(req, req.params.id))) return res.status(403).json({ error: 'Matter access denied' });
+  const folderId = req.query.folderId || '';
+  const params = [req.params.id];
+  let where = 'd.matterId=?';
+  if (folderId && folderId !== 'all') {
+    if (folderId === 'uncategorised') where += ' AND (d.folderId IS NULL OR d.folderId="")';
+    else { where += ' AND d.folderId=?'; params.push(folderId); }
+  }
+  res.json(await all(`SELECT d.id,d.matterId,d.name,d.type,d.mimeType,d.date,d.size,d.source,d.folderId,f.name folderName FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE ${where} ORDER BY d.date DESC, d.name`, params));
+});
 app.post('/api/matters/:id/documents', async (req, res) => {
   if (req.user.role === 'client') {
     if (!(await canAccessMatter(req, req.params.id))) return res.status(403).json({ error: 'Matter access denied' });
@@ -501,13 +567,34 @@ app.post('/api/matters/:id/documents', async (req, res) => {
   const id = genId('DOC');
   const buffer = Buffer.from(String(data).split(',').pop(), 'base64');
   const source = req.user.role === 'client' ? 'client' : 'firm';
+  let folderId = '';
+  if (req.user.role === 'client') {
+    const folder = await clientUploadsFolder(req.params.id, req.user.userId || '');
+    folderId = folder.id;
+  } else if (req.body.folderId && req.body.folderId !== 'uncategorised' && req.body.folderId !== 'all') {
+    const folder = await get('SELECT id FROM folders WHERE id=? AND matterId=?', [req.body.folderId, req.params.id]);
+    if (!folder) return res.status(400).json({ error: 'Folder not found for this matter' });
+    folderId = folder.id;
+  }
   const type = imageAllowed.includes(mimeType) ? 'Image' : mimeType.includes('pdf') ? 'PDF' : 'Word';
-  await run('INSERT INTO documents (id,matterId,name,type,mimeType,date,size,content,source) VALUES (?,?,?,?,?,?,?,?,?)', [id, req.params.id, name.replace(/[^\w .-]/g, '_'), type, mimeType, today(), `${Math.max(1, Math.round(buffer.length / 1024))} KB`, buffer, source]);
-  const doc = await get('SELECT id,matterId,name,type,mimeType,date,size,source FROM documents WHERE id=?', [id]);
+  await run('INSERT INTO documents (id,matterId,name,type,mimeType,date,size,content,source,folderId) VALUES (?,?,?,?,?,?,?,?,?,?)', [id, req.params.id, name.replace(/[^\w .-]/g, '_'), type, mimeType, today(), `${Math.max(1, Math.round(buffer.length / 1024))} KB`, buffer, source, folderId || null]);
+  const doc = await get('SELECT d.id,d.matterId,d.name,d.type,d.mimeType,d.date,d.size,d.source,d.folderId,f.name folderName FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=?', [id]);
   await logAudit(req, 'upload', 'document', id, `Uploaded document ${doc.name}`);
   res.json(doc);
 });
 app.get('/api/documents/:id/download', async (req, res) => { const doc = await get('SELECT * FROM documents WHERE id=?', [req.params.id]); if (!doc) return res.status(404).json({ error: 'Document not found' }); if (!(await canAccessMatter(req, doc.matterId))) return res.status(403).json({ error: 'Document access denied' }); res.setHeader('Content-Type', doc.mimeType || 'application/octet-stream'); res.setHeader('Content-Disposition', `attachment; filename="${doc.name}"`); res.send(doc.content); });
+app.patch('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
+  const doc = await get('SELECT * FROM documents WHERE id=?', [req.params.id]);
+  if (!doc) return res.status(404).json({ error: 'Document not found' });
+  let folderId = req.body.folderId || '';
+  if (folderId && folderId !== 'uncategorised' && folderId !== 'all') {
+    const folder = await get('SELECT id FROM folders WHERE id=? AND matterId=?', [folderId, doc.matterId]);
+    if (!folder) return res.status(400).json({ error: 'Folder not found for this matter' });
+  } else folderId = null;
+  await run('UPDATE documents SET folderId=? WHERE id=?', [folderId, req.params.id]);
+  await logAudit(req, 'update', 'document', req.params.id, `Moved document ${doc.name}`);
+  res.json(await get('SELECT d.id,d.matterId,d.name,d.type,d.mimeType,d.date,d.size,d.source,d.folderId,f.name folderName FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=?', [req.params.id]));
+});
 app.delete('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => { const doc = await get('SELECT id,name,matterId FROM documents WHERE id=?', [req.params.id]); await run('DELETE FROM documents WHERE id=?', [req.params.id]); await logAudit(req, 'delete', 'document', req.params.id, `Deleted document ${doc?.name || req.params.id}`); res.json({ id: req.params.id, deleted: true }); });
 
 app.get('/api/matters/:id/notes', async (req, res) => { if (!(await canAccessMatter(req, req.params.id))) return res.status(403).json({ error: 'Matter access denied' }); if (req.user.role === 'client') return res.json([]); res.json(await all('SELECT * FROM case_notes WHERE matterId=? ORDER BY createdAt DESC', [req.params.id])); });
@@ -602,7 +689,7 @@ app.get('/api/client/dashboard', async (req, res) => {
   const matters = await all('SELECT m.*, c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.clientId=? ORDER BY m.openDate DESC', [req.user.clientId || '']);
   const matterIds = matters.map(m => m.id);
   const placeholders = matterIds.map(() => '?').join(',');
-  const documents = matterIds.length ? await all(`SELECT id,matterId,name,type,mimeType,date,size,source FROM documents WHERE matterId IN (${placeholders}) ORDER BY date DESC`, matterIds) : [];
+  const documents = matterIds.length ? await all(`SELECT d.id,d.matterId,d.name,d.type,d.mimeType,d.date,d.size,d.source,d.folderId,f.name folderName FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.matterId IN (${placeholders}) ORDER BY d.date DESC`, matterIds) : [];
   const invoices = await all(`SELECT i.*, m.title matterTitle, m.reference FROM invoices i LEFT JOIN matters m ON m.id=i.matterId WHERE i.clientId=? ORDER BY i.date DESC`, [req.user.clientId || '']);
   const appearances = matterIds.length ? await all(`SELECT * FROM appearances WHERE matterId IN (${placeholders}) ORDER BY date`, matterIds) : [];
   const notices = await all('SELECT * FROM firm_notices ORDER BY createdAt DESC LIMIT 20');
