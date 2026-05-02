@@ -1,11 +1,31 @@
-const BASE = 'http://localhost:5000';
+const BASE = '';
+const AUTH_FAILURE_MESSAGE = 'Session expired. Please log in again.';
+
+const clearAuthStorage = () => {
+  localStorage.removeItem('lexflowSession');
+  localStorage.removeItem('lexflowToken');
+  localStorage.removeItem('token');
+};
+
+const notifyAuthFailure = () => {
+  window.dispatchEvent(new CustomEvent('lexflow:auth-failure', {
+    detail: { message: AUTH_FAILURE_MESSAGE },
+  }));
+  window.dispatchEvent(new Event('lexflow:unauthorized'));
+};
+
+const authExpiredError = () => {
+  const error = new Error(AUTH_FAILURE_MESSAGE);
+  error.isAuthExpired = true;
+  return error;
+};
 
 export const getStoredToken = () => {
   try {
     const session = JSON.parse(localStorage.getItem('lexflowSession') || 'null');
-    return session?.token || localStorage.getItem('lexflowToken') || '';
+    return session?.token || localStorage.getItem('lexflowToken') || localStorage.getItem('token') || '';
   } catch {
-    return localStorage.getItem('lexflowToken') || '';
+    return localStorage.getItem('lexflowToken') || localStorage.getItem('token') || '';
   }
 };
 
@@ -17,9 +37,9 @@ async function req(method, path, body) {
   const res = await fetch(`${BASE}${path}`, opts);
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) {
-    localStorage.removeItem('lexflowSession');
-    localStorage.removeItem('lexflowToken');
-    window.dispatchEvent(new Event('lexflow:unauthorized'));
+    clearAuthStorage();
+    notifyAuthFailure();
+    throw authExpiredError();
   }
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
@@ -78,9 +98,9 @@ export const getInvoicePdf = async id => {
   const token = getStoredToken();
   const res = await fetch(`${BASE}/api/invoices/${id}/pdf`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
   if (res.status === 401) {
-    localStorage.removeItem('lexflowSession');
-    localStorage.removeItem('lexflowToken');
-    window.dispatchEvent(new Event('lexflow:unauthorized'));
+    clearAuthStorage();
+    notifyAuthFailure();
+    throw authExpiredError();
   }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));

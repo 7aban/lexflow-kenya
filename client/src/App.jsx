@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 const API_BASE = '/api';
+const AUTH_FAILURE_MESSAGE = 'Session expired. Please log in again.';
 
 const theme = {
   navy900: '#081225',
@@ -39,21 +40,38 @@ function readSession() {
   try {
     const session = JSON.parse(localStorage.getItem('lexflowSession') || 'null');
     if (session?.token) return session;
-    const token = localStorage.getItem('lexflowToken');
+    const token = localStorage.getItem('lexflowToken') || localStorage.getItem('token');
     return token ? { token, user: null } : null;
   } catch {
-    return null;
+    const token = localStorage.getItem('lexflowToken') || localStorage.getItem('token');
+    return token ? { token, user: null } : null;
   }
 }
 
 function saveSession(session) {
   localStorage.setItem('lexflowSession', JSON.stringify(session));
   localStorage.setItem('lexflowToken', session.token);
+  localStorage.setItem('token', session.token);
 }
 
 function clearSession() {
   localStorage.removeItem('lexflowSession');
   localStorage.removeItem('lexflowToken');
+  localStorage.removeItem('token');
+}
+
+function emitAuthFailure() {
+  window.dispatchEvent(new CustomEvent('lexflow:auth-failure', {
+    detail: { message: AUTH_FAILURE_MESSAGE },
+  }));
+}
+
+class AuthExpiredError extends Error {
+  constructor() {
+    super(AUTH_FAILURE_MESSAGE);
+    this.name = 'AuthExpiredError';
+    this.isAuthExpired = true;
+  }
 }
 
 async function api(path, options = {}) {
@@ -70,7 +88,11 @@ async function api(path, options = {}) {
   });
   const type = response.headers.get('content-type') || '';
   const body = type.includes('application/json') ? await response.json().catch(() => ({})) : await response.text();
-  if (response.status === 401) clearSession();
+  if (response.status === 401) {
+    clearSession();
+    emitAuthFailure();
+    throw new AuthExpiredError();
+  }
   if (!response.ok) throw new Error(body?.error || `Request failed (${response.status})`);
   return body;
 }
@@ -98,6 +120,27 @@ export default function App() {
   const canManage = ['admin', 'advocate'].includes(user?.role);
 
   useEffect(() => {
+    function handleAuthFailure(event) {
+      clearSession();
+      setSession(null);
+      setUser(null);
+      setData(initialData);
+      setLoading(false);
+      setToast({
+        type: 'warning',
+        message: event.detail?.message || AUTH_FAILURE_MESSAGE,
+      });
+    }
+
+    window.addEventListener('lexflow:auth-failure', handleAuthFailure);
+    window.addEventListener('lexflow:unauthorized', handleAuthFailure);
+    return () => {
+      window.removeEventListener('lexflow:auth-failure', handleAuthFailure);
+      window.removeEventListener('lexflow:unauthorized', handleAuthFailure);
+    };
+  }, []);
+
+  useEffect(() => {
     if (authenticated) refresh();
   }, [authenticated]);
 
@@ -115,8 +158,8 @@ export default function App() {
       setUser(currentUser);
       setData({ dashboard, clients, matters, tasks, invoices });
     } catch (err) {
+      if (err?.isAuthExpired) return;
       setToast({ type: 'danger', message: err.message });
-      if (err.message.toLowerCase().includes('auth')) logout();
     } finally {
       setLoading(false);
     }
@@ -136,7 +179,14 @@ export default function App() {
     setData(initialData);
   }
 
-  if (!authenticated) return <LoginPage onLogin={login} />;
+  if (!authenticated) {
+    return (
+      <>
+        <LoginPage onLogin={login} />
+        <Toast toast={toast} onClose={() => setToast(null)} />
+      </>
+    );
+  }
 
   const visibleNav = nav.filter(([label]) => label !== 'Users' || isAdmin);
   const subtitles = {
