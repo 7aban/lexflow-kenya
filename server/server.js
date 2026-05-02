@@ -104,6 +104,7 @@ app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
     const user = await get('SELECT * FROM users WHERE lower(email)=lower(?)', [email || '']);
     if (!user || !(await bcrypt.compare(password || '', user.password || ''))) return res.status(401).json({ error: 'Invalid email or password' });
+    if (user.role === 'client') return res.status(403).json({ error: 'Please use the Client Portal login.' });
     const token = jwt.sign({ userId: user.id, role: user.role, fullName: user.fullName, clientId: user.clientId || '' }, JWT_SECRET, { expiresIn: '8h' });
     res.json({ token, user: { id: user.id, email: user.email, fullName: user.fullName, name: user.fullName, role: user.role, clientId: user.clientId || '' } });
   } catch (err) { res.status(500).json({ error: err.message }); }
