@@ -3,6 +3,7 @@ import { api, API_BASE, AUTH_FAILURE_MESSAGE, clearSession, readSession, saveSes
 import { defaultFirmSettings, styles, StyleTag, theme } from './theme.jsx';
 import { Logo, Skeleton, Toast } from './components/ui.jsx';
 import LoginPage from './components/LoginPage.jsx';
+import AuditLog from './views/AuditLog.jsx';
 import ClientApp from './views/ClientApp.jsx';
 import { Clients, Dashboard, FirmSettings, Invoices, Matters, Tasks, Users } from './views/StaffViews.jsx';
 
@@ -15,6 +16,7 @@ const nav = [
   ['Invoices', 'IN'],
   ['Firm Settings', 'FS'],
   ['Users', 'US'],
+  ['Audit Log', 'AL'],
 ];
 const legalResources = [
   ['eFiling CTS Judiciary', 'https://efiling.court.go.ke/auth', 'CT'],
@@ -133,7 +135,7 @@ export default function App() {
     return <ClientApp user={user} firm={firm} logout={logout} notify={setToast} toast={toast} setToast={setToast} />;
   }
 
-  const visibleNav = nav.filter(([label]) => !['Users', 'Firm Settings'].includes(label) || isAdmin);
+  const visibleNav = nav.filter(([label]) => !['Users', 'Firm Settings', 'Audit Log'].includes(label) || isAdmin);
   const subtitles = {
     Dashboard: 'Command center for active work, hearings, billing and firm movement.',
     Clients: 'A polished directory for intake, contacts and relationship context.',
@@ -142,6 +144,7 @@ export default function App() {
     Invoices: 'Receivables, invoice status and PDF export for client billing.',
     'Firm Settings': 'Client-ready branding, invoice identity and contact details.',
     Users: 'Role-based access for advocates, assistants and administrators.',
+    'Audit Log': 'A secure activity trail for important changes and accountability.',
   };
 
   return (
@@ -220,6 +223,7 @@ export default function App() {
         {!loading && view === 'Invoices' && <Invoices invoices={data.invoices} isAdmin={isAdmin} canManage={canManage} reload={refresh} notify={setToast} />}
         {!loading && view === 'Firm Settings' && isAdmin && <FirmSettings settings={firm} reload={refresh} notify={setToast} />}
         {!loading && view === 'Users' && isAdmin && <Users clients={data.clients} notify={setToast} />}
+        {!loading && view === 'Audit Log' && isAdmin && <AuditLog notify={setToast} navigate={setView} />}
       </main>
       <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
