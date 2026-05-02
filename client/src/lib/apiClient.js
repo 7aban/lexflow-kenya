@@ -96,6 +96,8 @@ export const deleteDeadline = id => api(`/deadlines/${id}`, { method: 'DELETE' }
 export const getComplianceGuidance = () => api('/compliance-guidance');
 export const getNotifications = () => api('/notifications');
 export const markNotificationsRead = data => api('/notifications/read', { method: 'POST', body: data });
+export const getAdvocatePerformance = (refresh = false) => api(`/performance/advocates${refresh ? '?refresh=1' : ''}`);
+export const getAdvocatePerformanceDetail = (userId, refresh = false) => api(`/performance/advocates/${userId}${refresh ? '?refresh=1' : ''}`);
 export const getNotices = () => api('/notices');
 export const createNotice = data => api('/notices', { method: 'POST', body: data });
 export const deleteNotice = id => api(`/notices/${id}`, { method: 'DELETE' });

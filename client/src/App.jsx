@@ -4,6 +4,7 @@ import { defaultFirmSettings, styles, StyleTag, theme } from './theme.jsx';
 import { Logo, Skeleton, Toast } from './components/ui.jsx';
 import LoginPage from './components/LoginPage.jsx';
 import AcceptInvitation from './views/AcceptInvitation.jsx';
+import AdvocatePerformance from './views/AdvocatePerformance.jsx';
 import AuditLog from './views/AuditLog.jsx';
 import ClientApp from './views/ClientApp.jsx';
 import DeadlineCenter from './views/DeadlineCenter.jsx';
@@ -18,6 +19,7 @@ const nav = [
   ['Tasks', 'TK'],
   ['Deadlines', 'DL'],
   ['Invoices', 'IN'],
+  ['Performance', 'PF'],
   ['Firm Settings', 'FS'],
   ['Users', 'US'],
   ['Invitations', 'IV'],
@@ -182,7 +184,7 @@ export default function App() {
     return <ClientApp user={user} firm={firm} logout={logout} notify={setToast} toast={toast} setToast={setToast} />;
   }
 
-  const visibleNav = nav.filter(([label]) => !['Users', 'Firm Settings', 'Invitations', 'Audit Log'].includes(label) || isAdmin);
+  const visibleNav = nav.filter(([label]) => !['Users', 'Firm Settings', 'Invitations', 'Audit Log', 'Performance'].includes(label) || isAdmin);
   const subtitles = {
     Dashboard: 'Command center for active work, hearings, billing and firm movement.',
     Clients: 'A polished directory for intake, contacts and relationship context.',
@@ -190,6 +192,7 @@ export default function App() {
     Tasks: 'Daily execution board for deadlines and delegated legal work.',
     Deadlines: 'Court, client, internal and statutory obligations in one timeline.',
     Invoices: 'Receivables, invoice status and PDF export for client billing.',
+    Performance: 'Managing partner view of advocate output, workload and court attendance.',
     'Firm Settings': 'Client-ready branding, invoice identity and contact details.',
     Users: 'Role-based access for advocates, assistants and administrators.',
     Invitations: 'Secure client portal onboarding links and invitation status.',
@@ -272,6 +275,7 @@ export default function App() {
         {!loading && view === 'Tasks' && <Tasks data={data} canManage={canManage} reload={refresh} notify={setToast} />}
         {!loading && view === 'Deadlines' && <DeadlineCenter data={data} canManage={canManage} notify={setToast} />}
         {!loading && view === 'Invoices' && <Invoices invoices={data.invoices} isAdmin={isAdmin} canManage={canManage} reload={refresh} notify={setToast} />}
+        {!loading && view === 'Performance' && isAdmin && <AdvocatePerformance notify={setToast} />}
         {!loading && view === 'Firm Settings' && isAdmin && <FirmSettings settings={firm} reload={refresh} notify={setToast} />}
         {!loading && view === 'Users' && isAdmin && <Users clients={data.clients} notify={setToast} />}
         {!loading && view === 'Invitations' && isAdmin && <Invitations clients={data.clients} notify={setToast} />}
