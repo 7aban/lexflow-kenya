@@ -36,6 +36,13 @@ const nav = [
   ['Invoices', 'IN'],
   ['Users', 'US'],
 ];
+const legalResources = [
+  ['Kenya Law', 'https://kenyalaw.org'],
+  ['eKLR', 'https://www.eklr.go.ke'],
+  ['Judiciary CTS', 'https://cts.judiciary.go.ke'],
+  ['NCAJ', 'https://ncaj.go.ke'],
+  ['eCitizen', 'https://www.ecitizen.go.ke'],
+];
 
 function readSession() {
   try {
@@ -112,6 +119,7 @@ export default function App() {
   const [user, setUser] = useState(session?.user || null);
   const [view, setView] = useState('Dashboard');
   const [search, setSearch] = useState('');
+  const [quickLinksOpen, setQuickLinksOpen] = useState(true);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
   const [data, setData] = useState(initialData);
@@ -221,6 +229,23 @@ export default function App() {
           ))}
         </nav>
 
+        <div style={styles.quickLinksPanel}>
+          <button type="button" className="lf-quick-toggle" onClick={() => setQuickLinksOpen(open => !open)} style={styles.quickLinksHeader} aria-expanded={quickLinksOpen}>
+            <span>Legal Resources</span>
+            <span style={styles.quickLinksChevron}>{quickLinksOpen ? 'v' : '>'}</span>
+          </button>
+          {quickLinksOpen && (
+            <div style={styles.quickLinksList}>
+              {legalResources.map(([name, href]) => (
+                <a key={name} className="lf-resource-link" style={styles.quickLink} href={href} target="_blank" rel="noopener noreferrer">
+                  <span style={styles.quickLinkIcon}>EX</span>
+                  <span>{name}</span>
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div style={styles.timerCard}>
           <div style={styles.timerTop}><span style={styles.liveDot} /> Timekeeper</div>
           <strong>00:00</strong>
@@ -322,6 +347,7 @@ function Dashboard({ data }) {
   const overdueTasks = data.tasks.filter(t => !t.completed && t.dueDate && t.dueDate < new Date().toISOString().slice(0, 10)).length;
   const stages = data.matters.reduce((acc, matter) => ({ ...acc, [matter.stage || 'Intake']: (acc[matter.stage || 'Intake'] || 0) + 1 }), {});
   const maxStage = Math.max(1, ...Object.values(stages));
+  const upcomingEvents = data.dashboard.upcomingEvents || [];
 
   return (
     <div style={styles.pageStack}>
@@ -365,6 +391,16 @@ function Dashboard({ data }) {
           <Table columns={['Invoice', 'Client', 'Amount', 'Status']} rows={data.invoices.slice(0, 6).map(i => [i.number || i.id, i.clientName || '-', kes(i.amount), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>])} empty="No invoices yet." />
         </Card>
       </div>
+
+      <Card title="Upcoming court dates" hint="Appearances and virtual court links">
+        <Table columns={['Appearance', 'Date', 'Time', 'Location', 'Virtual Court']} rows={upcomingEvents.map(event => [
+          event.title || event.type || 'Court appearance',
+          event.date || '-',
+          event.time || '-',
+          event.location || '-',
+          <MeetingLink key={event.id || `${event.date}-${event.title}`} event={event} dashboard />,
+        ])} empty="No upcoming court dates." />
+      </Card>
     </div>
   );
 }
@@ -412,6 +448,8 @@ function Matters({ data, canManage, reload, notify }) {
   const emptyMatterForm = { clientId: '', title: '', practiceArea: '', stage: 'Intake', assignedTo: '', paralegal: '', description: '', court: '', judge: '', caseNo: '', opposingCounsel: '', priority: 'Medium', solDate: '', billingType: 'hourly', billingRate: 15000, fixedFee: 0, retainerBalance: 0 };
   const [form, setForm] = useState(emptyMatterForm);
   const [time, setTime] = useState({ hours: 1, description: '', rate: 15000 });
+  const emptyEventForm = { title: '', date: '', time: '9:00 AM', type: 'Hearing', location: '', meetingLink: '', attorney: '', prepNote: '' };
+  const [eventForm, setEventForm] = useState(emptyEventForm);
   const [note, setNote] = useState('');
   const selected = data.matters.find(m => m.id === selectedId) || data.matters[0];
 
@@ -435,6 +473,7 @@ function Matters({ data, canManage, reload, notify }) {
   async function createMatter(event) { event.preventDefault(); try { if (editingMatter && detail) { await api(`/matters/${detail.id}`, { method: 'PATCH', body: form }); setEditingMatter(false); notify({ type: 'success', message: 'Matter updated.' }); await loadDetail(detail.id); } else { await api('/matters', { method: 'POST', body: form }); notify({ type: 'success', message: 'Matter created.' }); } setForm(emptyMatterForm); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function logTime(event) { event.preventDefault(); if (!detail) return; try { await api('/time-entries', { method: 'POST', body: { ...time, matterId: detail.id } }); setTime({ hours: 1, description: '', rate: detail.billingRate || 15000 }); notify({ type: 'success', message: 'Time logged.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function addNote(event) { event.preventDefault(); if (!detail || !note.trim()) return; try { await api(`/matters/${detail.id}/notes`, { method: 'POST', body: { content: note } }); setNote(''); notify({ type: 'success', message: 'Case note saved.' }); await loadDetail(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
+  async function createEvent(event) { event.preventDefault(); if (!detail) return; try { await api('/appearances', { method: 'POST', body: { ...eventForm, matterId: detail.id } }); setEventForm(emptyEventForm); notify({ type: 'success', message: 'Court appearance scheduled.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function uploadDoc(event) { const file = event.target.files?.[0]; if (!file || !detail) return; try { await api(`/matters/${detail.id}/documents`, { method: 'POST', body: { name: file.name, mimeType: file.type || 'application/octet-stream', data: await fileToDataUrl(file) } }); notify({ type: 'success', message: 'Document uploaded.' }); event.target.value = ''; await loadDetail(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function generateInvoice() { if (!detail) return; try { await api('/invoices/generate', { method: 'POST', body: { matterId: detail.id } }); notify({ type: 'success', message: 'Invoice generated.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   function startMatterEdit() { if (!detail) return; setEditingMatter(true); setForm({ ...emptyMatterForm, ...detail }); }
@@ -507,7 +546,7 @@ function Matters({ data, canManage, reload, notify }) {
                   </form>
                   <Sub title="Time entries"><TimeEntryEditorList entries={detail.timeEntries || []} canManage={canManage} editingTime={editingTime} setEditingTime={setEditingTime} saveTimeEntry={saveTimeEntry} confirmDelete={entry => setConfirm({ title: 'Delete time entry?', message: 'Delete this time entry?', onConfirm: () => deleteTimeEntryRecord(entry) })} /></Sub>
                   <Sub title="Tasks"><TaskEditorList tasks={detail.tasks || []} canManage={canManage} editingTask={editingTask} setEditingTask={setEditingTask} saveTask={saveTask} confirmDelete={task => setConfirm({ title: 'Delete task?', message: 'Delete this task?', onConfirm: () => deleteTaskRecord(task) })} /></Sub>
-                  <Sub title="Court appearances"><AppearanceEditorList events={detail.appearances || []} canManage={canManage} editingEvent={editingEvent} setEditingEvent={setEditingEvent} saveEvent={saveEvent} confirmDelete={event => setConfirm({ title: 'Delete appearance?', message: 'Delete this court appearance?', onConfirm: () => deleteEventRecord(event) })} /></Sub>
+                  <Sub title="Court appearances">{canManage && <form onSubmit={createEvent} style={{ ...styles.formGrid, marginBottom: 12 }}><Field label="Title"><input required style={styles.input} value={eventForm.title} onChange={e => setEventForm({ ...eventForm, title: e.target.value })} /></Field><Field label="Date"><input required type="date" style={styles.input} value={eventForm.date} onChange={e => setEventForm({ ...eventForm, date: e.target.value })} /></Field><Field label="Time"><input style={styles.input} value={eventForm.time} onChange={e => setEventForm({ ...eventForm, time: e.target.value })} /></Field><Field label="Type"><input style={styles.input} value={eventForm.type} onChange={e => setEventForm({ ...eventForm, type: e.target.value })} /></Field><Field label="Location"><input style={styles.input} value={eventForm.location} onChange={e => setEventForm({ ...eventForm, location: e.target.value })} /></Field><Field label="Meeting Link"><input type="url" placeholder="https://..." style={styles.input} value={eventForm.meetingLink} onChange={e => setEventForm({ ...eventForm, meetingLink: e.target.value })} /></Field><button style={styles.ghostButton}>Schedule event</button></form>}<AppearanceEditorList events={detail.appearances || []} canManage={canManage} editingEvent={editingEvent} setEditingEvent={setEditingEvent} saveEvent={saveEvent} confirmDelete={event => setConfirm({ title: 'Delete appearance?', message: 'Delete this court appearance?', onConfirm: () => deleteEventRecord(event) })} /></Sub>
                   <Sub title="Documents"><input style={styles.file} type="file" accept=".pdf,.doc,.docx" onChange={uploadDoc} /><Table columns={['Name', 'Type', 'Size', 'Download', 'Actions']} rows={(detail.documents || []).map(d => [d.name, d.type, d.size, <a key={d.id} style={styles.link} href={`${API_BASE}/documents/${d.id}/download?token=${encodeURIComponent(readSession()?.token || '')}`}>Download</a>, canManage ? <ActionGroup key={`${d.id}-actions`} actions={[['Delete', () => setConfirm({ title: 'Delete document?', message: 'Delete this document?', onConfirm: () => deleteDocumentRecord(d) })]]} /> : '-'])} empty="No documents uploaded." /></Sub>
                   <Sub title="Case notes"><form onSubmit={addNote} style={styles.noteForm}><input style={styles.input} value={note} onChange={e => setNote(e.target.value)} placeholder="Add a note" /><button style={styles.ghostButton}>Save note</button></form><Table columns={['Note', 'Author', 'Created']} rows={(detail.notes || []).map(n => [n.content, n.author || '-', n.createdAt ? new Date(n.createdAt).toLocaleString() : '-'])} empty="No notes yet." /></Sub>
                   <Sub title="Invoices"><Table columns={['Invoice', 'Amount', 'Status', 'PDF', 'Actions']} rows={(detail.invoices || []).map(i => [i.number || i.id, kes(i.amount), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <a key={`${i.id}-pdf`} style={styles.link} href={`${API_BASE}/invoices/${i.id}/pdf?token=${encodeURIComponent(readSession()?.token || '')}`}>PDF</a>, canManage && i.status !== 'Paid' ? <ActionGroup key={`${i.id}-actions`} actions={[['Delete', () => setConfirm({ title: 'Delete invoice?', message: 'Delete this invoice?', onConfirm: () => deleteInvoiceRecord(i) })]]} /> : '-'])} empty="No invoices yet." /></Sub>
@@ -578,7 +617,7 @@ function AppearanceEditorList({ events, canManage, editingEvent, setEditingEvent
   return (
     <div style={styles.tableWrap}>
       <table style={styles.table}>
-        <thead><tr>{['Title', 'Date', 'Time', 'Type', 'Location', 'Actions'].map(h => <th key={h}>{h}</th>)}</tr></thead>
+        <thead><tr>{['Title', 'Date', 'Time', 'Type', 'Location', 'Virtual Court', 'Actions'].map(h => <th key={h}>{h}</th>)}</tr></thead>
         <tbody>{events.map(event => {
           const editing = editingEvent?.id === event.id;
           return (
@@ -588,6 +627,7 @@ function AppearanceEditorList({ events, canManage, editingEvent, setEditingEvent
               <td>{editing ? <input style={styles.input} value={editingEvent.time || ''} onChange={e => setEditingEvent({ ...editingEvent, time: e.target.value })} /> : event.time || '-'}</td>
               <td>{editing ? <input style={styles.input} value={editingEvent.type || ''} onChange={e => setEditingEvent({ ...editingEvent, type: e.target.value })} /> : event.type || '-'}</td>
               <td>{editing ? <input style={styles.input} value={editingEvent.location || ''} onChange={e => setEditingEvent({ ...editingEvent, location: e.target.value })} /> : event.location || '-'}</td>
+              <td>{editing ? <input type="url" placeholder="https://..." style={styles.input} value={editingEvent.meetingLink || ''} onChange={e => setEditingEvent({ ...editingEvent, meetingLink: e.target.value })} /> : <MeetingLink event={event} />}</td>
               <td>{canManage ? editing ? <ActionGroup actions={[['Save', () => saveEvent(event, editingEvent)], ['Cancel', () => setEditingEvent(null)]]} /> : <ActionGroup actions={[['Edit', () => setEditingEvent({ ...event })], ['Delete', () => confirmDelete(event)]]} /> : '-'}</td>
             </tr>
           );
@@ -646,6 +686,16 @@ function AssistantSuggestions({ suggestions }) {
   );
 }
 
+function MeetingLink({ event, dashboard = false }) {
+  const href = (event?.meetingLink || '').trim();
+  if (!href) return <span style={styles.mutedText}>-</span>;
+  const urgent = dashboard ? isTodayOrTomorrow(event.date) : isToday(event.date);
+  if (urgent) {
+    return <a style={styles.joinButton} href={href} target="_blank" rel="noopener noreferrer">{dashboard ? 'Join' : 'Join Court'}</a>;
+  }
+  return <a style={styles.meetingLink} href={href} target="_blank" rel="noopener noreferrer"><span style={styles.videoBadge}>VC</span> Meeting Link</a>;
+}
+
 function ActionGroup({ actions }) {
   return <div style={styles.actionGroup}>{actions.map(([label, onClick]) => <button key={label} type="button" onClick={onClick} style={label === 'Delete' ? styles.dangerTinyButton : styles.tinyButton}>{label}</button>)}</div>;
 }
@@ -691,6 +741,13 @@ function Skeleton({ rows = 4 }) { return <div style={styles.skeletonGrid}>{Array
 function Table({ columns, rows, empty }) { if (!rows.length) return <Empty title={empty} text="Once records exist, they will appear here." />; return <div style={styles.tableWrap}><table style={styles.table}><thead><tr>{columns.map(c => <th key={c}>{c}</th>)}</tr></thead><tbody>{rows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>)}</tbody></table></div>; }
 function statusTone(status) { return status === 'Paid' ? 'green' : status === 'Overdue' ? 'red' : 'amber'; }
 function kes(value) { return `KSh ${Number(value || 0).toLocaleString('en-KE')}`; }
+function todayIso() { return new Date().toISOString().slice(0, 10); }
+function isToday(date) { return Boolean(date) && date === todayIso(); }
+function isTodayOrTomorrow(date) {
+  if (!date) return false;
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  return date === todayIso() || date === tomorrow;
+}
 
 function StyleTag() { return <style>{`
   * { box-sizing: border-box; }
@@ -702,6 +759,7 @@ function StyleTag() { return <style>{`
   input:focus, select:focus { outline: 2px solid rgba(212,163,74,.25); border-color: #D4A34A !important; }
   section:hover { box-shadow: 0 8px 22px rgba(15,27,51,.08); }
   .lf-nav:hover { background: rgba(255,255,255,.08) !important; color: #fff !important; }
+  .lf-resource-link:hover, .lf-quick-toggle:hover { background: rgba(255,255,255,.08) !important; color: #fff !important; }
   @media (max-width: 980px) {
     #root .lf-app-shell { grid-template-columns: 1fr; }
     #root aside { position: static; min-height: auto; }
@@ -728,6 +786,7 @@ const styles = {
   logo: { width: 36, height: 36, borderRadius: 8, display: 'grid', placeItems: 'center', background: theme.gold, color: '#fff', fontWeight: 900, fontSize: 13, boxShadow: '0 8px 18px rgba(212,163,74,.20)' },
   brand: { fontSize: 16, fontWeight: 700, letterSpacing: 0 }, brandSub: { fontSize: 11, color: '#9CA8BA', marginTop: 2 }, sideSectionLabel: { color: '#7F8CA3', fontSize: 11, fontWeight: 700, letterSpacing: 0, textTransform: 'uppercase', padding: '0 8px' },
   navList: { display: 'grid', gap: 4 }, navItem: { border: 0, borderLeft: '3px solid transparent', background: 'transparent', color: '#C9D3E2', borderRadius: 6, padding: '9px 10px', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontWeight: 600, textAlign: 'left' }, navActive: { background: 'rgba(255,255,255,.10)', color: '#fff', borderLeftColor: theme.gold }, navNumber: { width: 24, height: 24, borderRadius: 6, background: 'rgba(255,255,255,.08)', display: 'grid', placeItems: 'center', fontSize: 10, color: theme.gold, fontWeight: 800 },
+  quickLinksPanel: { display: 'grid', gap: 7, paddingTop: 2 }, quickLinksHeader: { border: 0, background: 'transparent', color: '#7F8CA3', borderRadius: 6, padding: '5px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: 10, fontWeight: 800, letterSpacing: .8, textTransform: 'uppercase' }, quickLinksChevron: { color: theme.gold, fontSize: 11, fontWeight: 900 }, quickLinksList: { display: 'grid', gap: 3 }, quickLink: { borderLeft: '3px solid transparent', color: '#C9D3E2', borderRadius: 6, padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 9, fontWeight: 600, textDecoration: 'none', transition: 'background .16s ease, color .16s ease' }, quickLinkIcon: { width: 24, height: 24, borderRadius: 6, background: 'rgba(255,255,255,.08)', display: 'grid', placeItems: 'center', fontSize: 9, color: theme.gold, fontWeight: 900 },
   timerCard: { marginTop: 'auto', padding: 12, borderRadius: 8, background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.10)', display: 'grid', gap: 4 }, timerTop: { color: '#DDE5F1', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }, liveDot: { width: 8, height: 8, borderRadius: 999, background: '#22C55E', boxShadow: '0 0 0 4px rgba(34,197,94,.13)' },
   userCard: { display: 'grid', gridTemplateColumns: '34px 1fr auto', gap: 8, alignItems: 'center', paddingTop: 12, borderTop: '1px solid rgba(255,255,255,.10)' }, avatar: { width: 34, height: 34, borderRadius: 8, background: '#243653', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 12 }, userName: { fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }, userRole: { color: '#AAB4C3', fontSize: 11, textTransform: 'capitalize' }, logout: { border: '1px solid rgba(255,255,255,.18)', color: '#fff', background: 'transparent', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', fontSize: 12 },
   main: { padding: 24, minWidth: 0 }, topbar: { display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', marginBottom: 20 }, eyebrow: { color: theme.goldDark, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0 }, title: { margin: '2px 0 0', fontSize: 20, fontWeight: 700, lineHeight: 1.2 }, subtitle: { margin: '5px 0 0', color: theme.muted, maxWidth: 680 }, topActions: { display: 'flex', gap: 8, alignItems: 'center' }, search: { width: 260, border: `1px solid ${theme.line}`, borderRadius: 6, padding: '7px 11px', background: '#fff', fontSize: 13 },
@@ -737,7 +796,7 @@ const styles = {
   splitGrid: { display: 'grid', gridTemplateColumns: 'minmax(260px,.72fr) minmax(0,1.28fr)', gap: 16 }, dashboardGrid: { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 16 }, matterGrid: { display: 'grid', gridTemplateColumns: '300px minmax(0,1fr)', gap: 16 },
   card: { background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, padding: '18px 20px', boxShadow: theme.shadow, minWidth: 0, transition: 'box-shadow .16s ease, transform .16s ease' }, cardHead: { display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 14 },
   formGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 12, alignItems: 'end' }, field: { display: 'grid', gap: 5 }, input: { width: '100%', border: `1px solid ${theme.line}`, borderRadius: 6, padding: '7px 11px', background: '#fff', fontSize: 13 }, primaryButton: { border: 0, borderRadius: 6, padding: '7px 16px', background: theme.navy600, color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }, goldButton: { border: 0, borderRadius: 6, padding: '7px 16px', background: theme.gold, color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }, dangerButton: { border: 0, borderRadius: 6, padding: '7px 16px', background: theme.red, color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }, ghostButton: { border: `1px solid ${theme.line}`, borderRadius: 6, padding: '7px 16px', background: '#fff', color: theme.navy600, fontWeight: 700, cursor: 'pointer', fontSize: 13 }, actionGroup: { display: 'flex', flexWrap: 'wrap', gap: 6 }, tinyButton: { border: `1px solid ${theme.line}`, borderRadius: 6, padding: '4px 10px', background: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: theme.navy600 }, dangerTinyButton: { border: '1px solid #FECACA', borderRadius: 6, padding: '4px 10px', background: theme.redBg, cursor: 'pointer', fontSize: 12, fontWeight: 700, color: theme.red },
-  tableWrap: { overflowX: 'auto', border: `1px solid ${theme.line}`, borderRadius: 8 }, table: { width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 620 }, badge: { display: 'inline-flex', padding: '4px 8px', borderRadius: 999, fontWeight: 700, fontSize: 12 }, link: { color: theme.navy600, fontWeight: 700, textDecoration: 'none' }, tableSelect: { border: `1px solid ${theme.line}`, borderRadius: 6, padding: '5px 8px', fontSize: 12 },
+  tableWrap: { overflowX: 'auto', border: `1px solid ${theme.line}`, borderRadius: 8 }, table: { width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 620 }, badge: { display: 'inline-flex', padding: '4px 8px', borderRadius: 999, fontWeight: 700, fontSize: 12 }, link: { color: theme.navy600, fontWeight: 700, textDecoration: 'none' }, meetingLink: { color: theme.navy600, fontWeight: 700, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }, videoBadge: { width: 22, height: 22, borderRadius: 6, display: 'inline-grid', placeItems: 'center', background: theme.blueBg, color: theme.blue, fontSize: 10, fontWeight: 900 }, joinButton: { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, padding: '5px 10px', background: theme.green, color: '#fff', fontWeight: 800, fontSize: 12, textDecoration: 'none', whiteSpace: 'nowrap', boxShadow: '0 6px 14px rgba(4,120,87,.18)' }, mutedText: { color: theme.muted }, tableSelect: { border: `1px solid ${theme.line}`, borderRadius: 6, padding: '5px 8px', fontSize: 12 },
   pipelineRow: { display: 'grid', gridTemplateColumns: '116px 1fr 30px', gap: 10, alignItems: 'center', marginBottom: 10 }, pipelineTrack: { height: 8, background: '#EEF2F7', borderRadius: 999, overflow: 'hidden' }, pipelineFill: { height: '100%', background: theme.gold, borderRadius: 999 },
   matterButton: { width: '100%', display: 'grid', gap: 4, textAlign: 'left', border: 0, borderLeft: '3px solid transparent', borderBottom: `1px solid ${theme.line}`, background: '#fff', padding: '12px 10px', cursor: 'pointer', borderRadius: 6 }, matterActive: { background: '#F8FAFC', borderLeftColor: theme.gold }, detailStack: { display: 'grid', gap: 16 }, chips: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, color: theme.muted }, tabList: { display: 'flex', gap: 4, borderBottom: `1px solid ${theme.line}` }, tabButton: { border: 0, borderBottom: '2px solid transparent', background: 'transparent', color: theme.muted, padding: '8px 12px', cursor: 'pointer', fontWeight: 700, fontSize: 13 }, tabActive: { color: theme.navy600, borderBottomColor: theme.gold }, assistantPanel: { display: 'grid', gap: 12 }, assistantIntro: { display: 'grid', gap: 4, padding: 14, borderRadius: 10, background: '#F8FAFC', border: `1px solid ${theme.line}`, color: theme.muted }, suggestionList: { display: 'grid', gap: 10 }, suggestionItem: { display: 'grid', gridTemplateColumns: '28px 1fr', gap: 10, alignItems: 'start', padding: '12px 14px', borderRadius: 10, border: `1px solid ${theme.line}`, background: '#fff', boxShadow: theme.shadow, lineHeight: 1.5 }, suggestionWarning: { background: theme.amberBg, borderColor: '#FDE68A', color: theme.amber }, suggestionGood: { background: theme.greenBg, borderColor: '#A7F3D0', color: theme.green }, suggestionIcon: { width: 28, height: 28, display: 'grid', placeItems: 'center', fontSize: 16 }, sub: { borderTop: `1px solid ${theme.line}`, paddingTop: 16 }, noteForm: { display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, marginBottom: 12 }, file: { marginBottom: 12, fontSize: 12 },
   empty: { minHeight: 136, display: 'grid', placeItems: 'center', textAlign: 'center', color: theme.muted, gap: 6, padding: 18 }, emptyIcon: { width: 42, height: 42, borderRadius: 10, display: 'grid', placeItems: 'center', background: '#F3F4F6', color: theme.navy600, fontWeight: 800 }, skeletonGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 12 }, skeleton: { height: 120, borderRadius: 10, background: '#fff', border: `1px solid ${theme.line}`, boxShadow: theme.shadow, padding: 16, display: 'grid', gap: 10, alignContent: 'start' }, skeletonLineLarge: { height: 18, width: '55%', borderRadius: 6, background: '#E5E7EB', animation: 'lfPulse 1.4s ease-in-out infinite' }, skeletonLine: { height: 12, width: '80%', borderRadius: 6, background: '#EEF2F7', animation: 'lfPulse 1.4s ease-in-out infinite' }, skeletonLineShort: { height: 12, width: '42%', borderRadius: 6, background: '#EEF2F7', animation: 'lfPulse 1.4s ease-in-out infinite' },
