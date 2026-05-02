@@ -386,22 +386,97 @@ function Clients({ clients, reload, notify }) {
 function Matters({ data, canManage, reload, notify }) {
   const [selectedId, setSelectedId] = useState('');
   const [detail, setDetail] = useState(null);
+  const [suggestions, setSuggestions] = useState([]);
+  const [detailTab, setDetailTab] = useState('Workspace');
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({ clientId: '', title: '', practiceArea: '', billingType: 'hourly', billingRate: 15000, fixedFee: 0 });
   const [time, setTime] = useState({ hours: 1, description: '', rate: 15000 });
   const [note, setNote] = useState('');
   const selected = data.matters.find(m => m.id === selectedId) || data.matters[0];
 
-  useEffect(() => { if (selected?.id) { setSelectedId(selected.id); loadDetail(selected.id); } else setDetail(null); }, [selected?.id]);
+  useEffect(() => { if (selected?.id) { setSelectedId(selected.id); loadDetail(selected.id); } else { setDetail(null); setSuggestions([]); } }, [selected?.id]);
 
-  async function loadDetail(id) { setLoading(true); try { setDetail(await api(`/matters/${id}`)); } catch (err) { notify({ type: 'danger', message: err.message }); } finally { setLoading(false); } }
+  async function loadDetail(id) {
+    setLoading(true);
+    try {
+      const [matter, smartTips] = await Promise.all([
+        api(`/matters/${id}`),
+        api(`/matters/${id}/suggestions`),
+      ]);
+      setDetail(matter);
+      setSuggestions(Array.isArray(smartTips) ? smartTips : []);
+    } catch (err) {
+      notify({ type: 'danger', message: err.message });
+    } finally {
+      setLoading(false);
+    }
+  }
   async function createMatter(event) { event.preventDefault(); try { await api('/matters', { method: 'POST', body: form }); setForm({ clientId: '', title: '', practiceArea: '', billingType: 'hourly', billingRate: 15000, fixedFee: 0 }); notify({ type: 'success', message: 'Matter created.' }); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function logTime(event) { event.preventDefault(); if (!detail) return; try { await api('/time-entries', { method: 'POST', body: { ...time, matterId: detail.id } }); setTime({ hours: 1, description: '', rate: detail.billingRate || 15000 }); notify({ type: 'success', message: 'Time logged.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function addNote(event) { event.preventDefault(); if (!detail || !note.trim()) return; try { await api(`/matters/${detail.id}/notes`, { method: 'POST', body: { content: note } }); setNote(''); notify({ type: 'success', message: 'Case note saved.' }); await loadDetail(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function uploadDoc(event) { const file = event.target.files?.[0]; if (!file || !detail) return; try { await api(`/matters/${detail.id}/documents`, { method: 'POST', body: { name: file.name, mimeType: file.type || 'application/octet-stream', data: await fileToDataUrl(file) } }); notify({ type: 'success', message: 'Document uploaded.' }); event.target.value = ''; await loadDetail(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function generateInvoice() { if (!detail) return; try { await api('/invoices/generate', { method: 'POST', body: { matterId: detail.id } }); notify({ type: 'success', message: 'Invoice generated.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
 
-  return <div style={styles.matterGrid}><Card title="Matter list" hint={`${data.matters.length} active files`}>{data.matters.length ? data.matters.map(m => <button key={m.id} onClick={() => setSelectedId(m.id)} style={{ ...styles.matterButton, ...(selected?.id === m.id ? styles.matterActive : {}) }}><strong>{m.title}</strong><span>{m.reference || m.id}</span><small>{m.clientName || 'No client'} / {m.stage || 'Intake'}</small></button>) : <Empty title="No matters" text="Create one after adding a client." />}</Card><div style={styles.pageStack}>{canManage && <Card title="Open a new matter" hint="Matter setup"><form onSubmit={createMatter} style={styles.formGrid}><Field label="Client"><select required style={styles.input} value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })}><option value="">Select client</option>{data.clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field><Field label="Title"><input required style={styles.input} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></Field><Field label="Practice"><input style={styles.input} value={form.practiceArea} onChange={e => setForm({ ...form, practiceArea: e.target.value })} /></Field><Field label="Billing"><select style={styles.input} value={form.billingType} onChange={e => setForm({ ...form, billingType: e.target.value })}><option value="hourly">Hourly</option><option value="fixed">Fixed fee</option></select></Field><Field label="Rate/Fee"><input type="number" style={styles.input} value={form.billingType === 'fixed' ? form.fixedFee : form.billingRate} onChange={e => setForm({ ...form, [form.billingType === 'fixed' ? 'fixedFee' : 'billingRate']: Number(e.target.value) })} /></Field><button style={styles.primaryButton}>Create matter</button></form></Card>}<Card title={detail?.title || 'Matter detail'} hint={detail?.reference || 'Select a file'} action={detail && canManage ? <button onClick={generateInvoice} style={styles.goldButton}>Generate invoice</button> : null}>{loading && <Skeleton rows={2} />}{!loading && detail && <div style={styles.detailStack}><div style={styles.chips}><Badge tone="blue">{detail.stage || 'Intake'}</Badge><span>{detail.clientName || 'No client'}</span><span>{detail.practiceArea || 'General'}</span></div><form onSubmit={logTime} style={styles.formGrid}><Field label="Hours"><input type="number" min="0" step="0.1" style={styles.input} value={time.hours} onChange={e => setTime({ ...time, hours: Number(e.target.value) })} /></Field><Field label="Description"><input style={styles.input} value={time.description} onChange={e => setTime({ ...time, description: e.target.value })} /></Field><Field label="Rate"><input type="number" style={styles.input} value={time.rate} onChange={e => setTime({ ...time, rate: Number(e.target.value) })} /></Field><button style={styles.primaryButton}>Log time</button></form><Sub title="Documents"><input style={styles.file} type="file" accept=".pdf,.doc,.docx" onChange={uploadDoc} /><Table columns={['Name', 'Type', 'Size', 'Download']} rows={(detail.documents || []).map(d => [d.name, d.type, d.size, <a key={d.id} style={styles.link} href={`${API_BASE}/documents/${d.id}/download?token=${encodeURIComponent(readSession()?.token || '')}`}>Download</a>])} empty="No documents uploaded." /></Sub><Sub title="Case notes"><form onSubmit={addNote} style={styles.noteForm}><input style={styles.input} value={note} onChange={e => setNote(e.target.value)} placeholder="Add a note" /><button style={styles.ghostButton}>Save note</button></form><Table columns={['Note', 'Author', 'Created']} rows={(detail.notes || []).map(n => [n.content, n.author || '-', n.createdAt ? new Date(n.createdAt).toLocaleString() : '-'])} empty="No notes yet." /></Sub><Sub title="Invoices"><Table columns={['Invoice', 'Amount', 'Status', 'PDF']} rows={(detail.invoices || []).map(i => [i.number || i.id, kes(i.amount), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <a key={`${i.id}-pdf`} style={styles.link} href={`${API_BASE}/invoices/${i.id}/pdf?token=${encodeURIComponent(readSession()?.token || '')}`}>PDF</a>])} empty="No invoices yet." /></Sub></div>}{!loading && !detail && <Empty title="Select a matter" text="Matter detail will appear here." />}</Card></div></div>;
+  return (
+    <div style={styles.matterGrid}>
+      <Card title="Matter list" hint={`${data.matters.length} active files`}>
+        {data.matters.length ? data.matters.map(m => (
+          <button key={m.id} onClick={() => setSelectedId(m.id)} style={{ ...styles.matterButton, ...(selected?.id === m.id ? styles.matterActive : {}) }}>
+            <strong>{m.title}</strong>
+            <span>{m.reference || m.id}</span>
+            <small>{m.clientName || 'No client'} / {m.stage || 'Intake'}</small>
+          </button>
+        )) : <Empty title="No matters" text="Create one after adding a client." />}
+      </Card>
+      <div style={styles.pageStack}>
+        {canManage && (
+          <Card title="Open a new matter" hint="Matter setup">
+            <form onSubmit={createMatter} style={styles.formGrid}>
+              <Field label="Client"><select required style={styles.input} value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })}><option value="">Select client</option>{data.clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
+              <Field label="Title"><input required style={styles.input} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></Field>
+              <Field label="Practice"><input style={styles.input} value={form.practiceArea} onChange={e => setForm({ ...form, practiceArea: e.target.value })} /></Field>
+              <Field label="Billing"><select style={styles.input} value={form.billingType} onChange={e => setForm({ ...form, billingType: e.target.value })}><option value="hourly">Hourly</option><option value="fixed">Fixed fee</option></select></Field>
+              <Field label="Rate/Fee"><input type="number" style={styles.input} value={form.billingType === 'fixed' ? form.fixedFee : form.billingRate} onChange={e => setForm({ ...form, [form.billingType === 'fixed' ? 'fixedFee' : 'billingRate']: Number(e.target.value) })} /></Field>
+              <button style={styles.primaryButton}>Create matter</button>
+            </form>
+          </Card>
+        )}
+        <Card title={detail?.title || 'Matter detail'} hint={detail?.reference || 'Select a file'} action={detail && canManage ? <button onClick={generateInvoice} style={styles.goldButton}>Generate invoice</button> : null}>
+          {loading && <Skeleton rows={2} />}
+          {!loading && detail && (
+            <div style={styles.detailStack}>
+              <div style={styles.chips}>
+                <Badge tone="blue">{detail.stage || 'Intake'}</Badge>
+                <span>{detail.clientName || 'No client'}</span>
+                <span>{detail.practiceArea || 'General'}</span>
+              </div>
+              <div style={styles.tabList}>
+                {['Workspace', 'Assistant'].map(tab => (
+                  <button key={tab} type="button" onClick={() => setDetailTab(tab)} style={{ ...styles.tabButton, ...(detailTab === tab ? styles.tabActive : {}) }}>{tab}</button>
+                ))}
+              </div>
+              {detailTab === 'Assistant' ? (
+                <AssistantSuggestions suggestions={suggestions} />
+              ) : (
+                <>
+                  <form onSubmit={logTime} style={styles.formGrid}>
+                    <Field label="Hours"><input type="number" min="0" step="0.1" style={styles.input} value={time.hours} onChange={e => setTime({ ...time, hours: Number(e.target.value) })} /></Field>
+                    <Field label="Description"><input style={styles.input} value={time.description} onChange={e => setTime({ ...time, description: e.target.value })} /></Field>
+                    <Field label="Rate"><input type="number" style={styles.input} value={time.rate} onChange={e => setTime({ ...time, rate: Number(e.target.value) })} /></Field>
+                    <button style={styles.primaryButton}>Log time</button>
+                  </form>
+                  <Sub title="Documents"><input style={styles.file} type="file" accept=".pdf,.doc,.docx" onChange={uploadDoc} /><Table columns={['Name', 'Type', 'Size', 'Download']} rows={(detail.documents || []).map(d => [d.name, d.type, d.size, <a key={d.id} style={styles.link} href={`${API_BASE}/documents/${d.id}/download?token=${encodeURIComponent(readSession()?.token || '')}`}>Download</a>])} empty="No documents uploaded." /></Sub>
+                  <Sub title="Case notes"><form onSubmit={addNote} style={styles.noteForm}><input style={styles.input} value={note} onChange={e => setNote(e.target.value)} placeholder="Add a note" /><button style={styles.ghostButton}>Save note</button></form><Table columns={['Note', 'Author', 'Created']} rows={(detail.notes || []).map(n => [n.content, n.author || '-', n.createdAt ? new Date(n.createdAt).toLocaleString() : '-'])} empty="No notes yet." /></Sub>
+                  <Sub title="Invoices"><Table columns={['Invoice', 'Amount', 'Status', 'PDF']} rows={(detail.invoices || []).map(i => [i.number || i.id, kes(i.amount), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <a key={`${i.id}-pdf`} style={styles.link} href={`${API_BASE}/invoices/${i.id}/pdf?token=${encodeURIComponent(readSession()?.token || '')}`}>PDF</a>])} empty="No invoices yet." /></Sub>
+                </>
+              )}
+            </div>
+          )}
+          {!loading && !detail && <Empty title="Select a matter" text="Matter detail will appear here." />}
+        </Card>
+      </div>
+    </div>
+  );
 }
 
 function Tasks({ data, reload, notify }) {
@@ -423,6 +498,31 @@ function Users({ notify }) {
   async function load() { try { setUsers(await api('/auth/users')); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function submit(event) { event.preventDefault(); try { await api('/auth/register', { method: 'POST', body: form }); setForm({ email: '', password: '', fullName: '', role: 'assistant' }); notify({ type: 'success', message: 'User created.' }); await load(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   return <div style={styles.splitGrid}><Card title="Create user" hint="Role-based access"><form onSubmit={submit} style={styles.formGrid}><Field label="Full name"><input required style={styles.input} value={form.fullName} onChange={e => setForm({ ...form, fullName: e.target.value })} /></Field><Field label="Email"><input required style={styles.input} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field><Field label="Password"><input required type="password" style={styles.input} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} /></Field><Field label="Role"><select style={styles.input} value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}><option value="assistant">Assistant</option><option value="advocate">Advocate</option><option value="admin">Admin</option></select></Field><button style={styles.primaryButton}>Create user</button></form></Card><Card title="Team" hint={`${users.length} users`}><Table columns={['Name', 'Email', 'Role']} rows={users.map(u => [u.fullName, u.email, <Badge key={u.id} tone="blue">{u.role}</Badge>])} empty="No users found." /></Card></div>;
+}
+
+function AssistantSuggestions({ suggestions }) {
+  const items = suggestions.length ? suggestions : ['This matter looks up to date. No urgent action is needed right now.'];
+  return (
+    <div style={styles.assistantPanel}>
+      <div style={styles.assistantIntro}>
+        <strong>Matter Assistant</strong>
+        <span>Rule-based prompts drawn from tasks, billing, documents, notes, and upcoming court dates.</span>
+      </div>
+      <div style={styles.suggestionList}>
+        {items.map((text, index) => {
+          const lower = text.toLowerCase();
+          const isGood = lower.includes('up to date') || lower.includes('no urgent');
+          const isWarning = lower.includes('overdue') || lower.includes('court') || lower.includes('hearing') || lower.includes('retainer') || lower.includes('outstanding');
+          return (
+            <div key={`${text}-${index}`} style={{ ...styles.suggestionItem, ...(isWarning ? styles.suggestionWarning : isGood ? styles.suggestionGood : {}) }}>
+              <span style={styles.suggestionIcon}>{isGood ? '✅' : isWarning ? '⚠️' : '💡'}</span>
+              <span>{text}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function Card({ title, hint, action, children }) { return <section style={styles.card}><div style={styles.cardHead}><div><h2>{title}</h2>{hint && <p>{hint}</p>}</div>{action}</div>{children}</section>; }
@@ -485,7 +585,7 @@ const styles = {
   formGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 12, alignItems: 'end' }, field: { display: 'grid', gap: 5 }, input: { width: '100%', border: `1px solid ${theme.line}`, borderRadius: 6, padding: '7px 11px', background: '#fff', fontSize: 13 }, primaryButton: { border: 0, borderRadius: 6, padding: '7px 16px', background: theme.navy600, color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }, goldButton: { border: 0, borderRadius: 6, padding: '7px 16px', background: theme.gold, color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }, ghostButton: { border: `1px solid ${theme.line}`, borderRadius: 6, padding: '7px 16px', background: '#fff', color: theme.navy600, fontWeight: 700, cursor: 'pointer', fontSize: 13 }, tinyButton: { border: `1px solid ${theme.line}`, borderRadius: 6, padding: '4px 10px', background: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: theme.navy600 },
   tableWrap: { overflowX: 'auto', border: `1px solid ${theme.line}`, borderRadius: 8 }, table: { width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 620 }, badge: { display: 'inline-flex', padding: '4px 8px', borderRadius: 999, fontWeight: 700, fontSize: 12 }, link: { color: theme.navy600, fontWeight: 700, textDecoration: 'none' }, tableSelect: { border: `1px solid ${theme.line}`, borderRadius: 6, padding: '5px 8px', fontSize: 12 },
   pipelineRow: { display: 'grid', gridTemplateColumns: '116px 1fr 30px', gap: 10, alignItems: 'center', marginBottom: 10 }, pipelineTrack: { height: 8, background: '#EEF2F7', borderRadius: 999, overflow: 'hidden' }, pipelineFill: { height: '100%', background: theme.gold, borderRadius: 999 },
-  matterButton: { width: '100%', display: 'grid', gap: 4, textAlign: 'left', border: 0, borderLeft: '3px solid transparent', borderBottom: `1px solid ${theme.line}`, background: '#fff', padding: '12px 10px', cursor: 'pointer', borderRadius: 6 }, matterActive: { background: '#F8FAFC', borderLeftColor: theme.gold }, detailStack: { display: 'grid', gap: 16 }, chips: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, color: theme.muted }, sub: { borderTop: `1px solid ${theme.line}`, paddingTop: 16 }, noteForm: { display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, marginBottom: 12 }, file: { marginBottom: 12, fontSize: 12 },
+  matterButton: { width: '100%', display: 'grid', gap: 4, textAlign: 'left', border: 0, borderLeft: '3px solid transparent', borderBottom: `1px solid ${theme.line}`, background: '#fff', padding: '12px 10px', cursor: 'pointer', borderRadius: 6 }, matterActive: { background: '#F8FAFC', borderLeftColor: theme.gold }, detailStack: { display: 'grid', gap: 16 }, chips: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, color: theme.muted }, tabList: { display: 'flex', gap: 4, borderBottom: `1px solid ${theme.line}` }, tabButton: { border: 0, borderBottom: '2px solid transparent', background: 'transparent', color: theme.muted, padding: '8px 12px', cursor: 'pointer', fontWeight: 700, fontSize: 13 }, tabActive: { color: theme.navy600, borderBottomColor: theme.gold }, assistantPanel: { display: 'grid', gap: 12 }, assistantIntro: { display: 'grid', gap: 4, padding: 14, borderRadius: 10, background: '#F8FAFC', border: `1px solid ${theme.line}`, color: theme.muted }, suggestionList: { display: 'grid', gap: 10 }, suggestionItem: { display: 'grid', gridTemplateColumns: '28px 1fr', gap: 10, alignItems: 'start', padding: '12px 14px', borderRadius: 10, border: `1px solid ${theme.line}`, background: '#fff', boxShadow: theme.shadow, lineHeight: 1.5 }, suggestionWarning: { background: theme.amberBg, borderColor: '#FDE68A', color: theme.amber }, suggestionGood: { background: theme.greenBg, borderColor: '#A7F3D0', color: theme.green }, suggestionIcon: { width: 28, height: 28, display: 'grid', placeItems: 'center', fontSize: 16 }, sub: { borderTop: `1px solid ${theme.line}`, paddingTop: 16 }, noteForm: { display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, marginBottom: 12 }, file: { marginBottom: 12, fontSize: 12 },
   empty: { minHeight: 136, display: 'grid', placeItems: 'center', textAlign: 'center', color: theme.muted, gap: 6, padding: 18 }, emptyIcon: { width: 42, height: 42, borderRadius: 10, display: 'grid', placeItems: 'center', background: '#F3F4F6', color: theme.navy600, fontWeight: 800 }, skeletonGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 12 }, skeleton: { height: 120, borderRadius: 10, background: '#fff', border: `1px solid ${theme.line}`, boxShadow: theme.shadow, padding: 16, display: 'grid', gap: 10, alignContent: 'start' }, skeletonLineLarge: { height: 18, width: '55%', borderRadius: 6, background: '#E5E7EB', animation: 'lfPulse 1.4s ease-in-out infinite' }, skeletonLine: { height: 12, width: '80%', borderRadius: 6, background: '#EEF2F7', animation: 'lfPulse 1.4s ease-in-out infinite' }, skeletonLineShort: { height: 12, width: '42%', borderRadius: 6, background: '#EEF2F7', animation: 'lfPulse 1.4s ease-in-out infinite' },
   toast: { position: 'fixed', top: 22, right: 22, zIndex: 2000, display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', minWidth: 300, maxWidth: 420, padding: '12px 14px', borderRadius: 10, boxShadow: theme.shadowLift, border: '1px solid', animation: 'lfSlideIn .18s ease-out' }, toastClose: { border: 0, background: 'transparent', color: 'inherit', fontWeight: 900, cursor: 'pointer', fontSize: 16 }, alert: { borderRadius: 8, padding: 12, background: theme.blueBg, color: theme.blue, fontWeight: 700 }, alertDanger: { background: theme.redBg, color: theme.red },
   loginShell: { minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24, background: 'linear-gradient(135deg, #F5F7FA, #EEF2F7)', color: '#fff' }, loginEditorial: { display: 'none' }, loginBadge: { display: 'none' }, loginMetricRow: { display: 'none' }, loginCard: { width: 410, maxWidth: 'calc(100vw - 32px)', color: theme.ink, background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 28, boxShadow: theme.shadowLift }, loginLogo: { width: 48, height: 48, borderRadius: 10, background: theme.gold, display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 900, marginBottom: 12 }, loginHint: { marginTop: 12, color: theme.muted, fontSize: 12 },

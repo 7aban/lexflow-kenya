@@ -117,6 +117,49 @@ app.get('/api/matters/:id', async (req, res) => {
   ]);
   res.json({ ...matter, tasks, timeEntries, documents, notes, invoices });
 });
+app.get('/api/matters/:id/suggestions', async (req, res) => {
+  const matter = await get('SELECT m.*, c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.id=?', [req.params.id]);
+  if (!matter) return res.status(404).json({ error: 'Matter not found' });
+
+  const todayDate = today();
+  const [taskStats, timeStats, docStats, noteStats, invoiceStats, nextAppearance] = await Promise.all([
+    get('SELECT COUNT(*) total, SUM(CASE WHEN completed=0 AND dueDate < ? THEN 1 ELSE 0 END) overdue FROM tasks WHERE matterId=?', [todayDate, req.params.id]),
+    get('SELECT COUNT(*) total, COALESCE(SUM(CASE WHEN billed=0 THEN hours*rate ELSE 0 END),0) unbilled FROM time_entries WHERE matterId=?', [req.params.id]),
+    get('SELECT COUNT(*) total FROM documents WHERE matterId=?', [req.params.id]),
+    get('SELECT COUNT(*) total FROM case_notes WHERE matterId=?', [req.params.id]),
+    get(`SELECT COUNT(*) total, SUM(CASE WHEN status='Outstanding' THEN 1 ELSE 0 END) outstanding FROM invoices WHERE matterId=?`, [req.params.id]),
+    get('SELECT * FROM appearances WHERE matterId=? AND date>=? ORDER BY date LIMIT 1', [req.params.id, todayDate]),
+  ]);
+
+  const suggestions = [];
+  const taskTotal = Number(taskStats?.total || 0);
+  const overdueTasks = Number(taskStats?.overdue || 0);
+  const timeTotal = Number(timeStats?.total || 0);
+  const unbilled = Number(timeStats?.unbilled || 0);
+  const docTotal = Number(docStats?.total || 0);
+  const noteTotal = Number(noteStats?.total || 0);
+  const invoiceTotal = Number(invoiceStats?.total || 0);
+  const outstandingInvoices = Number(invoiceStats?.outstanding || 0);
+
+  if ((matter.stage || '').toLowerCase() === 'intake' && taskTotal === 0 && timeTotal === 0 && noteTotal === 0) {
+    suggestions.push('This matter is still in Intake with no activity. Consider moving it to Conflict Check or creating the first task.');
+  }
+  if (overdueTasks > 0) suggestions.push(`${overdueTasks} overdue task${overdueTasks === 1 ? '' : 's'} need follow-up before the file slips.`);
+  if (nextAppearance) {
+    const daysAway = Math.ceil((new Date(`${nextAppearance.date}T00:00:00`) - new Date(`${todayDate}T00:00:00`)) / 86400000);
+    if (daysAway <= 3) suggestions.push(`${nextAppearance.type || 'Court'} date is ${daysAway === 0 ? 'today' : `in ${daysAway} day${daysAway === 1 ? '' : 's'}`}. Review preparation notes and confirm attendance logistics.`);
+    if (!nextAppearance.prepNote) suggestions.push('The next court appearance has no preparation note. Add a short prep note so the team knows what to review.');
+  }
+  if (docTotal === 0) suggestions.push('No documents are linked to this matter yet. Upload key pleadings, engagement letters, or court notices for quick reference.');
+  if (unbilled > 0) suggestions.push(`There is ${unbilled.toLocaleString('en-KE', { style: 'currency', currency: 'KES', maximumFractionDigits: 0 })} in unbilled time. Consider generating an invoice.`);
+  if ((matter.billingType || '').toLowerCase() === 'fixed' && Number(matter.fixedFee || 0) > 0 && invoiceTotal === 0) suggestions.push('This is a fixed-fee matter with no invoice yet. Generate the fixed-fee invoice when engagement is confirmed.');
+  if (Number(matter.retainerBalance || 0) > 0 && Number(matter.retainerBalance || 0) < 50000) suggestions.push('Retainer balance is running low. Consider requesting a top-up before more billable work is done.');
+  if ((matter.stage || '').toLowerCase() === 'closed' && outstandingInvoices > 0) suggestions.push('This matter is closed but still has an outstanding invoice. Follow up with the client or mark payment when received.');
+  if (noteTotal === 0 && taskTotal > 0) suggestions.push('There are tasks on this file but no case notes. Add a short status note to preserve matter context.');
+  if (!suggestions.length) suggestions.push('This matter looks up to date. No urgent action is needed right now.');
+
+  res.json(suggestions);
+});
 app.post('/api/matters', requireAdvocateOrAdmin, async (req, res) => {
   const id = genId('M');
   const reference = req.body.reference || `LEX-${new Date().getFullYear()}-${String(Date.now()).slice(-5)}`;
