@@ -68,15 +68,20 @@ export const globalSearch = q => req('GET', `/api/search?q=${encodeURIComponent(
 
 export const getClients = () => req('GET', '/api/clients');
 export const createClient = body => req('POST', '/api/clients', body);
+export const updateClient = (id, body) => req('PATCH', `/api/clients/${id}`, body);
+export const deleteClient = id => req('DELETE', `/api/clients/${id}`);
 
 export const getMatters = () => req('GET', '/api/matters');
 export const getMatter = id => req('GET', `/api/matters/${id}`);
 export const createMatter = body => req('POST', '/api/matters', body);
-export const updateMatterStatus = (id, body) => req('PATCH', `/api/matters/${id}`, body);
+export const updateMatter = (id, body) => req('PATCH', `/api/matters/${id}`, body);
+export const updateMatterStatus = (id, body) => req('PATCH', `/api/matters/${id}/status`, body);
+export const deleteMatter = id => req('DELETE', `/api/matters/${id}`);
 
 export const getTasks = () => req('GET', '/api/tasks');
 export const createTask = body => req('POST', '/api/tasks', body);
 export const updateTask = (id, body) => req('PATCH', `/api/tasks/${id}`, body);
+export const deleteTask = id => req('DELETE', `/api/tasks/${id}`);
 
 export const getTimeEntries = matterId => req('GET', matterId ? `/api/time-entries?matter_id=${matterId}` : '/api/time-entries');
 export const createTimeEntry = body => req('POST', '/api/time-entries', body);
@@ -84,6 +89,8 @@ export const updateTimeEntry = (id, body) => req('PATCH', `/api/time-entries/${i
 
 export const getUpcomingAppearances = () => req('GET', '/api/appearances/upcoming');
 export const createAppearance = body => req('POST', '/api/appearances', body);
+export const updateAppearance = (id, body) => req('PATCH', `/api/appearances/${id}`, body);
+export const deleteAppearance = id => req('DELETE', `/api/appearances/${id}`);
 
 export const getDashboard = () => req('GET', '/api/dashboard');
 
@@ -94,6 +101,7 @@ export const getInvoices = () => req('GET', '/api/invoices');
 export const generateInvoice = (matterId, dueDate) => req('POST', '/api/invoices/generate', typeof matterId === 'object' ? matterId : { matterId, dueDate });
 export const getInvoice = id => req('GET', `/api/invoices/${id}`);
 export const updateInvoiceStatus = (id, status) => req('PATCH', `/api/invoices/${id}/status`, { status });
+export const deleteInvoice = id => req('DELETE', `/api/invoices/${id}`);
 export const getInvoicePdf = async id => {
   const token = getStoredToken();
   const res = await fetch(`${BASE}/api/invoices/${id}/pdf`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });

@@ -103,19 +103,41 @@ app.post('/api/clients', async (req, res) => {
   await run('INSERT INTO clients (id,name,type,contact,email,phone,status,joinDate,conflictCleared,retainer) VALUES (?,?,?,?,?,?,?,?,?,?)', [id, req.body.name, req.body.type || 'Individual', req.body.contact || '', req.body.email || '', req.body.phone || '', 'Active', today(), 0, Number(req.body.retainer || 0)]);
   res.json(await get('SELECT * FROM clients WHERE id=?', [id]));
 });
+app.patch('/api/clients/:id', requireAdvocateOrAdmin, async (req, res) => {
+  const fields = ['name', 'type', 'contact', 'email', 'phone', 'status', 'conflictCleared', 'retainer'];
+  const updates = fields.filter(f => req.body[f] !== undefined);
+  if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
+  await run(`UPDATE clients SET ${updates.map(f => `${f}=?`).join(',')} WHERE id=?`, [...updates.map(f => f === 'retainer' ? Number(req.body[f] || 0) : req.body[f]), req.params.id]);
+  const client = await get('SELECT * FROM clients WHERE id=?', [req.params.id]);
+  client ? res.json(client) : res.status(404).json({ error: 'Client not found' });
+});
+app.delete('/api/clients/:id', requireAdvocateOrAdmin, async (req, res) => {
+  const matters = await all('SELECT id FROM matters WHERE clientId=?', [req.params.id]);
+  await run('BEGIN TRANSACTION');
+  try {
+    for (const matter of matters) await deleteMatterCascade(matter.id);
+    await run('DELETE FROM clients WHERE id=?', [req.params.id]);
+    await run('COMMIT');
+    res.json({ id: req.params.id, deleted: true });
+  } catch (err) {
+    await run('ROLLBACK').catch(() => {});
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.get('/api/matters', async (req, res) => res.json(await all('SELECT m.*, c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId ORDER BY openDate DESC')));
 app.get('/api/matters/:id', async (req, res) => {
   const matter = await get('SELECT m.*, c.name clientName, c.email clientEmail, c.phone clientPhone FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.id=?', [req.params.id]);
   if (!matter) return res.status(404).json({ error: 'Matter not found' });
-  const [tasks, timeEntries, documents, notes, invoices] = await Promise.all([
+  const [tasks, timeEntries, documents, notes, invoices, appearances] = await Promise.all([
     all('SELECT * FROM tasks WHERE matterId=? ORDER BY dueDate', [req.params.id]),
     all('SELECT * FROM time_entries WHERE matterId=? ORDER BY date DESC', [req.params.id]),
     all('SELECT id,matterId,name,type,mimeType,date,size FROM documents WHERE matterId=? ORDER BY date DESC', [req.params.id]),
     all('SELECT * FROM case_notes WHERE matterId=? ORDER BY createdAt DESC', [req.params.id]),
-    all('SELECT * FROM invoices WHERE matterId=? ORDER BY date DESC', [req.params.id])
+    all('SELECT * FROM invoices WHERE matterId=? ORDER BY date DESC', [req.params.id]),
+    all('SELECT * FROM appearances WHERE matterId=? ORDER BY date', [req.params.id])
   ]);
-  res.json({ ...matter, tasks, timeEntries, documents, notes, invoices });
+  res.json({ ...matter, tasks, timeEntries, documents, notes, invoices, appearances });
 });
 app.get('/api/matters/:id/suggestions', async (req, res) => {
   const matter = await get('SELECT m.*, c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.id=?', [req.params.id]);
@@ -167,16 +189,48 @@ app.post('/api/matters', requireAdvocateOrAdmin, async (req, res) => {
   res.json(await get('SELECT * FROM matters WHERE id=?', [id]));
 });
 app.patch('/api/matters/:id', requireAdvocateOrAdmin, async (req, res) => {
-  const fields = ['stage','assignedTo','paralegal','priority','billingRate','billingType','fixedFee','retainerBalance','totalBilled','solDate'];
+  const fields = ['reference','clientId','title','practiceArea','stage','assignedTo','paralegal','openDate','description','court','judge','caseNo','opposingCounsel','priority','billingRate','billingType','fixedFee','retainerBalance','totalBilled','solDate'];
   const updates = fields.filter(f => req.body[f] !== undefined);
   if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
-  await run(`UPDATE matters SET ${updates.map(f => `${f}=?`).join(',')} WHERE id=?`, [...updates.map(f => req.body[f]), req.params.id]);
-  res.json(await get('SELECT * FROM matters WHERE id=?', [req.params.id]));
+  await run(`UPDATE matters SET ${updates.map(f => `${f}=?`).join(',')} WHERE id=?`, [...updates.map(f => ['billingRate','fixedFee','retainerBalance','totalBilled'].includes(f) ? Number(req.body[f] || 0) : req.body[f]), req.params.id]);
+  const matter = await get('SELECT * FROM matters WHERE id=?', [req.params.id]);
+  matter ? res.json(matter) : res.status(404).json({ error: 'Matter not found' });
+});
+app.patch('/api/matters/:id/status', requireAdvocateOrAdmin, async (req, res) => {
+  await run('UPDATE matters SET stage=? WHERE id=?', [req.body.stage || 'Closed', req.params.id]);
+  const matter = await get('SELECT * FROM matters WHERE id=?', [req.params.id]);
+  matter ? res.json(matter) : res.status(404).json({ error: 'Matter not found' });
+});
+async function deleteMatterCascade(matterId) {
+  const invoices = await all('SELECT id FROM invoices WHERE matterId=?', [matterId]);
+  for (const invoice of invoices) await run('DELETE FROM invoice_items WHERE invoiceId=?', [invoice.id]);
+  await run('DELETE FROM invoices WHERE matterId=?', [matterId]);
+  await run('DELETE FROM tasks WHERE matterId=?', [matterId]);
+  await run('DELETE FROM time_entries WHERE matterId=?', [matterId]);
+  await run('DELETE FROM appearances WHERE matterId=?', [matterId]);
+  await run('DELETE FROM documents WHERE matterId=?', [matterId]);
+  await run('DELETE FROM case_notes WHERE matterId=?', [matterId]);
+  await run('DELETE FROM integrations_log WHERE matterId=?', [matterId]);
+  await run('DELETE FROM matters WHERE id=?', [matterId]);
+}
+app.delete('/api/matters/:id', requireAdvocateOrAdmin, async (req, res) => {
+  const matter = await get('SELECT id FROM matters WHERE id=?', [req.params.id]);
+  if (!matter) return res.status(404).json({ error: 'Matter not found' });
+  await run('BEGIN TRANSACTION');
+  try {
+    await deleteMatterCascade(req.params.id);
+    await run('COMMIT');
+    res.json({ id: req.params.id, deleted: true });
+  } catch (err) {
+    await run('ROLLBACK').catch(() => {});
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/tasks', async (req, res) => res.json(await all('SELECT * FROM tasks ORDER BY dueDate')));
 app.post('/api/tasks', async (req, res) => { const id = genId('T'); await run('INSERT INTO tasks (id,matterId,title,completed,assignee,dueDate,auto_generated) VALUES (?,?,?,?,?,?,?)', [id, req.body.matterId, req.body.title, req.body.completed ? 1 : 0, req.body.assignee || '', req.body.dueDate || '', 0]); res.json(await get('SELECT * FROM tasks WHERE id=?', [id])); });
-app.patch('/api/tasks/:id', async (req, res) => { await run('UPDATE tasks SET completed=COALESCE(?,completed), title=COALESCE(?,title), assignee=COALESCE(?,assignee), dueDate=COALESCE(?,dueDate) WHERE id=?', [req.body.completed === undefined ? null : (req.body.completed ? 1 : 0), req.body.title ?? null, req.body.assignee ?? null, req.body.dueDate ?? null, req.params.id]); res.json(await get('SELECT * FROM tasks WHERE id=?', [req.params.id])); });
+app.patch('/api/tasks/:id', requireAdvocateOrAdmin, async (req, res) => { await run('UPDATE tasks SET completed=COALESCE(?,completed), title=COALESCE(?,title), assignee=COALESCE(?,assignee), dueDate=COALESCE(?,dueDate) WHERE id=?', [req.body.completed === undefined ? null : (req.body.completed ? 1 : 0), req.body.title ?? null, req.body.assignee ?? null, req.body.dueDate ?? null, req.params.id]); res.json(await get('SELECT * FROM tasks WHERE id=?', [req.params.id])); });
+app.delete('/api/tasks/:id', requireAdvocateOrAdmin, async (req, res) => { await run('DELETE FROM tasks WHERE id=?', [req.params.id]); res.json({ id: req.params.id, deleted: true }); });
 
 app.get('/api/time-entries', async (req, res) => res.json(await all('SELECT * FROM time_entries ORDER BY date DESC')));
 app.post('/api/time-entries', async (req, res) => { const id = genId('TIME'); await run('INSERT INTO time_entries (id,matterId,attorney,date,hours,activity,description,rate,billed) VALUES (?,?,?,?,?,?,?,?,?)', [id, req.body.matterId, req.body.attorney || req.user.fullName || '', req.body.date || today(), Number(req.body.hours || 0), req.body.activity || '', req.body.description || '', Number(req.body.rate || 0), req.body.billed ? 1 : 0]); res.json(await get('SELECT * FROM time_entries WHERE id=?', [id])); });
@@ -185,6 +239,15 @@ app.patch('/api/time-entries/:id', async (req, res) => { await run('UPDATE time_
 app.get('/api/appearances', async (req, res) => res.json(await all('SELECT * FROM appearances ORDER BY date')));
 app.get('/api/appearances/upcoming', async (req, res) => res.json(await all('SELECT * FROM appearances WHERE date>=? ORDER BY date LIMIT 20', [today()])));
 app.post('/api/appearances', async (req, res) => { const id = genId('EV'); await run('INSERT INTO appearances (id,matterId,title,date,time,type,location,attorney,prepNote) VALUES (?,?,?,?,?,?,?,?,?)', [id, req.body.matterId, req.body.title, req.body.date, req.body.time || '9:00 AM', req.body.type || 'Hearing', req.body.location || '', req.body.attorney || '', req.body.prepNote || '']); res.json(await get('SELECT * FROM appearances WHERE id=?', [id])); });
+app.patch('/api/appearances/:id', requireAdvocateOrAdmin, async (req, res) => {
+  const fields = ['matterId','title','date','time','type','location','attorney','prepNote'];
+  const updates = fields.filter(f => req.body[f] !== undefined);
+  if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
+  await run(`UPDATE appearances SET ${updates.map(f => `${f}=?`).join(',')} WHERE id=?`, [...updates.map(f => req.body[f]), req.params.id]);
+  const event = await get('SELECT * FROM appearances WHERE id=?', [req.params.id]);
+  event ? res.json(event) : res.status(404).json({ error: 'Appearance not found' });
+});
+app.delete('/api/appearances/:id', requireAdvocateOrAdmin, async (req, res) => { await run('DELETE FROM appearances WHERE id=?', [req.params.id]); res.json({ id: req.params.id, deleted: true }); });
 
 app.post('/api/matters/:id/documents', requireAdvocateOrAdmin, async (req, res) => {
   const { name, mimeType, data } = req.body;
@@ -239,6 +302,14 @@ async function invoiceWithDetails(id) {
 }
 app.get('/api/invoices/:id', async (req, res) => { const invoice = await invoiceWithDetails(req.params.id); invoice ? res.json(invoice) : res.status(404).json({ error: 'Invoice not found' }); });
 app.patch('/api/invoices/:id/status', requireAdmin, async (req, res) => { if (!['Paid', 'Outstanding', 'Overdue'].includes(req.body.status)) return res.status(400).json({ error: 'Invalid invoice status' }); await run('UPDATE invoices SET status=? WHERE id=?', [req.body.status, req.params.id]); res.json(await invoiceWithDetails(req.params.id)); });
+app.delete('/api/invoices/:id', requireAdvocateOrAdmin, async (req, res) => {
+  const invoice = await get('SELECT * FROM invoices WHERE id=?', [req.params.id]);
+  if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+  if (invoice.status === 'Paid') return res.status(400).json({ error: 'Paid invoices cannot be deleted' });
+  await run('DELETE FROM invoice_items WHERE invoiceId=?', [req.params.id]);
+  await run('DELETE FROM invoices WHERE id=?', [req.params.id]);
+  res.json({ id: req.params.id, deleted: true });
+});
 app.get('/api/invoices/:id/pdf', async (req, res) => {
   const invoice = await invoiceWithDetails(req.params.id);
   if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
