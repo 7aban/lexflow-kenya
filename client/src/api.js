@@ -86,6 +86,7 @@ export const deleteTask = id => req('DELETE', `/api/tasks/${id}`);
 export const getTimeEntries = matterId => req('GET', matterId ? `/api/time-entries?matter_id=${matterId}` : '/api/time-entries');
 export const createTimeEntry = body => req('POST', '/api/time-entries', body);
 export const updateTimeEntry = (id, body) => req('PATCH', `/api/time-entries/${id}`, body);
+export const deleteTimeEntry = id => req('DELETE', `/api/time-entries/${id}`);
 
 export const getUpcomingAppearances = () => req('GET', '/api/appearances/upcoming');
 export const createAppearance = body => req('POST', '/api/appearances', body);

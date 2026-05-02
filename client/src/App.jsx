@@ -406,6 +406,7 @@ function Matters({ data, canManage, reload, notify }) {
   const [editingMatter, setEditingMatter] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [editingEvent, setEditingEvent] = useState(null);
+  const [editingTime, setEditingTime] = useState(null);
   const [confirm, setConfirm] = useState(null);
   const [loading, setLoading] = useState(false);
   const emptyMatterForm = { clientId: '', title: '', practiceArea: '', stage: 'Intake', assignedTo: '', paralegal: '', description: '', court: '', judge: '', caseNo: '', opposingCounsel: '', priority: 'Medium', solDate: '', billingType: 'hourly', billingRate: 15000, fixedFee: 0, retainerBalance: 0 };
@@ -445,6 +446,8 @@ function Matters({ data, canManage, reload, notify }) {
   async function deleteInvoiceRecord(invoice) { try { await api(`/invoices/${invoice.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Invoice deleted.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function saveEvent(event, values) { try { await api(`/appearances/${event.id}`, { method: 'PATCH', body: values }); setEditingEvent(null); notify({ type: 'success', message: 'Appearance updated.' }); await loadDetail(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteEventRecord(event) { try { await api(`/appearances/${event.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Appearance deleted.' }); await loadDetail(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
+  async function saveTimeEntry(entry, values) { try { await api(`/time-entries/${entry.id}`, { method: 'PATCH', body: values }); setEditingTime(null); notify({ type: 'success', message: 'Time entry updated.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
+  async function deleteTimeEntryRecord(entry) { try { await api(`/time-entries/${entry.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Time entry deleted.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
 
   return (
     <div style={styles.matterGrid}>
@@ -502,6 +505,7 @@ function Matters({ data, canManage, reload, notify }) {
                     <Field label="Rate"><input type="number" style={styles.input} value={time.rate} onChange={e => setTime({ ...time, rate: Number(e.target.value) })} /></Field>
                     <button style={styles.primaryButton}>Log time</button>
                   </form>
+                  <Sub title="Time entries"><TimeEntryEditorList entries={detail.timeEntries || []} canManage={canManage} editingTime={editingTime} setEditingTime={setEditingTime} saveTimeEntry={saveTimeEntry} confirmDelete={entry => setConfirm({ title: 'Delete time entry?', message: 'Delete this time entry?', onConfirm: () => deleteTimeEntryRecord(entry) })} /></Sub>
                   <Sub title="Tasks"><TaskEditorList tasks={detail.tasks || []} canManage={canManage} editingTask={editingTask} setEditingTask={setEditingTask} saveTask={saveTask} confirmDelete={task => setConfirm({ title: 'Delete task?', message: 'Delete this task?', onConfirm: () => deleteTaskRecord(task) })} /></Sub>
                   <Sub title="Court appearances"><AppearanceEditorList events={detail.appearances || []} canManage={canManage} editingEvent={editingEvent} setEditingEvent={setEditingEvent} saveEvent={saveEvent} confirmDelete={event => setConfirm({ title: 'Delete appearance?', message: 'Delete this court appearance?', onConfirm: () => deleteEventRecord(event) })} /></Sub>
                   <Sub title="Documents"><input style={styles.file} type="file" accept=".pdf,.doc,.docx" onChange={uploadDoc} /><Table columns={['Name', 'Type', 'Size', 'Download', 'Actions']} rows={(detail.documents || []).map(d => [d.name, d.type, d.size, <a key={d.id} style={styles.link} href={`${API_BASE}/documents/${d.id}/download?token=${encodeURIComponent(readSession()?.token || '')}`}>Download</a>, canManage ? <ActionGroup key={`${d.id}-actions`} actions={[['Delete', () => setConfirm({ title: 'Delete document?', message: 'Delete this document?', onConfirm: () => deleteDocumentRecord(d) })]]} /> : '-'])} empty="No documents uploaded." /></Sub>
@@ -585,6 +589,30 @@ function AppearanceEditorList({ events, canManage, editingEvent, setEditingEvent
               <td>{editing ? <input style={styles.input} value={editingEvent.type || ''} onChange={e => setEditingEvent({ ...editingEvent, type: e.target.value })} /> : event.type || '-'}</td>
               <td>{editing ? <input style={styles.input} value={editingEvent.location || ''} onChange={e => setEditingEvent({ ...editingEvent, location: e.target.value })} /> : event.location || '-'}</td>
               <td>{canManage ? editing ? <ActionGroup actions={[['Save', () => saveEvent(event, editingEvent)], ['Cancel', () => setEditingEvent(null)]]} /> : <ActionGroup actions={[['Edit', () => setEditingEvent({ ...event })], ['Delete', () => confirmDelete(event)]]} /> : '-'}</td>
+            </tr>
+          );
+        })}</tbody>
+      </table>
+    </div>
+  );
+}
+
+function TimeEntryEditorList({ entries, canManage, editingTime, setEditingTime, saveTimeEntry, confirmDelete }) {
+  if (!entries.length) return <Empty title="No time entries." text="Logged time will appear here." />;
+  return (
+    <div style={styles.tableWrap}>
+      <table style={styles.table}>
+        <thead><tr>{['Date', 'Description', 'Hours', 'Rate', 'Status', 'Actions'].map(h => <th key={h}>{h}</th>)}</tr></thead>
+        <tbody>{entries.map(entry => {
+          const editing = editingTime?.id === entry.id;
+          return (
+            <tr key={entry.id}>
+              <td>{editing ? <input type="date" style={styles.input} value={editingTime.date || ''} onChange={e => setEditingTime({ ...editingTime, date: e.target.value })} /> : entry.date || '-'}</td>
+              <td>{editing ? <input style={styles.input} value={editingTime.description || ''} onChange={e => setEditingTime({ ...editingTime, description: e.target.value })} /> : entry.description || entry.activity || '-'}</td>
+              <td>{editing ? <input type="number" step="0.1" style={styles.input} value={editingTime.hours || 0} onChange={e => setEditingTime({ ...editingTime, hours: Number(e.target.value) })} /> : Number(entry.hours || 0).toFixed(1)}</td>
+              <td>{editing ? <input type="number" style={styles.input} value={editingTime.rate || 0} onChange={e => setEditingTime({ ...editingTime, rate: Number(e.target.value) })} /> : kes(entry.rate)}</td>
+              <td><Badge tone={entry.billed ? 'green' : 'amber'}>{entry.billed ? 'Billed' : 'Unbilled'}</Badge></td>
+              <td>{canManage ? editing ? <ActionGroup actions={[['Save', () => saveTimeEntry(entry, editingTime)], ['Cancel', () => setEditingTime(null)]]} /> : <ActionGroup actions={[[entry.billed ? 'Unbill' : 'Bill', () => saveTimeEntry(entry, { billed: !entry.billed })], ['Edit', () => setEditingTime({ ...entry })], ['Delete', () => confirmDelete(entry)]]} /> : '-'}</td>
             </tr>
           );
         })}</tbody>

@@ -234,7 +234,15 @@ app.delete('/api/tasks/:id', requireAdvocateOrAdmin, async (req, res) => { await
 
 app.get('/api/time-entries', async (req, res) => res.json(await all('SELECT * FROM time_entries ORDER BY date DESC')));
 app.post('/api/time-entries', async (req, res) => { const id = genId('TIME'); await run('INSERT INTO time_entries (id,matterId,attorney,date,hours,activity,description,rate,billed) VALUES (?,?,?,?,?,?,?,?,?)', [id, req.body.matterId, req.body.attorney || req.user.fullName || '', req.body.date || today(), Number(req.body.hours || 0), req.body.activity || '', req.body.description || '', Number(req.body.rate || 0), req.body.billed ? 1 : 0]); res.json(await get('SELECT * FROM time_entries WHERE id=?', [id])); });
-app.patch('/api/time-entries/:id', async (req, res) => { await run('UPDATE time_entries SET billed=? WHERE id=?', [req.body.billed ? 1 : 0, req.params.id]); res.json(await get('SELECT * FROM time_entries WHERE id=?', [req.params.id])); });
+app.patch('/api/time-entries/:id', requireAdvocateOrAdmin, async (req, res) => {
+  const fields = ['matterId','attorney','date','hours','activity','description','rate','billed'];
+  const updates = fields.filter(f => req.body[f] !== undefined);
+  if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
+  await run(`UPDATE time_entries SET ${updates.map(f => `${f}=?`).join(',')} WHERE id=?`, [...updates.map(f => ['hours','rate'].includes(f) ? Number(req.body[f] || 0) : f === 'billed' ? (req.body[f] ? 1 : 0) : req.body[f]), req.params.id]);
+  const entry = await get('SELECT * FROM time_entries WHERE id=?', [req.params.id]);
+  entry ? res.json(entry) : res.status(404).json({ error: 'Time entry not found' });
+});
+app.delete('/api/time-entries/:id', requireAdvocateOrAdmin, async (req, res) => { await run('DELETE FROM time_entries WHERE id=?', [req.params.id]); res.json({ id: req.params.id, deleted: true }); });
 
 app.get('/api/appearances', async (req, res) => res.json(await all('SELECT * FROM appearances ORDER BY date')));
 app.get('/api/appearances/upcoming', async (req, res) => res.json(await all('SELECT * FROM appearances WHERE date>=? ORDER BY date LIMIT 20', [today()])));
