@@ -187,6 +187,11 @@ async function initDb() {
   await ensureColumn('appearances', 'meetingLink', 'TEXT');
   await ensureColumn('documents', 'source', "TEXT DEFAULT 'firm'");
   await ensureColumn('documents', 'folderId', 'TEXT');
+  await ensureColumn('clients', 'remindersEnabled', 'INTEGER DEFAULT 1');
+  await ensureColumn('clients', 'preferredChannel', "TEXT DEFAULT 'firm_default'");
+  await ensureColumn('matters', 'remindersEnabled', "TEXT DEFAULT 'firm_default'");
+  await ensureColumn('matters', 'courtRemindersEnabled', "TEXT DEFAULT 'firm_default'");
+  await ensureColumn('matters', 'invoiceRemindersEnabled', "TEXT DEFAULT 'firm_default'");
   await ensureColumn('reminder_logs', 'invoiceId', 'TEXT');
   await seedReminderTemplates();
 
@@ -334,12 +339,23 @@ async function sendReminder(eventType, context) {
   const firm = await getFirmSettings();
   const settings = firm.reminderSettings || defaultReminderSettings;
   if (!settings.remindersEnabled) return;
-  if (settings.whatsappEnabled) await sendReminderForChannel({ ...context, eventType, channel: 'whatsapp', firm, settings });
-  if (settings.emailEnabled) await sendReminderForChannel({ ...context, eventType, channel: 'email', firm, settings });
+  const matter = context.matter || {};
+  const client = context.client || {};
+  const matterEnabled = matter.remindersEnabled ?? 'firm_default';
+  if (matterEnabled === 'off' || matterEnabled === 'false' || matterEnabled === false) return;
+  if (eventType.startsWith('court') && ['off', 'false', false].includes(matter.courtRemindersEnabled)) return;
+  if (eventType.startsWith('invoice') && ['off', 'false', false].includes(matter.invoiceRemindersEnabled)) return;
+  if (client.remindersEnabled === 0 || client.remindersEnabled === false) return;
+  const preference = client.preferredChannel || 'firm_default';
+  const allowed = preference === 'none' ? [] : preference === 'both' ? ['whatsapp', 'email'] : preference === 'email' || preference === 'whatsapp' ? [preference] : ['firm_default'];
+  const shouldSendWhatsApp = settings.whatsappEnabled && (allowed.includes('firm_default') || allowed.includes('whatsapp'));
+  const shouldSendEmail = settings.emailEnabled && (allowed.includes('firm_default') || allowed.includes('email'));
+  if (shouldSendWhatsApp) await sendReminderForChannel({ ...context, eventType, channel: 'whatsapp', firm, settings });
+  if (shouldSendEmail) await sendReminderForChannel({ ...context, eventType, channel: 'email', firm, settings });
 }
 
 async function runCourtReminders(eventType, date) {
-  const rows = await all(`SELECT a.*, m.title matterTitle, m.id matterId, m.clientId, c.name clientName, c.email clientEmail, c.phone clientPhone
+  const rows = await all(`SELECT a.*, m.title matterTitle, m.id matterId, m.clientId, m.remindersEnabled matterRemindersEnabled, m.courtRemindersEnabled, m.invoiceRemindersEnabled, c.name clientName, c.email clientEmail, c.phone clientPhone, c.remindersEnabled clientRemindersEnabled, c.preferredChannel
     FROM appearances a
     LEFT JOIN matters m ON m.id=a.matterId
     LEFT JOIN clients c ON c.id=m.clientId
@@ -347,14 +363,14 @@ async function runCourtReminders(eventType, date) {
   for (const row of rows) {
     await sendReminder(eventType, {
       appearance: row,
-      matter: { id: row.matterId, title: row.matterTitle },
-      client: { id: row.clientId, name: row.clientName, email: row.clientEmail, phone: row.clientPhone },
+      matter: { id: row.matterId, title: row.matterTitle, remindersEnabled: row.matterRemindersEnabled, courtRemindersEnabled: row.courtRemindersEnabled, invoiceRemindersEnabled: row.invoiceRemindersEnabled },
+      client: { id: row.clientId, name: row.clientName, email: row.clientEmail, phone: row.clientPhone, remindersEnabled: row.clientRemindersEnabled, preferredChannel: row.preferredChannel },
     });
   }
 }
 
 async function runInvoiceReminders(eventType, whereSql, params = []) {
-  const rows = await all(`SELECT i.*, m.title matterTitle, m.id matterId, c.id clientId, c.name clientName, c.email clientEmail, c.phone clientPhone
+  const rows = await all(`SELECT i.*, m.title matterTitle, m.id matterId, m.remindersEnabled matterRemindersEnabled, m.courtRemindersEnabled, m.invoiceRemindersEnabled, c.id clientId, c.name clientName, c.email clientEmail, c.phone clientPhone, c.remindersEnabled clientRemindersEnabled, c.preferredChannel
     FROM invoices i
     LEFT JOIN matters m ON m.id=i.matterId
     LEFT JOIN clients c ON c.id=i.clientId
@@ -362,8 +378,8 @@ async function runInvoiceReminders(eventType, whereSql, params = []) {
   for (const row of rows) {
     await sendReminder(eventType, {
       invoice: { ...row, id: row.id, matterTitle: row.matterTitle },
-      matter: { id: row.matterId, title: row.matterTitle },
-      client: { id: row.clientId, name: row.clientName, email: row.clientEmail, phone: row.clientPhone },
+      matter: { id: row.matterId, title: row.matterTitle, remindersEnabled: row.matterRemindersEnabled, courtRemindersEnabled: row.courtRemindersEnabled, invoiceRemindersEnabled: row.invoiceRemindersEnabled },
+      client: { id: row.clientId, name: row.clientName, email: row.clientEmail, phone: row.clientPhone, remindersEnabled: row.clientRemindersEnabled, preferredChannel: row.preferredChannel },
     });
   }
 }
@@ -570,16 +586,16 @@ app.get('/api/dashboard', requireStaff, async (req, res) => {
 app.get('/api/clients', requireStaff, async (req, res) => res.json(await all('SELECT * FROM clients ORDER BY name')));
 app.post('/api/clients', requireStaff, async (req, res) => {
   const id = genId('C');
-  await run('INSERT INTO clients (id,name,type,contact,email,phone,status,joinDate,conflictCleared,retainer) VALUES (?,?,?,?,?,?,?,?,?,?)', [id, req.body.name, req.body.type || 'Individual', req.body.contact || '', req.body.email || '', req.body.phone || '', 'Active', today(), 0, Number(req.body.retainer || 0)]);
+  await run('INSERT INTO clients (id,name,type,contact,email,phone,status,joinDate,conflictCleared,retainer,remindersEnabled,preferredChannel) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', [id, req.body.name, req.body.type || 'Individual', req.body.contact || '', req.body.email || '', req.body.phone || '', 'Active', today(), 0, Number(req.body.retainer || 0), req.body.remindersEnabled === undefined ? 1 : (req.body.remindersEnabled ? 1 : 0), req.body.preferredChannel || 'firm_default']);
   const client = await get('SELECT * FROM clients WHERE id=?', [id]);
   await logAudit(req, 'create', 'client', id, `Created client ${client.name}`);
   res.json(client);
 });
 app.patch('/api/clients/:id', requireAdvocateOrAdmin, async (req, res) => {
-  const fields = ['name', 'type', 'contact', 'email', 'phone', 'status', 'conflictCleared', 'retainer'];
+  const fields = ['name', 'type', 'contact', 'email', 'phone', 'status', 'conflictCleared', 'retainer', 'remindersEnabled', 'preferredChannel'];
   const updates = fields.filter(f => req.body[f] !== undefined);
   if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
-  await run(`UPDATE clients SET ${updates.map(f => `${f}=?`).join(',')} WHERE id=?`, [...updates.map(f => f === 'retainer' ? Number(req.body[f] || 0) : req.body[f]), req.params.id]);
+  await run(`UPDATE clients SET ${updates.map(f => `${f}=?`).join(',')} WHERE id=?`, [...updates.map(f => f === 'retainer' ? Number(req.body[f] || 0) : f === 'remindersEnabled' ? (req.body[f] ? 1 : 0) : req.body[f]), req.params.id]);
   const client = await get('SELECT * FROM clients WHERE id=?', [req.params.id]);
   if (client) await logAudit(req, 'update', 'client', req.params.id, `Updated client ${client.name}`);
   client ? res.json(client) : res.status(404).json({ error: 'Client not found' });
@@ -667,13 +683,13 @@ app.get('/api/matters/:id/suggestions', async (req, res) => {
 app.post('/api/matters', requireAdvocateOrAdmin, async (req, res) => {
   const id = genId('M');
   const reference = req.body.reference || `LEX-${new Date().getFullYear()}-${String(Date.now()).slice(-5)}`;
-  await run(`INSERT INTO matters (id,reference,clientId,title,practiceArea,stage,assignedTo,paralegal,openDate,description,court,judge,caseNo,opposingCounsel,billingRate,retainerBalance,totalBilled,priority,solDate,billingType,fixedFee) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [id, reference, req.body.clientId, req.body.title, req.body.practiceArea || '', req.body.stage || 'Intake', req.body.assignedTo || '', req.body.paralegal || '', req.body.openDate || today(), req.body.description || '', req.body.court || '', req.body.judge || '', req.body.caseNo || '', req.body.opposingCounsel || '', Number(req.body.billingRate || 0), Number(req.body.retainerBalance || 0), 0, req.body.priority || 'Medium', req.body.solDate || '', req.body.billingType || 'hourly', Number(req.body.fixedFee || 0)]);
+  await run(`INSERT INTO matters (id,reference,clientId,title,practiceArea,stage,assignedTo,paralegal,openDate,description,court,judge,caseNo,opposingCounsel,billingRate,retainerBalance,totalBilled,priority,solDate,billingType,fixedFee,remindersEnabled,courtRemindersEnabled,invoiceRemindersEnabled) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [id, reference, req.body.clientId, req.body.title, req.body.practiceArea || '', req.body.stage || 'Intake', req.body.assignedTo || '', req.body.paralegal || '', req.body.openDate || today(), req.body.description || '', req.body.court || '', req.body.judge || '', req.body.caseNo || '', req.body.opposingCounsel || '', Number(req.body.billingRate || 0), Number(req.body.retainerBalance || 0), 0, req.body.priority || 'Medium', req.body.solDate || '', req.body.billingType || 'hourly', Number(req.body.fixedFee || 0), req.body.remindersEnabled || 'firm_default', req.body.courtRemindersEnabled || 'firm_default', req.body.invoiceRemindersEnabled || 'firm_default']);
   const matter = await get('SELECT * FROM matters WHERE id=?', [id]);
   await logAudit(req, 'create', 'matter', id, `Created matter ${matter.title} (${matter.reference})`);
   res.json(matter);
 });
 app.patch('/api/matters/:id', requireAdvocateOrAdmin, async (req, res) => {
-  const fields = ['reference','clientId','title','practiceArea','stage','assignedTo','paralegal','openDate','description','court','judge','caseNo','opposingCounsel','priority','billingRate','billingType','fixedFee','retainerBalance','totalBilled','solDate'];
+  const fields = ['reference','clientId','title','practiceArea','stage','assignedTo','paralegal','openDate','description','court','judge','caseNo','opposingCounsel','priority','billingRate','billingType','fixedFee','retainerBalance','totalBilled','solDate','remindersEnabled','courtRemindersEnabled','invoiceRemindersEnabled'];
   const updates = fields.filter(f => req.body[f] !== undefined);
   if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
   await run(`UPDATE matters SET ${updates.map(f => `${f}=?`).join(',')} WHERE id=?`, [...updates.map(f => ['billingRate','fixedFee','retainerBalance','totalBilled'].includes(f) ? Number(req.body[f] || 0) : req.body[f]), req.params.id]);

@@ -69,7 +69,8 @@ export function Dashboard({ data }) {
 }
 
 export function Clients({ clients, matters, canManage, isAdmin = false, reload, notify }) {
-  const [form, setForm] = useState({ name: '', type: 'Individual', contact: '', email: '', phone: '' });
+  const emptyClientForm = { name: '', type: 'Individual', contact: '', email: '', phone: '', remindersEnabled: true, preferredChannel: 'firm_default' };
+  const [form, setForm] = useState(emptyClientForm);
   const [editing, setEditing] = useState(null);
   const [confirm, setConfirm] = useState(null);
   const [tooltip, setTooltip] = useState(null);
@@ -81,7 +82,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
     try {
       if (editing) await api(`/clients/${editing.id}`, { method: 'PATCH', body: form });
       else await api('/clients', { method: 'POST', body: form });
-      setForm({ name: '', type: 'Individual', contact: '', email: '', phone: '' });
+      setForm(emptyClientForm);
       setEditing(null);
       notify({ type: 'success', message: editing ? 'Client updated.' : 'Client created.' });
       await reload();
@@ -89,7 +90,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   }
   function startEdit(client) {
     setEditing(client);
-    setForm({ name: client.name || '', type: client.type || 'Individual', contact: client.contact || '', email: client.email || '', phone: client.phone || '' });
+    setForm({ ...emptyClientForm, name: client.name || '', type: client.type || 'Individual', contact: client.contact || '', email: client.email || '', phone: client.phone || '', remindersEnabled: client.remindersEnabled === undefined ? true : Boolean(Number(client.remindersEnabled)), preferredChannel: client.preferredChannel || 'firm_default' });
   }
   async function deleteClient(client) {
     try {
@@ -112,9 +113,13 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
     if (account) return <Badge tone="green">Active</Badge>;
     return <button type="button" style={styles.tinyButton} onClick={() => inviteClient(client)}>Send Invitation</button>;
   }
-  return <div style={styles.splitGrid}><Card title={editing ? 'Edit client' : 'New client'} hint={editing ? 'Save client changes' : 'Intake record'}><form onSubmit={submit} style={styles.formGrid}><Field label="Name"><input required style={styles.input} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field><Field label="Type"><select style={styles.input} value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}><option>Individual</option><option>Company</option></select></Field><Field label="Contact"><input style={styles.input} value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} /></Field><Field label="Email"><input style={styles.input} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field><Field label="Phone"><input style={styles.input} value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></Field><button style={styles.primaryButton}>{editing ? 'Save changes' : 'Create client'}</button>{editing && <button type="button" style={styles.ghostButton} onClick={() => { setEditing(null); setForm({ name: '', type: 'Individual', contact: '', email: '', phone: '' }); }}>Cancel</button>}</form></Card><Card title="Client directory" hint={`${clients.length} records`}><Table columns={['Name', 'Type', 'Email', 'Phone', 'Status', 'Portal', 'Actions']} rows={clients.map(c => [<span key={c.id} onMouseMove={e => setTooltip({ x: e.clientX, y: e.clientY, title: c.name, lines: [`${c.type || 'Client'} / ${c.status || 'Active'}`, `${matters.filter(m => m.clientId === c.id).length} matter(s)`, `Joined ${c.joinDate || '-'}`], initial: (c.name || 'C').slice(0, 1) })} onMouseLeave={() => setTooltip(null)} style={styles.hoverName}>{c.name}</span>, c.type, c.email || '-', c.phone || '-', <Badge key={`${c.id}-status`} tone="green">{c.status || 'Active'}</Badge>, portalCell(c), canManage ? <ActionGroup key={`${c.id}-actions`} actions={[[ 'Edit', () => startEdit(c)], ['Delete', () => setConfirm({ title: 'Delete client?', message: 'Are you sure you want to delete this client? This will also remove all related matters.', onConfirm: () => deleteClient(c) })]]} /> : '-'])} empty="No clients yet." /></Card><ProfileTooltip tooltip={tooltip} /><ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} /></div>;
-}
-export function Matters({ data, canManage, reload, notify }) {
+  function reminderCell(client) {
+    if (client.remindersEnabled === 0) return <Badge tone="red">Off</Badge>;
+    const channel = client.preferredChannel || 'firm_default';
+    return <Badge tone={channel === 'none' ? 'red' : channel === 'firm_default' ? 'blue' : 'green'}>{channel === 'firm_default' ? 'Firm default' : channel}</Badge>;
+  }
+  return <div style={styles.splitGrid}><Card title={editing ? 'Edit client' : 'New client'} hint={editing ? 'Save client changes and communication preference' : 'Intake record'}><form onSubmit={submit} style={styles.formGrid}><Field label="Name"><input required style={styles.input} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field><Field label="Type"><select style={styles.input} value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}><option>Individual</option><option>Company</option></select></Field><Field label="Contact"><input style={styles.input} value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} /></Field><Field label="Email"><input style={styles.input} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field><Field label="Phone"><input style={styles.input} value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></Field><Field label="Reminders"><select style={styles.input} value={form.remindersEnabled ? 'on' : 'off'} onChange={e => setForm({ ...form, remindersEnabled: e.target.value === 'on' })}><option value="on">On</option><option value="off">Off for this client</option></select></Field><Field label="Preferred Channel"><select style={styles.input} value={form.preferredChannel} onChange={e => setForm({ ...form, preferredChannel: e.target.value })}><option value="firm_default">Firm default</option><option value="both">WhatsApp and Email</option><option value="whatsapp">WhatsApp only</option><option value="email">Email only</option><option value="none">None</option></select></Field><button style={styles.primaryButton}>{editing ? 'Save changes' : 'Create client'}</button>{editing && <button type="button" style={styles.ghostButton} onClick={() => { setEditing(null); setForm(emptyClientForm); }}>Cancel</button>}</form></Card><Card title="Client directory" hint={`${clients.length} records`}><Table columns={['Name', 'Type', 'Email', 'Phone', 'Status', 'Reminders', 'Portal', 'Actions']} rows={clients.map(c => [<span key={c.id} onMouseMove={e => setTooltip({ x: e.clientX, y: e.clientY, title: c.name, lines: [`${c.type || 'Client'} / ${c.status || 'Active'}`, `${matters.filter(m => m.clientId === c.id).length} matter(s)`, `Joined ${c.joinDate || '-'}`], initial: (c.name || 'C').slice(0, 1) })} onMouseLeave={() => setTooltip(null)} style={styles.hoverName}>{c.name}</span>, c.type, c.email || '-', c.phone || '-', <Badge key={`${c.id}-status`} tone="green">{c.status || 'Active'}</Badge>, reminderCell(c), portalCell(c), canManage ? <ActionGroup key={`${c.id}-actions`} actions={[[ 'Edit', () => startEdit(c)], ['Delete', () => setConfirm({ title: 'Delete client?', message: 'Are you sure you want to delete this client? This will also remove all related matters.', onConfirm: () => deleteClient(c) })]]} /> : '-'])} empty="No clients yet." /></Card><ProfileTooltip tooltip={tooltip} /><ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} /></div>;
+}export function Matters({ data, canManage, reload, notify }) {
   const [selectedId, setSelectedId] = useState('');
   const [detail, setDetail] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
@@ -126,7 +131,7 @@ export function Matters({ data, canManage, reload, notify }) {
   const [confirm, setConfirm] = useState(null);
   const [tooltip, setTooltip] = useState(null);
   const [loading, setLoading] = useState(false);
-  const emptyMatterForm = { clientId: '', title: '', practiceArea: '', stage: 'Intake', assignedTo: '', paralegal: '', description: '', court: '', judge: '', caseNo: '', opposingCounsel: '', priority: 'Medium', solDate: '', billingType: 'hourly', billingRate: 15000, fixedFee: 0, retainerBalance: 0 };
+  const emptyMatterForm = { clientId: '', title: '', practiceArea: '', stage: 'Intake', assignedTo: '', paralegal: '', description: '', court: '', judge: '', caseNo: '', opposingCounsel: '', priority: 'Medium', solDate: '', billingType: 'hourly', billingRate: 15000, fixedFee: 0, retainerBalance: 0, remindersEnabled: 'firm_default', courtRemindersEnabled: 'firm_default', invoiceRemindersEnabled: 'firm_default' };
   const [form, setForm] = useState(emptyMatterForm);
   const [time, setTime] = useState({ hours: 1, description: '', rate: 15000 });
   const emptyEventForm = { title: '', date: '', time: '9:00 AM', type: 'Hearing', location: '', meetingLink: '', attorney: '', prepNote: '' };
@@ -195,7 +200,7 @@ export function Matters({ data, canManage, reload, notify }) {
               <Field label="Opposing Counsel"><input style={styles.input} value={form.opposingCounsel || ''} onChange={e => setForm({ ...form, opposingCounsel: e.target.value })} /></Field>
               <Field label="Billing"><select style={styles.input} value={form.billingType} onChange={e => setForm({ ...form, billingType: e.target.value })}><option value="hourly">Hourly</option><option value="fixed">Fixed fee</option></select></Field>
               <Field label="Rate/Fee"><input type="number" style={styles.input} value={form.billingType === 'fixed' ? form.fixedFee : form.billingRate} onChange={e => setForm({ ...form, [form.billingType === 'fixed' ? 'fixedFee' : 'billingRate']: Number(e.target.value) })} /></Field>
-              <Field label="Description"><input style={styles.input} value={form.description || ''} onChange={e => setForm({ ...form, description: e.target.value })} /></Field>
+              <Field label="Matter Reminders"><select style={styles.input} value={form.remindersEnabled || 'firm_default'} onChange={e => setForm({ ...form, remindersEnabled: e.target.value })}><option value="firm_default">Use client/firm default</option><option value="on">On for this matter</option><option value="off">Off for this matter</option></select></Field><Field label="Court Reminders"><select style={styles.input} value={form.courtRemindersEnabled || 'firm_default'} onChange={e => setForm({ ...form, courtRemindersEnabled: e.target.value })}><option value="firm_default">Use matter default</option><option value="on">On</option><option value="off">Off</option></select></Field><Field label="Invoice Reminders"><select style={styles.input} value={form.invoiceRemindersEnabled || 'firm_default'} onChange={e => setForm({ ...form, invoiceRemindersEnabled: e.target.value })}><option value="firm_default">Use matter default</option><option value="on">On</option><option value="off">Off</option></select></Field><Field label="Description"><input style={styles.input} value={form.description || ''} onChange={e => setForm({ ...form, description: e.target.value })} /></Field>
               <button style={styles.primaryButton}>{editingMatter ? 'Save changes' : 'Create matter'}</button>
               {editingMatter && <button type="button" style={styles.ghostButton} onClick={() => { setEditingMatter(false); setForm(emptyMatterForm); }}>Cancel</button>}
             </form>
