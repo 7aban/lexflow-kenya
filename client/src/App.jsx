@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, API_BASE, AUTH_FAILURE_MESSAGE, clearSession, getNotifications, markNotificationsRead, readSession, saveSession } from './lib/apiClient.js';
 import { globalSearch } from './api.js';
 import { defaultFirmSettings, styles, StyleTag, theme } from './theme.jsx';
@@ -55,6 +55,7 @@ export default function App() {
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const searchRef = useRef(null);
   const [quickLinksOpen, setQuickLinksOpen] = useState(true);
   const [openNavGroup, setOpenNavGroup] = useState(() => readOpenNavGroup(session?.user?.role || 'assistant'));
   const [notifications, setNotifications] = useState([]);
@@ -152,6 +153,17 @@ export default function App() {
     }, 300);
     return () => clearTimeout(timer);
   }, [search]);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    function handleClickOutside(e) {
+      if (searchRef.current && !searchRef.current.contains(e.target)) {
+        setSearchOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [searchOpen]);
 
   async function refresh() {
     setLoading(true);
@@ -344,7 +356,7 @@ export default function App() {
             <p style={styles.subtitle}>{subtitles[view]}</p>
           </div>
           <div style={styles.topActions}>
-            <div style={{ position: 'relative' }}>
+            <div ref={searchRef} style={{ position: 'relative' }}>
               <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search workspace" style={styles.search} />
               {searchOpen && (
                 <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', width: 320, maxWidth: 'calc(100vw - 32px)', zIndex: 2200, background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, boxShadow: theme.shadowLift, padding: 0, maxHeight: 400, overflowY: 'auto', animation: 'lfDropIn .16s ease-out' }}>
