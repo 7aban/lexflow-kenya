@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { theme, styles } from '../theme.jsx';
 
 export function MeetingLink({ event, dashboard = false }) {
@@ -22,7 +22,69 @@ export function ProfileTooltip({ tooltip }) {
 }
 
 export function ActionGroup({ actions }) {
-  return <div style={styles.actionGroup}>{actions.map(([label, onClick]) => <button key={label} type="button" onClick={onClick} style={label === 'Delete' ? styles.dangerTinyButton : styles.tinyButton}>{label}</button>)}</div>;
+  const [open, setOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
+  const ref = useRef(null);
+  const visibleActions = actions.filter(Boolean);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function closeOnOutside(event) {
+      if (ref.current && !ref.current.contains(event.target)) setOpen(false);
+    }
+    function closeOnEscape(event) {
+      if (event.key === 'Escape') setOpen(false);
+    }
+    window.addEventListener('mousedown', closeOnOutside);
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('mousedown', closeOnOutside);
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [open]);
+
+  if (!visibleActions.length) return null;
+  return (
+    <div ref={ref} style={styles.actionMenuWrap}>
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="More actions"
+        onClick={() => {
+          if (!open) {
+            const rect = ref.current?.getBoundingClientRect();
+            if (rect) setMenuPosition({ top: rect.bottom + 6, left: Math.max(8, rect.right - 154) });
+          }
+          setOpen(current => !current);
+        }}
+        style={styles.actionMenuButton}
+      >
+        ...
+      </button>
+      {open && (
+        <div role="menu" style={{ ...styles.actionMenu, top: menuPosition.top, left: menuPosition.left }}>
+          {visibleActions.map(([label, onClick], index) => {
+            const danger = String(label).toLowerCase().includes('delete');
+            return (
+              <button
+                key={`${label}-${index}`}
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false);
+                  onClick?.();
+                }}
+                style={{ ...styles.actionMenuItem, ...(danger ? styles.actionMenuItemDanger : {}) }}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function ConfirmModal({ confirm, onClose }) {

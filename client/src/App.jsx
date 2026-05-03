@@ -13,19 +13,14 @@ import Invitations from './views/Invitations.jsx';
 import { Clients, Dashboard, FirmSettings, Invoices, Matters, Tasks, Users } from './views/StaffViews.jsx';
 
 const initialData = { dashboard: {}, clients: [], matters: [], tasks: [], invoices: [], firmSettings: defaultFirmSettings };
-const nav = [
-  ['Dashboard', 'DB'],
-  ['Clients', 'CL'],
-  ['Matters', 'MT'],
-  ['Tasks', 'TK'],
-  ['Deadlines', 'DL'],
-  ['Communications', 'CM'],
-  ['Invoices', 'IN'],
-  ['Performance', 'PF'],
-  ['Firm Settings', 'FS'],
-  ['Users', 'US'],
-  ['Invitations', 'IV'],
-  ['Audit Log', 'AL'],
+const navGroups = [
+  { title: 'Dashboard', items: [['Dashboard', 'OV', ['admin', 'advocate', 'assistant']], ['Performance', 'PF', ['admin']]] },
+  { title: 'Clients', items: [['Clients', 'CL', ['admin', 'advocate', 'assistant']], ['Invitations', 'IV', ['admin']]] },
+  { title: 'Matters', items: [['Matters', 'MT', ['admin', 'advocate', 'assistant']]] },
+  { title: 'Work', items: [['Tasks', 'TK', ['admin', 'advocate', 'assistant']], ['Deadlines', 'DL', ['admin', 'advocate', 'assistant']]] },
+  { title: 'Finance', items: [['Invoices', 'IN', ['admin']]] },
+  { title: 'Communications', items: [['Communications', 'CM', ['admin', 'advocate', 'assistant']]] },
+  { title: 'Administration', items: [['Users', 'US', ['admin']], ['Firm Settings', 'FS', ['admin']], ['Audit Log', 'AL', ['admin']]] },
 ];
 const legalResources = [
   ['eFiling CTS Judiciary', 'https://efiling.court.go.ke/auth', 'CT'],
@@ -33,6 +28,23 @@ const legalResources = [
   ['Ardhi Sasa', 'https://ardhisasa.lands.go.ke/home', 'AS'],
 ];
 
+function allowedNavGroups(role) {
+  return navGroups
+    .map(group => ({ ...group, items: group.items.filter(([, , roles]) => !roles || roles.includes(role)) }))
+    .filter(group => group.items.length);
+}
+
+function defaultNavGroup(role) {
+  return allowedNavGroups(role)[0]?.title || 'Dashboard';
+}
+
+function readOpenNavGroup(role) {
+  try {
+    return localStorage.getItem('lexflowOpenNavGroup') || defaultNavGroup(role);
+  } catch {
+    return defaultNavGroup(role);
+  }
+}
 
 export default function App() {
   const [session, setSession] = useState(readSession);
@@ -40,6 +52,7 @@ export default function App() {
   const [view, setView] = useState('Dashboard');
   const [search, setSearch] = useState('');
   const [quickLinksOpen, setQuickLinksOpen] = useState(true);
+  const [openNavGroup, setOpenNavGroup] = useState(() => readOpenNavGroup(session?.user?.role || 'assistant'));
   const [notifications, setNotifications] = useState([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [matterFocus, setMatterFocus] = useState(null);
@@ -52,6 +65,9 @@ export default function App() {
   const isAdmin = user?.role === 'admin';
   const canManage = ['admin', 'advocate'].includes(user?.role);
   const firm = data.firmSettings || defaultFirmSettings;
+  const role = user?.role || 'assistant';
+  const visibleGroups = allowedNavGroups(role);
+  const visibleViews = visibleGroups.flatMap(group => group.items.map(([label]) => label));
 
   useEffect(() => {
     async function loadPublicFirmSettings() {
@@ -102,6 +118,13 @@ export default function App() {
   useEffect(() => {
     document.title = firm?.name || 'LexFlow Kenya';
   }, [firm?.name]);
+
+  useEffect(() => {
+    if (!user || user.role === 'client') return;
+    if (!visibleViews.includes(view)) setView('Dashboard');
+    const activeGroup = visibleGroups.find(group => group.items.some(([label]) => label === view));
+    if (activeGroup) setOpenNavGroup(activeGroup.title);
+  }, [user?.role, view]);
 
   async function refresh() {
     setLoading(true);
@@ -194,7 +217,6 @@ export default function App() {
     return <ClientApp user={user} firm={firm} logout={logout} notify={setToast} toast={toast} setToast={setToast} />;
   }
 
-  const visibleNav = nav.filter(([label]) => !['Users', 'Firm Settings', 'Invitations', 'Audit Log', 'Performance'].includes(label) || isAdmin);
   const subtitles = {
     Dashboard: 'Command center for active work, hearings, billing and firm movement.',
     Clients: 'A polished directory for intake, contacts and relationship context.',
@@ -224,11 +246,33 @@ export default function App() {
 
         <div style={styles.sideSectionLabel}>Workspace</div>
         <nav style={styles.navList}>
-          {visibleNav.map(([label, number]) => (
-            <button key={label} type="button" className="lf-nav" onClick={() => setView(label)} style={{ ...styles.navItem, ...(view === label ? styles.navActive : {}) }}>
-              <span style={styles.navNumber}>{number}</span>
-              <span>{label}</span>
-            </button>
+          {visibleGroups.map(group => (
+            <div key={group.title} style={styles.navGroup}>
+              <button
+                type="button"
+                className="lf-nav-group"
+                onClick={() => {
+                  const next = openNavGroup === group.title ? '' : group.title;
+                  setOpenNavGroup(next);
+                  try { localStorage.setItem('lexflowOpenNavGroup', next); } catch {}
+                }}
+                style={styles.navGroupButton}
+                aria-expanded={openNavGroup === group.title}
+              >
+                <span>{group.title}</span>
+                <span style={styles.navGroupChevron}>{openNavGroup === group.title ? 'v' : '>'}</span>
+              </button>
+              {openNavGroup === group.title && (
+                <div style={styles.navGroupItems}>
+                  {group.items.map(([label, number]) => (
+                    <button key={label} type="button" className="lf-nav" onClick={() => setView(label)} style={{ ...styles.navItem, ...(view === label ? styles.navActive : {}) }}>
+                      <span style={styles.navNumber}>{number}</span>
+                      <span>{label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           ))}
         </nav>
 
