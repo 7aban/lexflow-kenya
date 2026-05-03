@@ -5,6 +5,16 @@ import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink,
 import MatterDocuments from '../components/MatterDocuments.jsx';
 import TaskTimer, { taskTimerActive } from '../components/TaskTimer.jsx';
 
+function formatFileSize(bytes = 0) {
+  if (!bytes) return '0 KB';
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function noticeFileName(file) {
+  return file?.friendlyName || file?.displayName || file?.name || 'Attachment';
+}
+
 export function Dashboard({ data }) {
   const outstanding = data.invoices.filter(i => i.status === 'Outstanding').reduce((sum, i) => sum + Number(i.amount || 0), 0);
   const paid = data.invoices.filter(i => i.status === 'Paid').reduce((sum, i) => sum + Number(i.amount || 0), 0);
@@ -276,20 +286,47 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify }) {
 }
 
 export function FirmSettings({ settings, clients = [], reload, notify }) {
+  const emptyNoticeForm = { title: '', content: '', clientId: '', files: [] };
   const [form, setForm] = useState({ ...defaultFirmSettings, ...settings });
   const [notices, setNotices] = useState([]);
-  const [noticeForm, setNoticeForm] = useState({ title: '', content: '', clientId: '', file: null });
+  const [noticeForm, setNoticeForm] = useState(emptyNoticeForm);
+  const [publishingNotice, setPublishingNotice] = useState(false);
+
   useEffect(() => setForm({ ...defaultFirmSettings, ...settings }), [settings]);
   useEffect(() => { loadNotices(); }, []);
-  async function loadNotices() { try { setNotices(await api('/notices')); } catch (err) { notify({ type: 'danger', message: err.message }); } }
+
+  async function loadNotices() {
+    try { setNotices(await api('/notices')); }
+    catch (err) { notify({ type: 'danger', message: err.message }); }
+  }
+
   function setReminderSetting(key, value) {
     setForm(current => ({ ...current, reminderSettings: { ...(current.reminderSettings || {}), [key]: value } }));
   }
+
   async function chooseLogo(event) {
     const file = event.target.files?.[0];
     if (!file) return;
     setForm({ ...form, logo: await fileToDataUrl(file) });
   }
+
+  function chooseNoticeFiles(event) {
+    const selected = Array.from(event.target.files || []);
+    if (!selected.length) return;
+    setNoticeForm(current => {
+      const files = [...current.files, ...selected].slice(0, 10);
+      if (current.files.length + selected.length > 10) {
+        notify({ type: 'warning', message: 'A notice can include up to 10 attachments.' });
+      }
+      return { ...current, files };
+    });
+    event.target.value = '';
+  }
+
+  function removeNoticeFile(index) {
+    setNoticeForm(current => ({ ...current, files: current.files.filter((_, fileIndex) => fileIndex !== index) }));
+  }
+
   async function submit(event) {
     event.preventDefault();
     try {
@@ -298,20 +335,25 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
       await reload();
     } catch (err) { notify({ type: 'danger', message: err.message }); }
   }
+
   async function createNotice(event) {
     event.preventDefault();
+    setPublishingNotice(true);
     try {
-      const attachments = noticeForm.file ? [{
-        name: noticeForm.file.name,
-        mimeType: noticeForm.file.type || 'application/octet-stream',
-        data: await fileToDataUrl(noticeForm.file),
-      }] : [];
+      const attachments = await Promise.all(noticeForm.files.map(async file => ({
+        name: file.name,
+        displayName: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        data: await fileToDataUrl(file),
+      })));
       await api('/notices', { method: 'POST', body: { title: noticeForm.title, content: noticeForm.content, clientId: noticeForm.clientId, attachments } });
-      setNoticeForm({ title: '', content: '', clientId: '', file: null });
-      notify({ type: 'success', message: 'Notice published.' });
+      setNoticeForm(emptyNoticeForm);
+      notify({ type: 'success', message: attachments.length ? 'Notice published with attachments.' : 'Notice published.' });
       await loadNotices();
     } catch (err) { notify({ type: 'danger', message: err.message }); }
+    finally { setPublishingNotice(false); }
   }
+
   async function deleteNotice(notice) {
     try {
       await api(`/notices/${notice.id}`, { method: 'DELETE' });
@@ -319,8 +361,103 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
       await loadNotices();
     } catch (err) { notify({ type: 'danger', message: err.message }); }
   }
+
+  function attachmentSummary(attachments = []) {
+    if (!attachments.length) return <span style={styles.mutedText}>None</span>;
+    return (
+      <div style={styles.noticeAttachmentSummary}>
+        {attachments.slice(0, 3).map(file => <span key={file.id}>{noticeFileName(file)}</span>)}
+        {attachments.length > 3 && <span>+{attachments.length - 3} more</span>}
+      </div>
+    );
+  }
+
   const reminder = form.reminderSettings || {};
-  return <div style={styles.pageStack}><Card title="Firm Settings" hint="Branding, invoice identity and client portal contact details"><form onSubmit={submit} style={styles.formGrid}><Field label="Firm Name"><input required style={styles.input} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field><Field label="Website URL"><input type="url" style={styles.input} value={form.websiteURL || ''} onChange={e => setForm({ ...form, websiteURL: e.target.value })} /></Field><Field label="Primary Color"><input type="color" style={styles.colorInput} value={form.primaryColor || '#0F1B33'} onChange={e => setForm({ ...form, primaryColor: e.target.value })} /></Field><Field label="Accent Color"><input type="color" style={styles.colorInput} value={form.accentColor || '#D4A34A'} onChange={e => setForm({ ...form, accentColor: e.target.value })} /></Field><Field label="Email"><input style={styles.input} value={form.email || ''} onChange={e => setForm({ ...form, email: e.target.value })} /></Field><Field label="Phone"><input style={styles.input} value={form.phone || ''} onChange={e => setForm({ ...form, phone: e.target.value })} /></Field><Field label="Address"><input style={styles.input} value={form.address || ''} onChange={e => setForm({ ...form, address: e.target.value })} /></Field><Field label="Logo"><input type="file" accept="image/*" style={styles.input} onChange={chooseLogo} /></Field><div className="lf-logo-preview" style={styles.logoPreview}>{form.logo ? <img src={form.logo} alt="Firm logo preview" /> : <span>LF</span>}<button type="button" style={styles.tinyButton} onClick={() => setForm({ ...form, logo: '' })}>Clear logo</button></div><button style={styles.primaryButton}>Save settings</button></form></Card><Card title="Client Reminder Automation" hint="Quiet reminders for court dates and invoice follow-ups. Templates use firm defaults and run silently in the background."><form onSubmit={submit} style={styles.formGrid}><Field label="Automatic Reminders"><select style={styles.input} value={reminder.remindersEnabled ? 'yes' : 'no'} onChange={e => setReminderSetting('remindersEnabled', e.target.value === 'yes')}><option value="yes">Enabled</option><option value="no">Disabled</option></select></Field><Field label="WhatsApp"><select style={styles.input} value={reminder.whatsappEnabled ? 'yes' : 'no'} onChange={e => setReminderSetting('whatsappEnabled', e.target.value === 'yes')}><option value="no">Off</option><option value="yes">On</option></select></Field><Field label="Email"><select style={styles.input} value={reminder.emailEnabled ? 'yes' : 'no'} onChange={e => setReminderSetting('emailEnabled', e.target.value === 'yes')}><option value="no">Off</option><option value="yes">On</option></select></Field>{reminder.whatsappEnabled && <><Field label="Twilio SID"><input style={styles.input} value={reminder.twilioSid || ''} onChange={e => setReminderSetting('twilioSid', e.target.value)} /></Field><Field label="Twilio Token"><input type="password" style={styles.input} value={reminder.twilioToken || ''} onChange={e => setReminderSetting('twilioToken', e.target.value)} /></Field><Field label="WhatsApp From"><input style={styles.input} value={reminder.twilioFromNumber || ''} onChange={e => setReminderSetting('twilioFromNumber', e.target.value)} placeholder="whatsapp:+14155238886" /></Field></>}{reminder.emailEnabled && <><Field label="SMTP Host"><input style={styles.input} value={reminder.smtpHost || ''} onChange={e => setReminderSetting('smtpHost', e.target.value)} /></Field><Field label="SMTP Port"><input style={styles.input} value={reminder.smtpPort || ''} onChange={e => setReminderSetting('smtpPort', e.target.value)} /></Field><Field label="SMTP User"><input style={styles.input} value={reminder.smtpUser || ''} onChange={e => setReminderSetting('smtpUser', e.target.value)} /></Field><Field label="SMTP Password"><input type="password" style={styles.input} value={reminder.smtpPass || ''} onChange={e => setReminderSetting('smtpPass', e.target.value)} /></Field></>}<div style={styles.formHelper}>When credentials are blank, LexFlow uses console stubs for testing. Real messages send automatically once provider credentials are saved.</div><button style={styles.primaryButton}>Save automation</button></form></Card><Card title="Client Portal Notices" hint="Publish broadcast or client-specific updates with optional attachments"><form onSubmit={createNotice} style={styles.formGrid}><Field label="Audience"><select style={styles.input} value={noticeForm.clientId} onChange={e => setNoticeForm({ ...noticeForm, clientId: e.target.value })}><option value="">All clients</option>{clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}</select></Field><Field label="Title"><input required style={styles.input} value={noticeForm.title} onChange={e => setNoticeForm({ ...noticeForm, title: e.target.value })} /></Field><Field label="Content"><input required style={styles.input} value={noticeForm.content} onChange={e => setNoticeForm({ ...noticeForm, content: e.target.value })} /></Field><Field label="Attachment"><input type="file" style={styles.input} onChange={e => setNoticeForm({ ...noticeForm, file: e.target.files?.[0] || null })} /></Field><button style={styles.primaryButton}>Publish notice</button></form><Table columns={['Title', 'Audience', 'Attachments', 'Created', 'Actions']} rows={notices.map(n => [n.title, n.clientName || 'All clients', `${n.attachments?.length || 0}`, n.createdAt ? new Date(n.createdAt).toLocaleString() : '-', <button key={n.id} type="button" style={styles.dangerTinyButton} onClick={() => deleteNotice(n)}>Delete</button>])} empty="No notices yet." /></Card></div>;
+
+  return (
+    <div style={styles.pageStack}>
+      <Card title="Firm Settings" hint="Branding, invoice identity and client portal contact details">
+        <form onSubmit={submit} style={styles.formGrid}>
+          <Field label="Firm Name"><input required style={styles.input} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
+          <Field label="Website URL"><input type="url" style={styles.input} value={form.websiteURL || ''} onChange={e => setForm({ ...form, websiteURL: e.target.value })} /></Field>
+          <Field label="Primary Color"><input type="color" style={styles.colorInput} value={form.primaryColor || '#0F1B33'} onChange={e => setForm({ ...form, primaryColor: e.target.value })} /></Field>
+          <Field label="Accent Color"><input type="color" style={styles.colorInput} value={form.accentColor || '#D4A34A'} onChange={e => setForm({ ...form, accentColor: e.target.value })} /></Field>
+          <Field label="Email"><input style={styles.input} value={form.email || ''} onChange={e => setForm({ ...form, email: e.target.value })} /></Field>
+          <Field label="Phone"><input style={styles.input} value={form.phone || ''} onChange={e => setForm({ ...form, phone: e.target.value })} /></Field>
+          <Field label="Address"><input style={styles.input} value={form.address || ''} onChange={e => setForm({ ...form, address: e.target.value })} /></Field>
+          <Field label="Logo"><input type="file" accept="image/*" style={styles.input} onChange={chooseLogo} /></Field>
+          <div className="lf-logo-preview" style={styles.logoPreview}>
+            {form.logo ? <img src={form.logo} alt="Firm logo preview" /> : <span>LF</span>}
+            <button type="button" style={styles.tinyButton} onClick={() => setForm({ ...form, logo: '' })}>Clear logo</button>
+          </div>
+          <button style={styles.primaryButton}>Save settings</button>
+        </form>
+      </Card>
+
+      <Card title="Client Reminder Automation" hint="Quiet reminders for court dates and invoice follow-ups. Templates use firm defaults and run silently in the background.">
+        <form onSubmit={submit} style={styles.formGrid}>
+          <Field label="Automatic Reminders"><select style={styles.input} value={reminder.remindersEnabled ? 'yes' : 'no'} onChange={e => setReminderSetting('remindersEnabled', e.target.value === 'yes')}><option value="yes">Enabled</option><option value="no">Disabled</option></select></Field>
+          <Field label="WhatsApp"><select style={styles.input} value={reminder.whatsappEnabled ? 'yes' : 'no'} onChange={e => setReminderSetting('whatsappEnabled', e.target.value === 'yes')}><option value="no">Off</option><option value="yes">On</option></select></Field>
+          <Field label="Email"><select style={styles.input} value={reminder.emailEnabled ? 'yes' : 'no'} onChange={e => setReminderSetting('emailEnabled', e.target.value === 'yes')}><option value="no">Off</option><option value="yes">On</option></select></Field>
+          {reminder.whatsappEnabled && <>
+            <Field label="Twilio SID"><input style={styles.input} value={reminder.twilioSid || ''} onChange={e => setReminderSetting('twilioSid', e.target.value)} /></Field>
+            <Field label="Twilio Token"><input type="password" style={styles.input} value={reminder.twilioToken || ''} onChange={e => setReminderSetting('twilioToken', e.target.value)} /></Field>
+            <Field label="WhatsApp From"><input style={styles.input} value={reminder.twilioFromNumber || ''} onChange={e => setReminderSetting('twilioFromNumber', e.target.value)} placeholder="whatsapp:+14155238886" /></Field>
+          </>}
+          {reminder.emailEnabled && <>
+            <Field label="SMTP Host"><input style={styles.input} value={reminder.smtpHost || ''} onChange={e => setReminderSetting('smtpHost', e.target.value)} /></Field>
+            <Field label="SMTP Port"><input style={styles.input} value={reminder.smtpPort || ''} onChange={e => setReminderSetting('smtpPort', e.target.value)} /></Field>
+            <Field label="SMTP User"><input style={styles.input} value={reminder.smtpUser || ''} onChange={e => setReminderSetting('smtpUser', e.target.value)} /></Field>
+            <Field label="SMTP Password"><input type="password" style={styles.input} value={reminder.smtpPass || ''} onChange={e => setReminderSetting('smtpPass', e.target.value)} /></Field>
+          </>}
+          <div style={styles.formHelper}>When credentials are blank, LexFlow uses console stubs for testing. Real messages send automatically once provider credentials are saved.</div>
+          <button style={styles.primaryButton}>Save automation</button>
+        </form>
+      </Card>
+
+      <Card title="Client Portal Notices" hint="Publish broadcast or client-specific updates with secure attachments">
+        <form onSubmit={createNotice} style={styles.formGrid}>
+          <Field label="Audience">
+            <select style={styles.input} value={noticeForm.clientId} onChange={e => setNoticeForm({ ...noticeForm, clientId: e.target.value })}>
+              <option value="">All clients</option>
+              {clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Title"><input required style={styles.input} value={noticeForm.title} onChange={e => setNoticeForm({ ...noticeForm, title: e.target.value })} /></Field>
+          <Field label="Attachments"><input type="file" multiple accept=".pdf,.doc,.docx,.txt,image/*" style={styles.input} onChange={chooseNoticeFiles} /></Field>
+          <Field label="Content">
+            <textarea required rows={4} style={{ ...styles.input, minHeight: 104, resize: 'vertical' }} value={noticeForm.content} onChange={e => setNoticeForm({ ...noticeForm, content: e.target.value })} />
+          </Field>
+          <div style={styles.formHelper}>Attachments are stored in LexFlow and exposed only through authenticated client downloads.</div>
+          {!!noticeForm.files.length && (
+            <div style={styles.noticeAttachmentPreview}>
+              {noticeForm.files.map((file, index) => (
+                <div key={`${file.name}-${file.lastModified}-${index}`} style={styles.noticeAttachmentPreviewItem}>
+                  <div>
+                    <strong>{file.name}</strong>
+                    <span>{file.type || 'File'} | {formatFileSize(file.size)}</span>
+                  </div>
+                  <button type="button" style={styles.dangerTinyButton} onClick={() => removeNoticeFile(index)}>Remove</button>
+                </div>
+              ))}
+            </div>
+          )}
+          <button disabled={publishingNotice} style={styles.primaryButton}>{publishingNotice ? 'Publishing...' : 'Publish notice'}</button>
+        </form>
+        <Table
+          columns={['Title', 'Audience', 'Attachments', 'Created', 'Actions']}
+          rows={notices.map(n => [
+            n.title,
+            n.clientName ? <Badge key={`${n.id}-audience`} tone="amber">{n.clientName}</Badge> : <Badge key={`${n.id}-audience`} tone="blue">All clients</Badge>,
+            attachmentSummary(n.attachments),
+            n.createdAt ? new Date(n.createdAt).toLocaleString() : '-',
+            <button key={n.id} type="button" style={styles.dangerTinyButton} onClick={() => deleteNotice(n)}>Delete</button>,
+          ])}
+          empty="No notices yet."
+        />
+      </Card>
+    </div>
+  );
 }
 export function Users({ clients = [], notify }) {
   const [users, setUsers] = useState([]);

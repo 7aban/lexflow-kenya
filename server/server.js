@@ -28,6 +28,18 @@ const today = () => new Date().toISOString().slice(0, 10);
 const addDays = days => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
 const invoiceNumber = () => `INV-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
 const money = amount => `KSh ${Number(amount || 0).toLocaleString('en-KE')}`;
+const MAX_NOTICE_ATTACHMENTS = 10;
+const MAX_NOTICE_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const allowedNoticeMimeTypes = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'image/webp',
+  'text/plain',
+]);
 const defaultFirmSettings = {
   id: 'default',
   name: 'LexFlow Kenya',
@@ -199,6 +211,7 @@ async function initDb() {
   await ensureColumn('documents', 'displayName', 'TEXT');
   await ensureColumn('documents', 'uploadedBy', 'TEXT');
   await ensureColumn('firm_notices', 'clientId', "TEXT DEFAULT ''");
+  await run("UPDATE documents SET clientVisible=1 WHERE noticeId IS NOT NULL AND noticeId<>'' AND COALESCE(clientVisible,0)<>1");
   await ensureColumn('clients', 'remindersEnabled', 'INTEGER DEFAULT 1');
   await ensureColumn('clients', 'preferredChannel', "TEXT DEFAULT 'firm_default'");
   await ensureColumn('matters', 'remindersEnabled', "TEXT DEFAULT 'firm_default'");
@@ -238,6 +251,30 @@ function cleanDocumentName(name = '') {
   return String(name || 'document').replace(/[^\w .-]/g, '_').slice(0, 180) || 'document';
 }
 
+function fileTypeFor(name = '', mimeType = '') {
+  const lowerName = String(name || '').toLowerCase();
+  const lowerMime = String(mimeType || '').toLowerCase();
+  if (lowerMime.includes('pdf') || lowerName.endsWith('.pdf')) return 'PDF';
+  if (lowerMime.includes('word') || lowerName.endsWith('.doc') || lowerName.endsWith('.docx')) return 'Word';
+  if (lowerMime.startsWith('image/')) return 'Image';
+  if (lowerMime === 'text/plain' || lowerName.endsWith('.txt')) return 'Text';
+  return 'File';
+}
+
+function noticeMimeTypeFor(name = '', mimeType = '') {
+  const lowerName = String(name || '').toLowerCase();
+  const lowerMime = String(mimeType || '').toLowerCase();
+  if (allowedNoticeMimeTypes.has(lowerMime)) return lowerMime;
+  if (lowerName.endsWith('.pdf')) return 'application/pdf';
+  if (lowerName.endsWith('.doc')) return 'application/msword';
+  if (lowerName.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  if (lowerName.endsWith('.png')) return 'image/png';
+  if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) return 'image/jpeg';
+  if (lowerName.endsWith('.webp')) return 'image/webp';
+  if (lowerName.endsWith('.txt')) return 'text/plain';
+  return lowerMime || 'application/octet-stream';
+}
+
 function documentListColumns() {
   return `d.id,d.matterId,d.name,d.displayName,d.type,d.mimeType,d.date,d.size,d.source,d.folderId,d.messageId,d.noticeId,d.clientVisible,d.uploadedBy,f.name folderName`;
 }
@@ -255,14 +292,44 @@ function clientDocumentVisibilitySql(alias = 'd') {
   )`;
 }
 
-function publicDocument(row = {}) {
+function publicDocument(row = {}, options = {}) {
   const displayName = row.displayName || row.name || 'Document';
+  if (options.client) {
+    return {
+      id: row.id,
+      displayName,
+      friendlyName: displayName,
+      type: row.type || fileTypeFor(displayName, row.mimeType),
+      mimeType: row.mimeType || 'application/octet-stream',
+      date: row.date || '',
+      size: row.size || '',
+      sharedBy: row.source === 'client' ? 'Uploaded by you' : 'Shared by your advocate',
+    };
+  }
   return {
     ...row,
     displayName,
     friendlyName: displayName,
     sharedBy: row.source === 'client' ? 'Uploaded by you' : 'Shared by your advocate',
     content: undefined,
+  };
+}
+
+function publicNotice(row = {}, attachments = [], req = {}) {
+  const notice = {
+    id: row.id,
+    title: row.title || 'Notice',
+    content: row.content || '',
+    createdAt: row.createdAt || '',
+    audience: row.clientId ? 'direct' : 'broadcast',
+    attachments,
+  };
+  if (req.user?.role === 'client') return notice;
+  return {
+    ...row,
+    clientName: row.clientName || '',
+    audience: row.clientId ? 'direct' : 'broadcast',
+    attachments,
   };
 }
 
@@ -283,7 +350,7 @@ async function canAccessConversation(req, conversationId) {
 async function canAccessDocument(req, doc) {
   if (!doc) return false;
   if (req.user?.role !== 'client') return true;
-  if (doc.noticeId && (await canAccessNotice(req, doc.noticeId))) return true;
+  if (doc.noticeId) return Number(doc.clientVisible || 0) === 1 && (await canAccessNotice(req, doc.noticeId));
   if (doc.messageId) {
     const thread = await get(`SELECT conv.id
       FROM messages msg
@@ -293,6 +360,66 @@ async function canAccessDocument(req, doc) {
   }
   if (!doc.matterId || !(await canAccessMatter(req, doc.matterId))) return false;
   return doc.source === 'client' || Number(doc.clientVisible || 0) === 1;
+}
+
+function decodeAttachmentData(attachment) {
+  const raw = String(attachment?.data || '');
+  const payload = (raw.includes(',') ? raw.split(',').pop() : raw).replace(/\s/g, '');
+  if (!payload) {
+    const err = new Error('Attachment data is required');
+    err.statusCode = 400;
+    throw err;
+  }
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(payload) || payload.length % 4 === 1) {
+    const err = new Error('Attachment data is not valid base64');
+    err.statusCode = 400;
+    throw err;
+  }
+  const buffer = Buffer.from(payload, 'base64');
+  if (!buffer.length) {
+    const err = new Error('Attachment is empty');
+    err.statusCode = 400;
+    throw err;
+  }
+  return buffer;
+}
+
+function prepareNoticeAttachments(input = []) {
+  const attachments = Array.isArray(input) ? input.filter(Boolean) : [];
+  if (attachments.length > MAX_NOTICE_ATTACHMENTS) {
+    const err = new Error(`A notice can include up to ${MAX_NOTICE_ATTACHMENTS} attachments`);
+    err.statusCode = 400;
+    throw err;
+  }
+  return attachments.map(attachment => {
+    if (!attachment?.name || !attachment?.data) {
+      const err = new Error('Each attachment requires a name and data');
+      err.statusCode = 400;
+      throw err;
+    }
+    const cleanName = cleanDocumentName(attachment.name);
+    const displayName = cleanDocumentName(attachment.displayName || attachment.name);
+    const mimeType = noticeMimeTypeFor(cleanName, attachment.mimeType);
+    if (!allowedNoticeMimeTypes.has(mimeType)) {
+      const err = new Error('Notice attachments must be PDF, Word, image, or text files');
+      err.statusCode = 400;
+      throw err;
+    }
+    const buffer = decodeAttachmentData(attachment);
+    if (buffer.length > MAX_NOTICE_ATTACHMENT_BYTES) {
+      const err = new Error(`${displayName} is too large. Maximum notice attachment size is 10 MB`);
+      err.statusCode = 400;
+      throw err;
+    }
+    return {
+      cleanName,
+      displayName,
+      mimeType,
+      buffer,
+      type: fileTypeFor(cleanName, mimeType),
+      size: `${Math.max(1, Math.round(buffer.length / 1024))} KB`,
+    };
+  });
 }
 
 async function logClientActivity({ clientId = '', matterId = '', userId = '', action = '', summary = '', entityType = '', entityId = '' }) {
@@ -546,11 +673,13 @@ app.get('/api/notices', authenticate, async (req, res) => {
   if (!notices.length) return res.json([]);
   const ids = notices.map(n => n.id);
   const placeholders = ids.map(() => '?').join(',');
-  const attachments = await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.noticeId IN (${placeholders}) ORDER BY d.date DESC, d.displayName, d.name`, ids);
-  res.json(notices.map(notice => ({
-    ...notice,
-    attachments: attachments.filter(doc => doc.noticeId === notice.id).map(publicDocument),
-  })));
+  const attachmentVisibility = req.user.role === 'client' ? ' AND COALESCE(d.clientVisible,0)=1' : '';
+  const attachments = await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.noticeId IN (${placeholders})${attachmentVisibility} ORDER BY d.date DESC, d.displayName, d.name`, ids);
+  res.json(notices.map(notice => publicNotice(
+    notice,
+    attachments.filter(doc => doc.noticeId === notice.id).map(doc => publicDocument(doc, { client: req.user.role === 'client' })),
+    req,
+  )));
 });
 app.get('/api/invitations/:token', async (req, res) => {
   const invitation = await get('SELECT email,status,expiresAt FROM invitations WHERE token=?', [req.params.token]);
@@ -788,28 +917,31 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
 });
 
 app.post('/api/notices', requireAdmin, async (req, res) => {
-  const { title, content, clientId = '', attachments = [] } = req.body;
+  const title = String(req.body.title || '').trim();
+  const content = String(req.body.content || '').trim();
+  const clientId = String(req.body.clientId || '').trim();
   if (!title || !content) return res.status(400).json({ error: 'title and content are required' });
   if (clientId) {
     const client = await get('SELECT id FROM clients WHERE id=?', [clientId]);
     if (!client) return res.status(400).json({ error: 'Target client not found' });
   }
+  let preparedAttachments = [];
+  try {
+    preparedAttachments = prepareNoticeAttachments(req.body.attachments);
+  } catch (err) {
+    return res.status(err.statusCode || 400).json({ error: err.message });
+  }
   const id = genId('NOTICE');
   await run('INSERT INTO firm_notices (id,title,content,createdAt,createdBy,clientId) VALUES (?,?,?,?,?,?)', [id, title, content, new Date().toISOString(), req.user.fullName || 'Admin', clientId || '']);
-  for (const attachment of Array.isArray(attachments) ? attachments : []) {
-    if (!attachment?.name || !attachment?.data) continue;
-    const buffer = Buffer.from(String(attachment.data).split(',').pop(), 'base64');
-    const mimeType = attachment.mimeType || 'application/octet-stream';
+  for (const attachment of preparedAttachments) {
     const docId = genId('DOC');
-    const cleanName = cleanDocumentName(attachment.name);
-    const type = mimeType.includes('pdf') ? 'PDF' : mimeType.includes('word') || cleanName.endsWith('.doc') || cleanName.endsWith('.docx') ? 'Word' : 'File';
     await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [docId, '', cleanName, attachment.displayName || cleanName, type, mimeType, today(), `${Math.max(1, Math.round(buffer.length / 1024))} KB`, buffer, 'firm', null, null, id, 1, req.user.userId || '']);
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [docId, '', attachment.cleanName, attachment.displayName, attachment.type, attachment.mimeType, today(), attachment.size, attachment.buffer, 'firm', null, null, id, 1, req.user.userId || '']);
   }
   await logAudit(req, 'create', 'notice', id, `Created firm notice ${title}`);
-  const notice = await get('SELECT * FROM firm_notices WHERE id=?', [id]);
+  const notice = await get(`SELECT n.*, c.name clientName FROM firm_notices n LEFT JOIN clients c ON c.id=n.clientId WHERE n.id=?`, [id]);
   const noticeAttachments = await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.noticeId=? ORDER BY d.date DESC`, [id]);
-  res.json({ ...notice, attachments: noticeAttachments.map(publicDocument) });
+  res.json(publicNotice(notice, noticeAttachments.map(publicDocument), req));
 });
 app.delete('/api/notices/:id', requireAdmin, async (req, res) => {
   const notice = await get('SELECT * FROM firm_notices WHERE id=?', [req.params.id]);
@@ -1474,7 +1606,7 @@ app.get('/api/client/dashboard', async (req, res) => {
   const appearances = matterIds.length ? await all(`SELECT * FROM appearances WHERE matterId IN (${placeholders}) ORDER BY date`, matterIds) : [];
   const notices = await all("SELECT * FROM firm_notices WHERE clientId IS NULL OR clientId='' OR clientId=? ORDER BY createdAt DESC LIMIT 20", [req.user.clientId || '']);
   const noticeIds = notices.map(notice => notice.id);
-  const noticeAttachments = noticeIds.length ? await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.noticeId IN (${noticeIds.map(() => '?').join(',')}) ORDER BY d.date DESC`, noticeIds) : [];
+  const noticeAttachments = noticeIds.length ? await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.noticeId IN (${noticeIds.map(() => '?').join(',')}) AND COALESCE(d.clientVisible,0)=1 ORDER BY d.date DESC`, noticeIds) : [];
   const paymentProofs = await all('SELECT id,invoiceId,matterId,clientId,method,reference,amount,note,fileName,mimeType,size,createdAt FROM payment_proofs WHERE clientId=? ORDER BY createdAt DESC', [req.user.clientId || '']);
   res.json({
     client,
@@ -1483,7 +1615,11 @@ app.get('/api/client/dashboard', async (req, res) => {
     invoices,
     notes: [],
     appearances,
-    notices: notices.map(notice => ({ ...notice, attachments: noticeAttachments.filter(doc => doc.noticeId === notice.id).map(publicDocument) })),
+    notices: notices.map(notice => publicNotice(
+      notice,
+      noticeAttachments.filter(doc => doc.noticeId === notice.id).map(doc => publicDocument(doc, { client: true })),
+      req,
+    )),
     paymentProofs,
   });
 });

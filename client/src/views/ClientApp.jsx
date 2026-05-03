@@ -17,6 +17,14 @@ function tokenQuery() {
   return encodeURIComponent(readSession()?.token || '');
 }
 
+function noticeFileName(file) {
+  return file?.friendlyName || file?.displayName || file?.name || 'Attachment';
+}
+
+function noticeFileType(file) {
+  return String(file?.type || 'File').slice(0, 4).toUpperCase();
+}
+
 function nextEventFor(matter, appearances) {
   return appearances.find(event => event.matterId === matter.id && event.date >= new Date().toISOString().slice(0, 10));
 }
@@ -227,25 +235,35 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
 }
 
 function Notices({ notices }) {
-  return <Card title="Firm Notices" hint="Updates and bulletins from the firm">{notices.length ? notices.map(notice => <NoticeItem key={notice.id} notice={notice} />) : <Empty title="No notices" text="The firm has not posted any notices yet." />}</Card>;
+  return (
+    <Card title="Firm Notices" hint="Updates and bulletins from the firm">
+      {notices.length ? <div style={styles.noticeList}>{notices.map(notice => <NoticeItem key={notice.id} notice={notice} />)}</div> : <Empty title="No notices" text="The firm has not posted any notices yet." />}
+    </Card>
+  );
 }
 
 function NoticeItem({ notice }) {
+  const direct = notice.audience === 'direct';
   return (
-    <div style={{ padding: '12px 0', borderBottom: `1px solid ${theme.line}` }}>
-      <strong>{notice.title}</strong>
-      <p>{notice.content}</p>
+    <article style={styles.noticeItem}>
+      <div style={styles.noticeItemHeader}>
+        <Badge tone={direct ? 'amber' : 'blue'}>{direct ? 'For you' : 'Broadcast'}</Badge>
+        <span style={styles.mutedText}>{notice.createdAt ? new Date(notice.createdAt).toLocaleString() : ''}</span>
+      </div>
+      <h3 style={styles.noticeTitle}>{notice.title}</h3>
+      <p style={styles.noticeBody}>{notice.content}</p>
       {!!notice.attachments?.length && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '8px 0' }}>
+        <div style={styles.noticeFileGrid}>
           {notice.attachments.map(file => (
-            <a key={file.id} style={styles.ghostButton} href={`${API_BASE}/documents/${file.id}/download?token=${tokenQuery()}`}>
-              {file.displayName || file.name || 'Attachment'}
+            <a key={file.id} style={styles.noticeFileLink} href={`${API_BASE}/documents/${file.id}/download?token=${tokenQuery()}`} download title={`Download ${noticeFileName(file)}`}>
+              <span style={styles.noticeFileIcon}>{noticeFileType(file)}</span>
+              <span>{noticeFileName(file)}</span>
+              <small style={styles.mutedText}>{file.size || 'Download'}</small>
             </a>
           ))}
         </div>
       )}
-      <span style={styles.mutedText}>{notice.createdAt ? new Date(notice.createdAt).toLocaleString() : ''}</span>
-    </div>
+    </article>
   );
 }
 
