@@ -976,6 +976,14 @@ app.get('/api/reminder-logs', requireAdmin, async (req, res) => {
 });
 
 app.get('/api/dashboard', requireStaff, async (req, res) => {
+  if (req.user.role === 'advocate') {
+    const name = req.user.fullName || '';
+    const active = await get("SELECT COUNT(*) count FROM matters WHERE stage NOT IN ('Closed','On Hold') AND assignedTo=?", [name]);
+    const hours = await get("SELECT COALESCE(SUM(hours),0) hours, COALESCE(SUM(hours*rate),0) revenue FROM time_entries WHERE date LIKE ? AND attorney=?", [`${today().slice(0, 7)}%`, name]);
+    const overdue = await get('SELECT COUNT(*) count FROM tasks WHERE completed=0 AND dueDate < ? AND assignee=?', [today(), name]);
+    const upcomingEvents = await all('SELECT * FROM appearances WHERE date >= ? AND attorney=? ORDER BY date LIMIT 5', [today(), name]);
+    return res.json({ activeMattersCount: active.count, monthHours: hours.hours, monthRevenue: hours.revenue, overdueTaskCount: overdue.count, upcomingEvents });
+  }
   const active = await get("SELECT COUNT(*) count FROM matters WHERE stage NOT IN ('Closed','On Hold')");
   const hours = await get("SELECT COALESCE(SUM(hours),0) hours, COALESCE(SUM(hours*rate),0) revenue FROM time_entries WHERE date LIKE ?", [`${today().slice(0, 7)}%`]);
   const overdue = await get('SELECT COUNT(*) count FROM tasks WHERE completed=0 AND dueDate < ?', [today()]);
@@ -1190,6 +1198,7 @@ app.get('/api/matters', async (req, res) => {
   const clientId = req.user.role === 'client' ? req.user.clientId : req.query.clientId;
   if (req.user.role === 'client' && !clientId) return res.json([]);
   if (clientId) return res.json(await all('SELECT m.*, c.name clientName, (SELECT MIN(date) FROM appearances a WHERE a.matterId=m.id AND a.date>=?) nextCourtDate FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.clientId=? ORDER BY openDate DESC', [today(), clientId]));
+  if (req.user.role === 'advocate') return res.json(await all('SELECT m.*, c.name clientName, (SELECT MIN(date) FROM appearances a WHERE a.matterId=m.id AND a.date>=?) nextCourtDate FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.assignedTo=? ORDER BY openDate DESC', [today(), req.user.fullName || '']));
   res.json(await all('SELECT m.*, c.name clientName, (SELECT MIN(date) FROM appearances a WHERE a.matterId=m.id AND a.date>=?) nextCourtDate FROM matters m LEFT JOIN clients c ON c.id=m.clientId ORDER BY openDate DESC', [today()]));
 });
 app.get('/api/matters/:id', async (req, res) => {
@@ -1514,6 +1523,7 @@ app.post('/api/matters/:id/notes', async (req, res) => {
 
 app.get('/api/invoices', async (req, res) => {
   if (req.user.role === 'client') return res.json(await all(`SELECT i.*, m.title matterTitle, m.reference, c.name clientName FROM invoices i LEFT JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId WHERE i.clientId=? ORDER BY i.date DESC, i.number DESC`, [req.user.clientId || '']));
+  if (req.user.role === 'advocate') return res.json(await all(`SELECT i.*, m.title matterTitle, m.reference, c.name clientName FROM invoices i LEFT JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId WHERE m.assignedTo=? ORDER BY i.date DESC, i.number DESC`, [req.user.fullName || '']));
   res.json(await all(`SELECT i.*, m.title matterTitle, m.reference, c.name clientName FROM invoices i LEFT JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId ORDER BY i.date DESC, i.number DESC`));
 });
 app.post('/api/invoices/generate', requireAdvocateOrAdmin, async (req, res) => {
