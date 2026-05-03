@@ -1675,6 +1675,7 @@ app.get('/api/search', requireStaff, async (req, res) => {
     const invoices = await all(`SELECT i.id,i.number,i.description,i.status,i.matterId FROM invoices i INNER JOIN matters m ON m.id=i.matterId WHERE m.assignedTo=? AND (i.number LIKE ? OR i.description LIKE ? OR i.status LIKE ?) LIMIT 5`, [name, q, q, q]);
     const appearances = await all(`SELECT a.id,a.title,a.date,a.time,a.type,a.location,a.attorney,a.matterId FROM appearances a LEFT JOIN matters m ON m.id=a.matterId WHERE (a.attorney=? OR m.assignedTo=?) AND (a.title LIKE ? OR a.location LIKE ? OR a.type LIKE ?) LIMIT 5`, [name, name, q, q, q]);
     const documents = await all(`SELECT d.id,d.displayName,d.name,d.type,d.matterId FROM documents d INNER JOIN matters m ON m.id=d.matterId WHERE m.assignedTo=? AND (d.displayName LIKE ? OR d.name LIKE ?) LIMIT 5`, [name, q, q]);
+    const conversations = await all(`SELECT conv.id,conv.matterId,conv.subject,m.title matterTitle FROM conversations conv INNER JOIN matters m ON m.id=conv.matterId WHERE m.assignedTo=? AND conv.subject LIKE ? LIMIT 5`, [name, q]);
     return res.json([
       ...matters.map(m => ({ type: 'Matter', id: m.id, matterId: m.id, title: m.title, subtitle: `${m.reference || ''} ${m.clientName || ''}`.trim() })),
       ...clients.map(c => ({ type: 'Client', id: c.id, title: c.name, subtitle: `${c.email || ''} ${c.phone || ''}`.trim() })),
@@ -1682,6 +1683,7 @@ app.get('/api/search', requireStaff, async (req, res) => {
       ...invoices.map(i => ({ type: 'Invoice', id: i.id, matterId: i.matterId, title: i.number, subtitle: `${i.description || i.status || ''}`.trim() })),
       ...appearances.map(a => ({ type: 'Appearance', id: a.id, matterId: a.matterId, title: a.title, subtitle: `${a.date || ''} ${a.time || ''} ${a.location || ''}`.trim() })),
       ...documents.map(d => ({ type: 'Document', id: d.id, matterId: d.matterId, title: d.displayName || d.name, subtitle: d.type || 'File' })),
+      ...conversations.map(conversation => ({ type: 'Conversation', id: conversation.id, matterId: conversation.matterId, title: conversation.subject, subtitle: conversation.matterTitle ? `Matter: ${conversation.matterTitle}` : 'Conversation' })),
     ]);
   }
   const matters = await all(`SELECT m.id,m.title,m.reference,c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.title LIKE ? OR m.reference LIKE ? OR c.name LIKE ? LIMIT 5`, [q, q, q]);
@@ -1690,6 +1692,7 @@ app.get('/api/search', requireStaff, async (req, res) => {
   const invoices = await all(`SELECT id,number,description,status,matterId FROM invoices WHERE number LIKE ? OR description LIKE ? OR status LIKE ? LIMIT 5`, [q, q, q]);
   const appearances = await all(`SELECT id,title,date,time,type,location,attorney,matterId FROM appearances WHERE title LIKE ? OR location LIKE ? OR type LIKE ? LIMIT 5`, [q, q, q]);
   const documents = await all(`SELECT id,displayName,name,type,matterId FROM documents WHERE displayName LIKE ? OR name LIKE ? LIMIT 5`, [q, q]);
+  const conversations = await all(`SELECT conv.id,conv.matterId,conv.subject,m.title matterTitle FROM conversations conv LEFT JOIN matters m ON m.id=conv.matterId WHERE conv.subject LIKE ? LIMIT 5`, [q]);
   res.json([
     ...matters.map(m => ({ type: 'Matter', id: m.id, matterId: m.id, title: m.title, subtitle: `${m.reference || ''} ${m.clientName || ''}`.trim() })),
     ...clients.map(c => ({ type: 'Client', id: c.id, title: c.name, subtitle: `${c.email || ''} ${c.phone || ''}`.trim() })),
@@ -1697,6 +1700,7 @@ app.get('/api/search', requireStaff, async (req, res) => {
     ...invoices.map(i => ({ type: 'Invoice', id: i.id, matterId: i.matterId, title: i.number, subtitle: `${i.description || i.status || ''}`.trim() })),
     ...appearances.map(a => ({ type: 'Appearance', id: a.id, matterId: a.matterId, title: a.title, subtitle: `${a.date || ''} ${a.time || ''} ${a.location || ''}`.trim() })),
     ...documents.map(d => ({ type: 'Document', id: d.id, matterId: d.matterId, title: d.displayName || d.name, subtitle: d.type || 'File' })),
+    ...conversations.map(conversation => ({ type: 'Conversation', id: conversation.id, matterId: conversation.matterId, title: conversation.subject, subtitle: conversation.matterTitle ? `Matter: ${conversation.matterTitle}` : 'Conversation' })),
   ]);
 });
 
