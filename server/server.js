@@ -170,7 +170,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS time_entries (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, attorney TEXT, date TEXT, hours REAL DEFAULT 0, activity TEXT, description TEXT, rate REAL DEFAULT 0, billed INTEGER DEFAULT 0)`);
   await run(`CREATE TABLE IF NOT EXISTS appearances (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT, date TEXT, time TEXT, type TEXT, location TEXT, meetingLink TEXT, attorney TEXT, prepNote TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS folders (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT NOT NULL, createdBy TEXT, createdAt TEXT)`);
-  await run(`CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT, type TEXT, mimeType TEXT, date TEXT, size TEXT, content BLOB)`);
+  await run(`CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT, displayName TEXT, type TEXT, mimeType TEXT, date TEXT, size TEXT, content BLOB, source TEXT DEFAULT 'firm', folderId TEXT, messageId TEXT, noticeId TEXT, clientVisible INTEGER DEFAULT 0, uploadedBy TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS case_notes (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, content TEXT NOT NULL, author TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS invoices (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, clientId TEXT, number TEXT, date TEXT, amount REAL DEFAULT 0, status TEXT DEFAULT 'Outstanding', dueDate TEXT, description TEXT, source TEXT DEFAULT 'time')`);
   await run(`CREATE TABLE IF NOT EXISTS invoice_items (id TEXT PRIMARY KEY, invoiceId TEXT NOT NULL, timeEntryId TEXT, date TEXT, description TEXT, hours REAL DEFAULT 0, rate REAL DEFAULT 0, amount REAL DEFAULT 0)`);
@@ -179,7 +179,10 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS reminder_settings (id TEXT PRIMARY KEY, remindersEnabled INTEGER DEFAULT 1, whatsappEnabled INTEGER DEFAULT 0, emailEnabled INTEGER DEFAULT 0, twilioSid TEXT, twilioToken TEXT, twilioFromNumber TEXT, smtpHost TEXT, smtpPort TEXT, smtpUser TEXT, smtpPass TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS reminder_templates (id TEXT PRIMARY KEY, eventType TEXT NOT NULL, channel TEXT NOT NULL, subject TEXT, body TEXT NOT NULL, createdBy TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS reminder_logs (id TEXT PRIMARY KEY, templateId TEXT, clientId TEXT, matterId TEXT, invoiceId TEXT, channel TEXT, recipient TEXT, status TEXT, sentAt TEXT, errorMessage TEXT)`);
-  await run(`CREATE TABLE IF NOT EXISTS firm_notices (id TEXT PRIMARY KEY, title TEXT, content TEXT, createdAt TEXT, createdBy TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS firm_notices (id TEXT PRIMARY KEY, title TEXT, content TEXT, createdAt TEXT, createdBy TEXT, clientId TEXT DEFAULT '')`);
+  await run(`CREATE TABLE IF NOT EXISTS conversations (id TEXT PRIMARY KEY, matterId TEXT, clientId TEXT NOT NULL, subject TEXT, createdAt TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, conversationId TEXT NOT NULL, senderId TEXT, senderRole TEXT, body TEXT, createdAt TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS client_activity (id TEXT PRIMARY KEY, clientId TEXT, matterId TEXT, userId TEXT, action TEXT, summary TEXT, entityType TEXT, entityId TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS deadlines (id TEXT PRIMARY KEY, matterId TEXT, clientId TEXT, title TEXT NOT NULL, type TEXT DEFAULT 'internal', dueDate TEXT NOT NULL, owner TEXT, status TEXT DEFAULT 'Open', notes TEXT, createdBy TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS payment_proofs (id TEXT PRIMARY KEY, invoiceId TEXT, matterId TEXT, clientId TEXT, method TEXT, reference TEXT, amount REAL DEFAULT 0, note TEXT, fileName TEXT, mimeType TEXT, size TEXT, content BLOB, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS invitations (id TEXT PRIMARY KEY, email TEXT NOT NULL, clientId TEXT, token TEXT UNIQUE NOT NULL, status TEXT DEFAULT 'pending', createdBy TEXT, createdAt TEXT, expiresAt TEXT)`);
@@ -190,6 +193,12 @@ async function initDb() {
   await ensureColumn('appearances', 'meetingLink', 'TEXT');
   await ensureColumn('documents', 'source', "TEXT DEFAULT 'firm'");
   await ensureColumn('documents', 'folderId', 'TEXT');
+  await ensureColumn('documents', 'messageId', 'TEXT');
+  await ensureColumn('documents', 'noticeId', 'TEXT');
+  await ensureColumn('documents', 'clientVisible', 'INTEGER DEFAULT 0');
+  await ensureColumn('documents', 'displayName', 'TEXT');
+  await ensureColumn('documents', 'uploadedBy', 'TEXT');
+  await ensureColumn('firm_notices', 'clientId', "TEXT DEFAULT ''");
   await ensureColumn('clients', 'remindersEnabled', 'INTEGER DEFAULT 1');
   await ensureColumn('clients', 'preferredChannel', "TEXT DEFAULT 'firm_default'");
   await ensureColumn('matters', 'remindersEnabled', "TEXT DEFAULT 'firm_default'");
@@ -224,6 +233,83 @@ async function canAccessMatter(req, matterId) {
   const matter = await get('SELECT id FROM matters WHERE id=? AND clientId=?', [matterId, req.user.clientId || '']);
   return Boolean(matter);
 }
+
+function cleanDocumentName(name = '') {
+  return String(name || 'document').replace(/[^\w .-]/g, '_').slice(0, 180) || 'document';
+}
+
+function documentListColumns() {
+  return `d.id,d.matterId,d.name,d.displayName,d.type,d.mimeType,d.date,d.size,d.source,d.folderId,d.messageId,d.noticeId,d.clientVisible,d.uploadedBy,f.name folderName`;
+}
+
+function clientDocumentVisibilitySql(alias = 'd') {
+  return `(
+    ${alias}.source='client'
+    OR COALESCE(${alias}.clientVisible,0)=1
+    OR EXISTS (
+      SELECT 1
+      FROM messages msg
+      JOIN conversations conv ON conv.id=msg.conversationId
+      WHERE msg.id=${alias}.messageId AND conv.clientId=?
+    )
+  )`;
+}
+
+function publicDocument(row = {}) {
+  const displayName = row.displayName || row.name || 'Document';
+  return {
+    ...row,
+    displayName,
+    friendlyName: displayName,
+    sharedBy: row.source === 'client' ? 'Uploaded by you' : 'Shared by your advocate',
+    content: undefined,
+  };
+}
+
+async function canAccessNotice(req, noticeId) {
+  if (!noticeId) return false;
+  if (req.user?.role !== 'client') return true;
+  const notice = await get("SELECT id FROM firm_notices WHERE id=? AND (clientId IS NULL OR clientId='' OR clientId=?)", [noticeId, req.user.clientId || '']);
+  return Boolean(notice);
+}
+
+async function canAccessConversation(req, conversationId) {
+  if (!conversationId) return false;
+  if (req.user?.role !== 'client') return true;
+  const conversation = await get('SELECT id FROM conversations WHERE id=? AND clientId=?', [conversationId, req.user.clientId || '']);
+  return Boolean(conversation);
+}
+
+async function canAccessDocument(req, doc) {
+  if (!doc) return false;
+  if (req.user?.role !== 'client') return true;
+  if (doc.noticeId && (await canAccessNotice(req, doc.noticeId))) return true;
+  if (doc.messageId) {
+    const thread = await get(`SELECT conv.id
+      FROM messages msg
+      JOIN conversations conv ON conv.id=msg.conversationId
+      WHERE msg.id=? AND conv.clientId=?`, [doc.messageId, req.user.clientId || '']);
+    if (thread) return true;
+  }
+  if (!doc.matterId || !(await canAccessMatter(req, doc.matterId))) return false;
+  return doc.source === 'client' || Number(doc.clientVisible || 0) === 1;
+}
+
+async function logClientActivity({ clientId = '', matterId = '', userId = '', action = '', summary = '', entityType = '', entityId = '' }) {
+  if (!clientId && !matterId) return;
+  await run('INSERT INTO client_activity (id,clientId,matterId,userId,action,summary,entityType,entityId,createdAt) VALUES (?,?,?,?,?,?,?,?,?)', [
+    genId('CACT'),
+    clientId || '',
+    matterId || '',
+    userId || '',
+    action || '',
+    summary || '',
+    entityType || '',
+    entityId || '',
+    new Date().toISOString(),
+  ]);
+}
+
 async function logAudit(req, action, entityType, entityId, summary) {
   if (!req.user) return;
   await run('INSERT INTO audit_logs (id,userId,userName,role,action,entityType,entityId,summary,createdAt) VALUES (?,?,?,?,?,?,?,?,?)', [
@@ -267,7 +353,15 @@ async function clientUploadsFolder(matterId, userId = '') {
   return folder;
 }
 
-async function matterFolders(matterId) {
+async function matterFolders(matterId, req = null) {
+  if (req?.user?.role === 'client') {
+    const visibleCount = await get(`SELECT COUNT(*) documentCount FROM documents d WHERE d.matterId=? AND ${clientDocumentVisibilitySql('d')}`, [matterId, req.user.clientId || '']);
+    const clientFolder = await get(`SELECT f.*, (SELECT COUNT(*) FROM documents d WHERE d.folderId=f.id AND ${clientDocumentVisibilitySql('d')}) documentCount
+      FROM folders f
+      WHERE f.matterId=? AND lower(f.name)=lower('Client Uploads')`, [req.user.clientId || '', matterId]);
+    const folders = clientFolder ? [{ ...clientFolder, name: 'Client Uploads' }] : [];
+    return [{ id: 'all', matterId, name: 'All Documents', virtual: true, documentCount: visibleCount?.documentCount || 0 }, ...folders];
+  }
   const folders = await all(`SELECT f.*, (SELECT COUNT(*) FROM documents d WHERE d.folderId=f.id) documentCount FROM folders f WHERE f.matterId=? ORDER BY CASE WHEN lower(f.name)=lower('Client Uploads') THEN 0 ELSE 1 END, lower(f.name)`, [matterId]);
   const uncategorised = await get('SELECT COUNT(*) documentCount FROM documents WHERE matterId=? AND (folderId IS NULL OR folderId="")', [matterId]);
   return [{ id: 'all', matterId, name: 'All Documents', virtual: true }, { id: 'uncategorised', matterId, name: 'Uncategorised', virtual: true, documentCount: uncategorised.documentCount || 0 }, ...folders];
@@ -441,7 +535,23 @@ app.post('/api/auth/client-login', async (req, res) => {
 });
 
 app.get('/api/firm-settings', async (req, res) => res.json(await getFirmSettings()));
-app.get('/api/notices', async (req, res) => res.json(await all('SELECT * FROM firm_notices ORDER BY createdAt DESC')));
+app.get('/api/notices', authenticate, async (req, res) => {
+  const params = [];
+  let where = '';
+  if (req.user.role === 'client') {
+    where = "WHERE n.clientId IS NULL OR n.clientId='' OR n.clientId=?";
+    params.push(req.user.clientId || '');
+  }
+  const notices = await all(`SELECT n.*, c.name clientName FROM firm_notices n LEFT JOIN clients c ON c.id=n.clientId ${where} ORDER BY n.createdAt DESC`, params);
+  if (!notices.length) return res.json([]);
+  const ids = notices.map(n => n.id);
+  const placeholders = ids.map(() => '?').join(',');
+  const attachments = await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.noticeId IN (${placeholders}) ORDER BY d.date DESC, d.displayName, d.name`, ids);
+  res.json(notices.map(notice => ({
+    ...notice,
+    attachments: attachments.filter(doc => doc.noticeId === notice.id).map(publicDocument),
+  })));
+});
 app.get('/api/invitations/:token', async (req, res) => {
   const invitation = await get('SELECT email,status,expiresAt FROM invitations WHERE token=?', [req.params.token]);
   if (!invitation) return res.status(404).json({ error: 'Invitation not found' });
@@ -579,16 +689,131 @@ app.post('/api/notifications/read', requireStaff, async (req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/conversations', async (req, res) => {
+  const params = [];
+  const filters = [];
+  if (req.user.role === 'client') {
+    filters.push('conv.clientId=?');
+    params.push(req.user.clientId || '');
+  } else if (req.query.clientId) {
+    filters.push('conv.clientId=?');
+    params.push(req.query.clientId);
+  }
+  if (req.query.matterId) {
+    filters.push('conv.matterId=?');
+    params.push(req.query.matterId);
+  }
+  const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+  const rows = await all(`SELECT conv.*, c.name clientName, m.title matterTitle, m.reference,
+      (SELECT MAX(createdAt) FROM messages msg WHERE msg.conversationId=conv.id) lastMessageAt,
+      (SELECT COUNT(*) FROM messages msg WHERE msg.conversationId=conv.id) messageCount
+    FROM conversations conv
+    LEFT JOIN clients c ON c.id=conv.clientId
+    LEFT JOIN matters m ON m.id=conv.matterId
+    ${where}
+    ORDER BY COALESCE(lastMessageAt, conv.createdAt) DESC`, params);
+  res.json(rows);
+});
+
+app.post('/api/conversations', async (req, res) => {
+  const matterId = req.body.matterId || '';
+  let clientId = req.user.role === 'client' ? (req.user.clientId || '') : (req.body.clientId || '');
+  if (matterId) {
+    const matter = await get('SELECT id,clientId,title FROM matters WHERE id=?', [matterId]);
+    if (!matter) return res.status(404).json({ error: 'Matter not found' });
+    if (req.user.role === 'client' && matter.clientId !== req.user.clientId) return res.status(403).json({ error: 'Matter access denied' });
+    if (clientId && clientId !== matter.clientId) return res.status(400).json({ error: 'Conversation client does not match matter client' });
+    clientId = matter.clientId;
+  }
+  if (!clientId) return res.status(400).json({ error: 'clientId or matterId is required' });
+  if (req.user.role === 'client' && clientId !== req.user.clientId) return res.status(403).json({ error: 'Client access denied' });
+  const client = await get('SELECT id,name FROM clients WHERE id=?', [clientId]);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const id = genId('CONV');
+  const subject = String(req.body.subject || '').trim() || (matterId ? 'Matter conversation' : 'General enquiry');
+  await run('INSERT INTO conversations (id,matterId,clientId,subject,createdAt) VALUES (?,?,?,?,?)', [id, matterId, clientId, subject, new Date().toISOString()]);
+  await logAudit(req, 'create', 'conversation', id, `Created conversation ${subject}`);
+  res.json(await get(`SELECT conv.*, c.name clientName, m.title matterTitle, m.reference
+    FROM conversations conv
+    LEFT JOIN clients c ON c.id=conv.clientId
+    LEFT JOIN matters m ON m.id=conv.matterId
+    WHERE conv.id=?`, [id]));
+});
+
+app.get('/api/conversations/:id/messages', async (req, res) => {
+  if (!(await canAccessConversation(req, req.params.id))) return res.status(403).json({ error: 'Conversation access denied' });
+  const messages = await all(`SELECT msg.*, u.fullName senderName
+    FROM messages msg
+    LEFT JOIN users u ON u.id=msg.senderId
+    WHERE msg.conversationId=?
+    ORDER BY msg.createdAt`, [req.params.id]);
+  if (!messages.length) return res.json([]);
+  const ids = messages.map(message => message.id);
+  const attachments = await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.messageId IN (${ids.map(() => '?').join(',')}) ORDER BY d.date DESC`, ids);
+  res.json(messages.map(message => ({
+    ...message,
+    attachments: attachments.filter(doc => doc.messageId === message.id).map(publicDocument),
+  })));
+});
+
+app.post('/api/conversations/:id/messages', async (req, res) => {
+  if (!(await canAccessConversation(req, req.params.id))) return res.status(403).json({ error: 'Conversation access denied' });
+  const conversation = await get('SELECT conv.*, c.name clientName, m.title matterTitle FROM conversations conv LEFT JOIN clients c ON c.id=conv.clientId LEFT JOIN matters m ON m.id=conv.matterId WHERE conv.id=?', [req.params.id]);
+  if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
+  const body = String(req.body.body || '').trim();
+  const attachments = Array.isArray(req.body.attachments) ? req.body.attachments : [];
+  if (!body && !attachments.length) return res.status(400).json({ error: 'Message body or attachment is required' });
+  const id = genId('MSG');
+  await run('INSERT INTO messages (id,conversationId,senderId,senderRole,body,createdAt) VALUES (?,?,?,?,?,?)', [id, req.params.id, req.user.userId || '', req.user.role || '', body, new Date().toISOString()]);
+  for (const attachment of attachments) {
+    if (!attachment?.name || !attachment?.data) continue;
+    const buffer = Buffer.from(String(attachment.data).split(',').pop(), 'base64');
+    const mimeType = attachment.mimeType || 'application/octet-stream';
+    const cleanName = cleanDocumentName(attachment.name);
+    const docId = genId('DOC');
+    const type = mimeType.includes('pdf') ? 'PDF' : mimeType.includes('word') || cleanName.endsWith('.doc') || cleanName.endsWith('.docx') ? 'Word' : mimeType.startsWith('image/') ? 'Image' : 'File';
+    await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [docId, conversation.matterId || '', cleanName, attachment.displayName || cleanName, type, mimeType, today(), `${Math.max(1, Math.round(buffer.length / 1024))} KB`, buffer, req.user.role === 'client' ? 'client' : 'firm', null, id, null, 1, req.user.userId || '']);
+  }
+  if (req.user.role === 'client') {
+    await notifyStaff('client_message', conversation.matterId || '', 'Client sent a message', `${conversation.clientName || req.user.fullName || 'Client'}: ${body.slice(0, 160)}`, conversation.clientId || req.user.clientId || '');
+    await logClientActivity({ clientId: conversation.clientId || req.user.clientId || '', matterId: conversation.matterId || '', userId: req.user.userId || '', action: 'sent_message', summary: body.slice(0, 220) || 'Sent an attachment', entityType: 'message', entityId: id });
+  } else {
+    await logClientActivity({ clientId: conversation.clientId || '', matterId: conversation.matterId || '', userId: req.user.userId || '', action: 'firm_sent_message', summary: body.slice(0, 220) || 'Sent an attachment', entityType: 'message', entityId: id });
+  }
+  await logAudit(req, 'create', 'message', id, `Added message to conversation ${conversation.subject || req.params.id}`);
+  const message = await get('SELECT msg.*, u.fullName senderName FROM messages msg LEFT JOIN users u ON u.id=msg.senderId WHERE msg.id=?', [id]);
+  const messageAttachments = await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.messageId=? ORDER BY d.date DESC`, [id]);
+  res.json({ ...message, attachments: messageAttachments.map(publicDocument) });
+});
+
 app.post('/api/notices', requireAdmin, async (req, res) => {
-  const { title, content } = req.body;
+  const { title, content, clientId = '', attachments = [] } = req.body;
   if (!title || !content) return res.status(400).json({ error: 'title and content are required' });
+  if (clientId) {
+    const client = await get('SELECT id FROM clients WHERE id=?', [clientId]);
+    if (!client) return res.status(400).json({ error: 'Target client not found' });
+  }
   const id = genId('NOTICE');
-  await run('INSERT INTO firm_notices (id,title,content,createdAt,createdBy) VALUES (?,?,?,?,?)', [id, title, content, new Date().toISOString(), req.user.fullName || 'Admin']);
+  await run('INSERT INTO firm_notices (id,title,content,createdAt,createdBy,clientId) VALUES (?,?,?,?,?,?)', [id, title, content, new Date().toISOString(), req.user.fullName || 'Admin', clientId || '']);
+  for (const attachment of Array.isArray(attachments) ? attachments : []) {
+    if (!attachment?.name || !attachment?.data) continue;
+    const buffer = Buffer.from(String(attachment.data).split(',').pop(), 'base64');
+    const mimeType = attachment.mimeType || 'application/octet-stream';
+    const docId = genId('DOC');
+    const cleanName = cleanDocumentName(attachment.name);
+    const type = mimeType.includes('pdf') ? 'PDF' : mimeType.includes('word') || cleanName.endsWith('.doc') || cleanName.endsWith('.docx') ? 'Word' : 'File';
+    await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [docId, '', cleanName, attachment.displayName || cleanName, type, mimeType, today(), `${Math.max(1, Math.round(buffer.length / 1024))} KB`, buffer, 'firm', null, null, id, 1, req.user.userId || '']);
+  }
   await logAudit(req, 'create', 'notice', id, `Created firm notice ${title}`);
-  res.json(await get('SELECT * FROM firm_notices WHERE id=?', [id]));
+  const notice = await get('SELECT * FROM firm_notices WHERE id=?', [id]);
+  const noticeAttachments = await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.noticeId=? ORDER BY d.date DESC`, [id]);
+  res.json({ ...notice, attachments: noticeAttachments.map(publicDocument) });
 });
 app.delete('/api/notices/:id', requireAdmin, async (req, res) => {
   const notice = await get('SELECT * FROM firm_notices WHERE id=?', [req.params.id]);
+  await run('DELETE FROM documents WHERE noticeId=?', [req.params.id]);
   await run('DELETE FROM firm_notices WHERE id=?', [req.params.id]);
   await logAudit(req, 'delete', 'notice', req.params.id, `Deleted firm notice ${notice?.title || req.params.id}`);
   res.json({ id: req.params.id, deleted: true });
@@ -796,12 +1021,28 @@ app.patch('/api/clients/:id', requireAdvocateOrAdmin, async (req, res) => {
   if (client) await logAudit(req, 'update', 'client', req.params.id, `Updated client ${client.name}`);
   client ? res.json(client) : res.status(404).json({ error: 'Client not found' });
 });
+app.get('/api/clients/:id/activity', requireStaff, async (req, res) => {
+  const client = await get('SELECT id FROM clients WHERE id=?', [req.params.id]);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const limit = Math.min(Math.max(Number(req.query.limit || 100), 1), 300);
+  res.json(await all(`SELECT ca.*, m.title matterTitle, m.reference, u.fullName userName
+    FROM client_activity ca
+    LEFT JOIN matters m ON m.id=ca.matterId
+    LEFT JOIN users u ON u.id=ca.userId
+    WHERE ca.clientId=?
+    ORDER BY ca.createdAt DESC
+    LIMIT ?`, [req.params.id, limit]));
+});
 app.delete('/api/clients/:id', requireAdvocateOrAdmin, async (req, res) => {
   const client = await get('SELECT * FROM clients WHERE id=?', [req.params.id]);
   const matters = await all('SELECT id FROM matters WHERE clientId=?', [req.params.id]);
   await run('BEGIN TRANSACTION');
   try {
     for (const matter of matters) await deleteMatterCascade(matter.id);
+    const conversations = await all('SELECT id FROM conversations WHERE clientId=?', [req.params.id]);
+    for (const conversation of conversations) await run('DELETE FROM messages WHERE conversationId=?', [conversation.id]);
+    await run('DELETE FROM conversations WHERE clientId=?', [req.params.id]);
+    await run('DELETE FROM client_activity WHERE clientId=?', [req.params.id]);
     await run('DELETE FROM deadlines WHERE clientId=?', [req.params.id]);
     await run('DELETE FROM clients WHERE id=?', [req.params.id]);
     await run('COMMIT');
@@ -823,15 +1064,21 @@ app.get('/api/matters/:id', async (req, res) => {
   const matter = await get('SELECT m.*, c.name clientName, c.email clientEmail, c.phone clientPhone FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.id=?', [req.params.id]);
   if (!matter) return res.status(404).json({ error: 'Matter not found' });
   if (req.user.role === 'client' && matter.clientId !== req.user.clientId) return res.status(403).json({ error: 'Matter access denied' });
+  const documentParams = [req.params.id];
+  let documentWhere = 'd.matterId=?';
+  if (req.user.role === 'client') {
+    documentWhere += ` AND ${clientDocumentVisibilitySql('d')}`;
+    documentParams.push(req.user.clientId || '');
+  }
   const [tasks, timeEntries, documents, notes, invoices, appearances] = await Promise.all([
-    all('SELECT * FROM tasks WHERE matterId=? ORDER BY dueDate', [req.params.id]),
-    all('SELECT * FROM time_entries WHERE matterId=? ORDER BY date DESC', [req.params.id]),
-    all('SELECT d.id,d.matterId,d.name,d.type,d.mimeType,d.date,d.size,d.source,d.folderId,f.name folderName FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.matterId=? ORDER BY d.date DESC', [req.params.id]),
+    req.user.role === 'client' ? Promise.resolve([]) : all('SELECT * FROM tasks WHERE matterId=? ORDER BY dueDate', [req.params.id]),
+    req.user.role === 'client' ? Promise.resolve([]) : all('SELECT * FROM time_entries WHERE matterId=? ORDER BY date DESC', [req.params.id]),
+    all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE ${documentWhere} ORDER BY d.date DESC`, documentParams),
     req.user.role === 'client' ? Promise.resolve([]) : all('SELECT * FROM case_notes WHERE matterId=? ORDER BY createdAt DESC', [req.params.id]),
     all('SELECT * FROM invoices WHERE matterId=? ORDER BY date DESC', [req.params.id]),
     all('SELECT * FROM appearances WHERE matterId=? ORDER BY date', [req.params.id])
   ]);
-  res.json({ ...matter, tasks, timeEntries, documents, notes, invoices, appearances });
+  res.json({ ...matter, tasks, timeEntries, documents: documents.map(publicDocument), notes, invoices, appearances });
 });
 app.get('/api/matters/:id/suggestions', async (req, res) => {
   if (req.user.role === 'client') return res.status(403).json({ error: 'Staff access required' });
@@ -903,6 +1150,9 @@ app.patch('/api/matters/:id/status', requireAdvocateOrAdmin, async (req, res) =>
 async function deleteMatterCascade(matterId) {
   const invoices = await all('SELECT id FROM invoices WHERE matterId=?', [matterId]);
   for (const invoice of invoices) await run('DELETE FROM invoice_items WHERE invoiceId=?', [invoice.id]);
+  const conversations = await all('SELECT id FROM conversations WHERE matterId=?', [matterId]);
+  for (const conversation of conversations) await run('DELETE FROM messages WHERE conversationId=?', [conversation.id]);
+  await run('DELETE FROM conversations WHERE matterId=?', [matterId]);
   await run('DELETE FROM invoices WHERE matterId=?', [matterId]);
   await run('DELETE FROM tasks WHERE matterId=?', [matterId]);
   await run('DELETE FROM time_entries WHERE matterId=?', [matterId]);
@@ -914,6 +1164,7 @@ async function deleteMatterCascade(matterId) {
   await run('DELETE FROM payment_proofs WHERE matterId=?', [matterId]);
   await run('DELETE FROM deadlines WHERE matterId=?', [matterId]);
   await run('DELETE FROM notifications WHERE matterId=?', [matterId]);
+  await run('DELETE FROM client_activity WHERE matterId=?', [matterId]);
   await run('DELETE FROM matters WHERE id=?', [matterId]);
 }
 app.delete('/api/matters/:id', requireAdvocateOrAdmin, async (req, res) => {
@@ -983,7 +1234,7 @@ app.delete('/api/appearances/:id', requireAdvocateOrAdmin, async (req, res) => {
 
 app.get('/api/matters/:id/folders', async (req, res) => {
   if (!(await canAccessMatter(req, req.params.id))) return res.status(403).json({ error: 'Matter access denied' });
-  res.json(await matterFolders(req.params.id));
+  res.json(await matterFolders(req.params.id, req));
 });
 app.post('/api/matters/:id/folders', requireAdvocateOrAdmin, async (req, res) => {
   const name = String(req.body.name || '').trim();
@@ -1026,7 +1277,12 @@ app.get('/api/matters/:id/documents', async (req, res) => {
     if (folderId === 'uncategorised') where += ' AND (d.folderId IS NULL OR d.folderId="")';
     else { where += ' AND d.folderId=?'; params.push(folderId); }
   }
-  res.json(await all(`SELECT d.id,d.matterId,d.name,d.type,d.mimeType,d.date,d.size,d.source,d.folderId,f.name folderName FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE ${where} ORDER BY d.date DESC, d.name`, params));
+  if (req.user.role === 'client') {
+    where += ` AND ${clientDocumentVisibilitySql('d')}`;
+    params.push(req.user.clientId || '');
+  }
+  const docs = await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE ${where} ORDER BY d.date DESC, COALESCE(d.displayName,d.name)`, params);
+  res.json(docs.map(publicDocument));
 });
 app.post('/api/matters/:id/documents', async (req, res) => {
   if (req.user.role === 'client') {
@@ -1034,7 +1290,7 @@ app.post('/api/matters/:id/documents', async (req, res) => {
   } else if (!['advocate', 'admin'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Advocate or admin access required' });
   }
-  const { name, mimeType, data } = req.body;
+  const { name, mimeType, data, displayName } = req.body;
   if (!name || !data) return res.status(400).json({ error: 'name and data are required' });
   const allowed = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
   const imageAllowed = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
@@ -1052,27 +1308,58 @@ app.post('/api/matters/:id/documents', async (req, res) => {
     folderId = folder.id;
   }
   const type = imageAllowed.includes(mimeType) ? 'Image' : mimeType.includes('pdf') ? 'PDF' : 'Word';
-  await run('INSERT INTO documents (id,matterId,name,type,mimeType,date,size,content,source,folderId) VALUES (?,?,?,?,?,?,?,?,?,?)', [id, req.params.id, name.replace(/[^\w .-]/g, '_'), type, mimeType, today(), `${Math.max(1, Math.round(buffer.length / 1024))} KB`, buffer, source, folderId || null]);
-  const doc = await get('SELECT d.id,d.matterId,d.name,d.type,d.mimeType,d.date,d.size,d.source,d.folderId,f.name folderName FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=?', [id]);
+  const cleanName = cleanDocumentName(name);
+  const cleanDisplayName = displayName ? cleanDocumentName(displayName) : cleanName;
+  const clientVisible = req.user.role === 'client' ? 0 : (req.body.clientVisible ? 1 : 0);
+  await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [id, req.params.id, cleanName, cleanDisplayName, type, mimeType, today(), `${Math.max(1, Math.round(buffer.length / 1024))} KB`, buffer, source, folderId || null, null, null, clientVisible, req.user.userId || '']);
+  const doc = await get(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=?`, [id]);
   await logAudit(req, 'upload', 'document', id, `Uploaded document ${doc.name}`);
   if (req.user.role === 'client') {
     const matter = await get('SELECT m.title, m.reference, c.id clientId, c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.id=?', [req.params.id]);
     await notifyStaff('client_document', req.params.id, 'Client uploaded a document', `${matter?.clientName || req.user.fullName || 'Client'} uploaded ${doc.name} for ${matter?.title || 'a matter'}.`, matter?.clientId || req.user.clientId || '');
+    await logClientActivity({ clientId: matter?.clientId || req.user.clientId || '', matterId: req.params.id, userId: req.user.userId || '', action: 'uploaded_document', summary: `Uploaded ${doc.displayName || doc.name}`, entityType: 'document', entityId: id });
   }
-  res.json(doc);
+  res.json(publicDocument(doc));
 });
-app.get('/api/documents/:id/download', async (req, res) => { const doc = await get('SELECT * FROM documents WHERE id=?', [req.params.id]); if (!doc) return res.status(404).json({ error: 'Document not found' }); if (!(await canAccessMatter(req, doc.matterId))) return res.status(403).json({ error: 'Document access denied' }); res.setHeader('Content-Type', doc.mimeType || 'application/octet-stream'); res.setHeader('Content-Disposition', `attachment; filename="${doc.name}"`); res.send(doc.content); });
+app.get('/api/documents/:id/download', async (req, res) => {
+  const doc = await get('SELECT * FROM documents WHERE id=?', [req.params.id]);
+  if (!doc) return res.status(404).json({ error: 'Document not found' });
+  if (!(await canAccessDocument(req, doc))) return res.status(403).json({ error: 'Document access denied' });
+  if (req.user.role === 'client') {
+    await logClientActivity({ clientId: req.user.clientId || '', matterId: doc.matterId || '', userId: req.user.userId || '', action: 'downloaded_document', summary: `Downloaded ${doc.displayName || doc.name || req.params.id}`, entityType: 'document', entityId: req.params.id });
+  }
+  res.setHeader('Content-Type', doc.mimeType || 'application/octet-stream');
+  res.setHeader('Content-Disposition', `attachment; filename="${cleanDocumentName(doc.displayName || doc.name)}"`);
+  res.send(doc.content);
+});
 app.patch('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
   const doc = await get('SELECT * FROM documents WHERE id=?', [req.params.id]);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
-  let folderId = req.body.folderId || '';
-  if (folderId && folderId !== 'uncategorised' && folderId !== 'all') {
-    const folder = await get('SELECT id FROM folders WHERE id=? AND matterId=?', [folderId, doc.matterId]);
-    if (!folder) return res.status(400).json({ error: 'Folder not found for this matter' });
-  } else folderId = null;
-  await run('UPDATE documents SET folderId=? WHERE id=?', [folderId, req.params.id]);
-  await logAudit(req, 'update', 'document', req.params.id, `Moved document ${doc.name}`);
-  res.json(await get('SELECT d.id,d.matterId,d.name,d.type,d.mimeType,d.date,d.size,d.source,d.folderId,f.name folderName FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=?', [req.params.id]));
+  const updates = [];
+  const values = [];
+  if (req.body.folderId !== undefined) {
+    let folderId = req.body.folderId || '';
+    if (folderId && folderId !== 'uncategorised' && folderId !== 'all') {
+      const folder = await get('SELECT id FROM folders WHERE id=? AND matterId=?', [folderId, doc.matterId]);
+      if (!folder) return res.status(400).json({ error: 'Folder not found for this matter' });
+    } else folderId = null;
+    updates.push('folderId=?');
+    values.push(folderId);
+  }
+  if (req.body.clientVisible !== undefined) {
+    updates.push('clientVisible=?');
+    values.push(req.body.clientVisible ? 1 : 0);
+  }
+  if (req.body.displayName !== undefined) {
+    updates.push('displayName=?');
+    values.push(cleanDocumentName(req.body.displayName || doc.name));
+  }
+  if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
+  await run(`UPDATE documents SET ${updates.join(',')} WHERE id=?`, [...values, req.params.id]);
+  await logAudit(req, 'update', 'document', req.params.id, `Updated document ${doc.name}`);
+  const updated = await get(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=?`, [req.params.id]);
+  res.json(publicDocument(updated));
 });
 app.delete('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => { const doc = await get('SELECT id,name,matterId FROM documents WHERE id=?', [req.params.id]); await run('DELETE FROM documents WHERE id=?', [req.params.id]); await logAudit(req, 'delete', 'document', req.params.id, `Deleted document ${doc?.name || req.params.id}`); res.json({ id: req.params.id, deleted: true }); });
 
@@ -1088,6 +1375,7 @@ app.post('/api/matters/:id/notes', async (req, res) => {
   if (req.user.role === 'client') {
     const matter = await get('SELECT m.title, m.reference, c.id clientId, c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.id=?', [req.params.id]);
     await notifyStaff('client_message', req.params.id, 'Client sent a message', `${matter?.clientName || author || 'Client'}: ${content.slice(0, 160)}`, matter?.clientId || req.user.clientId || '');
+    await logClientActivity({ clientId: matter?.clientId || req.user.clientId || '', matterId: req.params.id, userId: req.user.userId || '', action: 'sent_message', summary: content.slice(0, 220), entityType: 'case_note', entityId: id });
   }
   res.json(note);
 });
@@ -1181,12 +1469,23 @@ app.get('/api/client/dashboard', async (req, res) => {
   const matters = await all('SELECT m.*, c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.clientId=? ORDER BY m.openDate DESC', [req.user.clientId || '']);
   const matterIds = matters.map(m => m.id);
   const placeholders = matterIds.map(() => '?').join(',');
-  const documents = matterIds.length ? await all(`SELECT d.id,d.matterId,d.name,d.type,d.mimeType,d.date,d.size,d.source,d.folderId,f.name folderName FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.matterId IN (${placeholders}) ORDER BY d.date DESC`, matterIds) : [];
+  const documents = matterIds.length ? await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.matterId IN (${placeholders}) AND ${clientDocumentVisibilitySql('d')} ORDER BY d.date DESC`, [...matterIds, req.user.clientId || '']) : [];
   const invoices = await all(`SELECT i.*, m.title matterTitle, m.reference FROM invoices i LEFT JOIN matters m ON m.id=i.matterId WHERE i.clientId=? ORDER BY i.date DESC`, [req.user.clientId || '']);
   const appearances = matterIds.length ? await all(`SELECT * FROM appearances WHERE matterId IN (${placeholders}) ORDER BY date`, matterIds) : [];
-  const notices = await all('SELECT * FROM firm_notices ORDER BY createdAt DESC LIMIT 20');
+  const notices = await all("SELECT * FROM firm_notices WHERE clientId IS NULL OR clientId='' OR clientId=? ORDER BY createdAt DESC LIMIT 20", [req.user.clientId || '']);
+  const noticeIds = notices.map(notice => notice.id);
+  const noticeAttachments = noticeIds.length ? await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.noticeId IN (${noticeIds.map(() => '?').join(',')}) ORDER BY d.date DESC`, noticeIds) : [];
   const paymentProofs = await all('SELECT id,invoiceId,matterId,clientId,method,reference,amount,note,fileName,mimeType,size,createdAt FROM payment_proofs WHERE clientId=? ORDER BY createdAt DESC', [req.user.clientId || '']);
-  res.json({ client, matters, documents, invoices, notes: [], appearances, notices, paymentProofs });
+  res.json({
+    client,
+    matters,
+    documents: documents.map(publicDocument),
+    invoices,
+    notes: [],
+    appearances,
+    notices: notices.map(notice => ({ ...notice, attachments: noticeAttachments.filter(doc => doc.noticeId === notice.id).map(publicDocument) })),
+    paymentProofs,
+  });
 });
 
 app.post('/api/payment-proofs', async (req, res) => {

@@ -31,7 +31,7 @@ const defaultReminderTemplates = [
 async function createSchema() {
   const tables = [
     'audit_logs', 'notifications', 'payment_proofs', 'payments', 'expenses', 'disbursements', 'invoice_items', 'invoices',
-    'case_notes', 'documents', 'folders', 'appearances', 'time_entries', 'tasks', 'deadlines', 'matters', 'clients',
+    'messages', 'conversations', 'client_activity', 'case_notes', 'documents', 'folders', 'appearances', 'time_entries', 'tasks', 'deadlines', 'matters', 'clients',
     'users', 'integrations_log', 'firm_settings', 'reminder_settings', 'reminder_templates', 'reminder_logs',
     'firm_notices', 'invitations',
   ];
@@ -45,7 +45,7 @@ async function createSchema() {
   await run(`CREATE TABLE time_entries (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, taskId TEXT, attorney TEXT, date TEXT, hours REAL DEFAULT 0, activity TEXT, description TEXT, rate REAL DEFAULT 0, billed INTEGER DEFAULT 0)`);
   await run(`CREATE TABLE appearances (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT, date TEXT, time TEXT, type TEXT, location TEXT, meetingLink TEXT, attorney TEXT, prepNote TEXT)`);
   await run(`CREATE TABLE folders (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT NOT NULL, createdBy TEXT, createdAt TEXT)`);
-  await run(`CREATE TABLE documents (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT, type TEXT, mimeType TEXT, date TEXT, size TEXT, content BLOB, source TEXT DEFAULT 'firm', folderId TEXT)`);
+  await run(`CREATE TABLE documents (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT, displayName TEXT, type TEXT, mimeType TEXT, date TEXT, size TEXT, content BLOB, source TEXT DEFAULT 'firm', folderId TEXT, messageId TEXT, noticeId TEXT, clientVisible INTEGER DEFAULT 0, uploadedBy TEXT)`);
   await run(`CREATE TABLE case_notes (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, content TEXT NOT NULL, author TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE invoices (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, clientId TEXT, number TEXT, date TEXT, amount REAL DEFAULT 0, status TEXT DEFAULT 'Outstanding', dueDate TEXT, description TEXT, source TEXT DEFAULT 'time')`);
   await run(`CREATE TABLE invoice_items (id TEXT PRIMARY KEY, invoiceId TEXT NOT NULL, timeEntryId TEXT, date TEXT, description TEXT, hours REAL DEFAULT 0, rate REAL DEFAULT 0, amount REAL DEFAULT 0)`);
@@ -57,7 +57,10 @@ async function createSchema() {
   await run(`CREATE TABLE reminder_settings (id TEXT PRIMARY KEY, remindersEnabled INTEGER DEFAULT 1, whatsappEnabled INTEGER DEFAULT 0, emailEnabled INTEGER DEFAULT 0, twilioSid TEXT, twilioToken TEXT, twilioFromNumber TEXT, smtpHost TEXT, smtpPort TEXT, smtpUser TEXT, smtpPass TEXT)`);
   await run(`CREATE TABLE reminder_templates (id TEXT PRIMARY KEY, eventType TEXT NOT NULL, channel TEXT NOT NULL, subject TEXT, body TEXT NOT NULL, createdBy TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE reminder_logs (id TEXT PRIMARY KEY, templateId TEXT, clientId TEXT, matterId TEXT, invoiceId TEXT, channel TEXT, recipient TEXT, status TEXT, sentAt TEXT, errorMessage TEXT)`);
-  await run(`CREATE TABLE firm_notices (id TEXT PRIMARY KEY, title TEXT, content TEXT, createdAt TEXT, createdBy TEXT)`);
+  await run(`CREATE TABLE firm_notices (id TEXT PRIMARY KEY, title TEXT, content TEXT, createdAt TEXT, createdBy TEXT, clientId TEXT DEFAULT '')`);
+  await run(`CREATE TABLE conversations (id TEXT PRIMARY KEY, matterId TEXT, clientId TEXT NOT NULL, subject TEXT, createdAt TEXT)`);
+  await run(`CREATE TABLE messages (id TEXT PRIMARY KEY, conversationId TEXT NOT NULL, senderId TEXT, senderRole TEXT, body TEXT, createdAt TEXT)`);
+  await run(`CREATE TABLE client_activity (id TEXT PRIMARY KEY, clientId TEXT, matterId TEXT, userId TEXT, action TEXT, summary TEXT, entityType TEXT, entityId TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE deadlines (id TEXT PRIMARY KEY, matterId TEXT, clientId TEXT, title TEXT NOT NULL, type TEXT DEFAULT 'internal', dueDate TEXT NOT NULL, owner TEXT, status TEXT DEFAULT 'Open', notes TEXT, createdBy TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE payment_proofs (id TEXT PRIMARY KEY, invoiceId TEXT, matterId TEXT, clientId TEXT, method TEXT, reference TEXT, amount REAL DEFAULT 0, note TEXT, fileName TEXT, mimeType TEXT, size TEXT, content BLOB, createdAt TEXT)`);
   await run(`CREATE TABLE invitations (id TEXT PRIMARY KEY, email TEXT NOT NULL, clientId TEXT, token TEXT UNIQUE NOT NULL, status TEXT DEFAULT 'pending', createdBy TEXT, createdAt TEXT, expiresAt TEXT)`);
@@ -107,10 +110,10 @@ async function main() {
   const clients = [];
   for (let i = 0; i < clientSpecs.length; i += 1) {
     const [name, type, status, email, phone, retainer, joinedDays] = clientSpecs[i];
-    const client = { id: id('C'), name, type, status, email, phone, retainer, joinDate: daysAgo(joinedDays) };
+    const client = { id: id('C'), userId: id('U'), name, type, status, email, phone, retainer, joinDate: daysAgo(joinedDays) };
     clients.push(client);
     await run('INSERT INTO clients (id,name,type,contact,email,phone,status,joinDate,conflictCleared,retainer,remindersEnabled,preferredChannel) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', [client.id, name, type, name, email, phone, status, client.joinDate, 1, retainer, 1, i % 3 === 0 ? 'both' : 'firm_default']);
-    await run('INSERT INTO users (id,email,password,fullName,role,clientId,createdAt) VALUES (?,?,?,?,?,?,?)', [id('U'), email, password, name, 'client', client.id, nowIso()]);
+    await run('INSERT INTO users (id,email,password,fullName,role,clientId,createdAt) VALUES (?,?,?,?,?,?,?)', [client.userId, email, password, name, 'client', client.id, nowIso()]);
   }
 
   const matterSpecs = [
@@ -204,7 +207,9 @@ async function main() {
     await run('INSERT INTO folders (id,matterId,name,createdBy,createdAt) VALUES (?,?,?,?,?)', [clientUploads, matter.id, 'Client Uploads', clients[i % clients.length].id, nowIso()]);
     for (let j = 0; j < 2; j += 1) {
       const source = j === 0 ? 'firm' : 'client';
-      await run('INSERT INTO documents (id,matterId,name,type,mimeType,date,size,content,source,folderId) VALUES (?,?,?,?,?,?,?,?,?,?)', [id('DOC'), matter.id, `${source === 'firm' ? 'Draft pleading' : 'Client ID'} ${i + 1}.${j === 0 ? 'pdf' : 'png'}`, j === 0 ? 'PDF' : 'Image', j === 0 ? 'application/pdf' : 'image/png', daysAgo(i * 9 + j), `${18 + i + j} KB`, Buffer.from(`Demo document ${i}-${j}`), source, source === 'firm' ? pleadings : clientUploads]);
+      const fileName = `${source === 'firm' ? 'Draft pleading' : 'Client ID'} ${i + 1}.${j === 0 ? 'pdf' : 'png'}`;
+      await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [id('DOC'), matter.id, fileName, fileName, j === 0 ? 'PDF' : 'Image', j === 0 ? 'application/pdf' : 'image/png', daysAgo(i * 9 + j), `${18 + i + j} KB`, Buffer.from(`Demo document ${i}-${j}`), source, source === 'firm' ? pleadings : clientUploads, '', '', source === 'firm' && i % 2 === 0 ? 1 : 0, source === 'firm' ? admin.id : clients[i % clients.length].id]);
     }
   }
 
@@ -213,6 +218,14 @@ async function main() {
     if (i % 2 === 0) {
       const client = clients.find(c => c.id === matters[i].clientId);
       await run('INSERT INTO case_notes (id,matterId,content,author,createdAt) VALUES (?,?,?,?,?)', [id('NOTE'), matters[i].id, 'Client asked for an update through the portal.', client.name, nowIso()]);
+      const conversationId = id('CONV');
+      const clientMessageId = id('MSG');
+      const firmMessageId = id('MSG');
+      await run('INSERT INTO conversations (id,matterId,clientId,subject,createdAt) VALUES (?,?,?,?,?)', [conversationId, matters[i].id, client.id, `Update request: ${matters[i].reference}`, nowIso()]);
+      await run('INSERT INTO messages (id,conversationId,senderId,senderRole,body,createdAt) VALUES (?,?,?,?,?,?)', [clientMessageId, conversationId, client.userId, 'client', 'Good afternoon, kindly update me on the current status of this matter.', nowIso()]);
+      await run('INSERT INTO messages (id,conversationId,senderId,senderRole,body,createdAt) VALUES (?,?,?,?,?,?)', [firmMessageId, conversationId, admin.id, 'admin', 'Thank you. The advocate will post an update after the next court attendance.', nowIso()]);
+      await run('INSERT INTO client_activity (id,clientId,matterId,userId,action,summary,entityType,entityId,createdAt) VALUES (?,?,?,?,?,?,?,?,?)', [id('CACT'), client.id, matters[i].id, client.userId, 'sent_message', 'Client asked for an update through the portal.', 'message', clientMessageId, nowIso()]);
+      await run('INSERT INTO client_activity (id,clientId,matterId,userId,action,summary,entityType,entityId,createdAt) VALUES (?,?,?,?,?,?,?,?,?)', [id('CACT'), client.id, matters[i].id, admin.id, 'firm_sent_message', 'Firm replied to a client portal message.', 'message', firmMessageId, nowIso()]);
       for (const staff of [...advocates, ...assistants, admin]) {
         await run('INSERT INTO notifications (id,userId,type,matterId,clientId,title,body,createdAt,readAt) VALUES (?,?,?,?,?,?,?,?,?)', [id('NOTIF'), staff.id, 'client_message', matters[i].id, client.id, 'Client sent a message', `${client.name}: Client asked for an update through the portal.`, nowIso(), i % 4 === 0 ? '' : nowIso()]);
       }
@@ -225,8 +238,12 @@ async function main() {
     await run('INSERT INTO deadlines (id,matterId,clientId,title,type,dueDate,owner,status,notes,createdBy,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [id('DL'), matter.id, matter.clientId, pick(['VAT return review', 'Client document deadline', 'File submissions', 'AML source of funds review', 'Annual return check'], i), pick(deadlineTypes, i), i % 4 === 0 ? daysAgo(i + 1) : daysFromNow(i + 2), matter.advocate, i % 5 === 0 ? 'Done' : 'Open', 'Seeded compliance/deadline item.', admin.id, nowIso()]);
   }
 
-  await run('INSERT INTO firm_notices (id,title,content,createdAt,createdBy) VALUES (?,?,?,?,?)', [id('NOTICE'), 'Court recess notice', 'Please note that some court stations may adjust dates during recess. The firm will confirm your matter dates directly.', nowIso(), admin.fullName]);
-  await run('INSERT INTO firm_notices (id,title,content,createdAt,createdBy) VALUES (?,?,?,?,?)', [id('NOTICE'), 'Client portal launch', 'Clients can now upload documents and payment proof directly through the secure portal.', nowIso(), admin.fullName]);
+  const recessNotice = id('NOTICE');
+  const portalNotice = id('NOTICE');
+  await run('INSERT INTO firm_notices (id,title,content,createdAt,createdBy,clientId) VALUES (?,?,?,?,?,?)', [recessNotice, 'Court recess notice', 'Please note that some court stations may adjust dates during recess. The firm will confirm your matter dates directly.', nowIso(), admin.fullName, '']);
+  await run('INSERT INTO firm_notices (id,title,content,createdAt,createdBy,clientId) VALUES (?,?,?,?,?,?)', [portalNotice, 'Client portal launch', 'Clients can now upload documents and payment proof directly through the secure portal.', nowIso(), admin.fullName, clients[0].id]);
+  await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [id('DOC'), '', 'court-recess-guidance.pdf', 'Court recess guidance.pdf', 'PDF', 'application/pdf', today.toISOString().slice(0, 10), '12 KB', Buffer.from('Demo notice attachment'), 'firm', '', '', recessNotice, 1, admin.id]);
 
   const auditItems = [
     ['create', 'client', clients[0].id, 'Created demo client records'],

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { API_BASE, api, createFolder, deleteFolder, fileToDataUrl, getMatterDocuments, getMatterFolders, moveDocument, readSession, updateFolder } from '../lib/apiClient.js';
+import { API_BASE, api, createFolder, deleteFolder, fileToDataUrl, getMatterDocuments, getMatterFolders, moveDocument, readSession, updateDocument, updateFolder } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, Table } from './ui.jsx';
 
@@ -17,6 +17,10 @@ function folderIcon(folder) {
 function sourceBadge(doc, clientMode) {
   const client = doc.source === 'client';
   return <Badge tone={client ? 'amber' : 'blue'}>{clientMode && client ? 'Shared by you' : client ? 'Client' : 'Firm'}</Badge>;
+}
+
+function documentLabel(doc) {
+  return doc.displayName || doc.friendlyName || doc.name || 'Document';
 }
 
 export default function MatterDocuments({ matterId, clientMode = false, canManage = false, notify }) {
@@ -107,6 +111,14 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     } catch (err) { notify?.({ type: 'danger', message: err.message }); }
   }
 
+  async function toggleClientVisible(doc) {
+    try {
+      await updateDocument(doc.id, { clientVisible: !doc.clientVisible });
+      notify?.({ type: 'success', message: doc.clientVisible ? 'Document hidden from client.' : 'Document shared with client.' });
+      await load();
+    } catch (err) { notify?.({ type: 'danger', message: err.message }); }
+  }
+
   async function deleteDoc(doc) {
     try {
       await api(`/documents/${doc.id}`, { method: 'DELETE' });
@@ -161,16 +173,19 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
         </div>
         {loading ? <div style={styles.alert}>Loading documents...</div> : documents.length ? (
           <Table
-            columns={canManage ? ['Name', 'Folder', 'Date', 'Size', 'Source', 'Move', 'Actions'] : ['Name', 'Folder', 'Date', 'Size', 'Source', 'Download']}
+            columns={canManage ? ['Name', 'Folder', 'Date', 'Size', 'Source', 'Client Access', 'Move', 'Actions'] : ['Name', 'Folder', 'Date', 'Size', 'Source', 'Download']}
             rows={documents.map(doc => {
               const download = <a key={`${doc.id}-download`} style={styles.link} href={`${API_BASE}/documents/${doc.id}/download?token=${tokenQuery()}`}>Download</a>;
-              if (!canManage) return [doc.name, doc.folderName || 'Uncategorised', doc.date || '-', doc.size || '-', sourceBadge(doc, clientMode), download];
+              if (!canManage) return [documentLabel(doc), doc.folderName || 'Uncategorised', doc.date || '-', doc.size || '-', sourceBadge(doc, clientMode), download];
               return [
-                doc.name,
+                documentLabel(doc),
                 doc.folderName || 'Uncategorised',
                 doc.date || '-',
                 doc.size || '-',
                 sourceBadge(doc, clientMode),
+                doc.source === 'client'
+                  ? <Badge key={`${doc.id}-own`} tone="green">Client upload</Badge>
+                  : <button key={`${doc.id}-share`} type="button" style={styles.tinyButton} onClick={() => toggleClientVisible(doc)}>{doc.clientVisible ? 'Shared' : 'Internal'}</button>,
                 <select key={`${doc.id}-move`} style={styles.tableSelect} value={doc.folderId || 'uncategorised'} onChange={e => moveDoc(doc, e.target.value)}>
                   {folderOptions.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
                 </select>,

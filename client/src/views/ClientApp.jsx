@@ -231,11 +231,26 @@ function Notices({ notices }) {
 }
 
 function NoticeItem({ notice }) {
-  return <div style={{ padding: '12px 0', borderBottom: `1px solid ${theme.line}` }}><strong>{notice.title}</strong><p>{notice.content}</p><span style={styles.mutedText}>{notice.createdAt ? new Date(notice.createdAt).toLocaleString() : ''}</span></div>;
+  return (
+    <div style={{ padding: '12px 0', borderBottom: `1px solid ${theme.line}` }}>
+      <strong>{notice.title}</strong>
+      <p>{notice.content}</p>
+      {!!notice.attachments?.length && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '8px 0' }}>
+          {notice.attachments.map(file => (
+            <a key={file.id} style={styles.ghostButton} href={`${API_BASE}/documents/${file.id}/download?token=${tokenQuery()}`}>
+              {file.displayName || file.name || 'Attachment'}
+            </a>
+          ))}
+        </div>
+      )}
+      <span style={styles.mutedText}>{notice.createdAt ? new Date(notice.createdAt).toLocaleString() : ''}</span>
+    </div>
+  );
 }
 
 function Documents({ documents, matters }) {
-  return <Card title="All Documents" hint="Files shared across your matters"><Table columns={['Name', 'Matter', 'Source', 'Type', 'Download']} rows={documents.map(d => [d.name, matters.find(m => m.id === d.matterId)?.title || d.matterId, <Badge key={`${d.id}-source`} tone={d.source === 'client' ? 'green' : 'blue'}>{d.source === 'client' ? 'Shared by you' : 'Firm'}</Badge>, d.type, <a key={d.id} style={styles.link} href={`${API_BASE}/documents/${d.id}/download?token=${tokenQuery()}`}>Download</a>])} empty="No documents shared yet." /></Card>;
+  return <Card title="All Documents" hint="Files shared across your matters"><Table columns={['Name', 'Matter', 'Source', 'Type', 'Download']} rows={documents.map(d => [d.displayName || d.name, matters.find(m => m.id === d.matterId)?.title || d.matterId, <Badge key={`${d.id}-source`} tone={d.source === 'client' ? 'green' : 'blue'}>{d.source === 'client' ? 'Shared by you' : 'Firm'}</Badge>, d.type, <a key={d.id} style={styles.link} href={`${API_BASE}/documents/${d.id}/download?token=${tokenQuery()}`}>Download</a>])} empty="No documents shared yet." /></Card>;
 }
 
 function Account({ user, client, firm }) {

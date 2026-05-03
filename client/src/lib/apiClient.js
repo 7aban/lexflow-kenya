@@ -96,6 +96,10 @@ export const deleteDeadline = id => api(`/deadlines/${id}`, { method: 'DELETE' }
 export const getComplianceGuidance = () => api('/compliance-guidance');
 export const getNotifications = () => api('/notifications');
 export const markNotificationsRead = data => api('/notifications/read', { method: 'POST', body: data });
+export const getConversations = (params = {}) => api(queryPath('/conversations', params));
+export const createConversation = data => api('/conversations', { method: 'POST', body: data });
+export const getConversationMessages = conversationId => api(`/conversations/${conversationId}/messages`);
+export const sendConversationMessage = (conversationId, data) => api(`/conversations/${conversationId}/messages`, { method: 'POST', body: data });
 export const getAdvocatePerformance = (refresh = false) => api(`/performance/advocates${refresh ? '?refresh=1' : ''}`);
 export const getAdvocatePerformanceDetail = (userId, refresh = false) => api(`/performance/advocates/${userId}${refresh ? '?refresh=1' : ''}`);
 export const getNotices = () => api('/notices');
@@ -112,6 +116,8 @@ export const updateFolder = (folderId, data) => api(`/folders/${folderId}`, { me
 export const deleteFolder = folderId => api(`/folders/${folderId}`, { method: 'DELETE' });
 export const getMatterDocuments = (matterId, folderId = 'all') => api(`/matters/${matterId}/documents${folderId && folderId !== 'all' ? `?folderId=${encodeURIComponent(folderId)}` : ''}`);
 export const moveDocument = (docId, folderId) => api(`/documents/${docId}`, { method: 'PATCH', body: { folderId } });
+export const updateDocument = (docId, data) => api(`/documents/${docId}`, { method: 'PATCH', body: data });
+export const getClientActivity = (clientId, limit = 100) => api(`/clients/${clientId}/activity?limit=${encodeURIComponent(limit)}`);
 export const updateReminderTemplate = (id, data) => api(`/reminder-templates/${id}`, { method: 'PUT', body: data });
 export const getReminderLogs = (limit = 100) => api(`/reminder-logs?limit=${encodeURIComponent(limit)}`);
 
