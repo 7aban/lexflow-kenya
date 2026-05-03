@@ -1667,6 +1667,12 @@ app.post('/api/payment-proofs', async (req, res) => {
 app.get('/api/search', requireStaff, async (req, res) => {
   const q = `%${String(req.query.q || '').trim()}%`;
   if (q === '%%') return res.json([]);
+  if (req.user.role === 'advocate') {
+    const name = req.user.fullName || '';
+    const matters = await all(`SELECT m.id,m.title,m.reference,c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.assignedTo=? AND (m.title LIKE ? OR m.reference LIKE ? OR c.name LIKE ?) LIMIT 15`, [name, q, q, q]);
+    const clients = await all(`SELECT DISTINCT c.id,c.name,c.email,c.phone FROM clients c INNER JOIN matters m ON m.clientId=c.id WHERE m.assignedTo=? AND (c.name LIKE ? OR c.email LIKE ? OR c.phone LIKE ?) LIMIT 15`, [name, q, q, q]);
+    return res.json([...matters.map(m => ({ type: 'Matter', id: m.id, matterId: m.id, title: m.title, subtitle: `${m.reference || ''} ${m.clientName || ''}`.trim() })), ...clients.map(c => ({ type: 'Client', id: c.id, title: c.name, subtitle: `${c.email || ''} ${c.phone || ''}`.trim() }))]);
+  }
   const matters = await all(`SELECT m.id,m.title,m.reference,c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.title LIKE ? OR m.reference LIKE ? OR c.name LIKE ? LIMIT 15`, [q, q, q]);
   const clients = await all('SELECT id,name,email,phone FROM clients WHERE name LIKE ? OR email LIKE ? OR phone LIKE ? LIMIT 15', [q, q, q]);
   res.json([...matters.map(m => ({ type: 'Matter', id: m.id, matterId: m.id, title: m.title, subtitle: `${m.reference || ''} ${m.clientName || ''}`.trim() })), ...clients.map(c => ({ type: 'Client', id: c.id, title: c.name, subtitle: `${c.email || ''} ${c.phone || ''}`.trim() }))]);
