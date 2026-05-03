@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, API_BASE, AUTH_FAILURE_MESSAGE, clearSession, getNotifications, markNotificationsRead, readSession, saveSession } from './lib/apiClient.js';
+import { globalSearch } from './api.js';
 import { defaultFirmSettings, styles, StyleTag, theme } from './theme.jsx';
 import { Logo, Skeleton, Toast } from './components/ui.jsx';
 import LoginPage from './components/LoginPage.jsx';
@@ -51,6 +52,9 @@ export default function App() {
   const [user, setUser] = useState(session?.user || null);
   const [view, setView] = useState('Dashboard');
   const [search, setSearch] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [quickLinksOpen, setQuickLinksOpen] = useState(true);
   const [openNavGroup, setOpenNavGroup] = useState(() => readOpenNavGroup(session?.user?.role || 'assistant'));
   const [notifications, setNotifications] = useState([]);
@@ -125,6 +129,29 @@ export default function App() {
     const activeGroup = visibleGroups.find(group => group.items.some(([label]) => label === view));
     if (activeGroup) setOpenNavGroup(activeGroup.title);
   }, [user?.role, view]);
+
+  useEffect(() => {
+    const trimmed = search.trim();
+    if (trimmed.length < 2) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      setSearchOpen(false);
+      return;
+    }
+    setSearchLoading(true);
+    setSearchOpen(true);
+    const timer = setTimeout(async () => {
+      try {
+        const results = await globalSearch(trimmed);
+        setSearchResults(results || []);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearchLoading(false);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   async function refresh() {
     setLoading(true);
@@ -317,7 +344,30 @@ export default function App() {
             <p style={styles.subtitle}>{subtitles[view]}</p>
           </div>
           <div style={styles.topActions}>
-            <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search workspace" style={styles.search} />
+            <div style={{ position: 'relative' }}>
+              <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search workspace" style={styles.search} />
+              {searchOpen && (
+                <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', width: 320, maxWidth: 'calc(100vw - 32px)', zIndex: 2200, background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, boxShadow: theme.shadowLift, padding: 0, maxHeight: 400, overflowY: 'auto', animation: 'lfDropIn .16s ease-out' }}>
+                  {searchLoading ? (
+                    <div style={{ padding: 14, color: theme.muted, textAlign: 'center' }}>Searching...</div>
+                  ) : searchResults.length ? (
+                    searchResults.map(item => (
+                      <button key={item.id} type="button" onClick={() => {
+                        if (item.type === 'Matter') { setView('Matters'); setMatterFocus({ matterId: item.matterId, ts: Date.now() }); }
+                        if (item.type === 'Client') setView('Clients');
+                        setSearch(item.title || '');
+                        setSearchOpen(false);
+                      }} style={{ width: '100%', textAlign: 'left', border: 0, borderTop: `1px solid ${theme.line}`, background: '#fff', padding: '10px 12px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <strong style={{ fontSize: 13 }}>{item.type === 'Matter' ? 'Matter' : 'Client'}: {item.title || '-'}</strong>
+                        <span style={{ color: theme.muted, fontSize: 11 }}>{item.subtitle || ''}</span>
+                      </button>
+                    ))
+                  ) : (
+                    <div style={{ padding: 14, color: theme.muted, textAlign: 'center' }}>No results found.</div>
+                  )}
+                </div>
+              )}
+            </div>
             <NotificationBell notifications={notifications} open={notificationsOpen} setOpen={setNotificationsOpen} onOpen={openNotification} />
             <button type="button" onClick={refresh} disabled={loading} style={styles.ghostButton}>{loading ? 'Refreshing...' : 'Refresh'}</button>
           </div>
