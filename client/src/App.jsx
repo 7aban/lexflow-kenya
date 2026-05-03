@@ -367,10 +367,13 @@ export default function App() {
                       <button key={item.id} type="button" onClick={() => {
                         if (item.type === 'Matter') { setView('Matters'); setMatterFocus({ matterId: item.matterId, ts: Date.now() }); }
                         if (item.type === 'Client') setView('Clients');
+                        if (item.type === 'Task') setView('Tasks');
+                        if (item.type === 'Invoice') { if (isAdmin) setView('Invoices'); else if (item.matterId) { setView('Matters'); setMatterFocus({ matterId: item.matterId, ts: Date.now() }); } }
+                        if (item.type === 'Appearance') setView('Deadlines');
                         setSearch(item.title || '');
                         setSearchOpen(false);
                       }} style={{ width: '100%', textAlign: 'left', border: 0, borderTop: `1px solid ${theme.line}`, background: '#fff', padding: '10px 12px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <strong style={{ fontSize: 13 }}>{item.type === 'Matter' ? 'Matter' : 'Client'}: {item.title || '-'}</strong>
+                        <strong style={{ fontSize: 13 }}>{item.type}: {item.title || '-'}</strong>
                         <span style={{ color: theme.muted, fontSize: 11 }}>{item.subtitle || ''}</span>
                       </button>
                     ))
