@@ -15,7 +15,8 @@ function noticeFileName(file) {
   return file?.friendlyName || file?.displayName || file?.name || 'Attachment';
 }
 
-export function Dashboard({ data }) {
+export function Dashboard({ data, user }) {
+  const isAdvocate = user?.role === 'advocate';
   const outstanding = data.invoices.filter(i => i.status === 'Outstanding').reduce((sum, i) => sum + Number(i.amount || 0), 0);
   const paid = data.invoices.filter(i => i.status === 'Paid').reduce((sum, i) => sum + Number(i.amount || 0), 0);
   const overdueTasks = data.tasks.filter(t => !t.completed && t.dueDate && t.dueDate < new Date().toISOString().slice(0, 10)).length;
@@ -27,14 +28,18 @@ export function Dashboard({ data }) {
     <div style={styles.pageStack}>
       <section style={styles.heroCard}>
         <div>
-          <div style={styles.heroKicker}>Firm position</div>
+          <div style={styles.heroKicker}>{isAdvocate ? 'Your workload' : 'Firm position'}</div>
           <h2>Today feels manageable.</h2>
-          <p>{data.matters.length} matters, {data.tasks.length} tasks, and {kes(outstanding)} outstanding across active files.</p>
+          {isAdvocate ? (
+            <p>{data.matters.length} matters assigned, {data.dashboard.overdueTaskCount || 0} overdue task{data.dashboard.overdueTaskCount === 1 ? '' : 's'}. Outstanding: {kes(outstanding)}.</p>
+          ) : (
+            <p>{data.matters.length} matters, {data.tasks.length} tasks, and {kes(outstanding)} outstanding across active files.</p>
+          )}
         </div>
         <div style={styles.heroFigure}>{kes(paid + outstanding)}</div>
       </section>
 
-      {overdueTasks > 0 && (
+      {!isAdvocate && overdueTasks > 0 && (
         <div style={styles.warningPanel}>
           <div style={styles.warningIcon}>!</div>
           <div>
@@ -44,22 +49,32 @@ export function Dashboard({ data }) {
         </div>
       )}
 
+      {isAdvocate && data.dashboard.overdueTaskCount > 0 && (
+        <div style={styles.warningPanel}>
+          <div style={styles.warningIcon}>!</div>
+          <div>
+            <strong>{data.dashboard.overdueTaskCount} overdue task{data.dashboard.overdueTaskCount === 1 ? '' : 's'} need attention.</strong>
+            <span>Review your task board and clear critical deadlines before the close of day.</span>
+          </div>
+        </div>
+      )}
+
       <div style={styles.statsGrid}>
         <Stat label="Active matters" value={data.dashboard.activeMattersCount ?? data.matters.length} tone="navy" />
         <Stat label="Month hours" value={Number(data.dashboard.monthHours || 0).toFixed(1)} tone="gold" />
-        <Stat label="Revenue month" value={kes(data.dashboard.monthRevenue)} tone="green" />
-        <Stat label="Overdue tasks" value={overdueTasks} tone="red" />
+        <Stat label={isAdvocate ? 'My billed revenue' : 'Revenue month'} value={kes(data.dashboard.monthRevenue)} tone="green" />
+        <Stat label="Overdue tasks" value={isAdvocate ? data.dashboard.overdueTaskCount : overdueTasks} tone="red" />
       </div>
 
       <div style={styles.dashboardGrid}>
-        <Card title="Matter pipeline" hint="Stage distribution">
+        <Card title={isAdvocate ? 'My matters' : 'Matter pipeline'} hint={isAdvocate ? 'Assigned files' : 'Stage distribution'}>
           {Object.keys(stages).length ? Object.entries(stages).map(([stage, count]) => (
             <div key={stage} style={styles.pipelineRow}>
               <span>{stage}</span>
               <div style={styles.pipelineTrack}><div style={{ ...styles.pipelineFill, width: `${(count / maxStage) * 100}%` }} /></div>
               <strong>{count}</strong>
             </div>
-          )) : <Empty title="No matters yet" text="Create a client and matter to populate the board." />}
+          )) : <Empty title={isAdvocate ? 'No assigned matters' : 'No matters yet'} text={isAdvocate ? 'Your assigned matters will appear here.' : 'Create a client and matter to populate the board.'} />}
         </Card>
         <Card title="Receivables" hint="Latest invoice status">
           <Table columns={['Invoice', 'Client', 'Amount', 'Status']} rows={data.invoices.slice(0, 6).map(i => [i.number || i.id, i.clientName || '-', kes(i.amount), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>])} empty="No invoices yet." />

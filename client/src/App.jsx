@@ -324,7 +324,7 @@ export default function App() {
         </header>
 
         {loading && <Skeleton />}
-        {!loading && view === 'Dashboard' && <Dashboard data={data} />}
+        {!loading && view === 'Dashboard' && <Dashboard data={data} user={user} />}
         {!loading && view === 'Clients' && <Clients clients={data.clients} matters={data.matters} canManage={canManage} isAdmin={isAdmin} reload={refresh} notify={setToast} />}
         {!loading && view === 'Matters' && <Matters data={data} canManage={canManage} reload={refresh} notify={setToast} focus={matterFocus} onMatterOpened={async matterId => { setNotifications(current => current.filter(item => item.matterId !== matterId)); try { await markNotificationsRead({ matterId }); } catch {} }} />}
         {!loading && view === 'Tasks' && <Tasks data={data} canManage={canManage} reload={refresh} notify={setToast} />}
