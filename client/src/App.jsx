@@ -7,6 +7,7 @@ import AcceptInvitation from './views/AcceptInvitation.jsx';
 import AdvocatePerformance from './views/AdvocatePerformance.jsx';
 import AuditLog from './views/AuditLog.jsx';
 import ClientApp from './views/ClientApp.jsx';
+import Communications from './views/Communications.jsx';
 import DeadlineCenter from './views/DeadlineCenter.jsx';
 import Invitations from './views/Invitations.jsx';
 import { Clients, Dashboard, FirmSettings, Invoices, Matters, Tasks, Users } from './views/StaffViews.jsx';
@@ -18,6 +19,7 @@ const nav = [
   ['Matters', 'MT'],
   ['Tasks', 'TK'],
   ['Deadlines', 'DL'],
+  ['Communications', 'CM'],
   ['Invoices', 'IN'],
   ['Performance', 'PF'],
   ['Firm Settings', 'FS'],
@@ -41,6 +43,7 @@ export default function App() {
   const [notifications, setNotifications] = useState([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [matterFocus, setMatterFocus] = useState(null);
+  const [communicationFocus, setCommunicationFocus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
   const [data, setData] = useState(initialData);
@@ -164,9 +167,16 @@ export default function App() {
     setNotificationsOpen(false);
     if (notification.matterId) {
       setMatterFocus({ matterId: notification.matterId, tab: 'Case notes', ts: Date.now() });
-      setView('Matters');
+      setCommunicationFocus({ matterId: notification.matterId, clientId: notification.clientId || '', ts: Date.now() });
+      setView('Communications');
       setNotifications(current => current.filter(item => item.matterId !== notification.matterId));
       try { await markNotificationsRead({ matterId: notification.matterId }); }
+      catch { /* Keep navigation responsive even if read marking fails. */ }
+    } else if (notification.clientId) {
+      setCommunicationFocus({ matterId: '', clientId: notification.clientId, ts: Date.now() });
+      setView('Communications');
+      setNotifications(current => current.filter(item => item.id !== notification.id));
+      try { await markNotificationsRead({ id: notification.id }); }
       catch { /* Keep navigation responsive even if read marking fails. */ }
     }
   }
@@ -191,6 +201,7 @@ export default function App() {
     Matters: 'Matter pipeline, billing, documents, notes and invoice actions.',
     Tasks: 'Daily execution board for deadlines and delegated legal work.',
     Deadlines: 'Court, client, internal and statutory obligations in one timeline.',
+    Communications: 'Client messages, secure attachments and portal activity in one inbox.',
     Invoices: 'Receivables, invoice status and PDF export for client billing.',
     Performance: 'Managing partner view of advocate output, workload and court attendance.',
     'Firm Settings': 'Client-ready branding, invoice identity and contact details.',
@@ -274,9 +285,10 @@ export default function App() {
         {!loading && view === 'Matters' && <Matters data={data} canManage={canManage} reload={refresh} notify={setToast} focus={matterFocus} onMatterOpened={async matterId => { setNotifications(current => current.filter(item => item.matterId !== matterId)); try { await markNotificationsRead({ matterId }); } catch {} }} />}
         {!loading && view === 'Tasks' && <Tasks data={data} canManage={canManage} reload={refresh} notify={setToast} />}
         {!loading && view === 'Deadlines' && <DeadlineCenter data={data} canManage={canManage} notify={setToast} />}
+        {!loading && view === 'Communications' && <Communications clients={data.clients} matters={data.matters} focus={communicationFocus} notify={setToast} />}
         {!loading && view === 'Invoices' && <Invoices invoices={data.invoices} isAdmin={isAdmin} canManage={canManage} reload={refresh} notify={setToast} />}
         {!loading && view === 'Performance' && isAdmin && <AdvocatePerformance notify={setToast} />}
-        {!loading && view === 'Firm Settings' && isAdmin && <FirmSettings settings={firm} reload={refresh} notify={setToast} />}
+        {!loading && view === 'Firm Settings' && isAdmin && <FirmSettings settings={firm} clients={data.clients} reload={refresh} notify={setToast} />}
         {!loading && view === 'Users' && isAdmin && <Users clients={data.clients} notify={setToast} />}
         {!loading && view === 'Invitations' && isAdmin && <Invitations clients={data.clients} notify={setToast} />}
         {!loading && view === 'Audit Log' && isAdmin && <AuditLog notify={setToast} navigate={setView} />}

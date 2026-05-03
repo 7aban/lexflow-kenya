@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api } from '../lib/apiClient.js';
+import { API_BASE, createConversation, fileToDataUrl, getConversationMessages, getConversations, readSession, sendConversationMessage } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Badge, Empty, Field } from './ui.jsx';
 
@@ -18,7 +18,12 @@ export default function ClientChatWidget({ firm, matters = [], selectedMatterId 
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState(faqItems[0][0]);
   const [matterId, setMatterId] = useState(selectedMatterId || matters[0]?.id || '');
+  const [conversations, setConversations] = useState([]);
+  const [activeConversation, setActiveConversation] = useState(null);
+  const [messages, setMessages] = useState([]);
   const [message, setMessage] = useState('');
+  const [attachment, setAttachment] = useState(null);
+  const [loadingThread, setLoadingThread] = useState(false);
   const [sending, setSending] = useState(false);
   const unread = 0;
 
@@ -26,20 +31,81 @@ export default function ClientChatWidget({ firm, matters = [], selectedMatterId 
     if (selectedMatterId) setMatterId(selectedMatterId);
   }, [selectedMatterId]);
 
+  useEffect(() => {
+    if (open && tab === 'Message Firm') loadConversations();
+  }, [open, tab]);
+
+  useEffect(() => {
+    if (!matterId || !conversations.length) {
+      setActiveConversation(null);
+      setMessages([]);
+      return;
+    }
+    const existing = conversations.find(item => item.matterId === matterId);
+    setActiveConversation(existing || null);
+  }, [matterId, conversations]);
+
+  useEffect(() => {
+    if (activeConversation?.id) loadMessages(activeConversation.id);
+    else setMessages([]);
+  }, [activeConversation?.id]);
+
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return faqItems;
     return faqItems.filter(([question, answer]) => `${question} ${answer}`.toLowerCase().includes(needle));
   }, [query]);
 
+  async function loadConversations() {
+    try {
+      const rows = await getConversations();
+      setConversations(rows);
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    }
+  }
+
+  async function loadMessages(conversationId) {
+    setLoadingThread(true);
+    try {
+      setMessages(await getConversationMessages(conversationId));
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setLoadingThread(false);
+    }
+  }
+
+  async function ensureConversation(targetMatter) {
+    const existing = conversations.find(item => item.matterId === targetMatter);
+    if (existing) return existing;
+    const matter = matters.find(item => item.id === targetMatter);
+    const created = await createConversation({
+      matterId: targetMatter,
+      subject: matter ? `Message about ${matter.title}` : 'Client message',
+    });
+    setConversations(current => [created, ...current]);
+    return created;
+  }
+
   async function sendMessage(event) {
     event.preventDefault();
     const targetMatter = matterId || selectedMatterId || matters[0]?.id;
-    if (!targetMatter || !message.trim()) return notify?.({ type: 'warning', message: 'Choose a matter and write a message first.' });
+    if (!targetMatter || (!message.trim() && !attachment)) return notify?.({ type: 'warning', message: 'Choose a matter and write a message first.' });
     setSending(true);
     try {
-      await api(`/matters/${targetMatter}/notes`, { method: 'POST', body: { content: message } });
+      const conversation = await ensureConversation(targetMatter);
+      const attachments = attachment ? [{
+        name: attachment.name,
+        mimeType: attachment.type || 'application/octet-stream',
+        data: await fileToDataUrl(attachment),
+      }] : [];
+      const saved = await sendConversationMessage(conversation.id, { body: message, attachments });
+      setActiveConversation(conversation);
+      setMessages(current => [...current, saved]);
       setMessage('');
+      setAttachment(null);
+      await loadConversations();
       notify?.({ type: 'success', message: 'Message sent to the firm.' });
     } catch (err) {
       notify?.({ type: 'danger', message: err.message });
@@ -152,9 +218,20 @@ export default function ClientChatWidget({ firm, matters = [], selectedMatterId 
                   {matters.map(matter => <option key={matter.id} value={matter.id}>{matter.title}</option>)}
                 </select>
               </Field>
+              <div style={{ border: `1px solid ${theme.line}`, borderRadius: 10, padding: 10, background: '#F8FAFC', display: 'grid', gap: 8, maxHeight: 230, overflowY: 'auto' }}>
+                {loadingThread ? <span style={styles.mutedText}>Loading conversation...</span> : messages.length ? messages.map(item => (
+                  <div key={item.id} style={{ display: 'grid', justifyItems: item.senderRole === 'client' ? 'end' : 'start' }}>
+                    <div style={{ maxWidth: '86%', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 10, background: item.senderRole === 'client' ? theme.blueBg : '#fff' }}>
+                      <strong>{item.senderRole === 'client' ? 'You' : item.senderName || 'Firm team'}</strong>
+                      {item.body && <p style={{ margin: '5px 0 0', color: theme.ink }}>{item.body}</p>}
+                      {!!item.attachments?.length && <div style={{ display: 'grid', gap: 4, marginTop: 8 }}>{item.attachments.map(file => <a key={file.id} style={styles.link} href={`${API_BASE}/documents/${file.id}/download?token=${encodeURIComponent(readSession()?.token || '')}`}>{file.displayName || file.name || 'Attachment'}</a>)}</div>}
+                      <small style={{ color: theme.muted }}>{item.createdAt ? new Date(item.createdAt).toLocaleString() : ''}</small>
+                    </div>
+                  </div>
+                )) : <Empty title="No messages yet" text="Start the conversation and the firm will be notified." />}
+              </div>
               <Field label="Message">
                 <textarea
-                  required
                   rows={7}
                   style={{ ...styles.input, resize: 'vertical', minHeight: 132 }}
                   value={message}
@@ -162,8 +239,11 @@ export default function ClientChatWidget({ firm, matters = [], selectedMatterId 
                   placeholder={`Hello ${firm?.name || 'the firm'}, I need help with...`}
                 />
               </Field>
+              <Field label="Attachment">
+                <input type="file" style={styles.input} onChange={event => setAttachment(event.target.files?.[0] || null)} />
+              </Field>
               <button type="submit" disabled={sending || !matters.length} style={styles.primaryButton}>{sending ? 'Sending...' : 'Send message'}</button>
-              <p>Messages are saved to your matter file and notify the legal team.</p>
+              <p>Messages are saved in a secure conversation thread and notify the legal team.</p>
             </form>
           )}
         </div>
