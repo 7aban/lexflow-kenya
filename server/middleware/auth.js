@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'lexflow-kenya-secret';
+const JWT_SECRET = process.env.JWT_SECRET || 'lexflow-kenyan-law-secret';
 
 function authenticate(req, res, next) {
   const header = req.headers.authorization || '';
