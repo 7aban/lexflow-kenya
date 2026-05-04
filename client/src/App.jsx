@@ -69,6 +69,7 @@ export default function App() {
   const [communicationFocus, setCommunicationFocus] = useState(null);
   const [taskFocus, setTaskFocus] = useState(null);
   const [clientFocus, setClientFocus] = useState(null);
+  const [appearanceFocus, setAppearanceFocus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
   const [data, setData] = useState(initialData);
@@ -388,7 +389,7 @@ export default function App() {
                         if (item.type === 'Client') { setView('Clients'); setClientFocus({ clientId: item.id, ts: Date.now() }); }
                         if (item.type === 'Task') { setView('Tasks'); setTaskFocus({ taskId: item.id, ts: Date.now() }); }
                         if (item.type === 'Invoice') { if (isAdmin) setView('Invoices'); else if (item.matterId) { setView('Matters'); setMatterFocus({ matterId: item.matterId, ts: Date.now() }); } }
-                        if (item.type === 'Appearance') setView('Deadlines');
+                        if (item.type === 'Appearance') { setView('Deadlines'); setAppearanceFocus({ appearanceId: item.id, ts: Date.now() }); }
                         if (item.type === 'Document' && item.matterId) { setView('Matters'); setMatterFocus({ matterId: item.matterId, ts: Date.now() }); }
                         if (item.type === 'Conversation') { setView('Communications'); setCommunicationFocus({ matterId: item.matterId, clientId: '', ts: Date.now() }); }
                         setSearch(item.title || '');
@@ -414,7 +415,7 @@ export default function App() {
         {!loading && view === 'Clients' && <Clients clients={data.clients} matters={data.matters} canManage={canManage} isAdmin={isAdmin} reload={refresh} notify={setToast} focus={clientFocus} />}
         {!loading && view === 'Matters' && <Matters data={data} canManage={canManage} reload={refresh} notify={setToast} focus={matterFocus} onMatterOpened={async matterId => { setNotifications(current => current.filter(item => item.matterId !== matterId)); try { await markNotificationsRead({ matterId }); } catch {} }} />}
         {!loading && view === 'Tasks' && <Tasks data={data} canManage={canManage} reload={refresh} notify={setToast} focus={taskFocus} />}
-        {!loading && view === 'Deadlines' && <DeadlineCenter data={data} canManage={canManage} notify={setToast} />}
+        {!loading && view === 'Deadlines' && <DeadlineCenter data={data} canManage={canManage} notify={setToast} focus={appearanceFocus} />}
         {!loading && view === 'Communications' && <Communications clients={data.clients} matters={data.matters} focus={communicationFocus} notify={setToast} />}
         {!loading && view === 'Invoices' && <Invoices invoices={data.invoices} isAdmin={isAdmin} canManage={canManage} reload={refresh} notify={setToast} />}
         {!loading && view === 'Performance' && isAdmin && <AdvocatePerformance notify={setToast} />}

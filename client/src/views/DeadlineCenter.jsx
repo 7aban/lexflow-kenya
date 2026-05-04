@@ -42,7 +42,7 @@ function dueLabel(date) {
   return `In ${days} days`;
 }
 
-export default function DeadlineCenter({ data, canManage, notify }) {
+export default function DeadlineCenter({ data, canManage, notify, focus }) {
   const [deadlines, setDeadlines] = useState([]);
   const [guidance, setGuidance] = useState([]);
   const [filters, setFilters] = useState({ type: '', status: '' });
@@ -68,6 +68,17 @@ export default function DeadlineCenter({ data, canManage, notify }) {
   }
 
   useEffect(() => { load(); }, [filters.type, filters.status]);
+  useEffect(() => {
+    if (!focus?.appearanceId) return;
+    const targetId = `appearance:${focus.appearanceId}`;
+    const el = document.getElementById(`deadline-${targetId}`);
+    if (el) {
+      const prev = el.style.background;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.style.background = 'rgba(212, 163, 74, 0.15)';
+      setTimeout(() => { el.style.background = prev; }, 1200);
+    }
+  }, [deadlines, focus?.appearanceId, focus?.ts]);
 
   const summary = useMemo(() => {
     const open = deadlines.filter(row => row.status !== 'Done');
@@ -239,7 +250,7 @@ export default function DeadlineCenter({ data, canManage, notify }) {
 
       <Card title="Deadline Timeline" hint="Court dates, tasks, invoices, limitation dates and custom obligations in one list.">
         {loading ? <Skeleton rows={3} /> : rows.length ? (
-          <Table columns={['Due', 'Type', 'Deadline', 'Matter / Client', 'Owner', 'Status', 'Action']} rows={rows} empty="No deadlines found." />
+          <Table columns={['Due', 'Type', 'Deadline', 'Matter / Client', 'Owner', 'Status', 'Action']} rows={rows} rowIds={deadlines.map(r => `deadline-${r.id}`)} empty="No deadlines found." />
         ) : (
           <Empty title="No deadlines found" text="Create a custom deadline or add tasks, appearances, invoices and SOL dates to populate this timeline." />
         )}
