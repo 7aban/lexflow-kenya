@@ -65,7 +65,7 @@ const defaultReminderTemplates = [
   },
 ];
 
-module.exports = ({ run, get, genId, money, defaultFirmSettings }) => {
+module.exports = ({ run, get, all, genId, money, defaultFirmSettings }) => {
   function templateKey(template) {
     return `${template.eventType}:${template.channel}`;
   }
@@ -176,6 +176,36 @@ module.exports = ({ run, get, genId, money, defaultFirmSettings }) => {
     if (shouldSendEmail) await sendReminderForChannel({ ...context, eventType, channel: 'email', firm, settings });
   }
 
+  async function runCourtReminders(eventType, date, getFirmSettings) {
+    const rows = await all(`SELECT a.*, m.title matterTitle, m.id matterId, m.clientId, m.remindersEnabled matterRemindersEnabled, m.courtRemindersEnabled, m.invoiceRemindersEnabled, c.name clientName, c.email clientEmail, c.phone clientPhone, c.remindersEnabled clientRemindersEnabled, c.preferredChannel
+      FROM appearances a
+      LEFT JOIN matters m ON m.id=a.matterId
+      LEFT JOIN clients c ON c.id=m.clientId
+      WHERE a.date=?`, [date]);
+    for (const row of rows) {
+      await sendReminder(eventType, {
+        appearance: row,
+        matter: { id: row.matterId, title: row.matterTitle, remindersEnabled: row.matterRemindersEnabled, courtRemindersEnabled: row.courtRemindersEnabled, invoiceRemindersEnabled: row.invoiceRemindersEnabled },
+        client: { id: row.clientId, name: row.clientName, email: row.clientEmail, phone: row.clientPhone, remindersEnabled: row.clientRemindersEnabled, preferredChannel: row.preferredChannel },
+      }, getFirmSettings);
+    }
+  }
+
+  async function runInvoiceReminders(eventType, whereSql, params = [], getFirmSettings) {
+    const rows = await all(`SELECT i.*, m.title matterTitle, m.id matterId, m.remindersEnabled matterRemindersEnabled, m.courtRemindersEnabled, m.invoiceRemindersEnabled, c.id clientId, c.name clientName, c.email clientEmail, c.phone clientPhone, c.remindersEnabled clientRemindersEnabled, c.preferredChannel
+      FROM invoices i
+      LEFT JOIN matters m ON m.id=i.matterId
+      LEFT JOIN clients c ON c.id=i.clientId
+      WHERE ${whereSql}`, params);
+    for (const row of rows) {
+      await sendReminder(eventType, {
+        invoice: { ...row, id: row.id, matterTitle: row.matterTitle },
+        matter: { id: row.matterId, title: row.matterTitle, remindersEnabled: row.matterRemindersEnabled, courtRemindersEnabled: row.courtRemindersEnabled, invoiceRemindersEnabled: row.invoiceRemindersEnabled },
+        client: { id: row.clientId, name: row.clientName, email: row.clientEmail, phone: row.clientPhone, remindersEnabled: row.clientRemindersEnabled, preferredChannel: row.preferredChannel },
+      }, getFirmSettings);
+    }
+  }
+
   return {
     defaultReminderSettings,
     defaultReminderTemplates,
@@ -190,5 +220,7 @@ module.exports = ({ run, get, genId, money, defaultFirmSettings }) => {
     sendEmail,
     sendReminderForChannel,
     sendReminder,
+    runCourtReminders,
+    runInvoiceReminders,
   };
 };

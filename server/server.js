@@ -74,7 +74,9 @@ const {
   sendEmail,
   sendReminderForChannel,
   sendReminder,
-} = require('./lib/reminders')({ run, get, genId, money, defaultFirmSettings });
+  runCourtReminders,
+  runInvoiceReminders,
+} = require('./lib/reminders')({ run, get, all, genId, money, defaultFirmSettings });
 
 async function ensureColumn(table, column, definition) {
   const columns = await all(`PRAGMA table_info(${table})`);
@@ -179,45 +181,15 @@ async function matterFolders(matterId, req = null) {
   return [{ id: 'all', matterId, name: 'All Documents', virtual: true }, { id: 'uncategorised', matterId, name: 'Uncategorised', virtual: true, documentCount: uncategorised.documentCount || 0 }, ...folders];
 }
 
-async function runCourtReminders(eventType, date) {
-  const rows = await all(`SELECT a.*, m.title matterTitle, m.id matterId, m.clientId, m.remindersEnabled matterRemindersEnabled, m.courtRemindersEnabled, m.invoiceRemindersEnabled, c.name clientName, c.email clientEmail, c.phone clientPhone, c.remindersEnabled clientRemindersEnabled, c.preferredChannel
-    FROM appearances a
-    LEFT JOIN matters m ON m.id=a.matterId
-    LEFT JOIN clients c ON c.id=m.clientId
-    WHERE a.date=?`, [date]);
-  for (const row of rows) {
-    await sendReminder(eventType, {
-      appearance: row,
-      matter: { id: row.matterId, title: row.matterTitle, remindersEnabled: row.matterRemindersEnabled, courtRemindersEnabled: row.courtRemindersEnabled, invoiceRemindersEnabled: row.invoiceRemindersEnabled },
-      client: { id: row.clientId, name: row.clientName, email: row.clientEmail, phone: row.clientPhone, remindersEnabled: row.clientRemindersEnabled, preferredChannel: row.preferredChannel },
-    }, getFirmSettings);
-  }
-}
-
-async function runInvoiceReminders(eventType, whereSql, params = []) {
-  const rows = await all(`SELECT i.*, m.title matterTitle, m.id matterId, m.remindersEnabled matterRemindersEnabled, m.courtRemindersEnabled, m.invoiceRemindersEnabled, c.id clientId, c.name clientName, c.email clientEmail, c.phone clientPhone, c.remindersEnabled clientRemindersEnabled, c.preferredChannel
-    FROM invoices i
-    LEFT JOIN matters m ON m.id=i.matterId
-    LEFT JOIN clients c ON c.id=i.clientId
-    WHERE ${whereSql}`, params);
-  for (const row of rows) {
-    await sendReminder(eventType, {
-      invoice: { ...row, id: row.id, matterTitle: row.matterTitle },
-      matter: { id: row.matterId, title: row.matterTitle, remindersEnabled: row.matterRemindersEnabled, courtRemindersEnabled: row.courtRemindersEnabled, invoiceRemindersEnabled: row.invoiceRemindersEnabled },
-      client: { id: row.clientId, name: row.clientName, email: row.clientEmail, phone: row.clientPhone, remindersEnabled: row.clientRemindersEnabled, preferredChannel: row.preferredChannel },
-    }, getFirmSettings);
-  }
-}
-
 function startReminderJobs() {
   if (reminderJobsStarted) return;
   reminderJobsStarted = true;
-  cron.schedule('0 18 * * *', () => runCourtReminders('court_date_tomorrow', addDays(1)).catch(err => console.error('[LexFlow] Court reminder job failed', err)), { timezone: 'Africa/Nairobi' });
-  cron.schedule('0 7 * * *', () => runCourtReminders('court_date_today', today()).catch(err => console.error('[LexFlow] Court reminder job failed', err)), { timezone: 'Africa/Nairobi' });
-  cron.schedule('0 10 * * 1', () => runInvoiceReminders('invoice_overdue', "i.status='Overdue'").catch(err => console.error('[LexFlow] Invoice overdue job failed', err)), { timezone: 'Africa/Nairobi' });
-  cron.schedule('0 10 * * 5', () => runInvoiceReminders('invoice_outstanding', "i.status='Outstanding' AND i.dueDate<=? AND i.dueDate>=?", [addDays(7), today()]).catch(err => console.error('[LexFlow] Invoice outstanding job failed', err)), { timezone: 'Africa/Nairobi' });
+  cron.schedule('0 18 * * *', () => runCourtReminders('court_date_tomorrow', addDays(1), getFirmSettings).catch(err => console.error('[LexFlow] Court reminder job failed', err)), { timezone: 'Africa/Nairobi' });
+  cron.schedule('0 7 * * *', () => runCourtReminders('court_date_today', today(), getFirmSettings).catch(err => console.error('[LexFlow] Court reminder job failed', err)), { timezone: 'Africa/Nairobi' });
+  cron.schedule('0 10 * * 1', () => runInvoiceReminders('invoice_overdue', "i.status='Overdue'", [], getFirmSettings).catch(err => console.error('[LexFlow] Invoice overdue job failed', err)), { timezone: 'Africa/Nairobi' });
+  cron.schedule('0 10 * * 5', () => runInvoiceReminders('invoice_outstanding', "i.status='Outstanding' AND i.dueDate<=? AND i.dueDate>=?", [addDays(7), today()], getFirmSettings).catch(err => console.error('[LexFlow] Invoice outstanding job failed', err)), { timezone: 'Africa/Nairobi' });
   if (process.env.REMINDER_CRON_TEST === '1') {
-    cron.schedule('* * * * *', () => runCourtReminders('court_date_tomorrow', addDays(1)).catch(err => console.error('[LexFlow] Test reminder job failed', err)), { timezone: 'Africa/Nairobi' });
+    cron.schedule('* * * * *', () => runCourtReminders('court_date_tomorrow', addDays(1), getFirmSettings).catch(err => console.error('[LexFlow] Test reminder job failed', err)), { timezone: 'Africa/Nairobi' });
   }
   console.log('[LexFlow] Reminder jobs scheduled.');
 }
