@@ -14,6 +14,7 @@ const { genId, today, addDays, invoiceNumber, money } = require('./lib/utils');
 const createDb = require('./lib/db');
 const createAccess = require('./lib/access');
 const createLogging = require('./lib/logging');
+const createNotifications = require('./lib/notifications');
 const { cleanDocumentName, fileTypeFor, documentListColumns, clientDocumentVisibilitySql, publicDocument, publicNotice, MAX_NOTICE_ATTACHMENTS, MAX_NOTICE_ATTACHMENT_BYTES, allowedNoticeMimeTypes, noticeMimeTypeFor, decodeAttachmentData, prepareNoticeAttachments } = require('./lib/documents');
 
 const app = express();
@@ -21,6 +22,7 @@ const db = new sqlite3.Database(path.join(__dirname, 'lawfirm.db'));
 const { run, get, all } = createDb(db);
 const { canAccessMatter, canAccessNotice, canAccessConversation, canAccessDocument } = createAccess({ get });
 const { logClientActivity, logAudit } = createLogging({ run });
+const { notifyStaff } = createNotifications({ run, all, genId });
 const JWT_SECRET = process.env.JWT_SECRET || 'lexflow-kenyan-law-secret';
 const invitationAttempts = new Map();
 let reminderJobsStarted = false;
@@ -216,23 +218,7 @@ async function initDb() {
   }
 }
 
-async function notifyStaff(type, matterId, title, body, clientId = '') {
-  const staff = await all("SELECT id FROM users WHERE role IN ('admin','advocate','assistant')");
-  const createdAt = new Date().toISOString();
-  for (const user of staff) {
-    await run('INSERT INTO notifications (id,userId,type,matterId,clientId,title,body,createdAt,readAt) VALUES (?,?,?,?,?,?,?,?,?)', [
-      genId('NOTIF'),
-      user.id,
-      type || 'client_activity',
-      matterId || '',
-      clientId || '',
-      title || 'Client activity',
-      body || '',
-      createdAt,
-      '',
-    ]);
-  }
-}
+
 
 async function clientUploadsFolder(matterId, userId = '') {
   let folder = await get('SELECT * FROM folders WHERE matterId=? AND lower(name)=lower(?)', [matterId, 'Client Uploads']);
