@@ -9,6 +9,7 @@ const PDFDocument = require('pdfkit');
 const cron = require('node-cron');
 const nodemailer = require('nodemailer');
 const twilio = require('twilio');
+const helmet = require('helmet');
 const { authenticate, requireAdmin, requireAdvocateOrAdmin, requireStaff } = require('./middleware');
 const { genId, today, addDays, invoiceNumber, money } = require('./lib/utils');
 const createDb = require('./lib/db');
@@ -30,6 +31,9 @@ let reminderJobsStarted = false;
 let performanceCache = { timestamp: 0, rows: null };
 
 app.use(cors());
+app.use(helmet({
+  contentSecurityPolicy: false,
+}));
 app.use(express.json({ limit: '25mb' }));
 
 const defaultFirmSettings = {
