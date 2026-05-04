@@ -30,7 +30,6 @@ const { logClientActivity, logAudit } = createLogging({ run });
 const { notifyStaff } = createNotifications({ run, all, genId });
 const { appBaseUrl, invitationUrl, checkInvitationRateLimit } = createInvitations();
 const JWT_SECRET = process.env.JWT_SECRET || 'lexflow-kenyan-law-secret';
-let performanceCache = { timestamp: 0, rows: null };
 
 app.use(cors());
 app.use(helmet({
@@ -76,7 +75,7 @@ const {
   runInvoiceReminders,
   startReminderJobs,
 } = require('./lib/reminders')({ run, get, all, genId, money, defaultFirmSettings, today, addDays });
-const { monthStart, sixMonthKeys, advocatePerformanceRows } = require('./lib/performance')({ get, all, today, addDays });
+const { monthStart, sixMonthKeys, advocatePerformanceRows, cachedAdvocatePerformance } = require('./lib/performance')({ get, all, today, addDays });
 
 async function ensureColumn(table, column, definition) {
   const columns = await all(`PRAGMA table_info(${table})`);
@@ -531,14 +530,6 @@ app.get('/api/dashboard', requireStaff, async (req, res) => {
   const upcomingEvents = await all('SELECT * FROM appearances WHERE date >= ? ORDER BY date LIMIT 5', [today()]);
   res.json({ activeMattersCount: active.count, monthHours: hours.hours, monthRevenue: hours.revenue, overdueTaskCount: overdue.count, upcomingEvents });
 });
-
-async function cachedAdvocatePerformance(force = false) {
-  const now = Date.now();
-  if (!force && performanceCache.rows && now - performanceCache.timestamp < 5 * 60 * 1000) return performanceCache.rows;
-  const rows = await advocatePerformanceRows();
-  performanceCache = { timestamp: now, rows };
-  return rows;
-}
 
 app.get('/api/performance/advocates', requireAdmin, async (req, res) => {
   res.json(await cachedAdvocatePerformance(req.query.refresh === '1'));

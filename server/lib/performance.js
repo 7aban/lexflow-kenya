@@ -48,5 +48,15 @@ module.exports = ({ get, all, today, addDays }) => {
     return rows;
   }
 
-  return { monthStart, sixMonthKeys, advocatePerformanceRows };
+  let performanceCache = { timestamp: 0, rows: null };
+
+  async function cachedAdvocatePerformance(force = false) {
+    const now = Date.now();
+    if (!force && performanceCache.rows && now - performanceCache.timestamp < 5 * 60 * 1000) return performanceCache.rows;
+    const rows = await advocatePerformanceRows();
+    performanceCache = { timestamp: now, rows };
+    return rows;
+  }
+
+  return { monthStart, sixMonthKeys, advocatePerformanceRows, cachedAdvocatePerformance };
 };
