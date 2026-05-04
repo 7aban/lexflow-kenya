@@ -68,6 +68,7 @@ export default function App() {
   const [matterFocus, setMatterFocus] = useState(null);
   const [communicationFocus, setCommunicationFocus] = useState(null);
   const [taskFocus, setTaskFocus] = useState(null);
+  const [clientFocus, setClientFocus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
   const [data, setData] = useState(initialData);
@@ -384,7 +385,7 @@ export default function App() {
                     searchResults.map(item => (
                       <button key={item.id} type="button" onClick={() => {
                         if (item.type === 'Matter') { setView('Matters'); setMatterFocus({ matterId: item.matterId, ts: Date.now() }); }
-                        if (item.type === 'Client') setView('Clients');
+                        if (item.type === 'Client') { setView('Clients'); setClientFocus({ clientId: item.id, ts: Date.now() }); }
                         if (item.type === 'Task') { setView('Tasks'); setTaskFocus({ taskId: item.id, ts: Date.now() }); }
                         if (item.type === 'Invoice') { if (isAdmin) setView('Invoices'); else if (item.matterId) { setView('Matters'); setMatterFocus({ matterId: item.matterId, ts: Date.now() }); } }
                         if (item.type === 'Appearance') setView('Deadlines');
@@ -410,7 +411,7 @@ export default function App() {
 
         {loading && <Skeleton />}
         {!loading && view === 'Dashboard' && <Dashboard data={data} user={user} />}
-        {!loading && view === 'Clients' && <Clients clients={data.clients} matters={data.matters} canManage={canManage} isAdmin={isAdmin} reload={refresh} notify={setToast} />}
+        {!loading && view === 'Clients' && <Clients clients={data.clients} matters={data.matters} canManage={canManage} isAdmin={isAdmin} reload={refresh} notify={setToast} focus={clientFocus} />}
         {!loading && view === 'Matters' && <Matters data={data} canManage={canManage} reload={refresh} notify={setToast} focus={matterFocus} onMatterOpened={async matterId => { setNotifications(current => current.filter(item => item.matterId !== matterId)); try { await markNotificationsRead({ matterId }); } catch {} }} />}
         {!loading && view === 'Tasks' && <Tasks data={data} canManage={canManage} reload={refresh} notify={setToast} focus={taskFocus} />}
         {!loading && view === 'Deadlines' && <DeadlineCenter data={data} canManage={canManage} notify={setToast} />}
