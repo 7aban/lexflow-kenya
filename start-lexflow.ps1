@@ -47,4 +47,4 @@ Start-Sleep -Seconds 5
 
 Write-Host ""
 Write-Host "LexFlow should now be available at http://localhost:5173"
-Write-Host "Default admin login: admin@lexflow.co.ke / admin123"
+Write-Host "Default admin login: admin@lexflow.co.ke / password123"

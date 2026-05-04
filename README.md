@@ -28,7 +28,7 @@ This script:
 Default admin login:
 
 - Email: `admin@lexflow.co.ke`
-- Password: `admin123`
+- Password: `password123`
 
 To stop both local servers:
 
