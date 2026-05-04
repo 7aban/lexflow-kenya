@@ -15,6 +15,7 @@ const createDb = require('./lib/db');
 const createAccess = require('./lib/access');
 const createLogging = require('./lib/logging');
 const createNotifications = require('./lib/notifications');
+const createInvitations = require('./lib/invitations');
 const { cleanDocumentName, fileTypeFor, documentListColumns, clientDocumentVisibilitySql, publicDocument, publicNotice, MAX_NOTICE_ATTACHMENTS, MAX_NOTICE_ATTACHMENT_BYTES, allowedNoticeMimeTypes, noticeMimeTypeFor, decodeAttachmentData, prepareNoticeAttachments } = require('./lib/documents');
 
 const app = express();
@@ -23,8 +24,8 @@ const { run, get, all } = createDb(db);
 const { canAccessMatter, canAccessNotice, canAccessConversation, canAccessDocument } = createAccess({ get });
 const { logClientActivity, logAudit } = createLogging({ run });
 const { notifyStaff } = createNotifications({ run, all, genId });
+const { appBaseUrl, invitationUrl, checkInvitationRateLimit } = createInvitations();
 const JWT_SECRET = process.env.JWT_SECRET || 'lexflow-kenyan-law-secret';
-const invitationAttempts = new Map();
 let reminderJobsStarted = false;
 let performanceCache = { timestamp: 0, rows: null };
 
@@ -242,35 +243,6 @@ async function matterFolders(matterId, req = null) {
   const folders = await all(`SELECT f.*, (SELECT COUNT(*) FROM documents d WHERE d.folderId=f.id) documentCount FROM folders f WHERE f.matterId=? ORDER BY CASE WHEN lower(f.name)=lower('Client Uploads') THEN 0 ELSE 1 END, lower(f.name)`, [matterId]);
   const uncategorised = await get('SELECT COUNT(*) documentCount FROM documents WHERE matterId=? AND (folderId IS NULL OR folderId="")', [matterId]);
   return [{ id: 'all', matterId, name: 'All Documents', virtual: true }, { id: 'uncategorised', matterId, name: 'Uncategorised', virtual: true, documentCount: uncategorised.documentCount || 0 }, ...folders];
-}
-
-function appBaseUrl(req) {
-  if (process.env.BASE_URL) return process.env.BASE_URL.replace(/\/$/, '');
-  const host = req.get('host') || '';
-  if (host.startsWith('localhost') || host.startsWith('127.0.0.1')) return 'http://localhost:5173';
-  return `${req.protocol}://${host || 'localhost:5173'}`;
-}
-
-function invitationUrl(req, token) {
-  return `${appBaseUrl(req)}/invite/${token}`;
-}
-
-function checkInvitationRateLimit(req, res) {
-  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
-  const now = Date.now();
-  const windowMs = 15 * 60 * 1000;
-  const current = invitationAttempts.get(ip) || { count: 0, resetAt: now + windowMs };
-  if (current.resetAt < now) {
-    current.count = 0;
-    current.resetAt = now + windowMs;
-  }
-  current.count += 1;
-  invitationAttempts.set(ip, current);
-  if (current.count > 10) {
-    res.status(429).json({ error: 'Too many invitation attempts. Please try again later.' });
-    return false;
-  }
-  return true;
 }
 
 function renderTemplate(text = '', values = {}) {
