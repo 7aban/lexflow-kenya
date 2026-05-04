@@ -14,6 +14,9 @@ const rateLimit = require('express-rate-limit');
 const { authenticate, requireAdmin, requireAdvocateOrAdmin, requireStaff } = require('./middleware');
 const { validate } = require('./middleware/validation');
 const { loginValidation, registerValidation, invitationValidation } = require('./validation/auth.validation');
+const { createClientValidation } = require('./validation/client.validation');
+const { createMatterValidation } = require('./validation/matter.validation');
+const { generateInvoiceValidation } = require('./validation/invoice.validation');
 const { genId, today, addDays, invoiceNumber, money } = require('./lib/utils');
 const createDb = require('./lib/db');
 const createAccess = require('./lib/access');
@@ -882,7 +885,7 @@ app.get('/api/compliance-guidance', requireStaff, async (req, res) => {
 });
 
 app.get('/api/clients', requireStaff, async (req, res) => res.json(await all('SELECT * FROM clients ORDER BY name')));
-app.post('/api/clients', requireStaff, async (req, res) => {
+app.post('/api/clients', requireStaff, validate(createClientValidation), async (req, res) => {
   const id = genId('C');
   await run('INSERT INTO clients (id,name,type,contact,email,phone,status,joinDate,conflictCleared,retainer,remindersEnabled,preferredChannel) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', [id, req.body.name, req.body.type || 'Individual', req.body.contact || '', req.body.email || '', req.body.phone || '', 'Active', today(), 0, Number(req.body.retainer || 0), req.body.remindersEnabled === undefined ? 1 : (req.body.remindersEnabled ? 1 : 0), req.body.preferredChannel || 'firm_default']);
   const client = await get('SELECT * FROM clients WHERE id=?', [id]);
@@ -1002,7 +1005,7 @@ app.get('/api/matters/:id/suggestions', async (req, res) => {
 
   res.json(suggestions);
 });
-app.post('/api/matters', requireAdvocateOrAdmin, async (req, res) => {
+app.post('/api/matters', requireAdvocateOrAdmin, validate(createMatterValidation), async (req, res) => {
   const id = genId('M');
   const reference = req.body.reference || `LEX-${new Date().getFullYear()}-${String(Date.now()).slice(-5)}`;
   await run(`INSERT INTO matters (id,reference,clientId,title,practiceArea,stage,assignedTo,paralegal,openDate,description,court,judge,caseNo,opposingCounsel,billingRate,retainerBalance,totalBilled,priority,solDate,billingType,fixedFee,remindersEnabled,courtRemindersEnabled,invoiceRemindersEnabled) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [id, reference, req.body.clientId, req.body.title, req.body.practiceArea || '', req.body.stage || 'Intake', req.body.assignedTo || '', req.body.paralegal || '', req.body.openDate || today(), req.body.description || '', req.body.court || '', req.body.judge || '', req.body.caseNo || '', req.body.opposingCounsel || '', Number(req.body.billingRate || 0), Number(req.body.retainerBalance || 0), 0, req.body.priority || 'Medium', req.body.solDate || '', req.body.billingType || 'hourly', Number(req.body.fixedFee || 0), req.body.remindersEnabled || 'firm_default', req.body.courtRemindersEnabled || 'firm_default', req.body.invoiceRemindersEnabled || 'firm_default']);
@@ -1263,7 +1266,7 @@ app.get('/api/invoices', async (req, res) => {
   if (req.user.role === 'advocate') return res.json(await all(`SELECT i.*, m.title matterTitle, m.reference, c.name clientName FROM invoices i LEFT JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId WHERE m.assignedTo=? ORDER BY i.date DESC, i.number DESC`, [req.user.fullName || '']));
   res.json(await all(`SELECT i.*, m.title matterTitle, m.reference, c.name clientName FROM invoices i LEFT JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId ORDER BY i.date DESC, i.number DESC`));
 });
-app.post('/api/invoices/generate', requireAdvocateOrAdmin, async (req, res) => {
+app.post('/api/invoices/generate', requireAdvocateOrAdmin, validate(generateInvoiceValidation), async (req, res) => {
   try {
     const matter = await get('SELECT * FROM matters WHERE id=?', [req.body.matterId]);
     if (!matter) return res.status(404).json({ error: 'Matter not found' });
