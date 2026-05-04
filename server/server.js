@@ -13,12 +13,14 @@ const { authenticate, requireAdmin, requireAdvocateOrAdmin, requireStaff } = req
 const { genId, today, addDays, invoiceNumber, money } = require('./lib/utils');
 const createDb = require('./lib/db');
 const createAccess = require('./lib/access');
+const createLogging = require('./lib/logging');
 const { cleanDocumentName, fileTypeFor, documentListColumns, clientDocumentVisibilitySql, publicDocument, publicNotice, MAX_NOTICE_ATTACHMENTS, MAX_NOTICE_ATTACHMENT_BYTES, allowedNoticeMimeTypes, noticeMimeTypeFor, decodeAttachmentData, prepareNoticeAttachments } = require('./lib/documents');
 
 const app = express();
 const db = new sqlite3.Database(path.join(__dirname, 'lawfirm.db'));
 const { run, get, all } = createDb(db);
 const { canAccessMatter, canAccessNotice, canAccessConversation, canAccessDocument } = createAccess({ get });
+const { logClientActivity, logAudit } = createLogging({ run });
 const JWT_SECRET = process.env.JWT_SECRET || 'lexflow-kenyan-law-secret';
 const invitationAttempts = new Map();
 let reminderJobsStarted = false;
@@ -212,36 +214,6 @@ async function initDb() {
   if (!userCount.count) {
     await run('INSERT INTO users (id,email,password,fullName,role,createdAt) VALUES (?,?,?,?,?,?)', [genId('U'), 'admin@lexflow.co.ke', await bcrypt.hash('admin123', 10), 'LexFlow Admin', 'admin', new Date().toISOString()]);
   }
-}
-
-async function logClientActivity({ clientId = '', matterId = '', userId = '', action = '', summary = '', entityType = '', entityId = '' }) {
-  if (!clientId && !matterId) return;
-  await run('INSERT INTO client_activity (id,clientId,matterId,userId,action,summary,entityType,entityId,createdAt) VALUES (?,?,?,?,?,?,?,?,?)', [
-    genId('CACT'),
-    clientId || '',
-    matterId || '',
-    userId || '',
-    action || '',
-    summary || '',
-    entityType || '',
-    entityId || '',
-    new Date().toISOString(),
-  ]);
-}
-
-async function logAudit(req, action, entityType, entityId, summary) {
-  if (!req.user) return;
-  await run('INSERT INTO audit_logs (id,userId,userName,role,action,entityType,entityId,summary,createdAt) VALUES (?,?,?,?,?,?,?,?,?)', [
-    genId('AUD'),
-    req.user.userId || '',
-    req.user.fullName || '',
-    req.user.role || '',
-    action,
-    entityType,
-    entityId || '',
-    summary || '',
-    new Date().toISOString(),
-  ]);
 }
 
 async function notifyStaff(type, matterId, title, body, clientId = '') {
