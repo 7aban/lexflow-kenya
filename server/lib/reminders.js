@@ -1,5 +1,6 @@
 const nodemailer = require('nodemailer');
 const twilio = require('twilio');
+const cron = require('node-cron');
 
 const defaultReminderSettings = {
   remindersEnabled: true,
@@ -65,7 +66,7 @@ const defaultReminderTemplates = [
   },
 ];
 
-module.exports = ({ run, get, all, genId, money, defaultFirmSettings }) => {
+module.exports = ({ run, get, all, genId, money, defaultFirmSettings, today, addDays }) => {
   function templateKey(template) {
     return `${template.eventType}:${template.channel}`;
   }
@@ -206,6 +207,21 @@ module.exports = ({ run, get, all, genId, money, defaultFirmSettings }) => {
     }
   }
 
+  let reminderJobsStarted = false;
+
+  function startReminderJobs(getFirmSettings) {
+    if (reminderJobsStarted) return;
+    reminderJobsStarted = true;
+    cron.schedule('0 18 * * *', () => runCourtReminders('court_date_tomorrow', addDays(1), getFirmSettings).catch(err => console.error('[LexFlow] Court reminder job failed', err)), { timezone: 'Africa/Nairobi' });
+    cron.schedule('0 7 * * *', () => runCourtReminders('court_date_today', today(), getFirmSettings).catch(err => console.error('[LexFlow] Court reminder job failed', err)), { timezone: 'Africa/Nairobi' });
+    cron.schedule('0 10 * * 1', () => runInvoiceReminders('invoice_overdue', "i.status='Overdue'", [], getFirmSettings).catch(err => console.error('[LexFlow] Invoice overdue job failed', err)), { timezone: 'Africa/Nairobi' });
+    cron.schedule('0 10 * * 5', () => runInvoiceReminders('invoice_outstanding', "i.status='Outstanding' AND i.dueDate<=? AND i.dueDate>=?", [addDays(7), today()], getFirmSettings).catch(err => console.error('[LexFlow] Invoice outstanding job failed', err)), { timezone: 'Africa/Nairobi' });
+    if (process.env.REMINDER_CRON_TEST === '1') {
+      cron.schedule('* * * * *', () => runCourtReminders('court_date_tomorrow', addDays(1), getFirmSettings).catch(err => console.error('[LexFlow] Test reminder job failed', err)), { timezone: 'Africa/Nairobi' });
+    }
+    console.log('[LexFlow] Reminder jobs scheduled.');
+  }
+
   return {
     defaultReminderSettings,
     defaultReminderTemplates,
@@ -222,5 +238,6 @@ module.exports = ({ run, get, all, genId, money, defaultFirmSettings }) => {
     sendReminder,
     runCourtReminders,
     runInvoiceReminders,
+    startReminderJobs,
   };
 };

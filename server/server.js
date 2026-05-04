@@ -6,7 +6,6 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const PDFDocument = require('pdfkit');
-const cron = require('node-cron');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { authenticate, requireAdmin, requireAdvocateOrAdmin, requireStaff } = require('./middleware');
@@ -31,7 +30,6 @@ const { logClientActivity, logAudit } = createLogging({ run });
 const { notifyStaff } = createNotifications({ run, all, genId });
 const { appBaseUrl, invitationUrl, checkInvitationRateLimit } = createInvitations();
 const JWT_SECRET = process.env.JWT_SECRET || 'lexflow-kenyan-law-secret';
-let reminderJobsStarted = false;
 let performanceCache = { timestamp: 0, rows: null };
 
 app.use(cors());
@@ -76,7 +74,8 @@ const {
   sendReminder,
   runCourtReminders,
   runInvoiceReminders,
-} = require('./lib/reminders')({ run, get, all, genId, money, defaultFirmSettings });
+  startReminderJobs,
+} = require('./lib/reminders')({ run, get, all, genId, money, defaultFirmSettings, today, addDays });
 
 async function ensureColumn(table, column, definition) {
   const columns = await all(`PRAGMA table_info(${table})`);
@@ -179,19 +178,6 @@ async function matterFolders(matterId, req = null) {
   const folders = await all(`SELECT f.*, (SELECT COUNT(*) FROM documents d WHERE d.folderId=f.id) documentCount FROM folders f WHERE f.matterId=? ORDER BY CASE WHEN lower(f.name)=lower('Client Uploads') THEN 0 ELSE 1 END, lower(f.name)`, [matterId]);
   const uncategorised = await get('SELECT COUNT(*) documentCount FROM documents WHERE matterId=? AND (folderId IS NULL OR folderId="")', [matterId]);
   return [{ id: 'all', matterId, name: 'All Documents', virtual: true }, { id: 'uncategorised', matterId, name: 'Uncategorised', virtual: true, documentCount: uncategorised.documentCount || 0 }, ...folders];
-}
-
-function startReminderJobs() {
-  if (reminderJobsStarted) return;
-  reminderJobsStarted = true;
-  cron.schedule('0 18 * * *', () => runCourtReminders('court_date_tomorrow', addDays(1), getFirmSettings).catch(err => console.error('[LexFlow] Court reminder job failed', err)), { timezone: 'Africa/Nairobi' });
-  cron.schedule('0 7 * * *', () => runCourtReminders('court_date_today', today(), getFirmSettings).catch(err => console.error('[LexFlow] Court reminder job failed', err)), { timezone: 'Africa/Nairobi' });
-  cron.schedule('0 10 * * 1', () => runInvoiceReminders('invoice_overdue', "i.status='Overdue'", [], getFirmSettings).catch(err => console.error('[LexFlow] Invoice overdue job failed', err)), { timezone: 'Africa/Nairobi' });
-  cron.schedule('0 10 * * 5', () => runInvoiceReminders('invoice_outstanding', "i.status='Outstanding' AND i.dueDate<=? AND i.dueDate>=?", [addDays(7), today()], getFirmSettings).catch(err => console.error('[LexFlow] Invoice outstanding job failed', err)), { timezone: 'Africa/Nairobi' });
-  if (process.env.REMINDER_CRON_TEST === '1') {
-    cron.schedule('* * * * *', () => runCourtReminders('court_date_tomorrow', addDays(1), getFirmSettings).catch(err => console.error('[LexFlow] Test reminder job failed', err)), { timezone: 'Africa/Nairobi' });
-  }
-  console.log('[LexFlow] Reminder jobs scheduled.');
 }
 
 app.post('/api/auth/login', loginLimiter, validate(loginValidation), async (req, res) => {
@@ -1269,7 +1255,7 @@ if (require.main === module) {
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => {
     console.log(`LexFlow Kenya server running at http://localhost:${PORT}`);
-    startReminderJobs();
+    startReminderJobs(getFirmSettings);
   });
 }).catch(err => {
   console.error('Database initialisation failed', err);
