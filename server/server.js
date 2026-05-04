@@ -12,11 +12,13 @@ const twilio = require('twilio');
 const { authenticate, requireAdmin, requireAdvocateOrAdmin, requireStaff } = require('./middleware');
 const { genId, today, addDays, invoiceNumber, money } = require('./lib/utils');
 const createDb = require('./lib/db');
+const createAccess = require('./lib/access');
 
 const app = express();
 const db = new sqlite3.Database(path.join(__dirname, 'lawfirm.db'));
 const { run, get, all } = createDb(db);
-const JWT_SECRET = process.env.JWT_SECRET || 'lexflow-kenya-secret';
+const { canAccessMatter, canAccessNotice, canAccessConversation, canAccessDocument } = createAccess({ get });
+const JWT_SECRET = process.env.JWT_SECRET || 'lexflow-kenyan-law-secret';
 const invitationAttempts = new Map();
 let reminderJobsStarted = false;
 let performanceCache = { timestamp: 0, rows: null };
@@ -223,13 +225,6 @@ async function initDb() {
   }
 }
 
-// Auth middleware extracted to server/middleware
-async function canAccessMatter(req, matterId) {
-  if (req.user?.role !== 'client') return true;
-  const matter = await get('SELECT id FROM matters WHERE id=? AND clientId=?', [matterId, req.user.clientId || '']);
-  return Boolean(matter);
-}
-
 function cleanDocumentName(name = '') {
   return String(name || 'document').replace(/[^\w .-]/g, '_').slice(0, 180) || 'document';
 }
@@ -314,35 +309,6 @@ function publicNotice(row = {}, attachments = [], req = {}) {
     audience: row.clientId ? 'direct' : 'broadcast',
     attachments,
   };
-}
-
-async function canAccessNotice(req, noticeId) {
-  if (!noticeId) return false;
-  if (req.user?.role !== 'client') return true;
-  const notice = await get("SELECT id FROM firm_notices WHERE id=? AND (clientId IS NULL OR clientId='' OR clientId=?)", [noticeId, req.user.clientId || '']);
-  return Boolean(notice);
-}
-
-async function canAccessConversation(req, conversationId) {
-  if (!conversationId) return false;
-  if (req.user?.role !== 'client') return true;
-  const conversation = await get('SELECT id FROM conversations WHERE id=? AND clientId=?', [conversationId, req.user.clientId || '']);
-  return Boolean(conversation);
-}
-
-async function canAccessDocument(req, doc) {
-  if (!doc) return false;
-  if (req.user?.role !== 'client') return true;
-  if (doc.noticeId) return Number(doc.clientVisible || 0) === 1 && (await canAccessNotice(req, doc.noticeId));
-  if (doc.messageId) {
-    const thread = await get(`SELECT conv.id
-      FROM messages msg
-      JOIN conversations conv ON conv.id=msg.conversationId
-      WHERE msg.id=? AND conv.clientId=?`, [doc.messageId, req.user.clientId || '']);
-    if (thread) return true;
-  }
-  if (!doc.matterId || !(await canAccessMatter(req, doc.matterId))) return false;
-  return doc.source === 'client' || Number(doc.clientVisible || 0) === 1;
 }
 
 function decodeAttachmentData(attachment) {
