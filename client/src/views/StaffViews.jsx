@@ -282,10 +282,21 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   );
 }
 
-export function Tasks({ data, canManage, reload, notify }) {
+export function Tasks({ data, canManage, reload, notify, focus }) {
   const [form, setForm] = useState({ matterId: '', title: '', dueDate: '' });
   const [editingTask, setEditingTask] = useState(null);
   const [confirm, setConfirm] = useState(null);
+
+  useEffect(() => {
+    if (!focus?.taskId) return;
+    const el = document.getElementById(`task-${focus.taskId}`);
+    if (el) {
+      const prev = el.style.background;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.style.background = 'rgba(212, 163, 74, 0.15)';
+      setTimeout(() => { el.style.background = prev; }, 1200);
+    }
+  }, [focus?.taskId, focus?.ts]);
   async function submit(event) { event.preventDefault(); try { await api('/tasks', { method: 'POST', body: form }); setForm({ matterId: '', title: '', dueDate: '' }); notify({ type: 'success', message: 'Task created.' }); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function toggle(task) { try { await api(`/tasks/${task.id}`, { method: 'PATCH', body: { completed: !task.completed } }); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function saveTask(task, values) { try { await api(`/tasks/${task.id}`, { method: 'PATCH', body: values }); setEditingTask(null); notify({ type: 'success', message: 'Task updated.' }); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
@@ -494,7 +505,7 @@ function TaskEditorList({ tasks, entries = [], matter, canManage, editingTask, s
           const taskEntries = entries.filter(entry => entry.taskId === task.id);
           const isTiming = taskTimerActive(taskTimer, task.id);
           return (
-            <tr key={task.id} style={{ borderLeft: `4px solid ${isTiming ? theme.green : 'transparent'}`, transition: 'border-color .18s ease, background .18s ease' }}>
+            <tr key={task.id} id={`task-${task.id}`} style={{ borderLeft: `4px solid ${isTiming ? theme.green : 'transparent'}`, transition: 'border-color .18s ease, background .18s ease' }}>
               <td>{editing ? <input style={styles.input} value={editingTask.title || ''} onChange={e => setEditingTask({ ...editingTask, title: e.target.value })} /> : <div style={{ display: 'grid', gap: 3 }}><strong>{task.title}</strong>{taskEntries.length > 0 && <small style={{ color: theme.muted }}>{taskEntries.reduce((sum, entry) => sum + Number(entry.hours || 0), 0).toFixed(2)} hours logged from {taskEntries.length} entr{taskEntries.length === 1 ? 'y' : 'ies'}</small>}</div>}</td>
               <td>{editing ? <input style={styles.input} value={editingTask.assignee || ''} onChange={e => setEditingTask({ ...editingTask, assignee: e.target.value })} /> : task.assignee || '-'}</td>
               <td>{editing ? <input type="date" style={styles.input} value={editingTask.dueDate || ''} onChange={e => setEditingTask({ ...editingTask, dueDate: e.target.value })} /> : task.dueDate || '-'}</td>
