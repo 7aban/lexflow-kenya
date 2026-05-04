@@ -9,6 +9,7 @@ const PDFDocument = require('pdfkit');
 const cron = require('node-cron');
 const nodemailer = require('nodemailer');
 const twilio = require('twilio');
+const { authenticate, requireAdmin, requireAdvocateOrAdmin, requireStaff } = require('./middleware');
 
 const app = express();
 const db = new sqlite3.Database(path.join(__dirname, 'lawfirm.db'));
@@ -227,20 +228,7 @@ async function initDb() {
   }
 }
 
-function authenticate(req, res, next) {
-  const header = req.headers.authorization || '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : req.query.token;
-  if (!token) return res.status(401).json({ error: 'Authentication required' });
-  try {
-    req.user = jwt.verify(token, JWT_SECRET);
-    next();
-  } catch {
-    res.status(401).json({ error: 'Invalid or expired token' });
-  }
-}
-const requireAdmin = (req, res, next) => req.user?.role === 'admin' ? next() : res.status(403).json({ error: 'Admin access required' });
-const requireAdvocateOrAdmin = (req, res, next) => ['advocate', 'admin'].includes(req.user?.role) ? next() : res.status(403).json({ error: 'Advocate or admin access required' });
-const requireStaff = (req, res, next) => req.user?.role !== 'client' ? next() : res.status(403).json({ error: 'Staff access required' });
+// Auth middleware extracted to server/middleware
 async function canAccessMatter(req, matterId) {
   if (req.user?.role !== 'client') return true;
   const matter = await get('SELECT id FROM matters WHERE id=? AND clientId=?', [matterId, req.user.clientId || '']);
