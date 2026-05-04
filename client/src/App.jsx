@@ -349,11 +349,11 @@ export default function App() {
           )}
         </div>
 
-        <div style={styles.timerCard}>
+        <button type="button" onClick={() => setView('Tasks')} style={{ ...styles.timerCard, border: 'none', cursor: 'pointer', textAlign: 'left', color: 'inherit' }}>
           <div style={styles.timerTop}><span style={styles.liveDot} /> Timekeeper</div>
-          <strong>00:00</strong>
-          <span>Ready to log billable time</span>
-        </div>
+          <strong>Log billable time</strong>
+          <span>Open Tasks to start a timer</span>
+        </button>
 
         <div style={styles.userCard}>
           <div style={styles.avatar}>{(user?.fullName || user?.name || 'U').slice(0, 1).toUpperCase()}</div>
