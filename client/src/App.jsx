@@ -389,7 +389,7 @@ export default function App() {
                         if (item.type === 'Invoice') { if (isAdmin) setView('Invoices'); else if (item.matterId) { setView('Matters'); setMatterFocus({ matterId: item.matterId, ts: Date.now() }); } }
                         if (item.type === 'Appearance') setView('Deadlines');
                         if (item.type === 'Document' && item.matterId) { setView('Matters'); setMatterFocus({ matterId: item.matterId, ts: Date.now() }); }
-                        if (item.type === 'Conversation') setView('Communications');
+                        if (item.type === 'Conversation') { setView('Communications'); setCommunicationFocus({ matterId: item.matterId, clientId: '', ts: Date.now() }); }
                         setSearch(item.title || '');
                         setSearchOpen(false);
                       }} style={{ width: '100%', textAlign: 'left', border: 0, borderTop: `1px solid ${theme.line}`, background: '#fff', padding: '10px 12px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 2 }}>
