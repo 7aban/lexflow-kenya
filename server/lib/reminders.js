@@ -114,6 +114,25 @@ module.exports = ({ run, get, genId, money, defaultFirmSettings }) => {
     return { messageId: `stub-${Date.now()}` };
   }
 
+  async function getReminderSettings() {
+    const settings = await get('SELECT * FROM reminder_settings WHERE id=?', ['default']).catch(() => null);
+    const merged = { ...defaultReminderSettings, ...(settings || {}) };
+    return {
+      ...merged,
+      remindersEnabled: Boolean(Number(merged.remindersEnabled)),
+      whatsappEnabled: Boolean(Number(merged.whatsappEnabled)),
+      emailEnabled: Boolean(Number(merged.emailEnabled)),
+    };
+  }
+
+  async function saveReminderSettings(settings) {
+    const merged = { ...defaultReminderSettings, ...settings, id: 'default' };
+    await run(`INSERT INTO reminder_settings (id,remindersEnabled,whatsappEnabled,emailEnabled,twilioSid,twilioToken,twilioFromNumber,smtpHost,smtpPort,smtpUser,smtpPass)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET remindersEnabled=excluded.remindersEnabled, whatsappEnabled=excluded.whatsappEnabled, emailEnabled=excluded.emailEnabled, twilioSid=excluded.twilioSid, twilioToken=excluded.twilioToken, twilioFromNumber=excluded.twilioFromNumber, smtpHost=excluded.smtpHost, smtpPort=excluded.smtpPort, smtpUser=excluded.smtpUser, smtpPass=excluded.smtpPass`,
+      ['default', merged.remindersEnabled ? 1 : 0, merged.whatsappEnabled ? 1 : 0, merged.emailEnabled ? 1 : 0, merged.twilioSid || '', merged.twilioToken || '', merged.twilioFromNumber || '', merged.smtpHost || '', merged.smtpPort || '', merged.smtpUser || '', merged.smtpPass || '']);
+  }
+
   async function sendReminderForChannel({ eventType, channel, client, matter, invoice, appearance, firm, settings }) {
     const template = await get('SELECT * FROM reminder_templates WHERE eventType=? AND channel=?', [eventType, channel]);
     if (!template) return;
@@ -164,6 +183,8 @@ module.exports = ({ run, get, genId, money, defaultFirmSettings }) => {
     defaultTemplateFor,
     seedReminderTemplates,
     renderTemplate,
+    getReminderSettings,
+    saveReminderSettings,
     logReminderAttempt,
     sendWhatsApp,
     sendEmail,
