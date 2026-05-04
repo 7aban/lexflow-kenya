@@ -39,11 +39,12 @@ function defaultNavGroup(role) {
   return allowedNavGroups(role)[0]?.title || 'Dashboard';
 }
 
-function readOpenNavGroup(role) {
+function readOpenNavGroups(role) {
   try {
-    return localStorage.getItem('lexflowOpenNavGroup') || defaultNavGroup(role);
+    const saved = JSON.parse(localStorage.getItem('lexflowOpenNavGroups'));
+    return Array.isArray(saved) && saved.length ? new Set(saved) : null;
   } catch {
-    return defaultNavGroup(role);
+    return null;
   }
 }
 
@@ -57,7 +58,11 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const searchRef = useRef(null);
   const [quickLinksOpen, setQuickLinksOpen] = useState(true);
-  const [openNavGroup, setOpenNavGroup] = useState(() => readOpenNavGroup(session?.user?.role || 'assistant'));
+  const [openNavGroups, setOpenNavGroups] = useState(() => {
+    const currentRole = session?.user?.role || 'assistant';
+    const saved = readOpenNavGroups(currentRole);
+    return saved || new Set([defaultNavGroup(currentRole)]);
+  });
   const [notifications, setNotifications] = useState([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [matterFocus, setMatterFocus] = useState(null);
@@ -128,7 +133,15 @@ export default function App() {
     if (!user || user.role === 'client') return;
     if (!visibleViews.includes(view)) setView('Dashboard');
     const activeGroup = visibleGroups.find(group => group.items.some(([label]) => label === view));
-    if (activeGroup) setOpenNavGroup(activeGroup.title);
+    if (activeGroup) {
+      setOpenNavGroups(prev => {
+        if (prev.has(activeGroup.title)) return prev;
+        const next = new Set(prev);
+        next.add(activeGroup.title);
+        try { localStorage.setItem('lexflowOpenNavGroups', JSON.stringify([...next])); } catch {}
+        return next;
+      });
+    }
   }, [user?.role, view]);
 
   useEffect(() => {
@@ -291,17 +304,21 @@ export default function App() {
                 type="button"
                 className="lf-nav-group"
                 onClick={() => {
-                  const next = openNavGroup === group.title ? '' : group.title;
-                  setOpenNavGroup(next);
-                  try { localStorage.setItem('lexflowOpenNavGroup', next); } catch {}
+                  setOpenNavGroups(prev => {
+                    const next = new Set(prev);
+                    if (next.has(group.title)) { next.delete(group.title); }
+                    else { next.add(group.title); }
+                    try { localStorage.setItem('lexflowOpenNavGroups', JSON.stringify([...next])); } catch {}
+                    return next;
+                  });
                 }}
                 style={styles.navGroupButton}
-                aria-expanded={openNavGroup === group.title}
+                aria-expanded={openNavGroups.has(group.title)}
               >
                 <span>{group.title}</span>
-                <span style={styles.navGroupChevron}>{openNavGroup === group.title ? 'v' : '>'}</span>
+                <span style={styles.navGroupChevron}>{openNavGroups.has(group.title) ? 'v' : '>'}</span>
               </button>
-              {openNavGroup === group.title && (
+              {openNavGroups.has(group.title) && (
                 <div style={styles.navGroupItems}>
                   {group.items.map(([label, number]) => (
                     <button key={label} type="button" className="lf-nav" onClick={() => setView(label)} style={{ ...styles.navItem, ...(view === label ? styles.navActive : {}) }}>
