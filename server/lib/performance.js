@@ -58,5 +58,28 @@ module.exports = ({ get, all, today, addDays }) => {
     return rows;
   }
 
-  return { monthStart, sixMonthKeys, advocatePerformanceRows, cachedAdvocatePerformance };
+  async function advocatePerformanceDetail(fullName) {
+    const monthKeys = sixMonthKeys();
+    const startMonth = `${monthKeys[0]}-01`;
+    const [activeMatters, monthlyRows, recentTimeEntries] = await Promise.all([
+      all(`SELECT m.id,m.title,m.reference,m.stage,(SELECT MIN(a.date) FROM appearances a WHERE a.matterId=m.id AND a.date>=?) nextCourtDate
+        FROM matters m WHERE m.assignedTo=? AND m.stage<>'Closed' ORDER BY m.openDate DESC`, [today(), fullName || '']),
+      all(`SELECT substr(date,1,7) month, COALESCE(SUM(hours),0) hours, COALESCE(SUM(hours*rate),0) revenue
+        FROM time_entries WHERE attorney=? AND date>=? GROUP BY substr(date,1,7) ORDER BY month`, [fullName || '', startMonth]),
+      all(`SELECT t.*, m.title matterTitle, m.reference, task.title taskTitle
+        FROM time_entries t
+        LEFT JOIN matters m ON m.id=t.matterId
+        LEFT JOIN tasks task ON task.id=t.taskId
+        WHERE t.attorney=?
+        ORDER BY t.date DESC, t.id DESC
+        LIMIT 10`, [fullName || '']),
+    ]);
+    const monthlyBreakdown = monthKeys.map(month => {
+      const row = monthlyRows.find(item => item.month === month) || {};
+      return { month, hours: Number(row.hours || 0), revenue: Number(row.revenue || 0) };
+    });
+    return { activeMatterList: activeMatters, monthlyBreakdown, recentTimeEntries };
+  }
+
+  return { monthStart, sixMonthKeys, advocatePerformanceRows, cachedAdvocatePerformance, advocatePerformanceDetail };
 };
