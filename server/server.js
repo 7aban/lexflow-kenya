@@ -12,6 +12,8 @@ const twilio = require('twilio');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { authenticate, requireAdmin, requireAdvocateOrAdmin, requireStaff } = require('./middleware');
+const { validate } = require('./middleware/validation');
+const { loginValidation } = require('./validation/auth.validation');
 const { genId, today, addDays, invoiceNumber, money } = require('./lib/utils');
 const createDb = require('./lib/db');
 const createAccess = require('./lib/access');
@@ -375,7 +377,7 @@ function startReminderJobs() {
   console.log('[LexFlow] Reminder jobs scheduled.');
 }
 
-app.post('/api/auth/login', loginLimiter, async (req, res) => {
+app.post('/api/auth/login', loginLimiter, validate(loginValidation), async (req, res) => {
   try {
     const { email, password } = req.body;
     const user = await get('SELECT * FROM users WHERE lower(email)=lower(?)', [email || '']);
@@ -386,7 +388,7 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/auth/client-login', loginLimiter, async (req, res) => {
+app.post('/api/auth/client-login', loginLimiter, validate(loginValidation), async (req, res) => {
   try {
     const { email, password } = req.body;
     const user = await get('SELECT * FROM users WHERE lower(email)=lower(?) AND role=?', [email || '', 'client']);
