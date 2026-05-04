@@ -7,8 +7,6 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const PDFDocument = require('pdfkit');
 const cron = require('node-cron');
-const nodemailer = require('nodemailer');
-const twilio = require('twilio');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { authenticate, requireAdmin, requireAdvocateOrAdmin, requireStaff } = require('./middleware');
@@ -32,7 +30,6 @@ const { canAccessMatter, canAccessNotice, canAccessConversation, canAccessDocume
 const { logClientActivity, logAudit } = createLogging({ run });
 const { notifyStaff } = createNotifications({ run, all, genId });
 const { appBaseUrl, invitationUrl, checkInvitationRateLimit } = createInvitations();
-const { defaultReminderSettings, defaultReminderTemplates, templateKey, defaultTemplateFor, seedReminderTemplates, renderTemplate } = require('./lib/reminders')({ run, get, genId });
 const JWT_SECRET = process.env.JWT_SECRET || 'lexflow-kenyan-law-secret';
 let reminderJobsStarted = false;
 let performanceCache = { timestamp: 0, rows: null };
@@ -62,6 +59,20 @@ const defaultFirmSettings = {
   phone: '+254 700 123456',
   address: 'Nairobi, Kenya',
 };
+
+const {
+  defaultReminderSettings,
+  defaultReminderTemplates,
+  templateKey,
+  defaultTemplateFor,
+  seedReminderTemplates,
+  renderTemplate,
+  logReminderAttempt,
+  sendWhatsApp,
+  sendEmail,
+  sendReminderForChannel,
+  sendReminder,
+} = require('./lib/reminders')({ run, get, genId, money, defaultFirmSettings });
 
 async function ensureColumn(table, column, definition) {
   const columns = await all(`PRAGMA table_info(${table})`);
@@ -185,76 +196,6 @@ async function matterFolders(matterId, req = null) {
   return [{ id: 'all', matterId, name: 'All Documents', virtual: true }, { id: 'uncategorised', matterId, name: 'Uncategorised', virtual: true, documentCount: uncategorised.documentCount || 0 }, ...folders];
 }
 
-async function logReminderAttempt({ templateId, clientId, matterId = '', invoiceId = '', channel, recipient, status, errorMessage = '' }) {
-  await run('INSERT INTO reminder_logs (id,templateId,clientId,matterId,invoiceId,channel,recipient,status,sentAt,errorMessage) VALUES (?,?,?,?,?,?,?,?,?,?)', [genId('REMLOG'), templateId || '', clientId || '', matterId || '', invoiceId || '', channel || '', recipient || '', status, new Date().toISOString(), errorMessage || '']);
-}
-
-async function sendWhatsApp(settings, phone, message) {
-  if (settings.twilioSid && settings.twilioToken && settings.twilioFromNumber) {
-    const client = twilio(settings.twilioSid, settings.twilioToken);
-    return client.messages.create({ from: settings.twilioFromNumber, to: phone.startsWith('whatsapp:') ? phone : `whatsapp:${phone}`, body: message });
-  }
-  console.log(`[WhatsApp Stub] To: ${phone} - ${message}`);
-  return { sid: `stub-${Date.now()}` };
-}
-
-async function sendEmail(settings, to, subject, body) {
-  if (settings.smtpHost && settings.smtpUser && settings.smtpPass) {
-    const transporter = nodemailer.createTransport({
-      host: settings.smtpHost,
-      port: Number(settings.smtpPort || 587),
-      secure: Number(settings.smtpPort || 587) === 465,
-      auth: { user: settings.smtpUser, pass: settings.smtpPass },
-    });
-    return transporter.sendMail({ from: settings.smtpUser, to, subject, text: body });
-  }
-  console.log(`[Email Stub] To: ${to} - Subject: ${subject} - ${body}`);
-  return { messageId: `stub-${Date.now()}` };
-}
-
-async function sendReminderForChannel({ eventType, channel, client, matter, invoice, appearance, firm, settings }) {
-  const template = await get('SELECT * FROM reminder_templates WHERE eventType=? AND channel=?', [eventType, channel]);
-  if (!template) return;
-  const values = {
-    clientName: client?.name || 'Client',
-    matterTitle: matter?.title || invoice?.matterTitle || 'your matter',
-    courtDate: appearance?.date || '',
-    courtTime: appearance?.time || 'TBA',
-    invoiceAmount: money(invoice?.amount || 0),
-    invoiceDueDate: invoice?.dueDate || '',
-    firmName: firm.name || defaultFirmSettings.name,
-    firmPhone: firm.phone || defaultFirmSettings.phone,
-  };
-  const recipient = channel === 'whatsapp' ? client?.phone : client?.email;
-  if (!recipient) return logReminderAttempt({ templateId: template.id, clientId: client?.id, matterId: matter?.id, invoiceId: invoice?.id, channel, recipient: '', status: 'failed', errorMessage: `Missing ${channel === 'whatsapp' ? 'phone' : 'email'}` });
-  try {
-    if (channel === 'whatsapp') await sendWhatsApp(settings, recipient, renderTemplate(template.body, values));
-    else await sendEmail(settings, recipient, renderTemplate(template.subject || 'Reminder from {{firmName}}', values), renderTemplate(template.body, values));
-    await logReminderAttempt({ templateId: template.id, clientId: client?.id, matterId: matter?.id, invoiceId: invoice?.id, channel, recipient, status: 'sent' });
-  } catch (err) {
-    await logReminderAttempt({ templateId: template.id, clientId: client?.id, matterId: matter?.id, invoiceId: invoice?.id, channel, recipient, status: 'failed', errorMessage: err.message });
-  }
-}
-
-async function sendReminder(eventType, context) {
-  const firm = await getFirmSettings();
-  const settings = firm.reminderSettings || defaultReminderSettings;
-  if (!settings.remindersEnabled) return;
-  const matter = context.matter || {};
-  const client = context.client || {};
-  const matterEnabled = matter.remindersEnabled ?? 'firm_default';
-  if (matterEnabled === 'off' || matterEnabled === 'false' || matterEnabled === false) return;
-  if (eventType.startsWith('court') && ['off', 'false', false].includes(matter.courtRemindersEnabled)) return;
-  if (eventType.startsWith('invoice') && ['off', 'false', false].includes(matter.invoiceRemindersEnabled)) return;
-  if (client.remindersEnabled === 0 || client.remindersEnabled === false) return;
-  const preference = client.preferredChannel || 'firm_default';
-  const allowed = preference === 'none' ? [] : preference === 'both' ? ['whatsapp', 'email'] : preference === 'email' || preference === 'whatsapp' ? [preference] : ['firm_default'];
-  const shouldSendWhatsApp = settings.whatsappEnabled && (allowed.includes('firm_default') || allowed.includes('whatsapp'));
-  const shouldSendEmail = settings.emailEnabled && (allowed.includes('firm_default') || allowed.includes('email'));
-  if (shouldSendWhatsApp) await sendReminderForChannel({ ...context, eventType, channel: 'whatsapp', firm, settings });
-  if (shouldSendEmail) await sendReminderForChannel({ ...context, eventType, channel: 'email', firm, settings });
-}
-
 async function runCourtReminders(eventType, date) {
   const rows = await all(`SELECT a.*, m.title matterTitle, m.id matterId, m.clientId, m.remindersEnabled matterRemindersEnabled, m.courtRemindersEnabled, m.invoiceRemindersEnabled, c.name clientName, c.email clientEmail, c.phone clientPhone, c.remindersEnabled clientRemindersEnabled, c.preferredChannel
     FROM appearances a
@@ -266,7 +207,7 @@ async function runCourtReminders(eventType, date) {
       appearance: row,
       matter: { id: row.matterId, title: row.matterTitle, remindersEnabled: row.matterRemindersEnabled, courtRemindersEnabled: row.courtRemindersEnabled, invoiceRemindersEnabled: row.invoiceRemindersEnabled },
       client: { id: row.clientId, name: row.clientName, email: row.clientEmail, phone: row.clientPhone, remindersEnabled: row.clientRemindersEnabled, preferredChannel: row.preferredChannel },
-    });
+    }, getFirmSettings);
   }
 }
 
@@ -281,7 +222,7 @@ async function runInvoiceReminders(eventType, whereSql, params = []) {
       invoice: { ...row, id: row.id, matterTitle: row.matterTitle },
       matter: { id: row.matterId, title: row.matterTitle, remindersEnabled: row.matterRemindersEnabled, courtRemindersEnabled: row.courtRemindersEnabled, invoiceRemindersEnabled: row.invoiceRemindersEnabled },
       client: { id: row.clientId, name: row.clientName, email: row.clientEmail, phone: row.clientPhone, remindersEnabled: row.clientRemindersEnabled, preferredChannel: row.preferredChannel },
-    });
+    }, getFirmSettings);
   }
 }
 

@@ -1,3 +1,6 @@
+const nodemailer = require('nodemailer');
+const twilio = require('twilio');
+
 const defaultReminderSettings = {
   remindersEnabled: true,
   whatsappEnabled: false,
@@ -62,7 +65,7 @@ const defaultReminderTemplates = [
   },
 ];
 
-module.exports = ({ run, get, genId }) => {
+module.exports = ({ run, get, genId, money, defaultFirmSettings }) => {
   function templateKey(template) {
     return `${template.eventType}:${template.channel}`;
   }
@@ -84,6 +87,76 @@ module.exports = ({ run, get, genId }) => {
     return String(text).replace(/\{\{(\w+)\}\}/g, (_, key) => values[key] ?? '');
   }
 
+  async function logReminderAttempt({ templateId, clientId, matterId = '', invoiceId = '', channel, recipient, status, errorMessage = '' }) {
+    await run('INSERT INTO reminder_logs (id,templateId,clientId,matterId,invoiceId,channel,recipient,status,sentAt,errorMessage) VALUES (?,?,?,?,?,?,?,?,?,?)', [genId('REMLOG'), templateId || '', clientId || '', matterId || '', invoiceId || '', channel || '', recipient || '', status, new Date().toISOString(), errorMessage || '']);
+  }
+
+  async function sendWhatsApp(settings, phone, message) {
+    if (settings.twilioSid && settings.twilioToken && settings.twilioFromNumber) {
+      const client = twilio(settings.twilioSid, settings.twilioToken);
+      return client.messages.create({ from: settings.twilioFromNumber, to: phone.startsWith('whatsapp:') ? phone : `whatsapp:${phone}`, body: message });
+    }
+    console.log(`[WhatsApp Stub] To: ${phone} - ${message}`);
+    return { sid: `stub-${Date.now()}` };
+  }
+
+  async function sendEmail(settings, to, subject, body) {
+    if (settings.smtpHost && settings.smtpUser && settings.smtpPass) {
+      const transporter = nodemailer.createTransport({
+        host: settings.smtpHost,
+        port: Number(settings.smtpPort || 587),
+        secure: Number(settings.smtpPort || 587) === 465,
+        auth: { user: settings.smtpUser, pass: settings.smtpPass },
+      });
+      return transporter.sendMail({ from: settings.smtpUser, to, subject, text: body });
+    }
+    console.log(`[Email Stub] To: ${to} - Subject: ${subject} - ${body}`);
+    return { messageId: `stub-${Date.now()}` };
+  }
+
+  async function sendReminderForChannel({ eventType, channel, client, matter, invoice, appearance, firm, settings }) {
+    const template = await get('SELECT * FROM reminder_templates WHERE eventType=? AND channel=?', [eventType, channel]);
+    if (!template) return;
+    const values = {
+      clientName: client?.name || 'Client',
+      matterTitle: matter?.title || invoice?.matterTitle || 'your matter',
+      courtDate: appearance?.date || '',
+      courtTime: appearance?.time || 'TBA',
+      invoiceAmount: money(invoice?.amount || 0),
+      invoiceDueDate: invoice?.dueDate || '',
+      firmName: firm.name || defaultFirmSettings.name,
+      firmPhone: firm.phone || defaultFirmSettings.phone,
+    };
+    const recipient = channel === 'whatsapp' ? client?.phone : client?.email;
+    if (!recipient) return logReminderAttempt({ templateId: template.id, clientId: client?.id, matterId: matter?.id, invoiceId: invoice?.id, channel, recipient: '', status: 'failed', errorMessage: `Missing ${channel === 'whatsapp' ? 'phone' : 'email'}` });
+    try {
+      if (channel === 'whatsapp') await sendWhatsApp(settings, recipient, renderTemplate(template.body, values));
+      else await sendEmail(settings, recipient, renderTemplate(template.subject || 'Reminder from {{firmName}}', values), renderTemplate(template.body, values));
+      await logReminderAttempt({ templateId: template.id, clientId: client?.id, matterId: matter?.id, invoiceId: invoice?.id, channel, recipient, status: 'sent' });
+    } catch (err) {
+      await logReminderAttempt({ templateId: template.id, clientId: client?.id, matterId: matter?.id, invoiceId: invoice?.id, channel, recipient, status: 'failed', errorMessage: err.message });
+    }
+  }
+
+  async function sendReminder(eventType, context, getFirmSettings) {
+    const firm = await getFirmSettings();
+    const settings = firm.reminderSettings || defaultReminderSettings;
+    if (!settings.remindersEnabled) return;
+    const matter = context.matter || {};
+    const client = context.client || {};
+    const matterEnabled = matter.remindersEnabled ?? 'firm_default';
+    if (matterEnabled === 'off' || matterEnabled === 'false' || matterEnabled === false) return;
+    if (eventType.startsWith('court') && ['off', 'false', false].includes(matter.courtRemindersEnabled)) return;
+    if (eventType.startsWith('invoice') && ['off', 'false', false].includes(matter.invoiceRemindersEnabled)) return;
+    if (client.remindersEnabled === 0 || client.remindersEnabled === false) return;
+    const preference = client.preferredChannel || 'firm_default';
+    const allowed = preference === 'none' ? [] : preference === 'both' ? ['whatsapp', 'email'] : preference === 'email' || preference === 'whatsapp' ? [preference] : ['firm_default'];
+    const shouldSendWhatsApp = settings.whatsappEnabled && (allowed.includes('firm_default') || allowed.includes('whatsapp'));
+    const shouldSendEmail = settings.emailEnabled && (allowed.includes('firm_default') || allowed.includes('email'));
+    if (shouldSendWhatsApp) await sendReminderForChannel({ ...context, eventType, channel: 'whatsapp', firm, settings });
+    if (shouldSendEmail) await sendReminderForChannel({ ...context, eventType, channel: 'email', firm, settings });
+  }
+
   return {
     defaultReminderSettings,
     defaultReminderTemplates,
@@ -91,5 +164,10 @@ module.exports = ({ run, get, genId }) => {
     defaultTemplateFor,
     seedReminderTemplates,
     renderTemplate,
+    logReminderAttempt,
+    sendWhatsApp,
+    sendEmail,
+    sendReminderForChannel,
+    sendReminder,
   };
 };
