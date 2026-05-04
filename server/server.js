@@ -11,9 +11,11 @@ const nodemailer = require('nodemailer');
 const twilio = require('twilio');
 const { authenticate, requireAdmin, requireAdvocateOrAdmin, requireStaff } = require('./middleware');
 const { genId, today, addDays, invoiceNumber, money } = require('./lib/utils');
+const createDb = require('./lib/db');
 
 const app = express();
 const db = new sqlite3.Database(path.join(__dirname, 'lawfirm.db'));
+const { run, get, all } = createDb(db);
 const JWT_SECRET = process.env.JWT_SECRET || 'lexflow-kenya-secret';
 const invitationAttempts = new Map();
 let reminderJobsStarted = false;
@@ -22,9 +24,6 @@ let performanceCache = { timestamp: 0, rows: null };
 app.use(cors());
 app.use(express.json({ limit: '25mb' }));
 
-const run = (sql, params = []) => new Promise((resolve, reject) => db.run(sql, params, function onRun(err) { err ? reject(err) : resolve(this); }));
-const get = (sql, params = []) => new Promise((resolve, reject) => db.get(sql, params, (err, row) => err ? reject(err) : resolve(row)));
-const all = (sql, params = []) => new Promise((resolve, reject) => db.all(sql, params, (err, rows) => err ? reject(err) : resolve(rows)));
 const MAX_NOTICE_ATTACHMENTS = 10;
 const MAX_NOTICE_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const allowedNoticeMimeTypes = new Set([
