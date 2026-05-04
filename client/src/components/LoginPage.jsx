@@ -6,7 +6,7 @@ import { Alert, Field } from './ui.jsx';
 export default function LoginPage({ firm, onLogin }) {
   const [mode, setMode] = useState('staff');
   const [email, setEmail] = useState('admin@lexflow.co.ke');
-  const [password, setPassword] = useState('admin123');
+  const [password, setPassword] = useState('password123');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const firmName = firm?.name || 'LexFlow Kenya';
@@ -14,7 +14,7 @@ export default function LoginPage({ firm, onLogin }) {
   useEffect(() => {
     if (mode === 'staff') {
       setEmail(current => current || 'admin@lexflow.co.ke');
-      setPassword(current => current || 'admin123');
+      setPassword(current => current || 'password123');
     } else {
       setEmail('');
       setPassword('');
@@ -70,7 +70,7 @@ export default function LoginPage({ firm, onLogin }) {
           <input style={styles.input} type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" placeholder={mode === 'client' ? 'Portal password' : 'Workspace password'} />
         </Field>
         <button disabled={busy} style={{ ...styles.primaryButton, width: '100%', marginTop: 16 }}>{busy ? 'Signing in...' : modeCopy.button}</button>
-        {mode === 'staff' && <div style={styles.loginHint}>admin@lexflow.co.ke / admin123</div>}
+        {mode === 'staff' && <div style={styles.loginHint}>admin@lexflow.co.ke / password123</div>}
       </form>
     </div>
   );

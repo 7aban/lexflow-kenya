@@ -215,7 +215,7 @@ async function initDb() {
 
   const userCount = await get('SELECT COUNT(*) AS count FROM users');
   if (!userCount.count) {
-    await run('INSERT INTO users (id,email,password,fullName,role,createdAt) VALUES (?,?,?,?,?,?)', [genId('U'), 'admin@lexflow.co.ke', await bcrypt.hash('admin123', 10), 'LexFlow Admin', 'admin', new Date().toISOString()]);
+    await run('INSERT INTO users (id,email,password,fullName,role,createdAt) VALUES (?,?,?,?,?,?)', [genId('U'), 'admin@lexflow.co.ke', await bcrypt.hash('password123', 10), 'LexFlow Admin', 'admin', new Date().toISOString()]);
   }
 }
 

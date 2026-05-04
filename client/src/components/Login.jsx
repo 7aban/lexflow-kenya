@@ -16,7 +16,7 @@ const C = {
 
 export default function Login({ onLogin }) {
   const [email, setEmail] = useState('admin@lexflow.co.ke');
-  const [password, setPassword] = useState('admin123');
+  const [password, setPassword] = useState('password123');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -58,7 +58,7 @@ export default function Login({ onLogin }) {
           {busy ? 'Signing in...' : 'Sign In'}
         </button>
 
-        <div style={styles.hint}>Default admin: admin@lexflow.co.ke / admin123</div>
+        <div style={styles.hint}>Default admin: admin@lexflow.co.ke / password123</div>
       </form>
     </div>
   );
