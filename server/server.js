@@ -13,7 +13,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { authenticate, requireAdmin, requireAdvocateOrAdmin, requireStaff } = require('./middleware');
 const { validate } = require('./middleware/validation');
-const { loginValidation } = require('./validation/auth.validation');
+const { loginValidation, registerValidation, invitationValidation } = require('./validation/auth.validation');
 const { genId, today, addDays, invoiceNumber, money } = require('./lib/utils');
 const createDb = require('./lib/db');
 const createAccess = require('./lib/access');
@@ -470,7 +470,7 @@ app.get('/api/auth/me', async (req, res) => {
   user ? res.json({ ...user, name: user.fullName }) : res.status(404).json({ error: 'User not found' });
 });
 app.get('/api/auth/users', requireAdmin, async (req, res) => res.json(await all('SELECT id,email,fullName,role,clientId,createdAt FROM users ORDER BY createdAt DESC')));
-app.post('/api/auth/register', requireAdmin, async (req, res) => {
+app.post('/api/auth/register', requireAdmin, validate(registerValidation), async (req, res) => {
   try {
     const { email, password, fullName, role = 'assistant', clientId = '' } = req.body;
     if (!email || !password || !fullName) return res.status(400).json({ error: 'email, password and fullName are required' });
@@ -491,7 +491,7 @@ app.delete('/api/auth/users/:id', requireAdmin, async (req, res) => {
   res.json({ id: req.params.id, deleted: true });
 });
 
-app.post('/api/invitations', requireAdmin, async (req, res) => {
+app.post('/api/invitations', requireAdmin, validate(invitationValidation), async (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase();
   const clientId = req.body.clientId || '';
   if (!email) return res.status(400).json({ error: 'email is required' });
