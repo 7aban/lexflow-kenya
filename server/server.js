@@ -13,7 +13,7 @@ const { authenticate, requireAdmin, requireAdvocateOrAdmin, requireStaff } = req
 const { genId, today, addDays, invoiceNumber, money } = require('./lib/utils');
 const createDb = require('./lib/db');
 const createAccess = require('./lib/access');
-const { cleanDocumentName, fileTypeFor, documentListColumns, clientDocumentVisibilitySql, publicDocument, publicNotice } = require('./lib/documents');
+const { cleanDocumentName, fileTypeFor, documentListColumns, clientDocumentVisibilitySql, publicDocument, publicNotice, MAX_NOTICE_ATTACHMENTS, MAX_NOTICE_ATTACHMENT_BYTES, allowedNoticeMimeTypes, noticeMimeTypeFor, decodeAttachmentData, prepareNoticeAttachments } = require('./lib/documents');
 
 const app = express();
 const db = new sqlite3.Database(path.join(__dirname, 'lawfirm.db'));
@@ -27,18 +27,6 @@ let performanceCache = { timestamp: 0, rows: null };
 app.use(cors());
 app.use(express.json({ limit: '25mb' }));
 
-const MAX_NOTICE_ATTACHMENTS = 10;
-const MAX_NOTICE_ATTACHMENT_BYTES = 10 * 1024 * 1024;
-const allowedNoticeMimeTypes = new Set([
-  'application/pdf',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'image/png',
-  'image/jpeg',
-  'image/jpg',
-  'image/webp',
-  'text/plain',
-]);
 const defaultFirmSettings = {
   id: 'default',
   name: 'LexFlow Kenya',
@@ -224,80 +212,6 @@ async function initDb() {
   if (!userCount.count) {
     await run('INSERT INTO users (id,email,password,fullName,role,createdAt) VALUES (?,?,?,?,?,?)', [genId('U'), 'admin@lexflow.co.ke', await bcrypt.hash('admin123', 10), 'LexFlow Admin', 'admin', new Date().toISOString()]);
   }
-}
-
-function noticeMimeTypeFor(name = '', mimeType = '') {
-  const lowerName = String(name || '').toLowerCase();
-  const lowerMime = String(mimeType || '').toLowerCase();
-  if (allowedNoticeMimeTypes.has(lowerMime)) return lowerMime;
-  if (lowerName.endsWith('.pdf')) return 'application/pdf';
-  if (lowerName.endsWith('.doc')) return 'application/msword';
-  if (lowerName.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-  if (lowerName.endsWith('.png')) return 'image/png';
-  if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) return 'image/jpeg';
-  if (lowerName.endsWith('.webp')) return 'image/webp';
-  if (lowerName.endsWith('.txt')) return 'text/plain';
-  return lowerMime || 'application/octet-stream';
-}
-
-function decodeAttachmentData(attachment) {
-  const raw = String(attachment?.data || '');
-  const payload = (raw.includes(',') ? raw.split(',').pop() : raw).replace(/\s/g, '');
-  if (!payload) {
-    const err = new Error('Attachment data is required');
-    err.statusCode = 400;
-    throw err;
-  }
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(payload) || payload.length % 4 === 1) {
-    const err = new Error('Attachment data is not valid base64');
-    err.statusCode = 400;
-    throw err;
-  }
-  const buffer = Buffer.from(payload, 'base64');
-  if (!buffer.length) {
-    const err = new Error('Attachment is empty');
-    err.statusCode = 400;
-    throw err;
-  }
-  return buffer;
-}
-
-function prepareNoticeAttachments(input = []) {
-  const attachments = Array.isArray(input) ? input.filter(Boolean) : [];
-  if (attachments.length > MAX_NOTICE_ATTACHMENTS) {
-    const err = new Error(`A notice can include up to ${MAX_NOTICE_ATTACHMENTS} attachments`);
-    err.statusCode = 400;
-    throw err;
-  }
-  return attachments.map(attachment => {
-    if (!attachment?.name || !attachment?.data) {
-      const err = new Error('Each attachment requires a name and data');
-      err.statusCode = 400;
-      throw err;
-    }
-    const cleanName = cleanDocumentName(attachment.name);
-    const displayName = cleanDocumentName(attachment.displayName || attachment.name);
-    const mimeType = noticeMimeTypeFor(cleanName, attachment.mimeType);
-    if (!allowedNoticeMimeTypes.has(mimeType)) {
-      const err = new Error('Notice attachments must be PDF, Word, image, or text files');
-      err.statusCode = 400;
-      throw err;
-    }
-    const buffer = decodeAttachmentData(attachment);
-    if (buffer.length > MAX_NOTICE_ATTACHMENT_BYTES) {
-      const err = new Error(`${displayName} is too large. Maximum notice attachment size is 10 MB`);
-      err.statusCode = 400;
-      throw err;
-    }
-    return {
-      cleanName,
-      displayName,
-      mimeType,
-      buffer,
-      type: fileTypeFor(cleanName, mimeType),
-      size: `${Math.max(1, Math.round(buffer.length / 1024))} KB`,
-    };
-  });
 }
 
 async function logClientActivity({ clientId = '', matterId = '', userId = '', action = '', summary = '', entityType = '', entityId = '' }) {
