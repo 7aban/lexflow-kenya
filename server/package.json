@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "seed:demo": "node scripts/seed-demo-data.js"
+    "seed:demo": "node scripts/seed-demo-data.js",
+    "test": "npx jest"
   },
   "type": "commonjs",
   "dependencies": {
@@ -20,5 +21,9 @@
     "pdfkit": "^0.18.0",
     "sqlite3": "^6.0.1",
     "twilio": "^6.0.0"
+  },
+  "devDependencies": {
+    "jest": "^30.3.0",
+    "supertest": "^7.2.2"
   }
 }
