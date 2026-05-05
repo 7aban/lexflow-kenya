@@ -5,7 +5,7 @@ const { createBackup, rotateBackups, verifyBackup, getBackupList } = require('..
   backupDir: path.join(__dirname, '..', 'backups'),
 });
 
-const logFile = path.join(__dirname, '..', 'logs', 'backup.log');
+const logFile = path.join(__dirname, '..', '..', 'logs', 'backup.log');
 
 async function log(message) {
   const timestamp = new Date().toISOString();
