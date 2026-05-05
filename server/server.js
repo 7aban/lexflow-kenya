@@ -77,6 +77,7 @@ const {
 } = require('./lib/reminders')({ run, get, all, genId, money, defaultFirmSettings, today, addDays });
 const { monthStart, sixMonthKeys, advocatePerformanceRows, cachedAdvocatePerformance, advocatePerformanceDetail } = require('./lib/performance')({ get, all, today, addDays });
 const { advocateDashboard, staffDashboard } = require('./lib/dashboard')({ get, all, today });
+const { getClientDashboardData } = require('./lib/clientDashboard')({ get, all, documentListColumns, clientDocumentVisibilitySql, publicDocument, publicNotice });
 
 async function ensureColumn(table, column, definition) {
   const columns = await all(`PRAGMA table_info(${table})`);
@@ -1064,31 +1065,8 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
 
 app.get('/api/client/dashboard', async (req, res) => {
   if (req.user.role !== 'client') return res.status(403).json({ error: 'Client access required' });
-  const client = await get('SELECT * FROM clients WHERE id=?', [req.user.clientId || '']);
-  const matters = await all('SELECT m.*, c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.clientId=? ORDER BY m.openDate DESC', [req.user.clientId || '']);
-  const matterIds = matters.map(m => m.id);
-  const placeholders = matterIds.map(() => '?').join(',');
-  const documents = matterIds.length ? await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.matterId IN (${placeholders}) AND ${clientDocumentVisibilitySql('d')} ORDER BY d.date DESC`, [...matterIds, req.user.clientId || '']) : [];
-  const invoices = await all(`SELECT i.*, m.title matterTitle, m.reference FROM invoices i LEFT JOIN matters m ON m.id=i.matterId WHERE i.clientId=? ORDER BY i.date DESC`, [req.user.clientId || '']);
-  const appearances = matterIds.length ? await all(`SELECT * FROM appearances WHERE matterId IN (${placeholders}) ORDER BY date`, matterIds) : [];
-  const notices = await all("SELECT * FROM firm_notices WHERE clientId IS NULL OR clientId='' OR clientId=? ORDER BY createdAt DESC LIMIT 20", [req.user.clientId || '']);
-  const noticeIds = notices.map(notice => notice.id);
-  const noticeAttachments = noticeIds.length ? await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.noticeId IN (${noticeIds.map(() => '?').join(',')}) AND COALESCE(d.clientVisible,0)=1 ORDER BY d.date DESC`, noticeIds) : [];
-  const paymentProofs = await all('SELECT id,invoiceId,matterId,clientId,method,reference,amount,note,fileName,mimeType,size,createdAt FROM payment_proofs WHERE clientId=? ORDER BY createdAt DESC', [req.user.clientId || '']);
-  res.json({
-    client,
-    matters,
-    documents: documents.map(publicDocument),
-    invoices,
-    notes: [],
-    appearances,
-    notices: notices.map(notice => publicNotice(
-      notice,
-      noticeAttachments.filter(doc => doc.noticeId === notice.id).map(doc => publicDocument(doc, { client: true })),
-      req,
-    )),
-    paymentProofs,
-  });
+  const data = await getClientDashboardData(req.user.clientId || '', req);
+  res.json(data);
 });
 
 app.post('/api/payment-proofs', async (req, res) => {
