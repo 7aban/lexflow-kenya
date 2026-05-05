@@ -1,9 +1,10 @@
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ServerDir = Join-Path $ScriptDir ".." "server"
-$ProjectRoot = Join-Path $ScriptDir ".."
-$LogFile = Join-Path $ProjectRoot "logs" "backup.log"
+$ServerDir = Convert-Path (Join-Path $ScriptDir "..")
+$ProjectRoot = Convert-Path (Join-Path $ServerDir "..")
+$LogDir = Join-Path $ProjectRoot "logs"
+$LogFile = Join-Path $LogDir "backup.log"
 
 # Ensure logs directory exists
 if (-not (Test-Path $LogFile)) {

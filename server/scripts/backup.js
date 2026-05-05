@@ -2,7 +2,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const { createBackup, rotateBackups, verifyBackup, getBackupList } = require('../lib/backup')({
   serverDir: path.join(__dirname, '..'),
-  backupDir: path.join(__dirname, '..', 'backups'),
+  backupDir: path.join(__dirname, '..', '..', 'backups'),
 });
 
 const logFile = path.join(__dirname, '..', '..', 'logs', 'backup.log');
