@@ -21,17 +21,43 @@ const createLogging = require('./lib/logging');
 const createNotifications = require('./lib/notifications');
 const createInvitations = require('./lib/invitations');
 const { cleanDocumentName, fileTypeFor, documentListColumns, clientDocumentVisibilitySql, publicDocument, publicNotice, MAX_NOTICE_ATTACHMENTS, MAX_NOTICE_ATTACHMENT_BYTES, allowedNoticeMimeTypes, noticeMimeTypeFor, decodeAttachmentData, prepareNoticeAttachments } = require('./lib/documents');
+const config = require('./lib/config');
 
 const app = express();
-const db = new sqlite3.Database(path.join(__dirname, 'lawfirm.db'));
+const db = new sqlite3.Database(config.DATABASE_PATH);
 const { run, get, all } = createDb(db);
 const { canAccessMatter, canAccessNotice, canAccessConversation, canAccessDocument } = createAccess({ get });
 const { logClientActivity, logAudit } = createLogging({ run });
 const { notifyStaff } = createNotifications({ run, all, genId });
 const { appBaseUrl, invitationUrl, checkInvitationRateLimit } = createInvitations();
-const JWT_SECRET = process.env.JWT_SECRET || 'lexflow-kenyan-law-secret';
+const JWT_SECRET = config.JWT_SECRET;
 
-app.use(cors());
+// CORS configuration
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, etc.) in development
+    if (!origin) {
+      if (config.isProduction) {
+        return callback(new Error('CORS: requests with no origin not allowed in production'));
+      }
+      return callback(null, true);
+    }
+    if (config.CORS_ORIGINS.length === 0) {
+      if (config.isProduction) {
+        return callback(new Error('CORS: no allowed origins configured in production'));
+      }
+      // In development, allow all
+      return callback(null, true);
+    }
+    if (config.CORS_ORIGINS.includes(origin)) {
+      return callback(null, true);
+    }
+    callback(new Error(`CORS: origin ${origin} not allowed`));
+  },
+  credentials: true,
+  optionsSuccessStatus: 200
+};
+app.use(cors(corsOptions));
 app.use(helmet({
   contentSecurityPolicy: false,
 }));
@@ -1143,17 +1169,16 @@ app.post('/api/mpesa/stk-push', requireStaff, async (req, res) => { const id = g
 app.post('/api/whatsapp/reminders', requireStaff, async (req, res) => { const rows = await all(`SELECT a.*,m.clientId,m.title matterTitle,c.name clientName,c.phone FROM appearances a LEFT JOIN matters m ON m.id=a.matterId LEFT JOIN clients c ON c.id=m.clientId WHERE a.date BETWEEN ? AND ?`, [today(), addDays(Number(req.body.days || 3))]); const reminders = rows.map(r => ({ id: genId('WA'), matterId: r.matterId, clientName: r.clientName, phone: r.phone, message: `Reminder: ${r.title} for ${r.matterTitle} is on ${r.date} at ${r.time || 'TBA'}.`, status: r.phone ? 'Queued' : 'Missing phone' })); res.json({ count: reminders.length, reminders }); });
 app.get('/api/exports/:type.:format', requireStaff, async (req, res) => { const rows = req.params.type === 'itax' ? await all(`SELECT i.number,i.date,c.name client,i.amount,i.status FROM invoices i LEFT JOIN clients c ON c.id=i.clientId`) : await all(`SELECT m.reference,m.title,c.name client,m.practiceArea,m.stage,m.totalBilled FROM matters m LEFT JOIN clients c ON c.id=m.clientId`); if (req.params.format === 'pdf') { const doc = new PDFDocument(); res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', `attachment; filename="${req.params.type}-report.pdf"`); doc.pipe(res); doc.fontSize(18).text(`${req.params.type.toUpperCase()} Report`); rows.forEach(r => doc.fontSize(10).text(Object.values(r).join(' | '))); doc.end(); } else { res.setHeader('Content-Type', 'application/vnd.ms-excel'); res.setHeader('Content-Disposition', `attachment; filename="${req.params.type}-report.xls"`); res.send(rows.map(r => Object.values(r).map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')); } });
 
-module.exports = { app };
+module.exports = { app, config };
 
 if (require.main === module) {
   initDb().then(() => {
-  const PORT = process.env.PORT || 5000;
-  app.listen(PORT, () => {
-    console.log(`LexFlow Kenya server running at http://localhost:${PORT}`);
-    startReminderJobs(getFirmSettings);
+    app.listen(config.PORT, () => {
+      console.log(`LexFlow Kenya server running at http://localhost:${config.PORT}`);
+      startReminderJobs(getFirmSettings);
+    });
+  }).catch(err => {
+    console.error('Database initialisation failed', err);
+    process.exit(1);
   });
-}).catch(err => {
-  console.error('Database initialisation failed', err);
-  process.exit(1);
-});
 }

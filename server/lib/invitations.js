@@ -1,8 +1,10 @@
+const config = require('./config');
+
 module.exports = function createInvitations() {
   const invitationAttempts = new Map();
-
+  
   function appBaseUrl(req) {
-    if (process.env.BASE_URL) return process.env.BASE_URL.replace(/\/$/, '');
+    if (config.BASE_URL) return config.BASE_URL.replace(/\/$/, '');
     const host = req.get('host') || '';
     if (host.startsWith('localhost') || host.startsWith('127.0.0.1')) return 'http://localhost:5173';
     return `${req.protocol}://${host || 'localhost:5173'}`;
