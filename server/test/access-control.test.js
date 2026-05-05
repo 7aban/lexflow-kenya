@@ -29,6 +29,7 @@ describe('Access Control - P3-Access-2', () => {
       .post('/api/auth/login')
       .send({ email: 'sarah.mwangi@achokilaw.co.ke', password: 'password123' });
     advocateToken = advRes.body.token;
+    const sarahName = advRes.body.user.fullName;
 
     // Create another advocate for testing scoping
     const registerRes = await request(app)
@@ -36,12 +37,77 @@ describe('Access Control - P3-Access-2', () => {
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ email: 'test.advocate2@example.com', password: 'password123', fullName: 'Test Advocate Two', role: 'advocate' });
     otherAdvocateToken = registerRes.body.token;
+    const otherAdvocateName = registerRes.body.fullName;
 
-    // Get Sarah's matters
-    const sarahMatters = await request(app)
+    // Get Sarah's matters or create test matter for Sarah
+    let sarahMatters = await request(app)
       .get('/api/matters')
       .set('Authorization', `Bearer ${advocateToken}`);
-    if (sarahMatters.body.length > 0) {
+    
+    if (sarahMatters.body.length === 0) {
+      // Create a client for Sarah's matter
+      const clientRes = await request(app)
+        .post('/api/clients')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ name: 'Test Client for Sarah', email: 'test.sarah.client@example.com' });
+      const sarahClientId = clientRes.body.id;
+      
+      // Create matter assigned to Sarah
+      const matterRes = await request(app)
+        .post('/api/matters')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ clientId: sarahClientId, title: 'Sarah Test Matter', assignedTo: sarahName });
+      matterIdAssignedToSarah = matterRes.body.id;
+      
+      // Create invoice for Sarah's matter
+       const invoiceRes = await request(app)
+         .post('/api/invoices/generate')
+         .set('Authorization', `Bearer ${adminToken}`)
+         .send({ matterId: matterIdAssignedToSarah });
+       if (invoiceRes.statusCode === 200) {
+         invoiceIdForSarah = invoiceRes.body.id;
+       } else {
+         // If invoice generation fails due to no billable amount, create a time entry with rate and retry
+         const entryRes = await request(app)
+           .post('/api/time-entries')
+           .set('Authorization', `Bearer ${adminToken}`)
+           .send({ matterId: matterIdAssignedToSarah, attorney: sarahName, hours: 1, rate: 10000, date: '2026-05-05' });
+         const retryRes = await request(app)
+           .post('/api/invoices/generate')
+           .set('Authorization', `Bearer ${adminToken}`)
+           .send({ matterId: matterIdAssignedToSarah });
+         if (retryRes.statusCode === 200) {
+           invoiceIdForSarah = retryRes.body.id;
+         }
+       }
+      
+      // Create task for Sarah's matter
+      const taskRes = await request(app)
+        .post('/api/tasks')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ matterId: matterIdAssignedToSarah, title: 'Sarah Test Task', assignee: sarahName });
+      if (taskRes.statusCode === 200) {
+        taskIdForSarah = taskRes.body.id;
+      }
+      
+      // Create appearance for Sarah's matter
+      const appRes = await request(app)
+        .post('/api/appearances')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ matterId: matterIdAssignedToSarah, title: 'Sarah Test Appearance', attorney: sarahName, date: '2026-06-01' });
+      if (appRes.statusCode === 200) {
+        appearanceIdForSarah = appRes.body.id;
+      }
+      
+      // Create time entry for Sarah's matter
+       const entryRes = await request(app)
+         .post('/api/time-entries')
+         .set('Authorization', `Bearer ${adminToken}`)
+         .send({ matterId: matterIdAssignedToSarah, attorney: sarahName, hours: 1, rate: 10000, date: '2026-05-05' });
+      if (entryRes.statusCode === 200) {
+        timeEntryIdForSarah = entryRes.body.id;
+      }
+    } else {
       matterIdAssignedToSarah = sarahMatters.body[0].id;
       
       // Get an invoice for Sarah's matter
@@ -51,7 +117,7 @@ describe('Access Control - P3-Access-2', () => {
       if (invoicesRes.body.length > 0) {
         invoiceIdForSarah = invoicesRes.body[0].id;
       }
-
+      
       // Get a task for Sarah's matter
       const tasksRes = await request(app)
         .get('/api/tasks')
@@ -59,7 +125,7 @@ describe('Access Control - P3-Access-2', () => {
       if (tasksRes.body.length > 0) {
         taskIdForSarah = tasksRes.body[0].id;
       }
-
+      
       // Get an appearance for Sarah's matter
       const appearancesRes = await request(app)
         .get('/api/appearances')
@@ -67,7 +133,7 @@ describe('Access Control - P3-Access-2', () => {
       if (appearancesRes.body.length > 0) {
         appearanceIdForSarah = appearancesRes.body[0].id;
       }
-
+      
       // Get a time entry for Sarah's matter
       const entriesRes = await request(app)
         .get('/api/time-entries')
@@ -77,12 +143,58 @@ describe('Access Control - P3-Access-2', () => {
       }
     }
 
-    // Get matters assigned to other advocate
-    const otherMatters = await request(app)
-      .get('/api/matters')
-      .set('Authorization', `Bearer ${otherAdvocateToken}`);
-    if (otherMatters.body.length > 0) {
-      matterIdAssignedToOther = otherMatters.body[0].id;
+    // Create matter assigned to other advocate (Test Advocate Two)
+    const clientRes2 = await request(app)
+      .post('/api/clients')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Test Client for Other Advocate', email: 'test.other.client@example.com' });
+    const otherClientId = clientRes2.body.id;
+    
+    const matterRes2 = await request(app)
+      .post('/api/matters')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ clientId: otherClientId, title: 'Other Advocate Test Matter', assignedTo: otherAdvocateName });
+    matterIdAssignedToOther = matterRes2.body.id;
+    
+    // Create time entry for other advocate's matter FIRST (required for invoice generation)
+    const entryRes3 = await request(app)
+      .post('/api/time-entries')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ matterId: matterIdAssignedToOther, attorney: otherAdvocateName, hours: 2, rate: 10000, date: '2026-05-05' });
+    
+    // Create invoice for other advocate's matter
+    const invoiceRes2 = await request(app)
+      .post('/api/invoices/generate')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ matterId: matterIdAssignedToOther });
+    expect(invoiceRes2.statusCode).toBe(200);
+    invoiceIdForOther = invoiceRes2.body.id;
+    
+    // Create task for other advocate's matter
+    const taskRes2 = await request(app)
+      .post('/api/tasks')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ matterId: matterIdAssignedToOther, title: 'Other Advocate Test Task', assignee: otherAdvocateName });
+    if (taskRes2.statusCode === 200) {
+      taskIdForOther = taskRes2.body.id;
+    }
+    
+    // Create appearance for other advocate's matter
+    const appRes2 = await request(app)
+      .post('/api/appearances')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ matterId: matterIdAssignedToOther, title: 'Other Advocate Test Appearance', attorney: otherAdvocateName, date: '2026-06-02' });
+    if (appRes2.statusCode === 200) {
+      appearanceIdForOther = appRes2.body.id;
+    }
+    
+    // Create additional time entry for other advocate's matter (for testing time entry access)
+    const entryRes2 = await request(app)
+      .post('/api/time-entries')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ matterId: matterIdAssignedToOther, attorney: otherAdvocateName, hours: 3, rate: 10000, date: '2026-05-05' });
+    if (entryRes2.statusCode === 200) {
+      timeEntryIdForOther = entryRes2.body.id;
     }
   });
 
@@ -176,27 +288,21 @@ describe('Access Control - P3-Access-2', () => {
 
   describe('3. Advocate Scoping', () => {
     test('Advocate cannot access matter assigned to another advocate', async () => {
-      if (!matterIdAssignedToOther) {
-        console.log('Skipping: No matter assigned to other advocate');
-        return;
-      }
-      const res = await request(app)
-        .get(`/api/matters/${matterIdAssignedToOther}`)
-        .set('Authorization', `Bearer ${advocateToken}`);
-      expect(res.statusCode).toBe(403);
-    });
+       expect(matterIdAssignedToOther).toBeDefined();
+       const res = await request(app)
+         .get(`/api/matters/${matterIdAssignedToOther}`)
+         .set('Authorization', `Bearer ${advocateToken}`);
+       expect(res.statusCode).toBe(403);
+     });
 
     test('Advocate can access their own matter', async () => {
-      if (!matterIdAssignedToSarah) {
-        console.log('Skipping: No matter assigned to Sarah');
-        return;
-      }
-      const res = await request(app)
-        .get(`/api/matters/${matterIdAssignedToSarah}`)
-        .set('Authorization', `Bearer ${advocateToken}`);
-      expect(res.statusCode).toBe(200);
-      expect(res.body.id).toBe(matterIdAssignedToSarah);
-    });
+       expect(matterIdAssignedToSarah).toBeDefined();
+       const res = await request(app)
+         .get(`/api/matters/${matterIdAssignedToSarah}`)
+         .set('Authorization', `Bearer ${advocateToken}`);
+       expect(res.statusCode).toBe(200);
+       expect(res.body.id).toBe(matterIdAssignedToSarah);
+     });
   });
 
   describe('4. Invoice Access', () => {
@@ -221,108 +327,84 @@ describe('Access Control - P3-Access-2', () => {
     });
 
     test('Advocate cannot access invoice for matter assigned to other advocate', async () => {
-      if (!invoiceIdForOther) {
-        console.log('Skipping: No invoice for other advocate');
-        return;
-      }
-      const res = await request(app)
-        .get(`/api/invoices/${invoiceIdForOther}`)
-        .set('Authorization', `Bearer ${advocateToken}`);
-      expect(res.statusCode).toBe(403);
-    });
+       expect(invoiceIdForOther).toBeDefined();
+       const res = await request(app)
+         .get(`/api/invoices/${invoiceIdForOther}`)
+         .set('Authorization', `Bearer ${advocateToken}`);
+       expect(res.statusCode).toBe(403);
+     });
 
     test('Advocate can access invoice for their assigned matter', async () => {
-      if (!invoiceIdForSarah) {
-        console.log('Skipping: No invoice for Sarah');
-        return;
-      }
-      const res = await request(app)
-        .get(`/api/invoices/${invoiceIdForSarah}`)
-        .set('Authorization', `Bearer ${advocateToken}`);
-      expect(res.statusCode).toBe(200);
-    });
+       expect(invoiceIdForSarah).toBeDefined();
+       const res = await request(app)
+         .get(`/api/invoices/${invoiceIdForSarah}`)
+         .set('Authorization', `Bearer ${advocateToken}`);
+       expect(res.statusCode).toBe(200);
+     });
   });
 
   describe('5. Task Access', () => {
     test('Advocate cannot access task for matter assigned to other advocate', async () => {
-      if (!taskIdForOther) {
-        console.log('Skipping: No task for other advocate');
-        return;
-      }
-      const res = await request(app)
-        .patch(`/api/tasks/${taskIdForOther}`)
-        .set('Authorization', `Bearer ${advocateToken}`)
-        .send({ completed: true });
-      expect(res.statusCode).toBe(403);
-    });
+       expect(taskIdForOther).toBeDefined();
+       const res = await request(app)
+         .patch(`/api/tasks/${taskIdForOther}`)
+         .set('Authorization', `Bearer ${advocateToken}`)
+         .send({ completed: true });
+       expect(res.statusCode).toBe(403);
+     });
 
     test('Advocate can access task for their assigned matter', async () => {
-      if (!taskIdForSarah) {
-        console.log('Skipping: No task for Sarah');
-        return;
-      }
-      const res = await request(app)
-        .patch(`/api/tasks/${taskIdForSarah}`)
-        .set('Authorization', `Bearer ${advocateToken}`)
-        .send({ completed: true });
-      expect(res.statusCode).toBe(200);
-      
-      // Toggle back
-      await request(app)
-        .patch(`/api/tasks/${taskIdForSarah}`)
-        .set('Authorization', `Bearer ${advocateToken}`)
-        .send({ completed: false });
-    });
+       expect(taskIdForSarah).toBeDefined();
+       const res = await request(app)
+         .patch(`/api/tasks/${taskIdForSarah}`)
+         .set('Authorization', `Bearer ${advocateToken}`)
+         .send({ completed: true });
+       expect(res.statusCode).toBe(200);
+       
+       // Toggle back
+       await request(app)
+         .patch(`/api/tasks/${taskIdForSarah}`)
+         .set('Authorization', `Bearer ${advocateToken}`)
+         .send({ completed: false });
+     });
   });
 
   describe('6. Appearance Access', () => {
     test('Advocate cannot access appearance for matter assigned to other advocate', async () => {
-      if (!appearanceIdForOther) {
-        console.log('Skipping: No appearance for other advocate');
-        return;
-      }
-      const res = await request(app)
-        .patch(`/api/appearances/${appearanceIdForOther}`)
-        .set('Authorization', `Bearer ${advocateToken}`)
-        .send({ title: 'Updated Title' });
-      expect(res.statusCode).toBe(403);
-    });
+       expect(appearanceIdForOther).toBeDefined();
+       const res = await request(app)
+         .patch(`/api/appearances/${appearanceIdForOther}`)
+         .set('Authorization', `Bearer ${advocateToken}`)
+         .send({ title: 'Updated Title' });
+       expect(res.statusCode).toBe(403);
+     });
 
     test('Advocate can access appearance for their assigned matter', async () => {
-      if (!appearanceIdForSarah) {
-        console.log('Skipping: No appearance for Sarah');
-        return;
-      }
-      const res = await request(app)
-        .get(`/api/appearances/${appearanceIdForSarah}`)
-        .set('Authorization', `Bearer ${advocateToken}`);
-      expect(res.statusCode).toBe(200);
-    });
+       expect(appearanceIdForSarah).toBeDefined();
+       const res = await request(app)
+         .get(`/api/appearances/${appearanceIdForSarah}`)
+         .set('Authorization', `Bearer ${advocateToken}`);
+       expect(res.statusCode).toBe(200);
+     });
   });
 
   describe('7. Time Entry Access', () => {
     test('Advocate cannot access time entry for matter assigned to other advocate', async () => {
-      if (!timeEntryIdForOther) {
-        console.log('Skipping: No time entry for other advocate');
-        return;
-      }
-      const res = await request(app)
-        .patch(`/api/time-entries/${timeEntryIdForOther}`)
-        .set('Authorization', `Bearer ${advocateToken}`)
-        .send({ description: 'Updated description' });
-      expect(res.statusCode).toBe(403);
-    });
+       expect(timeEntryIdForOther).toBeDefined();
+       const res = await request(app)
+         .patch(`/api/time-entries/${timeEntryIdForOther}`)
+         .set('Authorization', `Bearer ${advocateToken}`)
+         .send({ description: 'Updated description' });
+       expect(res.statusCode).toBe(403);
+     });
 
     test('Advocate can access time entry for their assigned matter', async () => {
-      if (!timeEntryIdForSarah) {
-        console.log('Skipping: No time entry for Sarah');
-        return;
-      }
-      const res = await request(app)
-        .get(`/api/time-entries/${timeEntryIdForSarah}`)
-        .set('Authorization', `Bearer ${advocateToken}`);
-      expect(res.statusCode).toBe(200);
-    });
+       expect(timeEntryIdForSarah).toBeDefined();
+       const res = await request(app)
+         .get(`/api/time-entries/${timeEntryIdForSarah}`)
+         .set('Authorization', `Bearer ${advocateToken}`);
+       expect(res.statusCode).toBe(200);
+     });
   });
 
   describe('8. Search Scoping', () => {
@@ -380,25 +462,22 @@ describe('Access Control - P3-Access-2', () => {
 
   describe('10. Forbidden Access Audit Events', () => {
     test('Forbidden matter access generates audit event', async () => {
-      if (!matterIdAssignedToOther) {
-        console.log('Skipping: No matter assigned to other advocate');
-        return;
-      }
-      
-      // Try to access matter assigned to other advocate
-      await request(app)
-        .get(`/api/matters/${matterIdAssignedToOther}`)
-        .set('Authorization', `Bearer ${advocateToken}`);
-      
-      // Check audit events for forbidden_matter_access
-      const auditRes = await request(app)
-        .get('/api/audit-events?action=forbidden_matter_access')
-        .set('Authorization', `Bearer ${adminToken}`);
-      
-      expect(auditRes.statusCode).toBe(200);
-      // Should have at least one forbidden_matter_access event
-      const hasForbiddenEvent = auditRes.body.rows.some(r => r.action === 'forbidden_matter_access');
-      expect(hasForbiddenEvent).toBe(true);
-    });
+       expect(matterIdAssignedToOther).toBeDefined();
+       
+       // Try to access matter assigned to other advocate
+       await request(app)
+         .get(`/api/matters/${matterIdAssignedToOther}`)
+         .set('Authorization', `Bearer ${advocateToken}`);
+       
+       // Check audit events for forbidden_matter_access
+       const auditRes = await request(app)
+         .get('/api/audit-events?action=forbidden_matter_access')
+         .set('Authorization', `Bearer ${adminToken}`);
+       
+       expect(auditRes.statusCode).toBe(200);
+       // Should have at least one forbidden_matter_access event
+       const hasForbiddenEvent = auditRes.body.rows.some(r => r.action === 'forbidden_matter_access');
+       expect(hasForbiddenEvent).toBe(true);
+     });
   });
 });
