@@ -3,11 +3,12 @@
   "version": "1.0.0",
   "description": "LexFlow Kenya Express API",
   "main": "server.js",
-  "scripts": {
-    "start": "node server.js",
-    "seed:demo": "node scripts/seed-demo-data.js",
-    "test": "npx jest"
-  },
+    "scripts": {
+      "start": "node server.js",
+      "seed:demo": "node scripts/seed-demo-data.js",
+      "test": "npx jest",
+      "backup": "node scripts/backup.js"
+    },
   "type": "commonjs",
   "dependencies": {
     "bcryptjs": "^3.0.3",
