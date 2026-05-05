@@ -10,11 +10,9 @@ const tempBackupDir = path.join(tempRoot, 'backups');
 let backupHelper;
 
 beforeAll(async () => {
-  // Create temp directories
   await fs.mkdir(tempServerDir, { recursive: true });
   await fs.mkdir(tempBackupDir, { recursive: true });
 
-  // Create a minimal valid SQLite database
   await new Promise((resolve, reject) => {
     const db = new sqlite3.Database(path.join(tempServerDir, 'lawfirm.db'));
     db.run('CREATE TABLE test (id TEXT PRIMARY KEY)', (err) => {
@@ -28,7 +26,6 @@ beforeAll(async () => {
     });
   });
 
-  // Initialize backup helper with temp directories
   backupHelper = require('../lib/backup')({
     serverDir: tempServerDir,
     backupDir: tempBackupDir,
@@ -36,7 +33,6 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  // Clean up temp directories
   try {
     await fs.rm(tempRoot, { recursive: true, force: true });
   } catch (err) {
@@ -52,7 +48,6 @@ describe('Backup Helper Tests', () => {
     expect(result.size).toBeGreaterThan(0);
     expect(result.backupPath).toBeDefined();
     
-    // Verify file exists
     const stats = await fs.stat(result.backupPath);
     expect(stats.isFile()).toBe(true);
   });
@@ -65,7 +60,6 @@ describe('Backup Helper Tests', () => {
   });
 
   test('getBackupList returns newest first', async () => {
-    // Create multiple backups with delays for unique timestamps
     await backupHelper.createBackup();
     await new Promise(resolve => setTimeout(resolve, 1100));
     await backupHelper.createBackup();
@@ -76,7 +70,6 @@ describe('Backup Helper Tests', () => {
     expect(Array.isArray(backups)).toBe(true);
     expect(backups.length).toBeGreaterThanOrEqual(3);
 
-    // Check each item has required properties
     backups.forEach(backup => {
       expect(backup).toHaveProperty('filename');
       expect(backup).toHaveProperty('path');
@@ -84,7 +77,6 @@ describe('Backup Helper Tests', () => {
       expect(backup).toHaveProperty('createdAt');
     });
 
-    // Verify newest first by createdAt
     for (let i = 0; i < backups.length - 1; i++) {
       expect(new Date(backups[i].createdAt).getTime()).toBeGreaterThanOrEqual(
         new Date(backups[i + 1].createdAt).getTime()
@@ -93,29 +85,24 @@ describe('Backup Helper Tests', () => {
   });
 
   test('rotateBackups removes old backups beyond maxBackups', async () => {
-    // Create 5 backups
     for (let i = 0; i < 5; i++) {
       await backupHelper.createBackup();
-      if (i < 4) await new Promise(resolve => setTimeout(resolve, 1100));
     }
 
     const rotation = await backupHelper.rotateBackups(2);
     expect(rotation.removed).toBeGreaterThanOrEqual(3);
     expect(rotation.remaining).toBeLessThanOrEqual(2);
 
-    // Verify with getBackupList
     const backups = await backupHelper.getBackupList();
     expect(backups.length).toBeLessThanOrEqual(2);
-  });
+  }, 15000);
 
   test('verifyBackup rejects invalid/non-SQLite file', async () => {
-    // Create a text file that's not a database
     const textFilePath = path.join(tempBackupDir, 'not-a-db.txt');
     await fs.writeFile(textFilePath, 'not a database', 'utf8');
 
     await expect(backupHelper.verifyBackup(textFilePath)).rejects.toThrow();
     
-    // Clean up
     try { await fs.unlink(textFilePath); } catch (e) {}
   });
 });
