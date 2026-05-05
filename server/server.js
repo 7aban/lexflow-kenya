@@ -321,7 +321,7 @@ app.post('/api/invitations/:token/accept', async (req, res) => {
   const createdAt = new Date().toISOString();
   await run('INSERT INTO users (id,email,password,fullName,role,clientId,createdAt) VALUES (?,?,?,?,?,?,?)', [id, invitation.email, await hashPassword(password), name, 'client', invitation.clientId || '', createdAt]);
   await run("UPDATE invitations SET status='used' WHERE token=?", [req.params.token]);
-  const token = signAccessToken({ id, role: 'client', fullName: name, clientId: invitation.clientId || '', email: invitation.email });
+  const token = signAccessToken({ id, role: 'client', fullName: name, clientId: invitation.clientId || '', email: invitation.email, tokenVersion: 1 });
   res.json({ message: 'Client portal account created.', token, user: { id, email: invitation.email, fullName: name, name, role: 'client', clientId: invitation.clientId || '' } });
 });
 app.put('/api/firm-settings', authenticate, requireAdmin, async (req, res) => {

@@ -155,6 +155,55 @@ describe('JWT Hardening', () => {
     expect(decoded).toHaveProperty('iat');
   });
 
+  test('login-issued JWT includes tokenVersion = 1', async () => {
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'admin@lexflow.co.ke', password: 'password123' });
+    expect(res.statusCode).toBe(200);
+    const decoded = jwt.decode(res.body.token);
+    expect(decoded).toHaveProperty('tokenVersion');
+    expect(decoded.tokenVersion).toBe(1);
+  });
+
+  test('client-login-issued JWT includes tokenVersion = 1', async () => {
+    const res = await request(app)
+      .post('/api/auth/client-login')
+      .send({ email: 'margaret.wairimu@example.co.ke', password: 'password123' });
+    expect(res.statusCode).toBe(200);
+    const decoded = jwt.decode(res.body.token);
+    expect(decoded).toHaveProperty('tokenVersion');
+    expect(decoded.tokenVersion).toBe(1);
+  });
+
+  test('invitation acceptance-issued JWT includes tokenVersion = 1', async () => {
+    const inviteRes = await request(app)
+      .post('/api/invitations')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ email: 'tokenversion-invite@test.com' });
+    expect(inviteRes.statusCode).toBe(200);
+    const token = inviteRes.body.token;
+
+    const res = await request(app)
+      .post(`/api/invitations/${token}/accept`)
+      .send({ password: 'Str0ng!TokenVer2026', fullName: 'TokenVersion Client' });
+    expect(res.statusCode).toBe(200);
+    const decoded = jwt.decode(res.body.token);
+    expect(decoded).toHaveProperty('tokenVersion');
+    expect(decoded.tokenVersion).toBe(1);
+  });
+
+  test('manually signed JWT without tokenVersion still authenticates', async () => {
+    const noVersionToken = jwt.sign(
+      { userId: 'test', role: 'admin' },
+      config.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+    const res = await request(app)
+      .get('/api/notifications')
+      .set('Authorization', `Bearer ${noVersionToken}`);
+    expect(res.statusCode).toBe(200);
+  });
+
   test('expired token returns 401', async () => {
     // Create an already-expired token
     const expiredToken = jwt.sign(

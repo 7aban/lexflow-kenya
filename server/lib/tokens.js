@@ -8,6 +8,7 @@ function signAccessToken(user) {
     email: user.email || '',
     fullName: user.fullName || '',
     clientId: user.clientId || '',
+    tokenVersion: user.tokenVersion !== undefined ? user.tokenVersion : 1,
   };
   
   const options = {
