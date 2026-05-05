@@ -7,6 +7,7 @@
       "start": "node server.js",
       "seed:demo": "node scripts/seed-demo-data.js",
       "test": "npx jest",
+      "test:seeded": "npm run seed:demo && npm test",
       "backup": "node scripts/backup.js"
     },
   "type": "commonjs",

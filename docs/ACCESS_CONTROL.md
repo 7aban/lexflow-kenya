@@ -151,4 +151,4 @@ Access control is tested in:
 - `test/documents-client.test.js` - Document visibility and client portal tests
 - `test/client-dashboard.test.js` - Client dashboard isolation tests
 
-Run tests with: `cd server && npm test`
+Run tests with: `cd server && npm run seed:demo && npm test` (or `npm run test:seeded`). Tests require demo seed data.

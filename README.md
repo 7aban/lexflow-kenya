@@ -116,6 +116,35 @@ npm run build
 
 If the build passes, restart both services with `start-lexflow.ps1`.
 
+## Testing
+
+Backend tests require the demo seed database to be present. On a fresh clone, clean checkout, or after deleting/replacing `server/lawfirm.db`, run:
+
+```powershell
+cd server
+npm run seed:demo
+npm test
+```
+
+Or use the convenience script:
+
+```powershell
+cd server
+npm run test:seeded
+```
+
+### When auth/access-control tests fail
+
+If you see these symptoms:
+- login returns `401`
+- `advRes.body.user` is `undefined`
+- expected `403` but received `401`
+- many token/access-control tests fail together
+
+**First confirm the demo seed data exists** by running `npm run seed:demo` before investigating JWT/session code. These are test-fixture/setup issues, not auth regressions.
+
+Do not "fix" these failures by weakening JWT validation, bypassing auth middleware, or changing expected `403`s to `401`s.
+
 ## Version Control Notes
 
 - Source code is committed on `main`.

@@ -249,8 +249,16 @@ If upgrading from a version without centralized config:
 Run tests with test-specific config:
 ```bash
 cd server
+npm run seed:demo
 npm test
 ```
+
+Or use the convenience script:
+```bash
+npm run test:seeded
+```
+
+**Important**: Tests require demo seed data. On a fresh checkout or after replacing `lawfirm.db`, always run `npm run seed:demo` before `npm test`. Without seed data, login-based tests return 401 and cascade-fail — this is a fixture issue, not an auth regression.
 
 Test environment uses:
 - `NODE_ENV=test`
