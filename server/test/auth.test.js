@@ -1,5 +1,7 @@
 const request = require('supertest');
 const jwt = require('jsonwebtoken');
+const sqlite3 = require('sqlite3');
+const path = require('path');
 const config = require('../lib/config');
 const { app } = require('../server.js');
 
@@ -304,5 +306,191 @@ describe('Invitation acceptance password policy enforcement', () => {
     expect(res.body).toHaveProperty('token');
     expect(res.body).toHaveProperty('user');
     expect(res.body.user.role).toBe('client');
+  });
+});
+
+describe('Change password', () => {
+  const db = new sqlite3.Database(config.DATABASE_PATH);
+  const dbGet = (sql, params = []) => new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => err ? reject(err) : resolve(row));
+  });
+
+  test('unauthenticated request rejected with 401', async () => {
+    const res = await request(app)
+      .post('/api/auth/change-password')
+      .send({ currentPassword: 'password123', newPassword: 'Str0ng!ChangedPass2026' });
+    expect(res.statusCode).toBe(401);
+  });
+
+  test('missing currentPassword returns 400', async () => {
+    const res = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${advocateToken}`)
+      .send({ newPassword: 'Str0ng!ChangedPass2026' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('currentPassword and newPassword are required');
+  });
+
+  test('missing newPassword returns 400', async () => {
+    const res = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${advocateToken}`)
+      .send({ currentPassword: 'password123' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('currentPassword and newPassword are required');
+  });
+
+  test('non-string currentPassword returns 400', async () => {
+    const res = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${advocateToken}`)
+      .send({ currentPassword: 12345, newPassword: 'Str0ng!ChangedPass2026' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('currentPassword and newPassword must be strings');
+  });
+
+  test('non-string newPassword returns 400', async () => {
+    const res = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${advocateToken}`)
+      .send({ currentPassword: 'password123', newPassword: 12345 });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('currentPassword and newPassword must be strings');
+  });
+
+  test('overlong currentPassword returns 400', async () => {
+    const res = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${advocateToken}`)
+      .send({ currentPassword: 'a'.repeat(129), newPassword: 'Str0ng!ChangedPass2026' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('Password must not exceed 128 characters');
+  });
+
+  test('overlong newPassword returns 400', async () => {
+    const res = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${advocateToken}`)
+      .send({ currentPassword: 'password123', newPassword: 'a'.repeat(129) });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('Password must not exceed 128 characters');
+  });
+
+  test('wrong currentPassword returns 401', async () => {
+    const res = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${advocateToken}`)
+      .send({ currentPassword: 'wrongpassword', newPassword: 'Str0ng!ChangedPass2026' });
+    expect(res.statusCode).toBe(401);
+    expect(res.body.error).toBe('Current password is incorrect');
+  });
+
+  test('weak newPassword returns 400 with policy error', async () => {
+    const res = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${advocateToken}`)
+      .send({ currentPassword: 'password123', newPassword: 'weak' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('Password does not meet security requirements');
+    expect(Array.isArray(res.body.details)).toBe(true);
+  });
+
+  test('same password rejected with 400', async () => {
+    const res = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${advocateToken}`)
+      .send({ currentPassword: 'password123', newPassword: 'password123' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('New password must be different from current password');
+  });
+
+  test('successful password change returns 200', async () => {
+    const res = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${advocateToken}`)
+      .send({ currentPassword: 'password123', newPassword: 'Str0ng!ChangedPass2026' });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.message).toBe('Password changed successfully');
+  });
+
+  test('old password no longer works after change', async () => {
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'sarah.mwangi@achokilaw.co.ke', password: 'password123' });
+    expect(res.statusCode).toBe(401);
+  });
+
+  test('new password works after change', async () => {
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'sarah.mwangi@achokilaw.co.ke', password: 'Str0ng!ChangedPass2026' });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toHaveProperty('token');
+  });
+
+  test('stored password is not plaintext', async () => {
+    const user = await dbGet('SELECT password FROM users WHERE email=?', ['sarah.mwangi@achokilaw.co.ke']);
+    expect(user.password).not.toBe('Str0ng!ChangedPass2026');
+    expect(user.password).toMatch(/^\$2[aby]\$/);
+  });
+
+  test('password_changed audit event is recorded on success', async () => {
+    // First change admin password to trigger audit, then check
+    const adminLoginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'admin@lexflow.co.ke', password: 'password123' });
+    const freshAdminToken = adminLoginRes.body.token;
+
+    await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${freshAdminToken}`)
+      .send({ currentPassword: 'password123', newPassword: 'An0ther!StrongPass2026' });
+
+    const auditRes = await request(app)
+      .get('/api/audit-events?action=password_changed')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(auditRes.statusCode).toBe(200);
+    expect(auditRes.body.rows.length).toBeGreaterThan(0);
+    const event = auditRes.body.rows[0];
+    expect(event.action).toBe('password_changed');
+    expect(event.entity_type).toBe('user');
+  });
+
+  test('passwords are not present in audit metadata', async () => {
+    const auditRes = await request(app)
+      .get('/api/audit-events?action=password_changed')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(auditRes.statusCode).toBe(200);
+    const events = auditRes.body.rows.filter(e => e.action === 'password_changed');
+    for (const event of events) {
+      const metaStr = JSON.stringify(event.metadata || {});
+      expect(metaStr).not.toContain('password123');
+      expect(metaStr).not.toContain('Str0ng!');
+      expect(metaStr).not.toContain('An0ther!');
+    }
+  });
+
+  test("other users' passwords are not changed", async () => {
+    // Admin changed password, verify advocate's new password still works
+    const advocateLogin = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'sarah.mwangi@achokilaw.co.ke', password: 'Str0ng!ChangedPass2026' });
+    expect(advocateLogin.statusCode).toBe(200);
+
+    // Verify admin's old password no longer works
+    const adminOldLogin = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'admin@lexflow.co.ke', password: 'password123' });
+    expect(adminOldLogin.statusCode).toBe(401);
+
+    // Verify admin's new password works
+    const adminNewLogin = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'admin@lexflow.co.ke', password: 'An0ther!StrongPass2026' });
+    expect(adminNewLogin.statusCode).toBe(200);
+  });
+
+  afterAll(() => {
+    db.close();
   });
 });

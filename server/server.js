@@ -343,6 +343,24 @@ app.get('/api/auth/me', async (req, res) => {
   const user = await get('SELECT id,email,fullName,role,clientId,createdAt FROM users WHERE id=?', [req.user.userId]);
   user ? res.json({ ...user, name: user.fullName }) : res.status(404).json({ error: 'User not found' });
 });
+app.post('/api/auth/change-password', async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) return res.status(400).json({ error: 'currentPassword and newPassword are required' });
+    if (typeof currentPassword !== 'string' || typeof newPassword !== 'string') return res.status(400).json({ error: 'currentPassword and newPassword must be strings' });
+    if (currentPassword.length > 128 || newPassword.length > 128) return res.status(400).json({ error: 'Password must not exceed 128 characters' });
+    const user = await get('SELECT id,password,role FROM users WHERE id=?', [req.user.userId]);
+    if (!user) return res.status(401).json({ error: 'User not found' });
+    if (!(await verifyPassword(currentPassword, user.password))) return res.status(401).json({ error: 'Current password is incorrect' });
+    if (await verifyPassword(newPassword, user.password)) return res.status(400).json({ error: 'New password must be different from current password' });
+    const passwordPolicy = validatePasswordPolicy(newPassword);
+    if (!passwordPolicy.ok) return res.status(400).json({ error: 'Password does not meet security requirements', details: passwordPolicy.errors });
+    const hashedPassword = await hashPassword(newPassword);
+    await run('UPDATE users SET password=? WHERE id=?', [hashedPassword, req.user.userId]);
+    await recordAuditEvent(req, { action: 'password_changed', entityType: 'user', entityId: req.user.userId, metadata: { role: req.user.role } }).catch(() => {});
+    res.json({ message: 'Password changed successfully' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 app.get('/api/auth/users', requireAdmin, async (req, res) => res.json(await all('SELECT id,email,fullName,role,clientId,createdAt FROM users ORDER BY createdAt DESC')));
 app.post('/api/auth/register', requireAdmin, validate(registerValidation), async (req, res) => {
   try {
