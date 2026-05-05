@@ -59,17 +59,25 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 app.use(helmet({
-  contentSecurityPolicy: false,
+  contentSecurityPolicy: config.CSP_REPORT_ONLY ? { reportOnly: true, directives: config.CSP_DIRECTIVES } : config.isProduction ? { directives: config.CSP_DIRECTIVES } : false,
 }));
-app.use(express.json({ limit: '25mb' }));
+app.use(express.json({ limit: config.JSON_BODY_LIMIT }));
+// Separate upload limit for document routes
+app.use('/api/documents', express.json({ limit: config.UPLOAD_BODY_LIMIT }));
 
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  message: { error: 'Too many login attempts. Please try again in 15 minutes.' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+// General API rate limiter
+const generalLimiter = rateLimit(config.rateLimitConfig(config.RATE_LIMIT_WINDOW_MS, config.RATE_LIMIT_MAX));
+
+// Auth-specific rate limiter
+const authLimiter = rateLimit(config.rateLimitConfig(config.AUTH_RATE_LIMIT_WINDOW_MS, config.AUTH_RATE_LIMIT_MAX));
+
+// Apply general rate limiting to all API routes
+app.use('/api', generalLimiter);
+
+// Apply stricter rate limiting to auth routes
+app.use('/api/login', authLimiter);
+app.use('/api/register', authLimiter);
+app.use('/api/invitations', authLimiter);
 
 const defaultFirmSettings = {
   id: 'default',
@@ -178,7 +186,30 @@ async function initDb() {
 
   const userCount = await get('SELECT COUNT(*) AS count FROM users');
   if (!userCount.count) {
-    await run('INSERT INTO users (id,email,password,fullName,role,createdAt) VALUES (?,?,?,?,?,?)', [genId('U'), 'admin@lexflow.co.ke', await bcrypt.hash('password123', 10), 'LexFlow Admin', 'admin', new Date().toISOString()]);
+    // Use configured seed admin credentials
+    const adminEmail = config.SEED_ADMIN_EMAIL;
+    const adminPassword = config.SEED_ADMIN_PASSWORD;
+    const adminName = config.SEED_ADMIN_NAME;
+    
+    // Validate password in production
+    if (config.isProduction) {
+      if (!adminPassword) {
+        throw new Error('SEED_ADMIN_PASSWORD environment variable is required in production for initial admin setup');
+      }
+      const weakPasswords = ['password123', 'password', 'admin123', 'changeme', '123456', 'qwerty'];
+      if (weakPasswords.includes(adminPassword.toLowerCase()) || adminPassword.length < 12) {
+        throw new Error('SEED_ADMIN_PASSWORD must be at least 12 characters and not a common weak password. Please use a strong password.');
+      }
+    }
+    
+    const hashedPassword = await bcrypt.hash(adminPassword, 10);
+    await run('INSERT INTO users (id,email,password,fullName,role,createdAt) VALUES (?,?,?,?,?,?)', [genId('U'), adminEmail, hashedPassword, adminName, 'admin', new Date().toISOString()]);
+    if (!config.isTest) {
+      console.log(`Initial admin user created: ${adminEmail}`);
+      if (!config.isProduction) {
+        console.log('IMPORTANT: Change the default password after first login!');
+      }
+    }
   }
 }
 
@@ -208,7 +239,7 @@ async function matterFolders(matterId, req = null) {
   return [{ id: 'all', matterId, name: 'All Documents', virtual: true }, { id: 'uncategorised', matterId, name: 'Uncategorised', virtual: true, documentCount: uncategorised.documentCount || 0 }, ...folders];
 }
 
-app.post('/api/auth/login', loginLimiter, validate(loginValidation), async (req, res) => {
+app.post('/api/auth/login', authLimiter, validate(loginValidation), async (req, res) => {
   try {
     const { email, password } = req.body;
     const user = await get('SELECT * FROM users WHERE lower(email)=lower(?)', [email || '']);
@@ -219,7 +250,7 @@ app.post('/api/auth/login', loginLimiter, validate(loginValidation), async (req,
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/auth/client-login', loginLimiter, validate(loginValidation), async (req, res) => {
+app.post('/api/auth/client-login', authLimiter, validate(loginValidation), async (req, res) => {
   try {
     const { email, password } = req.body;
     const user = await get('SELECT * FROM users WHERE lower(email)=lower(?) AND role=?', [email || '', 'client']);

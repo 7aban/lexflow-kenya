@@ -81,6 +81,54 @@ const BACKUP_LOG = process.env.BACKUP_LOG || path.join(__dirname, '..', '..', 'l
 // Base URL for invitations/reminders
 const BASE_URL = process.env.BASE_URL || (isProduction ? '' : 'http://localhost:5000');
 
+// Seed admin configuration
+const SEED_ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || 'admin@lexflow.co.ke';
+const SEED_ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || (isTest ? 'test-password' : (isProduction ? '' : 'password123'));
+const SEED_ADMIN_NAME = process.env.SEED_ADMIN_NAME || 'Admin';
+
+// Rate limiting configuration
+const RATE_LIMIT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || (isTest ? '0' : '900000'), 10); // 15 min default
+const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || (isTest ? '999999' : '100'), 10); // 100 requests per window
+const AUTH_RATE_LIMIT_WINDOW_MS = parseInt(process.env.AUTH_RATE_LIMIT_WINDOW_MS || (isTest ? '0' : '900000'), 10); // 15 min
+const AUTH_RATE_LIMIT_MAX = parseInt(process.env.AUTH_RATE_LIMIT_MAX || (isTest ? '999999' : '5'), 10); // 5 attempts per 15 min
+
+// Disable rate limiting in test mode
+function rateLimitConfig(windowMs, max) {
+  if (isTest) {
+    return {
+      windowMs: 1000, // 1 second (minimum valid value)
+      max: 999999, // effectively unlimited
+      message: { error: 'Too many requests, please try again later.' },
+      standardHeaders: true,
+      legacyHeaders: false,
+    };
+  }
+  return {
+    windowMs: windowMs,
+    max: max,
+    message: { error: 'Too many requests, please try again later.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+  };
+}
+
+// JSON body limit
+const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || '1mb';
+const UPLOAD_BODY_LIMIT = process.env.UPLOAD_BODY_LIMIT || '10mb';
+
+// Helmet CSP configuration
+const CSP_REPORT_ONLY = process.env.CSP_REPORT_ONLY === 'true';
+const CSP_DIRECTIVES = process.env.CSP_DIRECTIVES ? JSON.parse(process.env.CSP_DIRECTIVES) : {
+  defaultSrc: ["'self'"],
+  scriptSrc: ["'self'"],
+  styleSrc: ["'self'", "'unsafe-inline'"], // Needed for some inline styles
+  imgSrc: ["'self'", 'data:', 'blob:'],
+  connectSrc: ["'self'"].concat(CORS_ORIGINS.length > 0 ? CORS_ORIGINS : []),
+  objectSrc: ["'none'"],
+  baseUri: ["'self'"],
+  frameAncestors: ["'none'"],
+};
+
 module.exports = {
   isProduction,
   isTest,
@@ -92,4 +140,16 @@ module.exports = {
   BACKUP_DIR,
   BACKUP_LOG,
   BASE_URL,
+  SEED_ADMIN_EMAIL,
+  SEED_ADMIN_PASSWORD,
+  SEED_ADMIN_NAME,
+  RATE_LIMIT_WINDOW_MS,
+  RATE_LIMIT_MAX,
+  AUTH_RATE_LIMIT_WINDOW_MS,
+  AUTH_RATE_LIMIT_MAX,
+  JSON_BODY_LIMIT,
+  UPLOAD_BODY_LIMIT,
+  CSP_REPORT_ONLY,
+  CSP_DIRECTIVES,
+  rateLimitConfig,
 };
