@@ -20,6 +20,7 @@ const createAccess = require('./lib/access');
 const createLogging = require('./lib/logging');
 const createNotifications = require('./lib/notifications');
 const createInvitations = require('./lib/invitations');
+const createAudit = require('./lib/audit');
 const { cleanDocumentName, fileTypeFor, documentListColumns, clientDocumentVisibilitySql, publicDocument, publicNotice, MAX_NOTICE_ATTACHMENTS, MAX_NOTICE_ATTACHMENT_BYTES, allowedNoticeMimeTypes, noticeMimeTypeFor, decodeAttachmentData, prepareNoticeAttachments } = require('./lib/documents');
 const config = require('./lib/config');
 
@@ -30,6 +31,7 @@ const { canAccessMatter, canAccessNotice, canAccessConversation, canAccessDocume
 const { logClientActivity, logAudit } = createLogging({ run });
 const { notifyStaff } = createNotifications({ run, all, genId });
 const { appBaseUrl, invitationUrl, checkInvitationRateLimit } = createInvitations();
+const { recordAuditEvent } = createAudit({ run, get });
 const JWT_SECRET = config.JWT_SECRET;
 
 // CORS configuration
@@ -162,6 +164,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS payment_proofs (id TEXT PRIMARY KEY, invoiceId TEXT, matterId TEXT, clientId TEXT, method TEXT, reference TEXT, amount REAL DEFAULT 0, note TEXT, fileName TEXT, mimeType TEXT, size TEXT, content BLOB, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS invitations (id TEXT PRIMARY KEY, email TEXT NOT NULL, clientId TEXT, token TEXT UNIQUE NOT NULL, status TEXT DEFAULT 'pending', createdBy TEXT, createdAt TEXT, expiresAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, userId TEXT, userName TEXT, role TEXT, action TEXT, entityType TEXT, entityId TEXT, summary TEXT, createdAt TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS audit_events (id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, actor_user_id TEXT, actor_role TEXT, actor_email TEXT, action TEXT NOT NULL, entity_type TEXT, entity_id TEXT, matter_id TEXT, client_id TEXT, ip_address TEXT, user_agent TEXT, metadata_json TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)`);
   await run(`CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, userId TEXT NOT NULL, type TEXT, matterId TEXT, clientId TEXT, title TEXT, body TEXT, createdAt TEXT, readAt TEXT)`);
 
   await ensureClientUserSupport();
@@ -243,9 +246,15 @@ app.post('/api/auth/login', authLimiter, validate(loginValidation), async (req, 
   try {
     const { email, password } = req.body;
     const user = await get('SELECT * FROM users WHERE lower(email)=lower(?)', [email || '']);
-    if (!user || !(await bcrypt.compare(password || '', user.password || ''))) return res.status(401).json({ error: 'Invalid email or password' });
+    if (!user || !(await bcrypt.compare(password || '', user.password || ''))) {
+      // Log failed login attempt
+      await recordAuditEvent(req, { action: 'login_failure', entityType: 'user', metadata: { email, reason: 'invalid credentials' } }).catch(() => {});
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
     if (user.role === 'client') return res.status(403).json({ error: 'Please use the Client Portal login.' });
     const token = jwt.sign({ userId: user.id, role: user.role, fullName: user.fullName, clientId: user.clientId || '' }, JWT_SECRET, { expiresIn: '8h' });
+    // Log successful login
+    await recordAuditEvent(req, { action: 'login_success', entityType: 'user', entityId: user.id, metadata: { email: user.email, role: user.role } }).catch(() => {});
     res.json({ token, user: { id: user.id, email: user.email, fullName: user.fullName, name: user.fullName, role: user.role, clientId: user.clientId || '' } });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -394,6 +403,31 @@ app.get('/api/audit-logs', requireAdmin, async (req, res) => {
   const rows = await all(`SELECT * FROM audit_logs ${where} ORDER BY createdAt DESC LIMIT ? OFFSET ?`, [...params, limit, offset]);
   const countRow = await get(`SELECT COUNT(*) count FROM audit_logs ${where}`, params);
   res.json({ rows, total: countRow.count, limit, offset });
+});
+
+app.get('/api/audit-events', requireAdmin, async (req, res) => {
+  const filters = [];
+  const params = [];
+  const safeFields = ['actor_user_id', 'action', 'entity_type', 'entity_id', 'matter_id', 'client_id'];
+  for (const field of safeFields) {
+    if (req.query[field]) {
+      filters.push(`${field}=?`);
+      params.push(req.query[field]);
+    }
+  }
+  const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+  const offset = Math.max(Number(req.query.offset) || 0, 0);
+  const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+  const rows = await all(`SELECT id, timestamp, actor_user_id, actor_role, actor_email, action, entity_type, entity_id, matter_id, client_id, ip_address, metadata_json FROM audit_events ${where} ORDER BY timestamp DESC LIMIT ? OFFSET ?`, [...params, limit, offset]);
+  const countRow = await get(`SELECT COUNT(*) count FROM audit_events ${where}`, params);
+  // Parse metadata_json safely
+  const sanitized = rows.map(r => ({
+    ...r,
+    metadata: (() => {
+      try { return JSON.parse(r.metadata_json || '{}'); } catch (e) { return {}; }
+    })(),
+  }));
+  res.json({ rows: sanitized, total: countRow.count, limit, offset });
 });
 
 app.get('/api/notifications', requireStaff, async (req, res) => {
