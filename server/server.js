@@ -24,6 +24,7 @@ const createAudit = require('./lib/audit');
 const { cleanDocumentName, fileTypeFor, documentListColumns, clientDocumentVisibilitySql, publicDocument, publicNotice, MAX_NOTICE_ATTACHMENTS, MAX_NOTICE_ATTACHMENT_BYTES, allowedNoticeMimeTypes, noticeMimeTypeFor, decodeAttachmentData, prepareNoticeAttachments } = require('./lib/documents');
 const config = require('./lib/config');
 const { signAccessToken } = require('./lib/tokens');
+const { validatePasswordPolicy } = require('./lib/passwordPolicy');
 
 const app = express();
 const db = new sqlite3.Database(config.DATABASE_PATH);
@@ -309,7 +310,9 @@ app.post('/api/invitations/:token/accept', async (req, res) => {
     return res.status(400).json({ error: 'Invitation has expired' });
   }
   const { password, fullName } = req.body;
-  if (!password || String(password).length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  if (!password) return res.status(400).json({ error: 'Password is required' });
+  const passwordPolicy = validatePasswordPolicy(password);
+  if (!passwordPolicy.ok) return res.status(400).json({ error: 'Password does not meet security requirements', details: passwordPolicy.errors });
   const existing = await get('SELECT id FROM users WHERE lower(email)=lower(?)', [invitation.email]);
   if (existing) return res.status(400).json({ error: 'A user with this email already exists' });
   const id = genId('U');
@@ -345,6 +348,8 @@ app.post('/api/auth/register', requireAdmin, validate(registerValidation), async
   try {
     const { email, password, fullName, role = 'assistant', clientId = '' } = req.body;
     if (!email || !password || !fullName) return res.status(400).json({ error: 'email, password and fullName are required' });
+    const passwordPolicy = validatePasswordPolicy(password);
+    if (!passwordPolicy.ok) return res.status(400).json({ error: 'Password does not meet security requirements', details: passwordPolicy.errors });
     if (!['advocate', 'assistant', 'admin', 'client'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
     if (role === 'client' && !clientId) return res.status(400).json({ error: 'Client users must be linked to a client record' });
     const id = genId('U');

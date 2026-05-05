@@ -82,7 +82,7 @@ describe('Register validation', () => {
     const res = await request(app)
       .post('/api/auth/register')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ email: 'test@example.com', password: 'password123', fullName: 'Test User', role: 'manager' });
+      .send({ email: 'test@example.com', password: 'Str0ng!Passw0rd2026', fullName: 'Test User', role: 'manager' });
     expect(res.statusCode).toBe(400);
     expect(res.body.error).toBe('Invalid role');
   });
@@ -91,7 +91,7 @@ describe('Register validation', () => {
     const res = await request(app)
       .post('/api/auth/register')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ email: 'test@example.com', password: 'password123', fullName: 'Test User', role: 'client' });
+      .send({ email: 'test@example.com', password: 'Str0ng!Passw0rd2026', fullName: 'Test User', role: 'client' });
     expect(res.statusCode).toBe(400);
     expect(res.body.error).toBe('Client users must be linked to a client record');
   });
@@ -212,5 +212,97 @@ describe('JWT Hardening', () => {
     expect(res.body.user).toHaveProperty('id');
     expect(res.body.user).toHaveProperty('role');
     expect(res.body.user.role).toBe('admin');
+  });
+});
+
+describe('Registration password policy enforcement', () => {
+  test('rejects weak password with 400', async () => {
+    const res = await request(app)
+      .post('/api/auth/register')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ email: 'weakpass@test.com', password: 'weak', fullName: 'Weak User', role: 'assistant' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('Password does not meet security requirements');
+    expect(Array.isArray(res.body.details)).toBe(true);
+  });
+
+  test('rejects short password with 400', async () => {
+    const res = await request(app)
+      .post('/api/auth/register')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ email: 'short@test.com', password: 'Ab1!', fullName: 'Short User', role: 'assistant' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('Password does not meet security requirements');
+  });
+
+  test('rejects common password password123 with 400', async () => {
+    const res = await request(app)
+      .post('/api/auth/register')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ email: 'common@test.com', password: 'password123', fullName: 'Common User', role: 'assistant' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('Password does not meet security requirements');
+  });
+
+  test('accepts strong password and creates user', async () => {
+    const res = await request(app)
+      .post('/api/auth/register')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ email: 'strongpolicy@test.com', password: 'Str0ng!Passw0rd2026', fullName: 'Strong User', role: 'assistant' });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toHaveProperty('id');
+    expect(res.body.email).toBe('strongpolicy@test.com');
+  });
+});
+
+describe('Invitation acceptance password policy enforcement', () => {
+  test('rejects weak password with 400', async () => {
+    // Create an invitation first
+    const inviteRes = await request(app)
+      .post('/api/invitations')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ email: 'weakinvite@test.com' });
+    expect(inviteRes.statusCode).toBe(200);
+    const token = inviteRes.body.token;
+
+    const res = await request(app)
+      .post(`/api/invitations/${token}/accept`)
+      .send({ password: 'weak', fullName: 'Weak Client' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('Password does not meet security requirements');
+    expect(Array.isArray(res.body.details)).toBe(true);
+  });
+
+  test('rejects old 6-character password that previously passed', async () => {
+    const inviteRes = await request(app)
+      .post('/api/invitations')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ email: 'shortinvite@test.com' });
+    expect(inviteRes.statusCode).toBe(200);
+    const token = inviteRes.body.token;
+
+    const res = await request(app)
+      .post(`/api/invitations/${token}/accept`)
+      .send({ password: 'Ab1!xy', fullName: 'Short Client' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('Password does not meet security requirements');
+  });
+
+  test('accepts strong password', async () => {
+    const inviteRes = await request(app)
+      .post('/api/invitations')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ email: 'stronginvite@test.com' });
+    expect(inviteRes.statusCode).toBe(200);
+    const token = inviteRes.body.token;
+
+    const res = await request(app)
+      .post(`/api/invitations/${token}/accept`)
+      .send({ password: 'Str0ng!Passw0rd2026', fullName: 'Strong Client' });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toHaveProperty('message');
+    expect(res.body).toHaveProperty('token');
+    expect(res.body).toHaveProperty('user');
+    expect(res.body.user.role).toBe('client');
   });
 });

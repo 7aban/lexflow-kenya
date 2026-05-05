@@ -35,7 +35,7 @@ describe('Access Control - P3-Access-2', () => {
     const registerRes = await request(app)
       .post('/api/auth/register')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ email: 'test.advocate2@example.com', password: 'password123', fullName: 'Test Advocate Two', role: 'advocate' });
+      .send({ email: 'test.advocate2@example.com', password: 'Str0ng!Passw0rd2026', fullName: 'Test Advocate Two', role: 'advocate' });
     otherAdvocateToken = registerRes.body.token;
     const otherAdvocateName = registerRes.body.fullName;
 
@@ -265,12 +265,12 @@ describe('Access Control - P3-Access-2', () => {
       await request(app)
         .post('/api/auth/register')
         .set('Authorization', `Bearer ${adminToken}`)
-        .send({ email: 'test.client2@example.com', password: 'password123', fullName: 'Test Client Two', role: 'client', clientId: clientIdB });
+        .send({ email: 'test.client2@example.com', password: 'Str0ng!Passw0rd2026', fullName: 'Test Client Two', role: 'client', clientId: clientIdB });
 
       // Login as client B
       const clientLoginB = await request(app)
         .post('/api/auth/client-login')
-        .send({ email: 'test.client2@example.com', password: 'password123' });
+        .send({ email: 'test.client2@example.com', password: 'Str0ng!Passw0rd2026' });
       clientTokenB = clientLoginB.body.token;
     });
 
