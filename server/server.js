@@ -76,6 +76,7 @@ const {
   startReminderJobs,
 } = require('./lib/reminders')({ run, get, all, genId, money, defaultFirmSettings, today, addDays });
 const { monthStart, sixMonthKeys, advocatePerformanceRows, cachedAdvocatePerformance, advocatePerformanceDetail } = require('./lib/performance')({ get, all, today, addDays });
+const { advocateDashboard, staffDashboard } = require('./lib/dashboard')({ get, all, today });
 
 async function ensureColumn(table, column, definition) {
   const columns = await all(`PRAGMA table_info(${table})`);
@@ -516,19 +517,10 @@ app.get('/api/reminder-logs', requireAdmin, async (req, res) => {
 });
 
 app.get('/api/dashboard', requireStaff, async (req, res) => {
-  if (req.user.role === 'advocate') {
-    const name = req.user.fullName || '';
-    const active = await get("SELECT COUNT(*) count FROM matters WHERE stage NOT IN ('Closed','On Hold') AND assignedTo=?", [name]);
-    const hours = await get("SELECT COALESCE(SUM(hours),0) hours, COALESCE(SUM(hours*rate),0) revenue FROM time_entries WHERE date LIKE ? AND attorney=?", [`${today().slice(0, 7)}%`, name]);
-    const overdue = await get('SELECT COUNT(*) count FROM tasks WHERE completed=0 AND dueDate < ? AND assignee=?', [today(), name]);
-    const upcomingEvents = await all('SELECT * FROM appearances WHERE date >= ? AND attorney=? ORDER BY date LIMIT 5', [today(), name]);
-    return res.json({ activeMattersCount: active.count, monthHours: hours.hours, monthRevenue: hours.revenue, overdueTaskCount: overdue.count, upcomingEvents });
-  }
-  const active = await get("SELECT COUNT(*) count FROM matters WHERE stage NOT IN ('Closed','On Hold')");
-  const hours = await get("SELECT COALESCE(SUM(hours),0) hours, COALESCE(SUM(hours*rate),0) revenue FROM time_entries WHERE date LIKE ?", [`${today().slice(0, 7)}%`]);
-  const overdue = await get('SELECT COUNT(*) count FROM tasks WHERE completed=0 AND dueDate < ?', [today()]);
-  const upcomingEvents = await all('SELECT * FROM appearances WHERE date >= ? ORDER BY date LIMIT 5', [today()]);
-  res.json({ activeMattersCount: active.count, monthHours: hours.hours, monthRevenue: hours.revenue, overdueTaskCount: overdue.count, upcomingEvents });
+  const data = req.user.role === 'advocate'
+    ? await advocateDashboard(req.user.fullName || '')
+    : await staffDashboard();
+  res.json(data);
 });
 
 app.get('/api/performance/advocates', requireAdmin, async (req, res) => {
