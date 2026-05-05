@@ -27,7 +27,7 @@ const config = require('./lib/config');
 const app = express();
 const db = new sqlite3.Database(config.DATABASE_PATH);
 const { run, get, all } = createDb(db);
-const { canAccessMatter, canAccessNotice, canAccessConversation, canAccessDocument } = createAccess({ get });
+const { canAccessMatter, canAccessClient, canAccessInvoice, canAccessTask, canAccessTimeEntry, canAccessAppearance, canAccessNotice, canAccessConversation, canAccessDocument } = createAccess({ get });
 const { logClientActivity, logAudit } = createLogging({ run });
 const { notifyStaff } = createNotifications({ run, all, genId });
 const { appBaseUrl, invitationUrl, checkInvitationRateLimit } = createInvitations();
@@ -753,7 +753,10 @@ app.get('/api/matters', async (req, res) => {
 app.get('/api/matters/:id', async (req, res) => {
   const matter = await get('SELECT m.*, c.name clientName, c.email clientEmail, c.phone clientPhone FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.id=?', [req.params.id]);
   if (!matter) return res.status(404).json({ error: 'Matter not found' });
-  if (req.user.role === 'client' && matter.clientId !== req.user.clientId) return res.status(403).json({ error: 'Matter access denied' });
+  if (!(await canAccessMatter(req, req.params.id))) {
+    await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Matter access denied' });
+  }
   const documentParams = [req.params.id];
   let documentWhere = 'd.matterId=?';
   if (req.user.role === 'client') {
@@ -823,6 +826,10 @@ app.post('/api/matters', requireAdvocateOrAdmin, validate(createMatterValidation
   res.json(matter);
 });
 app.patch('/api/matters/:id', requireAdvocateOrAdmin, async (req, res) => {
+  if (!(await canAccessMatter(req, req.params.id))) {
+    await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Matter access denied' });
+  }
   const fields = ['reference','clientId','title','practiceArea','stage','assignedTo','paralegal','openDate','description','court','judge','caseNo','opposingCounsel','priority','billingRate','billingType','fixedFee','retainerBalance','totalBilled','solDate','remindersEnabled','courtRemindersEnabled','invoiceRemindersEnabled'];
   const updates = fields.filter(f => req.body[f] !== undefined);
   if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
@@ -832,6 +839,10 @@ app.patch('/api/matters/:id', requireAdvocateOrAdmin, async (req, res) => {
   matter ? res.json(matter) : res.status(404).json({ error: 'Matter not found' });
 });
 app.patch('/api/matters/:id/status', requireAdvocateOrAdmin, async (req, res) => {
+  if (!(await canAccessMatter(req, req.params.id))) {
+    await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Matter access denied' });
+  }
   await run('UPDATE matters SET stage=? WHERE id=?', [req.body.stage || 'Closed', req.params.id]);
   const matter = await get('SELECT * FROM matters WHERE id=?', [req.params.id]);
   if (matter) await logAudit(req, 'archive', 'matter', req.params.id, `Set matter ${matter.title} stage to ${matter.stage}`);
@@ -858,6 +869,10 @@ async function deleteMatterCascade(matterId) {
   await run('DELETE FROM matters WHERE id=?', [matterId]);
 }
 app.delete('/api/matters/:id', requireAdvocateOrAdmin, async (req, res) => {
+  if (!(await canAccessMatter(req, req.params.id))) {
+    await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Matter access denied' });
+  }
   const matter = await get('SELECT id,title,reference FROM matters WHERE id=?', [req.params.id]);
   if (!matter) return res.status(404).json({ error: 'Matter not found' });
   await run('BEGIN TRANSACTION');
@@ -872,12 +887,57 @@ app.delete('/api/matters/:id', requireAdvocateOrAdmin, async (req, res) => {
   }
 });
 
-app.get('/api/tasks', requireStaff, async (req, res) => res.json(await all('SELECT * FROM tasks ORDER BY dueDate')));
+app.get('/api/tasks', requireStaff, async (req, res) => {
+  let query = 'SELECT * FROM tasks';
+  const params = [];
+  if (req.user?.role === 'advocate') {
+    query += ' WHERE assignee=? OR id IN (SELECT t.id FROM tasks t JOIN matters m ON m.id=t.matterId WHERE m.assignedTo=?)';
+    params.push(req.user.fullName || '', req.user.fullName || '');
+  }
+  query += ' ORDER BY dueDate';
+  res.json(await all(query, params));
+});
 app.post('/api/tasks', requireStaff, async (req, res) => { const id = genId('T'); await run('INSERT INTO tasks (id,matterId,title,completed,assignee,dueDate,auto_generated) VALUES (?,?,?,?,?,?,?)', [id, req.body.matterId, req.body.title, req.body.completed ? 1 : 0, req.body.assignee || '', req.body.dueDate || '', 0]); const task = await get('SELECT * FROM tasks WHERE id=?', [id]); await logAudit(req, 'create', 'task', id, `Created task ${task.title}`); res.json(task); });
-app.patch('/api/tasks/:id', requireAdvocateOrAdmin, async (req, res) => { await run('UPDATE tasks SET completed=COALESCE(?,completed), title=COALESCE(?,title), assignee=COALESCE(?,assignee), dueDate=COALESCE(?,dueDate) WHERE id=?', [req.body.completed === undefined ? null : (req.body.completed ? 1 : 0), req.body.title ?? null, req.body.assignee ?? null, req.body.dueDate ?? null, req.params.id]); const task = await get('SELECT * FROM tasks WHERE id=?', [req.params.id]); if (task) await logAudit(req, req.body.completed !== undefined ? 'complete' : 'update', 'task', req.params.id, `${req.body.completed !== undefined ? (task.completed ? 'Completed' : 'Reopened') : 'Updated'} task ${task.title}`); res.json(task); });
-app.delete('/api/tasks/:id', requireAdvocateOrAdmin, async (req, res) => { const task = await get('SELECT * FROM tasks WHERE id=?', [req.params.id]); await run('DELETE FROM tasks WHERE id=?', [req.params.id]); await logAudit(req, 'delete', 'task', req.params.id, `Deleted task ${task?.title || req.params.id}`); res.json({ id: req.params.id, deleted: true }); });
+app.patch('/api/tasks/:id', requireAdvocateOrAdmin, async (req, res) => {
+  if (!(await canAccessTask(req, req.params.id))) {
+    await recordAuditEvent(req, { action: 'forbidden_task_access', entityType: 'task', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Task access denied' });
+  }
+  await run('UPDATE tasks SET completed=COALESCE(?,completed), title=COALESCE(?,title), assignee=COALESCE(?,assignee), dueDate=COALESCE(?,dueDate) WHERE id=?', [req.body.completed === undefined ? null : (req.body.completed ? 1 : 0), req.body.title ?? null, req.body.assignee ?? null, req.body.dueDate ?? null, req.params.id]);
+  const task = await get('SELECT * FROM tasks WHERE id=?', [req.params.id]);
+  if (task) await logAudit(req, req.body.completed !== undefined ? 'complete' : 'update', 'task', req.params.id, `${req.body.completed !== undefined ? (task.completed ? 'Completed' : 'Reopened') : 'Updated'} task ${task.title}`);
+  res.json(task);
+});
+app.delete('/api/tasks/:id', requireAdvocateOrAdmin, async (req, res) => {
+  if (!(await canAccessTask(req, req.params.id))) {
+    await recordAuditEvent(req, { action: 'forbidden_task_access', entityType: 'task', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Task access denied' });
+  }
+  const task = await get('SELECT * FROM tasks WHERE id=?', [req.params.id]);
+  await run('DELETE FROM tasks WHERE id=?', [req.params.id]);
+  await logAudit(req, 'delete', 'task', req.params.id, `Deleted task ${task?.title || req.params.id}`);
+  res.json({ id: req.params.id, deleted: true });
+});
 
-app.get('/api/time-entries', requireStaff, async (req, res) => res.json(await all('SELECT * FROM time_entries ORDER BY date DESC')));
+app.get('/api/time-entries', requireStaff, async (req, res) => {
+  let query = 'SELECT * FROM time_entries';
+  const params = [];
+  if (req.user?.role === 'advocate') {
+    query += ' WHERE attorney=? OR matterId IN (SELECT id FROM matters WHERE assignedTo=?)';
+    params.push(req.user.fullName || '', req.user.fullName || '');
+  }
+  query += ' ORDER BY date DESC';
+  res.json(await all(query, params));
+});
+app.get('/api/time-entries/:id', requireStaff, async (req, res) => {
+  if (!(await canAccessTimeEntry(req, req.params.id))) {
+    await recordAuditEvent(req, { action: 'forbidden_time_entry_access', entityType: 'time_entry', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Time entry access denied' });
+  }
+  const entry = await get('SELECT * FROM time_entries WHERE id=?', [req.params.id]);
+  entry ? res.json(entry) : res.status(404).json({ error: 'Time entry not found' });
+});
+
 app.post('/api/time-entries', requireStaff, async (req, res) => {
   const taskId = req.body.taskId || '';
   if (taskId) {
@@ -892,6 +952,10 @@ app.post('/api/time-entries', requireStaff, async (req, res) => {
   res.json(entry);
 });
 app.patch('/api/time-entries/:id', requireAdvocateOrAdmin, async (req, res) => {
+  if (!(await canAccessTimeEntry(req, req.params.id))) {
+    await recordAuditEvent(req, { action: 'forbidden_time_entry_access', entityType: 'time_entry', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Time entry access denied' });
+  }
   const fields = ['matterId','taskId','attorney','date','hours','activity','description','rate','billed'];
   const updates = fields.filter(f => req.body[f] !== undefined);
   if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
@@ -906,12 +970,43 @@ app.patch('/api/time-entries/:id', requireAdvocateOrAdmin, async (req, res) => {
   if (entry) await logAudit(req, req.body.billed !== undefined ? 'bill_toggle' : 'update', 'time_entry', req.params.id, `${req.body.billed !== undefined ? (entry.billed ? 'Marked billed' : 'Marked unbilled') : 'Updated'} time entry for matter ${entry.matterId}`);
   entry ? res.json(entry) : res.status(404).json({ error: 'Time entry not found' });
 });
-app.delete('/api/time-entries/:id', requireAdvocateOrAdmin, async (req, res) => { const entry = await get('SELECT * FROM time_entries WHERE id=?', [req.params.id]); await run('DELETE FROM time_entries WHERE id=?', [req.params.id]); await logAudit(req, 'delete', 'time_entry', req.params.id, `Deleted time entry for matter ${entry?.matterId || ''}`); res.json({ id: req.params.id, deleted: true }); });
+app.delete('/api/time-entries/:id', requireAdvocateOrAdmin, async (req, res) => {
+  if (!(await canAccessTimeEntry(req, req.params.id))) {
+    await recordAuditEvent(req, { action: 'forbidden_time_entry_access', entityType: 'time_entry', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Time entry access denied' });
+  }
+  const entry = await get('SELECT * FROM time_entries WHERE id=?', [req.params.id]);
+  await run('DELETE FROM time_entries WHERE id=?', [req.params.id]);
+  await logAudit(req, 'delete', 'time_entry', req.params.id, `Deleted time entry for matter ${entry?.matterId || ''}`);
+  res.json({ id: req.params.id, deleted: true });
+});
 
-app.get('/api/appearances', requireStaff, async (req, res) => res.json(await all('SELECT * FROM appearances ORDER BY date')));
+app.get('/api/appearances', requireStaff, async (req, res) => {
+  let query = 'SELECT * FROM appearances';
+  const params = [];
+  if (req.user?.role === 'advocate') {
+    query += ' WHERE attorney=? OR id IN (SELECT a.id FROM appearances a JOIN matters m ON m.id=a.matterId WHERE m.assignedTo=?)';
+    params.push(req.user.fullName || '', req.user.fullName || '');
+  }
+  query += ' ORDER BY date';
+  res.json(await all(query, params));
+});
 app.get('/api/appearances/upcoming', requireStaff, async (req, res) => res.json(await all('SELECT * FROM appearances WHERE date>=? ORDER BY date LIMIT 20', [today()])));
+app.get('/api/appearances/:id', requireStaff, async (req, res) => {
+  if (!(await canAccessAppearance(req, req.params.id))) {
+    await recordAuditEvent(req, { action: 'forbidden_appearance_access', entityType: 'appearance', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Appearance access denied' });
+  }
+  const appearance = await get('SELECT * FROM appearances WHERE id=?', [req.params.id]);
+  appearance ? res.json(appearance) : res.status(404).json({ error: 'Appearance not found' });
+});
+
 app.post('/api/appearances', requireAdvocateOrAdmin, async (req, res) => { const id = genId('EV'); await run('INSERT INTO appearances (id,matterId,title,date,time,type,location,meetingLink,attorney,prepNote) VALUES (?,?,?,?,?,?,?,?,?,?)', [id, req.body.matterId, req.body.title, req.body.date, req.body.time || '9:00 AM', req.body.type || 'Hearing', req.body.location || '', req.body.meetingLink || '', req.body.attorney || '', req.body.prepNote || '']); const event = await get('SELECT * FROM appearances WHERE id=?', [id]); await logAudit(req, 'create', 'appearance', id, `Scheduled ${event.type || 'appearance'} ${event.title || ''} on ${event.date}`); res.json(event); });
 app.patch('/api/appearances/:id', requireAdvocateOrAdmin, async (req, res) => {
+  if (!(await canAccessAppearance(req, req.params.id))) {
+    await recordAuditEvent(req, { action: 'forbidden_appearance_access', entityType: 'appearance', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Appearance access denied' });
+  }
   const fields = ['matterId','title','date','time','type','location','meetingLink','attorney','prepNote'];
   const updates = fields.filter(f => req.body[f] !== undefined);
   if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
@@ -920,13 +1015,26 @@ app.patch('/api/appearances/:id', requireAdvocateOrAdmin, async (req, res) => {
   if (event) await logAudit(req, 'update', 'appearance', req.params.id, `Updated appearance ${event.title || event.type || req.params.id}`);
   event ? res.json(event) : res.status(404).json({ error: 'Appearance not found' });
 });
-app.delete('/api/appearances/:id', requireAdvocateOrAdmin, async (req, res) => { const event = await get('SELECT * FROM appearances WHERE id=?', [req.params.id]); await run('DELETE FROM appearances WHERE id=?', [req.params.id]); await logAudit(req, 'delete', 'appearance', req.params.id, `Deleted appearance ${event?.title || event?.type || req.params.id}`); res.json({ id: req.params.id, deleted: true }); });
+app.delete('/api/appearances/:id', requireAdvocateOrAdmin, async (req, res) => {
+  if (!(await canAccessAppearance(req, req.params.id))) {
+    await recordAuditEvent(req, { action: 'forbidden_appearance_access', entityType: 'appearance', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Appearance access denied' });
+  }
+  const event = await get('SELECT * FROM appearances WHERE id=?', [req.params.id]);
+  await run('DELETE FROM appearances WHERE id=?', [req.params.id]);
+  await logAudit(req, 'delete', 'appearance', req.params.id, `Deleted appearance ${event?.title || event?.type || req.params.id}`);
+  res.json({ id: req.params.id, deleted: true });
+});
 
 app.get('/api/matters/:id/folders', async (req, res) => {
   if (!(await canAccessMatter(req, req.params.id))) return res.status(403).json({ error: 'Matter access denied' });
   res.json(await matterFolders(req.params.id, req));
 });
 app.post('/api/matters/:id/folders', requireAdvocateOrAdmin, async (req, res) => {
+  if (!(await canAccessMatter(req, req.params.id))) {
+    await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Matter access denied' });
+  }
   const name = String(req.body.name || '').trim();
   if (!name) return res.status(400).json({ error: 'Folder name is required' });
   const matter = await get('SELECT id FROM matters WHERE id=?', [req.params.id]);
@@ -939,10 +1047,14 @@ app.post('/api/matters/:id/folders', requireAdvocateOrAdmin, async (req, res) =>
   res.json(await get('SELECT * FROM folders WHERE id=?', [id]));
 });
 app.patch('/api/folders/:id', requireAdvocateOrAdmin, async (req, res) => {
-  const name = String(req.body.name || '').trim();
-  if (!name) return res.status(400).json({ error: 'Folder name is required' });
   const folder = await get('SELECT * FROM folders WHERE id=?', [req.params.id]);
   if (!folder) return res.status(404).json({ error: 'Folder not found' });
+  if (!(await canAccessMatter(req, folder.matterId))) {
+    await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: folder.matterId, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Matter access denied' });
+  }
+  const name = String(req.body.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Folder name is required' });
   const existing = await get('SELECT id FROM folders WHERE matterId=? AND lower(name)=lower(?) AND id<>?', [folder.matterId, name, req.params.id]);
   if (existing) return res.status(400).json({ error: 'Folder already exists for this matter' });
   await run('UPDATE folders SET name=? WHERE id=?', [name, req.params.id]);
@@ -952,6 +1064,10 @@ app.patch('/api/folders/:id', requireAdvocateOrAdmin, async (req, res) => {
 app.delete('/api/folders/:id', requireAdvocateOrAdmin, async (req, res) => {
   const folder = await get('SELECT * FROM folders WHERE id=?', [req.params.id]);
   if (!folder) return res.status(404).json({ error: 'Folder not found' });
+  if (!(await canAccessMatter(req, folder.matterId))) {
+    await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: folder.matterId, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Matter access denied' });
+  }
   const count = await get('SELECT COUNT(*) count FROM documents WHERE folderId=?', [req.params.id]);
   if (count.count) return res.status(400).json({ error: 'Folder must be empty before it can be deleted' });
   await run('DELETE FROM folders WHERE id=?', [req.params.id]);
@@ -979,6 +1095,11 @@ app.post('/api/matters/:id/documents', async (req, res) => {
     if (!(await canAccessMatter(req, req.params.id))) return res.status(403).json({ error: 'Matter access denied' });
   } else if (!['advocate', 'admin'].includes(req.user.role)) {
     return res.status(403).json({ error: 'Advocate or admin access required' });
+  } else if (req.user.role === 'advocate') {
+    if (!(await canAccessMatter(req, req.params.id))) {
+      await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+      return res.status(403).json({ error: 'Matter access denied' });
+    }
   }
   const { name, mimeType, data, displayName } = req.body;
   if (!name || !data) return res.status(400).json({ error: 'name and data are required' });
@@ -1026,6 +1147,10 @@ app.get('/api/documents/:id/download', async (req, res) => {
 app.patch('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
   const doc = await get('SELECT * FROM documents WHERE id=?', [req.params.id]);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
+  if (doc.matterId && !(await canAccessMatter(req, doc.matterId))) {
+    await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Document access denied' });
+  }
   const updates = [];
   const values = [];
   if (req.body.folderId !== undefined) {
@@ -1051,7 +1176,17 @@ app.patch('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
   const updated = await get(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=?`, [req.params.id]);
   res.json(publicDocument(updated));
 });
-app.delete('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => { const doc = await get('SELECT id,name,matterId FROM documents WHERE id=?', [req.params.id]); await run('DELETE FROM documents WHERE id=?', [req.params.id]); await logAudit(req, 'delete', 'document', req.params.id, `Deleted document ${doc?.name || req.params.id}`); res.json({ id: req.params.id, deleted: true }); });
+app.delete('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
+  const doc = await get('SELECT id,name,matterId FROM documents WHERE id=?', [req.params.id]);
+  if (!doc) return res.status(404).json({ error: 'Document not found' });
+  if (doc.matterId && !(await canAccessMatter(req, doc.matterId))) {
+    await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Document access denied' });
+  }
+  await run('DELETE FROM documents WHERE id=?', [req.params.id]);
+  await logAudit(req, 'delete', 'document', req.params.id, `Deleted document ${doc?.name || req.params.id}`);
+  res.json({ id: req.params.id, deleted: true });
+});
 
 app.get('/api/matters/:id/notes', async (req, res) => { if (!(await canAccessMatter(req, req.params.id))) return res.status(403).json({ error: 'Matter access denied' }); if (req.user.role === 'client') return res.json([]); res.json(await all('SELECT * FROM case_notes WHERE matterId=? ORDER BY createdAt DESC', [req.params.id])); });
 app.post('/api/matters/:id/notes', async (req, res) => {
@@ -1074,6 +1209,16 @@ app.get('/api/invoices', async (req, res) => {
   if (req.user.role === 'client') return res.json(await all(`SELECT i.*, m.title matterTitle, m.reference, c.name clientName FROM invoices i LEFT JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId WHERE i.clientId=? ORDER BY i.date DESC, i.number DESC`, [req.user.clientId || '']));
   if (req.user.role === 'advocate') return res.json(await all(`SELECT i.*, m.title matterTitle, m.reference, c.name clientName FROM invoices i LEFT JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId WHERE m.assignedTo=? ORDER BY i.date DESC, i.number DESC`, [req.user.fullName || '']));
   res.json(await all(`SELECT i.*, m.title matterTitle, m.reference, c.name clientName FROM invoices i LEFT JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId ORDER BY i.date DESC, i.number DESC`));
+});
+
+app.get('/api/invoices/:id', async (req, res) => {
+  const invoice = await invoiceWithDetails(req.params.id);
+  if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+  if (!(await canAccessInvoice(req, req.params.id))) {
+    await recordAuditEvent(req, { action: 'forbidden_invoice_access', entityType: 'invoice', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Invoice access denied' });
+  }
+  res.json(invoice);
 });
 app.post('/api/invoices/generate', requireAdvocateOrAdmin, validate(generateInvoiceValidation), async (req, res) => {
   try {
@@ -1110,9 +1255,13 @@ async function invoiceWithDetails(id) {
   invoice.items = await all('SELECT * FROM invoice_items WHERE invoiceId=? ORDER BY date', [id]);
   return invoice;
 }
-app.get('/api/invoices/:id', async (req, res) => { const invoice = await invoiceWithDetails(req.params.id); if (!invoice) return res.status(404).json({ error: 'Invoice not found' }); if (req.user.role === 'client' && invoice.clientId !== req.user.clientId) return res.status(403).json({ error: 'Invoice access denied' }); res.json(invoice); });
+app.get('/api/invoices/:id', async (req, res) => { const invoice = await invoiceWithDetails(req.params.id); if (!invoice) return res.status(404).json({ error: 'Invoice not found' }); if (!(await canAccessInvoice(req, req.params.id))) return res.status(403).json({ error: 'Invoice access denied' }); res.json(invoice); });
 app.patch('/api/invoices/:id/status', requireAdmin, async (req, res) => { if (!['Paid', 'Outstanding', 'Overdue'].includes(req.body.status)) return res.status(400).json({ error: 'Invalid invoice status' }); await run('UPDATE invoices SET status=? WHERE id=?', [req.body.status, req.params.id]); const invoice = await invoiceWithDetails(req.params.id); await logAudit(req, 'status', 'invoice', req.params.id, `Set invoice ${invoice?.number || req.params.id} status to ${req.body.status}`); res.json(invoice); });
 app.delete('/api/invoices/:id', requireAdvocateOrAdmin, async (req, res) => {
+  if (!(await canAccessInvoice(req, req.params.id))) {
+    await recordAuditEvent(req, { action: 'forbidden_invoice_access', entityType: 'invoice', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Invoice access denied' });
+  }
   const invoice = await get('SELECT * FROM invoices WHERE id=?', [req.params.id]);
   if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
   if (invoice.status === 'Paid') return res.status(400).json({ error: 'Paid invoices cannot be deleted' });
@@ -1122,9 +1271,12 @@ app.delete('/api/invoices/:id', requireAdvocateOrAdmin, async (req, res) => {
   res.json({ id: req.params.id, deleted: true });
 });
 app.get('/api/invoices/:id/pdf', async (req, res) => {
+  if (!(await canAccessInvoice(req, req.params.id))) {
+    await recordAuditEvent(req, { action: 'forbidden_invoice_access', entityType: 'invoice', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Invoice access denied' });
+  }
   const invoice = await invoiceWithDetails(req.params.id);
   if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
-  if (req.user.role === 'client' && invoice.clientId !== req.user.clientId) return res.status(403).json({ error: 'Invoice access denied' });
   const firm = await getFirmSettings();
   const subtotal = Number(invoice.amount || 0);
   const vat = subtotal * 0.16;
@@ -1197,7 +1349,7 @@ app.get('/api/search', requireStaff, async (req, res) => {
     const name = req.user.fullName || '';
     const matters = await all(`SELECT m.id,m.title,m.reference,c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.assignedTo=? AND (m.title LIKE ? OR m.reference LIKE ? OR c.name LIKE ?) LIMIT 5`, [name, q, q, q]);
     const clients = await all(`SELECT DISTINCT c.id,c.name,c.email,c.phone FROM clients c INNER JOIN matters m ON m.clientId=c.id WHERE m.assignedTo=? AND (c.name LIKE ? OR c.email LIKE ? OR c.phone LIKE ?) LIMIT 5`, [name, q, q, q]);
-    const tasks = await all(`SELECT t.id,t.title,t.assignee,t.matterId FROM tasks t WHERE t.assignee=? AND (t.title LIKE ? OR t.assignee LIKE ?) LIMIT 5`, [name, q, q]);
+    const tasks = await all(`SELECT t.id,t.title,t.assignee,t.matterId FROM tasks t LEFT JOIN matters m ON m.id=t.matterId WHERE (t.assignee=? OR m.assignedTo=?) AND (t.title LIKE ? OR t.assignee LIKE ?) LIMIT 5`, [name, name, q, q]);
     const invoices = await all(`SELECT i.id,i.number,i.description,i.status,i.matterId FROM invoices i INNER JOIN matters m ON m.id=i.matterId WHERE m.assignedTo=? AND (i.number LIKE ? OR i.description LIKE ? OR i.status LIKE ?) LIMIT 5`, [name, q, q, q]);
     const appearances = await all(`SELECT a.id,a.title,a.date,a.time,a.type,a.location,a.attorney,a.matterId FROM appearances a LEFT JOIN matters m ON m.id=a.matterId WHERE (a.attorney=? OR m.assignedTo=?) AND (a.title LIKE ? OR a.location LIKE ? OR a.type LIKE ?) LIMIT 5`, [name, name, q, q, q]);
     const documents = await all(`SELECT d.id,d.displayName,d.name,d.type,d.matterId FROM documents d INNER JOIN matters m ON m.id=d.matterId WHERE m.assignedTo=? AND (d.displayName LIKE ? OR d.name LIKE ?) LIMIT 5`, [name, q, q]);
@@ -1212,6 +1364,7 @@ app.get('/api/search', requireStaff, async (req, res) => {
       ...conversations.map(conversation => ({ type: 'Conversation', id: conversation.id, matterId: conversation.matterId, title: conversation.subject, subtitle: conversation.matterTitle ? `Matter: ${conversation.matterTitle}` : 'Conversation' })),
     ]);
   }
+  // admin/assistant - no scoping
   const matters = await all(`SELECT m.id,m.title,m.reference,c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.title LIKE ? OR m.reference LIKE ? OR c.name LIKE ? LIMIT 5`, [q, q, q]);
   const clients = await all('SELECT id,name,email,phone FROM clients WHERE name LIKE ? OR email LIKE ? OR phone LIKE ? LIMIT 5', [q, q, q]);
   const tasks = await all(`SELECT id,title,assignee,matterId FROM tasks WHERE title LIKE ? OR assignee LIKE ? LIMIT 5`, [q, q]);
