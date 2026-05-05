@@ -309,6 +309,36 @@ describe('Invitation acceptance password policy enforcement', () => {
   });
 });
 
+describe('Users tokenVersion schema', () => {
+  const db = new sqlite3.Database(config.DATABASE_PATH);
+  const dbGet = (sql, params = []) => new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => err ? reject(err) : resolve(row));
+  });
+  const dbAll = (sql, params = []) => new Promise((resolve, reject) => {
+    db.all(sql, params, (err, rows) => err ? reject(err) : resolve(rows));
+  });
+
+  test('users table has tokenVersion column', async () => {
+    const columns = await dbAll('PRAGMA table_info(users)');
+    const tokenVersionCol = columns.find(c => c.name === 'tokenVersion');
+    expect(tokenVersionCol).toBeDefined();
+    expect(tokenVersionCol.type).toBe('INTEGER');
+    expect(tokenVersionCol.dflt_value).toBe('1');
+  });
+
+  test('seeded users have tokenVersion = 1', async () => {
+    const users = await dbAll('SELECT id, email, tokenVersion FROM users');
+    expect(users.length).toBeGreaterThan(0);
+    for (const user of users) {
+      expect(user.tokenVersion).toBe(1);
+    }
+  });
+
+  afterAll(() => {
+    db.close();
+  });
+});
+
 describe('Change password', () => {
   const db = new sqlite3.Database(config.DATABASE_PATH);
   const dbGet = (sql, params = []) => new Promise((resolve, reject) => {

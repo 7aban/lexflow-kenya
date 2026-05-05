@@ -169,6 +169,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, userId TEXT NOT NULL, type TEXT, matterId TEXT, clientId TEXT, title TEXT, body TEXT, createdAt TEXT, readAt TEXT)`);
 
   await ensureClientUserSupport();
+  await ensureColumn('users', 'tokenVersion', 'INTEGER DEFAULT 1');
   await ensureColumn('appearances', 'meetingLink', 'TEXT');
   await ensureColumn('documents', 'source', "TEXT DEFAULT 'firm'");
   await ensureColumn('documents', 'folderId', 'TEXT');
@@ -207,7 +208,7 @@ async function initDb() {
     }
     
     const hashedPassword = await hashPassword(adminPassword);
-    await run('INSERT INTO users (id,email,password,fullName,role,createdAt) VALUES (?,?,?,?,?,?)', [genId('U'), adminEmail, hashedPassword, adminName, 'admin', new Date().toISOString()]);
+    await run('INSERT INTO users (id,email,password,fullName,role,createdAt,tokenVersion) VALUES (?,?,?,?,?,?,?)', [genId('U'), adminEmail, hashedPassword, adminName, 'admin', new Date().toISOString(), 1]);
     if (!config.isTest) {
       console.log(`Initial admin user created: ${adminEmail}`);
       if (!config.isProduction) {
