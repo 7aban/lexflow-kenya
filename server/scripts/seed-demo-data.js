@@ -1,6 +1,6 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
-const bcrypt = require('bcryptjs');
+const { hashPassword } = require('../lib/passwords');
 
 const dbPath = path.join(__dirname, '..', 'lawfirm.db');
 const db = new sqlite3.Database(dbPath);
@@ -75,7 +75,7 @@ async function insertAudit(action, entityType, entityId, summary, userName = 'De
 async function main() {
   console.log(`Seeding LexFlow demo database at ${dbPath}`);
   await createSchema();
-  const password = await bcrypt.hash('password123', 10);
+  const password = await hashPassword('password123');
 
   await run('INSERT INTO firm_settings (id,name,logo,primaryColor,accentColor,websiteURL,email,phone,address) VALUES (?,?,?,?,?,?,?,?,?)', ['default', 'Achoki & Co. Advocates', '', '#0F1B33', '#D4A34A', 'https://lexflow.co.ke', 'info@achokilaw.co.ke', '+254 711 204 880', 'ICEA Building, Kenyatta Avenue, Nairobi']);
   await run('INSERT INTO reminder_settings (id,remindersEnabled,whatsappEnabled,emailEnabled) VALUES (?,?,?,?)', ['default', 1, 0, 0]);

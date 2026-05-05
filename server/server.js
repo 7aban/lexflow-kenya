@@ -3,7 +3,7 @@ const cors = require('cors');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const crypto = require('crypto');
-const bcrypt = require('bcryptjs');
+const { hashPassword, verifyPassword } = require('./lib/passwords');
 const jwt = require('jsonwebtoken');
 const PDFDocument = require('pdfkit');
 const helmet = require('helmet');
@@ -205,7 +205,7 @@ async function initDb() {
       }
     }
     
-    const hashedPassword = await bcrypt.hash(adminPassword, 10);
+    const hashedPassword = await hashPassword(adminPassword);
     await run('INSERT INTO users (id,email,password,fullName,role,createdAt) VALUES (?,?,?,?,?,?)', [genId('U'), adminEmail, hashedPassword, adminName, 'admin', new Date().toISOString()]);
     if (!config.isTest) {
       console.log(`Initial admin user created: ${adminEmail}`);
@@ -246,7 +246,7 @@ app.post('/api/auth/login', authLimiter, validate(loginValidation), async (req, 
   try {
     const { email, password } = req.body;
     const user = await get('SELECT * FROM users WHERE lower(email)=lower(?)', [email || '']);
-    if (!user || !(await bcrypt.compare(password || '', user.password || ''))) {
+    if (!user || !(await verifyPassword(password || '', user.password || ''))) {
       // Log failed login attempt
       await recordAuditEvent(req, { action: 'login_failure', entityType: 'user', metadata: { email, reason: 'invalid credentials' } }).catch(() => {});
       return res.status(401).json({ error: 'Invalid email or password' });
@@ -263,7 +263,7 @@ app.post('/api/auth/client-login', authLimiter, validate(loginValidation), async
   try {
     const { email, password } = req.body;
     const user = await get('SELECT * FROM users WHERE lower(email)=lower(?) AND role=?', [email || '', 'client']);
-    if (!user || !(await bcrypt.compare(password || '', user.password || ''))) return res.status(401).json({ error: 'Invalid client email or password' });
+    if (!user || !(await verifyPassword(password || '', user.password || ''))) return res.status(401).json({ error: 'Invalid client email or password' });
     const token = signAccessToken(user);
     res.json({ token, user: { id: user.id, email: user.email, fullName: user.fullName, name: user.fullName, role: user.role, clientId: user.clientId || '' } });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -315,7 +315,7 @@ app.post('/api/invitations/:token/accept', async (req, res) => {
   const id = genId('U');
   const name = fullName || invitation.email.split('@')[0];
   const createdAt = new Date().toISOString();
-  await run('INSERT INTO users (id,email,password,fullName,role,clientId,createdAt) VALUES (?,?,?,?,?,?,?)', [id, invitation.email, await bcrypt.hash(password, 10), name, 'client', invitation.clientId || '', createdAt]);
+  await run('INSERT INTO users (id,email,password,fullName,role,clientId,createdAt) VALUES (?,?,?,?,?,?,?)', [id, invitation.email, await hashPassword(password), name, 'client', invitation.clientId || '', createdAt]);
   await run("UPDATE invitations SET status='used' WHERE token=?", [req.params.token]);
   const token = signAccessToken({ id, role: 'client', fullName: name, clientId: invitation.clientId || '', email: invitation.email });
   res.json({ message: 'Client portal account created.', token, user: { id, email: invitation.email, fullName: name, name, role: 'client', clientId: invitation.clientId || '' } });
@@ -349,7 +349,7 @@ app.post('/api/auth/register', requireAdmin, validate(registerValidation), async
     if (role === 'client' && !clientId) return res.status(400).json({ error: 'Client users must be linked to a client record' });
     const id = genId('U');
     const createdAt = new Date().toISOString();
-    await run('INSERT INTO users (id,email,password,fullName,role,clientId,createdAt) VALUES (?,?,?,?,?,?,?)', [id, email, await bcrypt.hash(password, 10), fullName, role, role === 'client' ? clientId : '', createdAt]);
+    await run('INSERT INTO users (id,email,password,fullName,role,clientId,createdAt) VALUES (?,?,?,?,?,?,?)', [id, email, await hashPassword(password), fullName, role, role === 'client' ? clientId : '', createdAt]);
     await logAudit(req, 'create', 'user', id, `Created ${role} user ${email}`);
     res.json({ id, email, fullName, name: fullName, role, clientId: role === 'client' ? clientId : '', createdAt });
   } catch (err) { res.status(400).json({ error: err.message }); }
