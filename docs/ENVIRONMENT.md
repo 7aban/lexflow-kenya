@@ -37,6 +37,7 @@ LexFlow uses environment variables for configuration. This document describes th
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `JWT_SECRET` | Secret for signing JWT tokens (min 32 chars) | `a1b2c3d4e5f6...` |
+| `JWT_EXPIRES_IN` | Access token expiry duration | `1h` (production), `8h` (dev) |
 | `CORS_ORIGINS` | Comma-separated allowed origins | `https://lexflow.co.ke` |
 | `SEED_ADMIN_PASSWORD` | Strong password for initial admin (12+ chars) | `MyStr0ngP@ssw0rd2026!` |
 
@@ -45,6 +46,9 @@ LexFlow uses environment variables for configuration. This document describes th
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `NODE_ENV` | `development` | Set to `production` in production |
+| `JWT_EXPIRES_IN` | `1h` (prod), `8h` (dev) | Access token expiry (e.g., `1h`, `2h`, `15m`) |
+| `JWT_ISSUER` | (none) | JWT issuer for extra validation |
+| `JWT_AUDIENCE` | (none) | JWT audience for extra validation |
 | `PORT` | `5000` | Server port |
 | `DATABASE_PATH` | `lawfirm.db` | Path to SQLite database |
 | `BACKUP_DIR` | `../backups` | Backup storage directory |

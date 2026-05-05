@@ -50,6 +50,28 @@ const JWT_SECRET = (() => {
   return secret;
 })();
 
+// JWT Access Token Expiry - configurable
+const JWT_EXPIRES_IN = (() => {
+  const expiresIn = process.env.JWT_EXPIRES_IN;
+  if (expiresIn) {
+    return expiresIn;
+  }
+  if (isTest) {
+    return '1h'; // Short expiry for tests
+  }
+  if (isProduction) {
+    return '1h'; // Short-lived tokens in production - use refresh tokens for longer sessions
+  }
+  return '8h'; // Development default
+})();
+
+// JWT algorithm constraint
+const JWT_ALGORITHM = 'HS256';
+
+// Optional JWT issuer/audience for extra validation
+const JWT_ISSUER = process.env.JWT_ISSUER || '';
+const JWT_AUDIENCE = process.env.JWT_AUDIENCE || '';
+
 // Port configuration
 const PORT = parseInt(process.env.PORT || '5000', 10);
 
@@ -134,6 +156,10 @@ module.exports = {
   isTest,
   nodeEnv: process.env.NODE_ENV || 'development',
   JWT_SECRET,
+  JWT_EXPIRES_IN,
+  JWT_ALGORITHM,
+  JWT_ISSUER,
+  JWT_AUDIENCE,
   PORT,
   CORS_ORIGINS,
   DATABASE_PATH,

@@ -23,6 +23,7 @@ const createInvitations = require('./lib/invitations');
 const createAudit = require('./lib/audit');
 const { cleanDocumentName, fileTypeFor, documentListColumns, clientDocumentVisibilitySql, publicDocument, publicNotice, MAX_NOTICE_ATTACHMENTS, MAX_NOTICE_ATTACHMENT_BYTES, allowedNoticeMimeTypes, noticeMimeTypeFor, decodeAttachmentData, prepareNoticeAttachments } = require('./lib/documents');
 const config = require('./lib/config');
+const { signAccessToken } = require('./lib/tokens');
 
 const app = express();
 const db = new sqlite3.Database(config.DATABASE_PATH);
@@ -32,7 +33,6 @@ const { logClientActivity, logAudit } = createLogging({ run });
 const { notifyStaff } = createNotifications({ run, all, genId });
 const { appBaseUrl, invitationUrl, checkInvitationRateLimit } = createInvitations();
 const { recordAuditEvent } = createAudit({ run, get });
-const JWT_SECRET = config.JWT_SECRET;
 
 // CORS configuration
 const corsOptions = {
@@ -252,7 +252,7 @@ app.post('/api/auth/login', authLimiter, validate(loginValidation), async (req, 
       return res.status(401).json({ error: 'Invalid email or password' });
     }
     if (user.role === 'client') return res.status(403).json({ error: 'Please use the Client Portal login.' });
-    const token = jwt.sign({ userId: user.id, role: user.role, fullName: user.fullName, clientId: user.clientId || '' }, JWT_SECRET, { expiresIn: '8h' });
+    const token = signAccessToken(user);
     // Log successful login
     await recordAuditEvent(req, { action: 'login_success', entityType: 'user', entityId: user.id, metadata: { email: user.email, role: user.role } }).catch(() => {});
     res.json({ token, user: { id: user.id, email: user.email, fullName: user.fullName, name: user.fullName, role: user.role, clientId: user.clientId || '' } });
@@ -264,7 +264,7 @@ app.post('/api/auth/client-login', authLimiter, validate(loginValidation), async
     const { email, password } = req.body;
     const user = await get('SELECT * FROM users WHERE lower(email)=lower(?) AND role=?', [email || '', 'client']);
     if (!user || !(await bcrypt.compare(password || '', user.password || ''))) return res.status(401).json({ error: 'Invalid client email or password' });
-    const token = jwt.sign({ userId: user.id, role: user.role, fullName: user.fullName, clientId: user.clientId || '' }, JWT_SECRET, { expiresIn: '8h' });
+    const token = signAccessToken(user);
     res.json({ token, user: { id: user.id, email: user.email, fullName: user.fullName, name: user.fullName, role: user.role, clientId: user.clientId || '' } });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -317,7 +317,7 @@ app.post('/api/invitations/:token/accept', async (req, res) => {
   const createdAt = new Date().toISOString();
   await run('INSERT INTO users (id,email,password,fullName,role,clientId,createdAt) VALUES (?,?,?,?,?,?,?)', [id, invitation.email, await bcrypt.hash(password, 10), name, 'client', invitation.clientId || '', createdAt]);
   await run("UPDATE invitations SET status='used' WHERE token=?", [req.params.token]);
-  const token = jwt.sign({ userId: id, role: 'client', fullName: name, clientId: invitation.clientId || '' }, JWT_SECRET, { expiresIn: '8h' });
+  const token = signAccessToken({ id, role: 'client', fullName: name, clientId: invitation.clientId || '', email: invitation.email });
   res.json({ message: 'Client portal account created.', token, user: { id, email: invitation.email, fullName: name, name, role: 'client', clientId: invitation.clientId || '' } });
 });
 app.put('/api/firm-settings', authenticate, requireAdmin, async (req, res) => {

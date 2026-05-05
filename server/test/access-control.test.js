@@ -61,9 +61,9 @@ describe('Access Control - P3-Access-2', () => {
       
       // Create invoice for Sarah's matter
        const invoiceRes = await request(app)
-         .post('/api/invoices/generate')
-         .set('Authorization', `Bearer ${adminToken}`)
-         .send({ matterId: matterIdAssignedToSarah });
+          .post('/api/invoices/generate')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ matterId: matterIdAssignedToSarah });
        if (invoiceRes.statusCode === 200) {
          invoiceIdForSarah = invoiceRes.body.id;
        } else {
@@ -81,29 +81,29 @@ describe('Access Control - P3-Access-2', () => {
          }
        }
       
-      // Create task for Sarah's matter
-      const taskRes = await request(app)
-        .post('/api/tasks')
-        .set('Authorization', `Bearer ${adminToken}`)
-        .send({ matterId: matterIdAssignedToSarah, title: 'Sarah Test Task', assignee: sarahName });
+       // Create task for Sarah's matter
+       const taskRes = await request(app)
+         .post('/api/tasks')
+         .set('Authorization', `Bearer ${adminToken}`)
+         .send({ matterId: matterIdAssignedToSarah, title: 'Sarah Test Task', assignee: sarahName });
       if (taskRes.statusCode === 200) {
         taskIdForSarah = taskRes.body.id;
       }
       
-      // Create appearance for Sarah's matter
-      const appRes = await request(app)
-        .post('/api/appearances')
-        .set('Authorization', `Bearer ${adminToken}`)
-        .send({ matterId: matterIdAssignedToSarah, title: 'Sarah Test Appearance', attorney: sarahName, date: '2026-06-01' });
+       // Create appearance for Sarah's matter
+       const appRes = await request(app)
+         .post('/api/appearances')
+         .set('Authorization', `Bearer ${adminToken}`)
+         .send({ matterId: matterIdAssignedToSarah, title: 'Sarah Test Appearance', attorney: sarahName, date: '2026-06-01' });
       if (appRes.statusCode === 200) {
         appearanceIdForSarah = appRes.body.id;
       }
       
-      // Create time entry for Sarah's matter
+       // Create time entry for Sarah's matter
        const entryRes = await request(app)
-         .post('/api/time-entries')
-         .set('Authorization', `Bearer ${adminToken}`)
-         .send({ matterId: matterIdAssignedToSarah, attorney: sarahName, hours: 1, rate: 10000, date: '2026-05-05' });
+          .post('/api/time-entries')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ matterId: matterIdAssignedToSarah, attorney: sarahName, hours: 1, rate: 10000, date: '2026-05-05' });
       if (entryRes.statusCode === 200) {
         timeEntryIdForSarah = entryRes.body.id;
       }

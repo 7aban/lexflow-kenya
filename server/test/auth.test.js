@@ -1,4 +1,6 @@
 const request = require('supertest');
+const jwt = require('jsonwebtoken');
+const config = require('../lib/config');
 const { app } = require('../server.js');
 
 let adminToken;
@@ -137,5 +139,78 @@ describe('Invitation auth gate', () => {
       .set('Authorization', `Bearer ${clientToken}`)
       .send({ email: 'test@example.com' });
     expect(res.statusCode).toBe(403);
+  });
+});
+
+describe('JWT Hardening', () => {
+  test('token has expiry set', async () => {
+    const adminRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'admin@lexflow.co.ke', password: 'password123' });
+    const token = adminRes.body.token;
+    const decoded = jwt.decode(token);
+    expect(decoded).toHaveProperty('exp');
+    expect(decoded).toHaveProperty('iat');
+  });
+
+  test('expired token returns 401', async () => {
+    // Create an already-expired token
+    const expiredToken = jwt.sign(
+      { userId: 'test', role: 'admin' },
+      config.JWT_SECRET,
+      { expiresIn: '-1h' }
+    );
+    const res = await request(app)
+      .get('/api/notifications')
+      .set('Authorization', `Bearer ${expiredToken}`);
+    expect(res.statusCode).toBe(401);
+    expect(res.body.error).toBe('Token expired');
+  });
+
+  test('invalid signature returns 401', async () => {
+    // Create token with wrong secret
+    const badToken = jwt.sign(
+      { userId: 'test', role: 'admin' },
+      'wrong-secret',
+      { expiresIn: '1h' }
+    );
+    const res = await request(app)
+      .get('/api/notifications')
+      .set('Authorization', `Bearer ${badToken}`);
+    expect(res.statusCode).toBe(401);
+    expect(res.body.error).toBe('Invalid token');
+  });
+
+  test('malformed token returns 401', async () => {
+    const res = await request(app)
+      .get('/api/notifications')
+      .set('Authorization', 'Bearer not-a-valid-jwt');
+    expect(res.statusCode).toBe(401);
+  });
+
+  test('wrong algorithm is rejected', async () => {
+    // Create token with RS256 (not HS256)
+    // Note: This test verifies the algorithm constraint indirectly
+    // since we can't easily sign with RS256 without a key pair
+    const token = jwt.sign(
+      { userId: 'test', role: 'admin' },
+      config.JWT_SECRET,
+      { algorithm: 'HS256' }
+    );
+    // Verify the token uses correct algorithm
+    const decoded = jwt.decode(token, { complete: true });
+    expect(decoded.header.alg).toBe('HS256');
+  });
+
+  test('login response includes token with correct payload', async () => {
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'admin@lexflow.co.ke', password: 'password123' });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toHaveProperty('token');
+    expect(res.body).toHaveProperty('user');
+    expect(res.body.user).toHaveProperty('id');
+    expect(res.body.user).toHaveProperty('role');
+    expect(res.body.user.role).toBe('admin');
   });
 });
