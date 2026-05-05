@@ -1,34 +1,47 @@
+const fs = require('fs').promises;
 const path = require('path');
 const { createBackup, rotateBackups, verifyBackup, getBackupList } = require('../lib/backup')({
   serverDir: path.join(__dirname, '..'),
   backupDir: path.join(__dirname, '..', 'backups'),
 });
 
+const logFile = path.join(__dirname, '..', 'logs', 'backup.log');
+
+async function log(message) {
+  const timestamp = new Date().toISOString();
+  const line = `[${timestamp}] ${message}\n`;
+  await fs.mkdir(path.dirname(logFile), { recursive: true }).catch(() => {});
+  await fs.appendFile(logFile, line);
+  console.log(message);
+}
+
 async function main() {
   try {
-    console.log('Creating backup...');
+    await log('Creating backup...');
     const result = await createBackup();
-    console.log(`Backup created: ${result.filename}`);
-    console.log(`Size: ${result.size} bytes`);
+    await log(`Backup created: ${result.filename}`);
+    await log(`Size: ${result.size} bytes`);
 
-    console.log('Verifying backup...');
+    await log('Verifying backup...');
     const verification = await verifyBackup(result.backupPath);
-    console.log(`Verification: ${verification.result}`);
+    await log(`Verification: ${verification.result}`);
 
-    console.log('Rotating old backups...');
+    await log('Rotating old backups...');
     const rotation = await rotateBackups(7);
-    console.log(`Removed: ${rotation.removed}, Remaining: ${rotation.remaining}`);
+    await log(`Removed: ${rotation.removed}, Remaining: ${rotation.remaining}`);
 
-    console.log('Current backups:');
+    await log('Current backups:');
     const backups = await getBackupList();
     backups.forEach(b => {
-      console.log(`  ${b.filename} (${b.size} bytes, ${b.createdAt})`);
+      log(`  ${b.filename} (${b.size} bytes, ${b.createdAt})`);
     });
 
-    console.log('Backup completed successfully.');
+    await log('Backup completed successfully.');
     process.exit(0);
   } catch (err) {
-    console.error('Backup failed:', err.message);
+    const errorMsg = `Backup failed: ${err.message}`;
+    log(errorMsg);
+    console.error(errorMsg);
     process.exit(1);
   }
 }
