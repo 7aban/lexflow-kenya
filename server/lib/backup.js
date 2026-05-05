@@ -14,7 +14,8 @@ module.exports = ({ serverDir, backupDir }) => {
     const ts = now.toISOString();
     const datePart = ts.slice(0, 10).replace(/-/g, '');
     const timePart = ts.slice(11, 19).replace(/:/g, '');
-    const timestamp = `${datePart}-${timePart}`;
+    const msPart = String(now.getMilliseconds()).padStart(3, '0');
+    const timestamp = `${datePart}-${timePart}${msPart}`;
     const filename = `lawfirm-${timestamp}.db`;
     const backupPath = path.join(backupDir, filename);
     await fs.copyFile(source, backupPath);

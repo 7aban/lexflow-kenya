@@ -44,7 +44,7 @@ describe('Backup Helper Tests', () => {
   test('createBackup creates a timestamped .db file', async () => {
     const result = await backupHelper.createBackup();
     expect(result.success).toBe(true);
-    expect(result.filename).toMatch(/^lawfirm-\d{8}-\d{6}\.db$/);
+    expect(result.filename).toMatch(/^lawfirm-\d{8}-\d{9}\.db$/);
     expect(result.size).toBeGreaterThan(0);
     expect(result.backupPath).toBeDefined();
     
@@ -85,16 +85,19 @@ describe('Backup Helper Tests', () => {
   });
 
   test('rotateBackups removes old backups beyond maxBackups', async () => {
+    // Create 5 backups with small delays to ensure distinct mtime
     for (let i = 0; i < 5; i++) {
       await backupHelper.createBackup();
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
 
+    const beforeRotation = await backupHelper.getBackupList();
     const rotation = await backupHelper.rotateBackups(2);
-    expect(rotation.removed).toBeGreaterThanOrEqual(3);
-    expect(rotation.remaining).toBeLessThanOrEqual(2);
+    expect(rotation.removed).toBe(beforeRotation.length - 2);
+    expect(rotation.remaining).toBe(2);
 
     const backups = await backupHelper.getBackupList();
-    expect(backups.length).toBeLessThanOrEqual(2);
+    expect(backups.length).toBe(2);
   }, 15000);
 
   test('verifyBackup rejects invalid/non-SQLite file', async () => {
