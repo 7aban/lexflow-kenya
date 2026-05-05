@@ -26,6 +26,20 @@ beforeAll(async () => {
   clientToken = clientRes.body.token;
 });
 
+afterAll(async () => {
+  const db = new sqlite3.Database(config.DATABASE_PATH);
+  const run = (sql, params = []) => new Promise((resolve, reject) => {
+    db.run(sql, params, (err) => err ? reject(err) : resolve());
+  });
+  const { hashPassword } = require('../lib/passwords');
+  try {
+    const defaultHash = await hashPassword('password123');
+    await run("UPDATE users SET password=? WHERE email IN (?,?)", [defaultHash, 'admin@lexflow.co.ke', 'sarah.mwangi@achokilaw.co.ke']);
+  } finally {
+    db.close();
+  }
+});
+
 describe('Auth API', () => {
   test('POST /api/auth/login with correct credentials succeeds', () => {
     expect(adminToken).toBeDefined();
