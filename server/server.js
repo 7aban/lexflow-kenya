@@ -178,6 +178,7 @@ async function initDb() {
   await ensureColumn('documents', 'clientVisible', 'INTEGER DEFAULT 0');
   await ensureColumn('documents', 'displayName', 'TEXT');
   await ensureColumn('documents', 'uploadedBy', 'TEXT');
+  await ensureColumn('documents', 'deletedAt', 'TEXT');
   await ensureColumn('firm_notices', 'clientId', "TEXT DEFAULT ''");
   await run("UPDATE documents SET clientVisible=1 WHERE noticeId IS NOT NULL AND noticeId<>'' AND COALESCE(clientVisible,0)<>1");
   await ensureColumn('clients', 'remindersEnabled', 'INTEGER DEFAULT 1');
@@ -284,7 +285,7 @@ app.get('/api/notices', authenticate, async (req, res) => {
   const ids = notices.map(n => n.id);
   const placeholders = ids.map(() => '?').join(',');
   const attachmentVisibility = req.user.role === 'client' ? ' AND COALESCE(d.clientVisible,0)=1' : '';
-  const attachments = await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.noticeId IN (${placeholders})${attachmentVisibility} ORDER BY d.date DESC, d.displayName, d.name`, ids);
+  const attachments = await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.noticeId IN (${placeholders}) AND d.deletedAt IS NULL${attachmentVisibility} ORDER BY d.date DESC, d.displayName, d.name`, ids);
   res.json(notices.map(notice => publicNotice(
     notice,
     attachments.filter(doc => doc.noticeId === notice.id).map(doc => publicDocument(doc, { client: req.user.role === 'client' })),
@@ -535,7 +536,7 @@ app.get('/api/conversations/:id/messages', async (req, res) => {
     ORDER BY msg.createdAt`, [req.params.id]);
   if (!messages.length) return res.json([]);
   const ids = messages.map(message => message.id);
-  const attachments = await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.messageId IN (${ids.map(() => '?').join(',')}) ORDER BY d.date DESC`, ids);
+  const attachments = await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.messageId IN (${ids.map(() => '?').join(',')}) AND d.deletedAt IS NULL ORDER BY d.date DESC`, ids);
   res.json(messages.map(message => ({
     ...message,
     attachments: attachments.filter(doc => doc.messageId === message.id).map(publicDocument),
@@ -597,12 +598,12 @@ app.post('/api/notices', requireAdmin, async (req, res) => {
   }
   await logAudit(req, 'create', 'notice', id, `Created firm notice ${title}`);
   const notice = await get(`SELECT n.*, c.name clientName FROM firm_notices n LEFT JOIN clients c ON c.id=n.clientId WHERE n.id=?`, [id]);
-  const noticeAttachments = await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.noticeId=? ORDER BY d.date DESC`, [id]);
+  const noticeAttachments = await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.noticeId=? AND d.deletedAt IS NULL ORDER BY d.date DESC`, [id]);
   res.json(publicNotice(notice, noticeAttachments.map(publicDocument), req));
 });
 app.delete('/api/notices/:id', requireAdmin, async (req, res) => {
   const notice = await get('SELECT * FROM firm_notices WHERE id=?', [req.params.id]);
-  await run('DELETE FROM documents WHERE noticeId=?', [req.params.id]);
+  await run("UPDATE documents SET deletedAt=? WHERE noticeId=?", [new Date().toISOString(), req.params.id]);
   await run('DELETE FROM firm_notices WHERE id=?', [req.params.id]);
   await logAudit(req, 'delete', 'notice', req.params.id, `Deleted firm notice ${notice?.title || req.params.id}`);
   res.json({ id: req.params.id, deleted: true });
@@ -1102,7 +1103,7 @@ app.get('/api/matters/:id/documents', async (req, res) => {
   if (!(await canAccessMatter(req, req.params.id))) return res.status(403).json({ error: 'Matter access denied' });
   const folderId = req.query.folderId || '';
   const params = [req.params.id];
-  let where = 'd.matterId=?';
+  let where = 'd.matterId=? AND d.deletedAt IS NULL';
   if (folderId && folderId !== 'all') {
     if (folderId === 'uncategorised') where += ' AND (d.folderId IS NULL OR d.folderId="")';
     else { where += ' AND d.folderId=?'; params.push(folderId); }
@@ -1158,12 +1159,13 @@ app.post('/api/matters/:id/documents', async (req, res) => {
   res.json(publicDocument(doc));
 });
 app.get('/api/documents/:id/download', async (req, res) => {
-  const doc = await get('SELECT * FROM documents WHERE id=?', [req.params.id]);
+  const doc = await get('SELECT * FROM documents WHERE id=? AND deletedAt IS NULL', [req.params.id]);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
   if (!(await canAccessDocument(req, doc))) return res.status(403).json({ error: 'Document access denied' });
   if (req.user.role === 'client') {
     await logClientActivity({ clientId: req.user.clientId || '', matterId: doc.matterId || '', userId: req.user.userId || '', action: 'downloaded_document', summary: `Downloaded ${doc.displayName || doc.name || req.params.id}`, entityType: 'document', entityId: req.params.id });
   }
+  await recordAuditEvent(req, { action: 'document_accessed', entityType: 'document', entityId: req.params.id, matterId: doc.matterId || '', clientId: req.user.role === 'client' ? (req.user.clientId || '') : '', metadata: { documentId: req.params.id, matterId: doc.matterId || '', mimeType: doc.mimeType || '' } }).catch(() => {});
   res.setHeader('Content-Type', doc.mimeType || 'application/octet-stream');
   res.setHeader('Content-Disposition', `attachment; filename="${cleanDocumentName(doc.displayName || doc.name)}"`);
   res.send(doc.content);
@@ -1201,14 +1203,14 @@ app.patch('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
   res.json(publicDocument(updated));
 });
 app.delete('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
-  const doc = await get('SELECT id,name,matterId FROM documents WHERE id=?', [req.params.id]);
+  const doc = await get('SELECT id,name,matterId FROM documents WHERE id=? AND deletedAt IS NULL', [req.params.id]);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
   if (doc.matterId && !(await canAccessMatter(req, doc.matterId))) {
     await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
     return res.status(403).json({ error: 'Document access denied' });
   }
-  await run('DELETE FROM documents WHERE id=?', [req.params.id]);
-  await logAudit(req, 'delete', 'document', req.params.id, `Deleted document ${doc?.name || req.params.id}`);
+  await run("UPDATE documents SET deletedAt=? WHERE id=?", [new Date().toISOString(), req.params.id]);
+  await logAudit(req, 'delete', 'document', req.params.id, `Soft-deleted document ${doc?.name || req.params.id}`);
   res.json({ id: req.params.id, deleted: true });
 });
 
