@@ -1,8 +1,60 @@
 const fs = require('fs').promises;
 const path = require('path');
+const crypto = require('crypto');
 const sqlite3 = require('sqlite3');
 
-module.exports = ({ serverDir, backupDir }) => {
+const ALGORITHM = 'aes-256-gcm';
+const IV_LENGTH = 16;
+const AUTH_TAG_LENGTH = 16;
+
+function getBackupKey() {
+  const key = process.env.LEXFLOW_BACKUP_KEY;
+  if (!key) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('LEXFLOW_BACKUP_KEY environment variable is required in production');
+    }
+    return null;
+  }
+  if (Buffer.from(key, 'hex').length !== 32) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('LEXFLOW_BACKUP_KEY must be 64 hex characters (32 bytes)');
+    }
+    return null;
+  }
+  return Buffer.from(key, 'hex');
+}
+
+function encryptBuffer(plaintext, key) {
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return Buffer.concat([iv, authTag, encrypted]);
+}
+
+function decryptBuffer(encryptedData, key) {
+  const iv = encryptedData.slice(0, IV_LENGTH);
+  const authTag = encryptedData.slice(IV_LENGTH, IV_LENGTH + AUTH_TAG_LENGTH);
+  const encrypted = encryptedData.slice(IV_LENGTH + AUTH_TAG_LENGTH);
+  const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+  decipher.setAuthTag(authTag);
+  return Buffer.concat([decipher.update(encrypted), decipher.final()]);
+}
+
+async function checkpointWal(dbPath) {
+  return new Promise((resolve, reject) => {
+    const tempDb = new sqlite3.Database(dbPath, sqlite3.OPEN_READWRITE, (err) => {
+      if (err) return reject(err);
+      tempDb.exec("PRAGMA wal_checkpoint(FULL)", (err2) => {
+        tempDb.close();
+        if (err2) return reject(err2);
+        resolve();
+      });
+    });
+  });
+}
+
+module.exports = ({ serverDir, backupDir, config }) => {
   function ensureBackupDir() {
     return fs.mkdir(backupDir, { recursive: true });
   }
@@ -16,9 +68,27 @@ module.exports = ({ serverDir, backupDir }) => {
     const timePart = ts.slice(11, 19).replace(/:/g, '');
     const msPart = String(now.getMilliseconds()).padStart(3, '0');
     const timestamp = `${datePart}-${timePart}${msPart}`;
-    const filename = `lawfirm-${timestamp}.db`;
+
+    // WAL-safe checkpoint before backup
+    try {
+      await checkpointWal(source);
+    } catch (e) {
+      console.error('WAL checkpoint warning:', e.message);
+    }
+
+    const key = config.BACKUP_KEY;
+    const ext = key ? '.db.enc' : '.db';
+    const filename = `lawfirm-${timestamp}${ext}`;
     const backupPath = path.join(backupDir, filename);
-    await fs.copyFile(source, backupPath);
+
+    if (key) {
+      const plaintext = await fs.readFile(source);
+      const encrypted = encryptBuffer(plaintext, key);
+      await fs.writeFile(backupPath, encrypted);
+    } else {
+      await fs.copyFile(source, backupPath);
+    }
+
     const stats = await fs.stat(backupPath);
     return {
       success: true,
@@ -26,12 +96,13 @@ module.exports = ({ serverDir, backupDir }) => {
       filename,
       timestamp,
       size: stats.size,
+      encrypted: !!key,
     };
   }
 
-  async function rotateBackups(maxBackups = 7) {
+  async function rotateBackups(maxBackups = config.BACKUP_RETENTION_COUNT) {
     const files = (await fs.readdir(backupDir))
-      .filter(f => f.startsWith('lawfirm-') && f.endsWith('.db'))
+      .filter(f => f.startsWith('lawfirm-') && (f.endsWith('.db') || f.endsWith('.db.enc')))
       .map(f => ({
         filename: f,
         path: path.join(backupDir, f),
@@ -48,26 +119,45 @@ module.exports = ({ serverDir, backupDir }) => {
     return { removed, remaining: files.length };
   }
 
-  function verifyBackup(backupPath) {
-    return new Promise((resolve, reject) => {
-      const db = new sqlite3.Database(backupPath, sqlite3.OPEN_READONLY, err => {
-        if (err) return reject(new Error(`Cannot open backup: ${err.message}`));
-        db.get("PRAGMA integrity_check", (err2, row) => {
-          db.close();
-          if (err2) return reject(new Error(`Integrity check failed: ${err2.message}`));
-          if (row && String(row.integrity_check || '').toLowerCase() === 'ok') {
-            resolve({ valid: true, result: 'ok' });
-          } else {
-            reject(new Error(`Backup is corrupted: ${JSON.stringify(row)}`));
-          }
+  async function verifyBackup(backupPath) {
+    const isEnc = backupPath.endsWith('.db.enc');
+    let tempDbPath = backupPath;
+    let cleanup = false;
+    try {
+      if (isEnc) {
+        const key = config.BACKUP_KEY;
+        if (!key) throw new Error('Cannot verify encrypted backup: no BACKUP_KEY');
+        const encryptedData = await fs.readFile(backupPath);
+        const plaintext = decryptBuffer(encryptedData, key);
+        const os = require('os');
+        tempDbPath = path.join(os.tmpdir(), `lexflow-verify-${Date.now()}.db`);
+        await fs.writeFile(tempDbPath, plaintext);
+        cleanup = true;
+      }
+      return new Promise((resolve, reject) => {
+        const db = new sqlite3.Database(tempDbPath, sqlite3.OPEN_READONLY, err => {
+          if (err) return reject(new Error(`Cannot open backup: ${err.message}`));
+          db.get("PRAGMA integrity_check", (err2, row) => {
+            db.close();
+            if (err2) return reject(new Error(`Integrity check failed: ${err2.message}`));
+            if (row && String(row.integrity_check || '').toLowerCase() === 'ok') {
+              resolve({ valid: true, result: 'ok' });
+            } else {
+              reject(new Error(`Backup is corrupted: ${JSON.stringify(row)}`));
+            }
+          });
         });
       });
-    });
+    } finally {
+      if (cleanup) {
+        await fs.unlink(tempDbPath).catch(() => {});
+      }
+    }
   }
 
   async function getBackupList() {
     const files = (await fs.readdir(backupDir))
-      .filter(f => f.startsWith('lawfirm-') && f.endsWith('.db'))
+      .filter(f => f.startsWith('lawfirm-') && (f.endsWith('.db') || f.endsWith('.db.enc')))
       .map(f => {
         const filePath = path.join(backupDir, f);
         return fs.stat(filePath).then(s => ({
@@ -75,6 +165,7 @@ module.exports = ({ serverDir, backupDir }) => {
           path: filePath,
           size: s.size,
           createdAt: s.mtime.toISOString(),
+          encrypted: f.endsWith('.db.enc'),
         })).catch(() => null);
       });
     const results = (await Promise.all(files)).filter(Boolean);
@@ -82,5 +173,5 @@ module.exports = ({ serverDir, backupDir }) => {
     return results;
   }
 
-  return { ensureBackupDir, createBackup, rotateBackups, verifyBackup, getBackupList };
+  return { ensureBackupDir, createBackup, rotateBackups, verifyBackup, getBackupList, checkpointWal, decryptBuffer };
 };

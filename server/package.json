@@ -8,7 +8,8 @@
       "seed:demo": "node scripts/seed-demo-data.js",
       "test": "npx jest --runInBand",
       "test:seeded": "npm run seed:demo && npm test",
-      "backup": "node scripts/backup.js"
+      "backup": "node scripts/backup.js",
+      "restore:backup": "node scripts/restore-backup.js"
     },
   "type": "commonjs",
   "dependencies": {

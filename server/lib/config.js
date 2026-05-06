@@ -99,6 +99,23 @@ const DATABASE_PATH = process.env.DATABASE_PATH || path.join(__dirname, '..', 'l
 // Backup configuration
 const BACKUP_DIR = process.env.BACKUP_DIR || path.join(__dirname, '..', '..', 'backups');
 const BACKUP_LOG = process.env.BACKUP_LOG || path.join(__dirname, '..', '..', 'logs', 'backup.log');
+const BACKUP_RETENTION_COUNT = (() => {
+  const count = parseInt(process.env.LEXFLOW_BACKUP_RETENTION_COUNT || '7', 10);
+  if (isNaN(count) || count < 1) return 7;
+  if (count > 100) return 100; // safety cap
+  return count;
+})();
+const BACKUP_KEY = (() => {
+  const key = process.env.LEXFLOW_BACKUP_KEY;
+  if (!key) return null;
+  if (key.length !== 64) {
+    if (isProduction) {
+      throw new Error('LEXFLOW_BACKUP_KEY must be 64 hex characters (32 bytes)');
+    }
+    return null;
+  }
+  return Buffer.from(key, 'hex');
+})();
 
 // Base URL for invitations/reminders
 const BASE_URL = process.env.BASE_URL || (isProduction ? '' : 'http://localhost:5000');
@@ -165,6 +182,8 @@ module.exports = {
   DATABASE_PATH,
   BACKUP_DIR,
   BACKUP_LOG,
+  BACKUP_RETENTION_COUNT,
+  BACKUP_KEY,
   BASE_URL,
   SEED_ADMIN_EMAIL,
   SEED_ADMIN_PASSWORD,
