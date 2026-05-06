@@ -6,7 +6,7 @@
     "scripts": {
       "start": "node server.js",
       "seed:demo": "node scripts/seed-demo-data.js",
-      "test": "npx jest",
+      "test": "npx jest --runInBand",
       "test:seeded": "npm run seed:demo && npm test",
       "backup": "node scripts/backup.js"
     },
