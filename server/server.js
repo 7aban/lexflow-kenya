@@ -357,7 +357,7 @@ app.post('/api/auth/change-password', async (req, res) => {
     const passwordPolicy = validatePasswordPolicy(newPassword);
     if (!passwordPolicy.ok) return res.status(400).json({ error: 'Password does not meet security requirements', details: passwordPolicy.errors });
     const hashedPassword = await hashPassword(newPassword);
-    await run('UPDATE users SET password=? WHERE id=?', [hashedPassword, req.user.userId]);
+    await run('UPDATE users SET password=?, tokenVersion = COALESCE(tokenVersion, 1) + 1 WHERE id=?', [hashedPassword, req.user.userId]);
     await recordAuditEvent(req, { action: 'password_changed', entityType: 'user', entityId: req.user.userId, metadata: { role: req.user.role } }).catch(() => {});
     res.json({ message: 'Password changed successfully' });
   } catch (err) { res.status(500).json({ error: err.message }); }

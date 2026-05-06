@@ -538,6 +538,26 @@ describe('Change password', () => {
     expect(res.body.error).toBe('New password must be different from current password');
   });
 
+  test('wrong currentPassword does NOT increment tokenVersion', async () => {
+    const before = await dbGet('SELECT tokenVersion FROM users WHERE email=?', ['sarah.mwangi@achokilaw.co.ke']);
+    await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${advocateToken}`)
+      .send({ currentPassword: 'wrongpassword', newPassword: 'Str0ng!ChangedPass2026' });
+    const after = await dbGet('SELECT tokenVersion FROM users WHERE email=?', ['sarah.mwangi@achokilaw.co.ke']);
+    expect(after.tokenVersion).toBe(before.tokenVersion);
+  });
+
+  test('weak newPassword does NOT increment tokenVersion', async () => {
+    const before = await dbGet('SELECT tokenVersion FROM users WHERE email=?', ['sarah.mwangi@achokilaw.co.ke']);
+    await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${advocateToken}`)
+      .send({ currentPassword: 'password123', newPassword: 'weak' });
+    const after = await dbGet('SELECT tokenVersion FROM users WHERE email=?', ['sarah.mwangi@achokilaw.co.ke']);
+    expect(after.tokenVersion).toBe(before.tokenVersion);
+  });
+
   test('successful password change returns 200', async () => {
     const res = await request(app)
       .post('/api/auth/change-password')
@@ -545,6 +565,37 @@ describe('Change password', () => {
       .send({ currentPassword: 'password123', newPassword: 'Str0ng!ChangedPass2026' });
     expect(res.statusCode).toBe(200);
     expect(res.body.message).toBe('Password changed successfully');
+  });
+
+  test('successful password change increments tokenVersion in DB', async () => {
+    const user = await dbGet('SELECT tokenVersion FROM users WHERE email=?', ['sarah.mwangi@achokilaw.co.ke']);
+    expect(user.tokenVersion).toBe(2);
+  });
+
+  test('old token is rejected after password change with 401', async () => {
+    const res = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${advocateToken}`);
+    expect(res.statusCode).toBe(401);
+  });
+
+  test('fresh login with new password succeeds after change', async () => {
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'sarah.mwangi@achokilaw.co.ke', password: 'Str0ng!ChangedPass2026' });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.token).toBeDefined();
+  });
+
+  test('fresh token from new login authenticates successfully', async () => {
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'sarah.mwangi@achokilaw.co.ke', password: 'Str0ng!ChangedPass2026' });
+    const freshToken = loginRes.body.token;
+    const meRes = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${freshToken}`);
+    expect(meRes.statusCode).toBe(200);
   });
 
   test('old password no longer works after change', async () => {
@@ -569,7 +620,6 @@ describe('Change password', () => {
   });
 
   test('password_changed audit event is recorded on success', async () => {
-    // First change admin password to trigger audit, then check
     const adminLoginRes = await request(app)
       .post('/api/auth/login')
       .send({ email: 'admin@lexflow.co.ke', password: 'password123' });
@@ -580,9 +630,14 @@ describe('Change password', () => {
       .set('Authorization', `Bearer ${freshAdminToken}`)
       .send({ currentPassword: 'password123', newPassword: 'An0ther!StrongPass2026' });
 
+    const auditTokenRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'admin@lexflow.co.ke', password: 'An0ther!StrongPass2026' });
+    const auditToken = auditTokenRes.body.token;
+
     const auditRes = await request(app)
       .get('/api/audit-events?action=password_changed')
-      .set('Authorization', `Bearer ${adminToken}`);
+      .set('Authorization', `Bearer ${auditToken}`);
     expect(auditRes.statusCode).toBe(200);
     expect(auditRes.body.rows.length).toBeGreaterThan(0);
     const event = auditRes.body.rows[0];
@@ -591,9 +646,13 @@ describe('Change password', () => {
   });
 
   test('passwords are not present in audit metadata', async () => {
+    const adminLoginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'admin@lexflow.co.ke', password: 'An0ther!StrongPass2026' });
+    const auditToken = adminLoginRes.body.token;
     const auditRes = await request(app)
       .get('/api/audit-events?action=password_changed')
-      .set('Authorization', `Bearer ${adminToken}`);
+      .set('Authorization', `Bearer ${auditToken}`);
     expect(auditRes.statusCode).toBe(200);
     const events = auditRes.body.rows.filter(e => e.action === 'password_changed');
     for (const event of events) {
