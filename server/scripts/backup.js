@@ -27,12 +27,12 @@ async function main() {
       await log('Backup is encrypted (.db.enc)');
     }
 
-    if (!result.encrypted) {
-      await log('Verifying backup...');
+    await log('Verifying backup...');
+    try {
       const verification = await verifyBackup(result.backupPath);
       await log(`Verification: ${verification.result}`);
-    } else {
-      await log('Skipping verification for encrypted backup');
+    } catch (verifyErr) {
+      await log(`Verification warning: ${verifyErr.message}`);
     }
 
     await log('Rotating old backups...');

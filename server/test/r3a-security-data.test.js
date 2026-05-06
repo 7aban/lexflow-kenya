@@ -3,16 +3,21 @@ const { app } = require('../server.js');
 const sqlite3 = require('sqlite3');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 
-// Use a temp file-based DB for WAL mode tests
-const tempDbPath = path.join(__dirname, 'temp-wal-test.db');
+// Use OS temp directory to avoid repo pollution
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lexflow-r3a-wal-'));
+const tempDbPath = path.join(tempDir, 'test.db');
 
 function createWalDb() {
   // Delete temp DB if it exists
   try { fs.unlinkSync(tempDbPath); } catch (e) {}
   const db = new sqlite3.Database(tempDbPath);
-  db.run('PRAGMA journal_mode=WAL');
-  db.run('PRAGMA busy_timeout=5000');
+  // Wait for PRAGMAs to apply before returning
+  db.serialize(() => {
+    db.run('PRAGMA journal_mode=WAL');
+    db.run('PRAGMA busy_timeout=5000');
+  });
   return db;
 }
 
@@ -23,15 +28,23 @@ function dbGet(db, sql, params = []) {
   });
 }
 
+function dbClose(db) {
+  return new Promise((resolve, reject) => {
+    db.close(err => err ? reject(err) : resolve());
+  });
+}
+
 describe('R3a: SQLite WAL mode and busy_timeout', () => {
   let db;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     db = createWalDb();
+    // Wait for PRAGMAs to apply
+    await new Promise(resolve => setTimeout(resolve, 100));
   });
 
-  afterEach(() => {
-    db.close();
+  afterEach(async () => {
+    await dbClose(db);
     try { fs.unlinkSync(tempDbPath); } catch (e) {}
   });
 
@@ -44,6 +57,10 @@ describe('R3a: SQLite WAL mode and busy_timeout', () => {
     const row = await dbGet(db, 'PRAGMA busy_timeout');
     expect(Number(row.timeout)).toBe(5000);
   });
+});
+
+afterAll(() => {
+  try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (e) {}
 });
 
 describe('R3a: Document soft-delete', () => {

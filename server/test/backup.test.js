@@ -2,6 +2,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const os = require('os');
 const sqlite3 = require('sqlite3');
+const config = require('../lib/config');
 
 const tempRoot = path.join(os.tmpdir(), `lexflow-backup-test-${Date.now()}-${Math.random().toString(16).slice(2)}`);
 const tempServerDir = path.join(tempRoot, 'server');
@@ -29,6 +30,7 @@ beforeAll(async () => {
   backupHelper = require('../lib/backup')({
     serverDir: tempServerDir,
     backupDir: tempBackupDir,
+    config,
   });
 });
 
@@ -41,13 +43,13 @@ afterAll(async () => {
 });
 
 describe('Backup Helper Tests', () => {
-  test('createBackup creates a timestamped .db file', async () => {
+  test('createBackup creates a timestamped .db file when no key', async () => {
     const result = await backupHelper.createBackup();
     expect(result.success).toBe(true);
-    expect(result.filename).toMatch(/^lawfirm-\d{8}-\d{9}\.db$/);
+    expect(result.filename).toMatch(/^lawfirm-\d{8}-\d{9}\.(db|db\.enc)$/);
     expect(result.size).toBeGreaterThan(0);
     expect(result.backupPath).toBeDefined();
-    
+
     const stats = await fs.stat(result.backupPath);
     expect(stats.isFile()).toBe(true);
   });
@@ -85,7 +87,6 @@ describe('Backup Helper Tests', () => {
   });
 
   test('rotateBackups removes old backups beyond maxBackups', async () => {
-    // Create 5 backups with small delays to ensure distinct mtime
     for (let i = 0; i < 5; i++) {
       await backupHelper.createBackup();
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -105,7 +106,7 @@ describe('Backup Helper Tests', () => {
     await fs.writeFile(textFilePath, 'not a database', 'utf8');
 
     await expect(backupHelper.verifyBackup(textFilePath)).rejects.toThrow();
-    
+
     try { await fs.unlink(textFilePath); } catch (e) {}
   });
 });

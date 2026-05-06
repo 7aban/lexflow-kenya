@@ -130,12 +130,21 @@ module.exports = ({ serverDir, backupDir, config }) => {
         const encryptedData = await fs.readFile(backupPath);
         const plaintext = decryptBuffer(encryptedData, key);
         const os = require('os');
+        const path = require('path');
         tempDbPath = path.join(os.tmpdir(), `lexflow-verify-${Date.now()}.db`);
         await fs.writeFile(tempDbPath, plaintext);
         cleanup = true;
+        // Clean up possible WAL/SHM files created when SQLite opens the temp DB
+        for (const ext of ['-wal', '-shm', '.db-wal', '.db-shm']) {
+          try { await fs.unlink(tempDbPath + ext); } catch (e) {}
+        }
       }
-      return new Promise((resolve, reject) => {
-        const db = new sqlite3.Database(tempDbPath, sqlite3.OPEN_READONLY, err => {
+      // Ensure file exists and is readable
+      await fs.access(tempDbPath, fs.constants.R_OK);
+      const stats = await fs.stat(tempDbPath);
+      if (stats.size === 0) throw new Error('Backup file is empty');
+      return await new Promise((resolve, reject) => {
+        const db = new sqlite3.Database(tempDbPath, sqlite3.OPEN_READONLY, (err) => {
           if (err) return reject(new Error(`Cannot open backup: ${err.message}`));
           db.get("PRAGMA integrity_check", (err2, row) => {
             db.close();
