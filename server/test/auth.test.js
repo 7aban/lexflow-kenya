@@ -8,12 +8,14 @@ const { app } = require('../server.js');
 let adminToken;
 let advocateToken;
 let clientToken;
+let adminUserId;
 
 beforeAll(async () => {
   const adminRes = await request(app)
     .post('/api/auth/login')
     .send({ email: 'admin@lexflow.co.ke', password: 'password123' });
   adminToken = adminRes.body.token;
+  adminUserId = jwt.decode(adminToken).userId;
 
   const advRes = await request(app)
     .post('/api/auth/login')
@@ -206,15 +208,54 @@ describe('JWT Hardening', () => {
     expect(decoded.tokenVersion).toBe(1);
   });
 
-  test('manually signed JWT without tokenVersion still authenticates', async () => {
+  test('token without tokenVersion is rejected with 401', async () => {
     const noVersionToken = jwt.sign(
-      { userId: 'test', role: 'admin' },
+      { userId: adminUserId, role: 'admin' },
       config.JWT_SECRET,
       { expiresIn: '1h' }
     );
     const res = await request(app)
       .get('/api/notifications')
       .set('Authorization', `Bearer ${noVersionToken}`);
+    expect(res.statusCode).toBe(401);
+    expect(res.body.error).toBe('Session invalidated');
+  });
+
+  test('token with stale tokenVersion is rejected with 401', async () => {
+    const staleToken = jwt.sign(
+      { userId: adminUserId, role: 'admin', tokenVersion: 99 },
+      config.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+    const res = await request(app)
+      .get('/api/notifications')
+      .set('Authorization', `Bearer ${staleToken}`);
+    expect(res.statusCode).toBe(401);
+    expect(res.body.error).toBe('Session invalidated');
+  });
+
+  test('token for deleted/non-existent user is rejected with 401', async () => {
+    const ghostToken = jwt.sign(
+      { userId: 'U_NONEXISTENT_FAKE_ID', role: 'admin', tokenVersion: 1 },
+      config.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+    const res = await request(app)
+      .get('/api/notifications')
+      .set('Authorization', `Bearer ${ghostToken}`);
+    expect(res.statusCode).toBe(401);
+    expect(res.body.error).toBe('Invalid token');
+  });
+
+  test('token with matching tokenVersion authenticates', async () => {
+    const validToken = jwt.sign(
+      { userId: adminUserId, role: 'admin', tokenVersion: 1 },
+      config.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+    const res = await request(app)
+      .get('/api/notifications')
+      .set('Authorization', `Bearer ${validToken}`);
     expect(res.statusCode).toBe(200);
   });
 
