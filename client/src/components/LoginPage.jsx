@@ -3,13 +3,62 @@ import { API_BASE } from '../lib/apiClient.js';
 import { styles, StyleTag, theme } from '../theme.jsx';
 import { Alert, Field } from './ui.jsx';
 
+function OAuthDivider() {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '14px 0 8px' }}>
+      <div style={{ flex: 1, height: 1, background: theme.line }} />
+      <span style={{ fontSize: 12, color: theme.muted }}>or continue with</span>
+      <div style={{ flex: 1, height: 1, background: theme.line }} />
+    </div>
+  );
+}
+
+function OAuthButton({ provider, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        ...styles.ghostButton,
+        width: '100%',
+        padding: '9px 14px',
+        fontSize: 13,
+        border: `1px solid ${theme.line}`,
+        borderRadius: 8,
+        cursor: 'pointer',
+        background: '#fff',
+        color: theme.ink,
+        fontWeight: 500,
+      }}
+    >
+      {provider === 'google' ? 'Continue with Google' : 'Continue with Microsoft'}
+    </button>
+  );
+}
+
 export default function LoginPage({ firm, onLogin }) {
   const [mode, setMode] = useState('staff');
   const [email, setEmail] = useState('admin@lexflow.co.ke');
   const [password, setPassword] = useState('password123');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [oauthBusy, setOauthBusy] = useState(false);
+  const [oauthEnabled, setOauthEnabled] = useState(false);
   const firmName = firm?.name || 'LexFlow Kenya';
+
+  useEffect(() => {
+    async function checkOAuth() {
+      try {
+        const res = await fetch(`${API_BASE}/auth/oauth/google/start`);
+        if (res.ok || res.status === 503) {
+          setOauthEnabled(res.status !== 503);
+        }
+      } catch {
+        setOauthEnabled(false);
+      }
+    }
+    if (mode === 'staff') checkOAuth();
+  }, [mode]);
 
   useEffect(() => {
     if (mode === 'staff') {
@@ -21,6 +70,21 @@ export default function LoginPage({ firm, onLogin }) {
     }
     setError('');
   }, [mode]);
+
+  async function handleOAuth(provider) {
+    setOauthBusy(true);
+    setError('');
+    try {
+      const res = await fetch(`${API_BASE}/auth/oauth/${provider}/start`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'OAuth not available');
+      window.location.href = data.authorizationUrl;
+    } catch (err) {
+      setError(err.message || 'OAuth login failed');
+    } finally {
+      setOauthBusy(false);
+    }
+  }
 
   async function submit(event) {
     event.preventDefault();
@@ -63,6 +127,7 @@ export default function LoginPage({ firm, onLogin }) {
         </div>
         <h2 style={{ margin: '14px 0 4px', fontSize: 18 }}>{modeCopy.title}</h2>
         {error && <Alert tone="danger">{error}</Alert>}
+        {oauthBusy && <Alert tone="info">Redirecting to provider...</Alert>}
         <Field label="Email">
           <input style={styles.input} value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" placeholder={modeCopy.placeholder} />
         </Field>
@@ -70,6 +135,16 @@ export default function LoginPage({ firm, onLogin }) {
           <input style={styles.input} type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" placeholder={mode === 'client' ? 'Portal password' : 'Workspace password'} />
         </Field>
         <button disabled={busy} style={{ ...styles.primaryButton, width: '100%', marginTop: 16 }}>{busy ? 'Signing in...' : modeCopy.button}</button>
+        {mode === 'staff' && oauthEnabled && (
+          <>
+            <OAuthDivider />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}>
+              <OAuthButton provider="google" onClick={() => handleOAuth('google')} />
+              <OAuthButton provider="microsoft" onClick={() => handleOAuth('microsoft')} />
+            </div>
+            <div style={{ fontSize: 11, color: theme.muted, textAlign: 'center', marginTop: 4 }}>For authorised firm users only.</div>
+          </>
+        )}
         {mode === 'staff' && <div style={styles.loginHint}>admin@lexflow.co.ke / password123</div>}
       </form>
     </div>

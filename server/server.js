@@ -25,6 +25,10 @@ const { cleanDocumentName, fileTypeFor, documentListColumns, clientDocumentVisib
 const config = require('./lib/config');
 const { signAccessToken } = require('./lib/tokens');
 const { validatePasswordPolicy } = require('./lib/passwordPolicy');
+const createOAuth = require('./lib/oauth');
+const { signState, verifyState } = require('./lib/oauthState');
+const googleOAuth = require('./lib/oauthGoogle');
+const microsoftOAuth = require('./lib/oauthMicrosoft');
 
 const app = express();
 const db = new sqlite3.Database(config.DATABASE_PATH);
@@ -34,6 +38,7 @@ const { logClientActivity, logAudit } = createLogging({ run });
 const { notifyStaff } = createNotifications({ run, all, genId });
 const { appBaseUrl, invitationUrl, checkInvitationRateLimit } = createInvitations();
 const { recordAuditEvent } = createAudit({ run, get });
+const oauth = createOAuth({ run, get, all });
 
 // CORS configuration
 const corsOptions = {
@@ -167,6 +172,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS audit_logs (id TEXT PRIMARY KEY, userId TEXT, userName TEXT, role TEXT, action TEXT, entityType TEXT, entityId TEXT, summary TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS audit_events (id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, actor_user_id TEXT, actor_role TEXT, actor_email TEXT, action TEXT NOT NULL, entity_type TEXT, entity_id TEXT, matter_id TEXT, client_id TEXT, ip_address TEXT, user_agent TEXT, metadata_json TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)`);
   await run(`CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, userId TEXT NOT NULL, type TEXT, matterId TEXT, clientId TEXT, title TEXT, body TEXT, createdAt TEXT, readAt TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS oauth_accounts (id TEXT PRIMARY KEY, userId TEXT NOT NULL, provider TEXT CHECK(provider IN ('google','microsoft')) NOT NULL, providerSubject TEXT NOT NULL, email TEXT NOT NULL, emailVerified INTEGER DEFAULT 0, revokedAt TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, lastLoginAt TEXT, UNIQUE(provider, providerSubject))`);
 
   await ensureClientUserSupport();
   await ensureColumn('users', 'tokenVersion', 'INTEGER DEFAULT 1');
@@ -340,6 +346,81 @@ app.put('/api/firm-settings', authenticate, requireAdmin, async (req, res) => {
   res.json(await getFirmSettings());
 });
 
+// --- Staff OAuth routes (no authentication required) ---
+app.get('/api/auth/oauth/google/start', async (req, res) => {
+  if (!config.OAUTH_STAFF_ENABLED) return res.status(503).json({ error: 'Staff OAuth is not enabled.' });
+  try {
+    const state = signState('google');
+    const url = googleOAuth.buildAuthorizationUrl(state);
+    await recordAuditEvent(req, { action: 'oauth_login_started', entityType: 'oauth', metadata: { provider: 'google' } }).catch(() => {});
+    res.json({ authorizationUrl: url });
+  } catch (err) { res.status(500).json({ error: 'OAuth is not configured.' }); }
+});
+
+app.get('/api/auth/oauth/google/callback', async (req, res) => {
+  if (!config.OAUTH_STAFF_ENABLED) return res.status(400).json({ error: 'Staff OAuth is not enabled.' });
+  const { code, state, error: providerError } = req.query;
+  if (providerError) {
+    await recordAuditEvent(req, { action: 'oauth_login_failed', entityType: 'oauth', metadata: { provider: 'google', reason: providerError } }).catch(() => {});
+    return res.redirect(`${config.BASE_URL}/oauth/callback?error=${encodeURIComponent('Provider denied access')}`);
+  }
+  const stateCheck = verifyState(state, 'google');
+  if (!stateCheck.valid) {
+    await recordAuditEvent(req, { action: 'oauth_login_failed', entityType: 'oauth', metadata: { provider: 'google', reason: 'invalid_state' } }).catch(() => {});
+    return res.redirect(`${config.BASE_URL}/oauth/callback?error=${encodeURIComponent('Invalid session. Try again.')}`);
+  }
+  try {
+    const profile = await googleOAuth.handleCallback(code);
+    const result = await oauth.completeOAuthLogin(profile);
+    if (!result.ok) {
+      await recordAuditEvent(req, { action: result.error === 'unknown_user' ? 'oauth_unknown_user_rejected' : result.error === 'client_rejected' ? 'oauth_login_failed' : 'oauth_login_failed', entityType: 'oauth', metadata: { provider: 'google', reason: result.error } }).catch(() => {});
+      return res.redirect(`${config.BASE_URL}/oauth/callback?error=${encodeURIComponent(result.message)}`);
+    }
+    await recordAuditEvent(req, { action: 'oauth_login_succeeded', entityType: 'user', entityId: result.user.id, metadata: { provider: 'google', role: result.user.role } }).catch(() => {});
+    res.redirect(`${config.BASE_URL}/oauth/callback?token=${encodeURIComponent(result.token)}&user=${encodeURIComponent(JSON.stringify(result.user))}`);
+  } catch (err) {
+    await recordAuditEvent(req, { action: 'oauth_login_failed', entityType: 'oauth', metadata: { provider: 'google', reason: 'exchange_error' } }).catch(() => {});
+    res.redirect(`${config.BASE_URL}/oauth/callback?error=${encodeURIComponent('OAuth login failed.')}`);
+  }
+});
+
+app.get('/api/auth/oauth/microsoft/start', async (req, res) => {
+  if (!config.OAUTH_STAFF_ENABLED) return res.status(503).json({ error: 'Staff OAuth is not enabled.' });
+  try {
+    const state = signState('microsoft');
+    const url = microsoftOAuth.buildAuthorizationUrl(state);
+    await recordAuditEvent(req, { action: 'oauth_login_started', entityType: 'oauth', metadata: { provider: 'microsoft' } }).catch(() => {});
+    res.json({ authorizationUrl: url });
+  } catch (err) { res.status(500).json({ error: 'OAuth is not configured.' }); }
+});
+
+app.get('/api/auth/oauth/microsoft/callback', async (req, res) => {
+  if (!config.OAUTH_STAFF_ENABLED) return res.status(400).json({ error: 'Staff OAuth is not enabled.' });
+  const { code, state, error: providerError } = req.query;
+  if (providerError) {
+    await recordAuditEvent(req, { action: 'oauth_login_failed', entityType: 'oauth', metadata: { provider: 'microsoft', reason: providerError } }).catch(() => {});
+    return res.redirect(`${config.BASE_URL}/oauth/callback?error=${encodeURIComponent('Provider denied access')}`);
+  }
+  const stateCheck = verifyState(state, 'microsoft');
+  if (!stateCheck.valid) {
+    await recordAuditEvent(req, { action: 'oauth_login_failed', entityType: 'oauth', metadata: { provider: 'microsoft', reason: 'invalid_state' } }).catch(() => {});
+    return res.redirect(`${config.BASE_URL}/oauth/callback?error=${encodeURIComponent('Invalid session. Try again.')}`);
+  }
+  try {
+    const profile = await microsoftOAuth.handleCallback(code);
+    const result = await oauth.completeOAuthLogin(profile);
+    if (!result.ok) {
+      await recordAuditEvent(req, { action: result.error === 'unknown_user' ? 'oauth_unknown_user_rejected' : result.error === 'client_rejected' ? 'oauth_login_failed' : 'oauth_login_failed', entityType: 'oauth', metadata: { provider: 'microsoft', reason: result.error } }).catch(() => {});
+      return res.redirect(`${config.BASE_URL}/oauth/callback?error=${encodeURIComponent(result.message)}`);
+    }
+    await recordAuditEvent(req, { action: 'oauth_login_succeeded', entityType: 'user', entityId: result.user.id, metadata: { provider: 'microsoft', role: result.user.role } }).catch(() => {});
+    res.redirect(`${config.BASE_URL}/oauth/callback?token=${encodeURIComponent(result.token)}&user=${encodeURIComponent(JSON.stringify(result.user))}`);
+  } catch (err) {
+    await recordAuditEvent(req, { action: 'oauth_login_failed', entityType: 'oauth', metadata: { provider: 'microsoft', reason: 'exchange_error' } }).catch(() => {});
+    res.redirect(`${config.BASE_URL}/oauth/callback?error=${encodeURIComponent('OAuth login failed.')}`);
+  }
+});
+
 app.use('/api', authenticate);
 
 app.get('/api/auth/me', async (req, res) => {
@@ -383,10 +464,31 @@ app.post('/api/auth/register', requireAdmin, validate(registerValidation), async
 app.delete('/api/auth/users/:id', requireAdmin, async (req, res) => {
   if (req.params.id === req.user.userId) return res.status(400).json({ error: 'You cannot delete your own account' });
   const user = await get('SELECT id,email,fullName,role FROM users WHERE id=?', [req.params.id]);
-  await run('DELETE FROM users WHERE id=?', [req.params.id]);
+  await run('BEGIN TRANSACTION');
+  try {
+    await run('DELETE FROM oauth_accounts WHERE userId=?', [req.params.id]);
+    await run('DELETE FROM users WHERE id=?', [req.params.id]);
+    await run('COMMIT');
+  } catch (err) {
+    await run('ROLLBACK').catch(() => {});
+    return res.status(500).json({ error: err.message });
+  }
   await logAudit(req, 'delete', 'user', req.params.id, `Deleted user ${user?.email || req.params.id}`);
   await recordAuditEvent(req, { action: 'user_deactivated', entityType: 'user', entityId: req.params.id, metadata: { role: user?.role || '', email: user?.email || '' } }).catch(() => {});
   res.json({ id: req.params.id, deleted: true });
+});
+
+// OAuth account management (staff only)
+app.get('/api/auth/oauth/accounts', requireStaff, async (req, res) => {
+  const accounts = await oauth.getLinkedAccounts(req.user.userId);
+  res.json(accounts);
+});
+app.delete('/api/auth/oauth/accounts/:provider', requireStaff, async (req, res) => {
+  if (!['google', 'microsoft'].includes(req.params.provider)) return res.status(400).json({ error: 'Unknown provider' });
+  const result = await oauth.unlinkOAuthAccount(req.user.userId, req.params.provider);
+  if (!result.ok) return res.status(404).json({ error: result.message });
+  await recordAuditEvent(req, { action: 'oauth_account_unlinked', entityType: 'oauth', metadata: { provider: req.params.provider } }).catch(() => {});
+  res.json({ ok: true, provider: req.params.provider });
 });
 
 app.post('/api/invitations', requireAdmin, validate(invitationValidation), async (req, res) => {

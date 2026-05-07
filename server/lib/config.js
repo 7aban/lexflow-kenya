@@ -168,6 +168,28 @@ const CSP_DIRECTIVES = process.env.CSP_DIRECTIVES ? JSON.parse(process.env.CSP_D
   frameAncestors: ["'none'"],
 };
 
+// OAuth configuration
+const OAUTH_STAFF_ENABLED = process.env.OAUTH_STAFF_ENABLED === 'true';
+const OAUTH_CLIENT_ENABLED = process.env.OAUTH_CLIENT_ENABLED === 'true'; // deferred
+const OAUTH_STATE_SECRET = process.env.OAUTH_STATE_SECRET || '';
+const OAUTH_REQUIRE_VERIFIED_EMAIL = process.env.OAUTH_REQUIRE_VERIFIED_EMAIL !== 'false'; // default true
+const OAUTH_ALLOWED_DOMAINS = (() => {
+  const domains = process.env.OAUTH_ALLOWED_DOMAINS || '';
+  if (!domains) return null; // no domain restriction
+  return domains.split(',').map(d => d.trim().toLowerCase()).filter(Boolean);
+})();
+
+// Google OAuth
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || `${BASE_URL}/api/auth/oauth/google/callback`;
+
+// Microsoft OAuth
+const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID || '';
+const MICROSOFT_CLIENT_SECRET = process.env.MICROSOFT_CLIENT_SECRET || '';
+const MICROSOFT_TENANT_ID = process.env.MICROSOFT_TENANT_ID || 'common';
+const MICROSOFT_REDIRECT_URI = process.env.MICROSOFT_REDIRECT_URI || `${BASE_URL}/api/auth/oauth/microsoft/callback`;
+
 module.exports = {
   isProduction,
   isTest,
@@ -197,4 +219,16 @@ module.exports = {
   CSP_REPORT_ONLY,
   CSP_DIRECTIVES,
   rateLimitConfig,
+  OAUTH_STAFF_ENABLED,
+  OAUTH_CLIENT_ENABLED,
+  OAUTH_STATE_SECRET,
+  OAUTH_REQUIRE_VERIFIED_EMAIL,
+  OAUTH_ALLOWED_DOMAINS,
+  GOOGLE_CLIENT_ID,
+  GOOGLE_CLIENT_SECRET,
+  GOOGLE_REDIRECT_URI,
+  MICROSOFT_CLIENT_ID,
+  MICROSOFT_CLIENT_SECRET,
+  MICROSOFT_TENANT_ID,
+  MICROSOFT_REDIRECT_URI,
 };

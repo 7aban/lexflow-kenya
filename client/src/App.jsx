@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { api, API_BASE, AUTH_FAILURE_MESSAGE, clearSession, getNotifications, markNotificationsRead, readSession, saveSession } from './lib/apiClient.js';
 import { globalSearch } from './api.js';
 import { defaultFirmSettings, styles, StyleTag, theme } from './theme.jsx';
-import { Logo, Skeleton, Toast } from './components/ui.jsx';
+import { Logo, Skeleton, Toast, Alert } from './components/ui.jsx';
 import LoginPage from './components/LoginPage.jsx';
+import OAuthCallback from './views/OAuthCallback.jsx';
 import AcceptInvitation from './views/AcceptInvitation.jsx';
 import AdvocatePerformance from './views/AdvocatePerformance.jsx';
 import AuditLog from './views/AuditLog.jsx';
@@ -239,6 +240,10 @@ export default function App() {
         <Toast toast={toast} onClose={() => setToast(null)} />
       </>
     );
+  }
+
+  if (window.location.pathname === '/oauth/callback') {
+    return <OAuthCallback firm={firm} onLogin={login} />;
   }
 
   async function openNotification(notification) {
