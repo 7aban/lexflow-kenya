@@ -1604,10 +1604,16 @@ app.get('/health', (_req, res) => {
   });
 });
 
-module.exports = { app, config };
+// Initialize database when module is loaded (required by tests and by server start)
+const dbReady = initDb().catch(err => {
+  console.error('Database initialisation failed', err);
+  if (require.main === module) process.exit(1);
+});
+
+module.exports = { app, config, dbReady };
 
 if (require.main === module) {
-  initDb().then(() => {
+  dbReady.then(() => {
     app.listen(config.PORT, () => {
       console.log(`LexFlow Kenya server running at http://localhost:${config.PORT}`);
       startReminderJobs(getFirmSettings);

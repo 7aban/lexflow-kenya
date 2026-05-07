@@ -53,7 +53,7 @@ async function createSchema() {
   await run(`CREATE TABLE disbursements (id TEXT PRIMARY KEY, matterId TEXT, invoiceId TEXT, description TEXT, amount REAL DEFAULT 0, date TEXT, billed INTEGER DEFAULT 0)`);
   await run(`CREATE TABLE expenses (id TEXT PRIMARY KEY, matterId TEXT, category TEXT, description TEXT, amount REAL DEFAULT 0, date TEXT, vendor TEXT)`);
   await run(`CREATE TABLE integrations_log (id TEXT PRIMARY KEY, type TEXT NOT NULL, matterId TEXT, clientId TEXT, recipient TEXT, message TEXT, status TEXT, createdAt TEXT)`);
-  await run(`CREATE TABLE firm_settings (id TEXT PRIMARY KEY, name TEXT, logo TEXT, primaryColor TEXT, accentColor TEXT, websiteURL TEXT, email TEXT, phone TEXT, address TEXT)`);
+  await run(`CREATE TABLE firm_settings (id TEXT PRIMARY KEY, name TEXT, logo TEXT, primaryColor TEXT, accentColor TEXT, websiteURL TEXT, email TEXT, phone TEXT, address TEXT, themeJson TEXT)`);
   await run(`CREATE TABLE reminder_settings (id TEXT PRIMARY KEY, remindersEnabled INTEGER DEFAULT 1, whatsappEnabled INTEGER DEFAULT 0, emailEnabled INTEGER DEFAULT 0, twilioSid TEXT, twilioToken TEXT, twilioFromNumber TEXT, smtpHost TEXT, smtpPort TEXT, smtpUser TEXT, smtpPass TEXT)`);
   await run(`CREATE TABLE reminder_templates (id TEXT PRIMARY KEY, eventType TEXT NOT NULL, channel TEXT NOT NULL, subject TEXT, body TEXT NOT NULL, createdBy TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE reminder_logs (id TEXT PRIMARY KEY, templateId TEXT, clientId TEXT, matterId TEXT, invoiceId TEXT, channel TEXT, recipient TEXT, status TEXT, sentAt TEXT, errorMessage TEXT)`);
@@ -77,7 +77,7 @@ async function main() {
   await createSchema();
   const password = await hashPassword('password123');
 
-  await run('INSERT INTO firm_settings (id,name,logo,primaryColor,accentColor,websiteURL,email,phone,address) VALUES (?,?,?,?,?,?,?,?,?)', ['default', 'Achoki & Co. Advocates', '', '#0F1B33', '#D4A34A', 'https://lexflow.co.ke', 'info@achokilaw.co.ke', '+254 711 204 880', 'ICEA Building, Kenyatta Avenue, Nairobi']);
+  await run('INSERT INTO firm_settings (id,name,logo,primaryColor,accentColor,websiteURL,email,phone,address,themeJson) VALUES (?,?,?,?,?,?,?,?,?,?)', ['default', 'Achoki & Co. Advocates', '', '#0F1B33', '#D4A34A', 'https://lexflow.co.ke', 'info@achokilaw.co.ke', '+254 711 204 880', 'ICEA Building, Kenyatta Avenue, Nairobi', null]);
   await run('INSERT INTO reminder_settings (id,remindersEnabled,whatsappEnabled,emailEnabled) VALUES (?,?,?,?)', ['default', 1, 0, 0]);
   for (const [eventType, channel, subject, body] of defaultReminderTemplates) {
     await run('INSERT INTO reminder_templates (id,eventType,channel,subject,body,createdBy,createdAt) VALUES (?,?,?,?,?,?,?)', [id('RT'), eventType, channel, subject, body, 'system', nowIso()]);
