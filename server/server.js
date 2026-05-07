@@ -1145,6 +1145,26 @@ app.delete('/api/matters/:id', requireAdvocateOrAdmin, async (req, res) => {
   }
 });
 
+app.patch('/api/matters/:id/reassign', authenticate, requireAdmin, async (req, res) => {
+  const { assignedTo } = req.body;
+  if (typeof assignedTo !== 'string' || !assignedTo.trim()) return res.status(400).json({ error: 'assignedTo is required' });
+  const trimmed = assignedTo.trim();
+  if (trimmed.length > 120) return res.status(400).json({ error: 'assignedTo must not exceed 120 characters' });
+  const matter = await get('SELECT id, title, reference, assignedTo FROM matters WHERE id=?', [req.params.id]);
+  if (!matter) return res.status(404).json({ error: 'Matter not found' });
+  if (matter.assignedTo === trimmed) return res.status(400).json({ error: 'Matter is already assigned to this advocate' });
+  const target = await get('SELECT id, fullName, role, isActive FROM users WHERE fullName=?', [trimmed]);
+  if (!target) return res.status(400).json({ error: 'Assigned user does not exist' });
+  if (target.role !== 'advocate') return res.status(400).json({ error: 'Assigned user is not an advocate' });
+  if (target.isActive !== 1) return res.status(400).json({ error: 'Assigned advocate is not active' });
+  const oldAssignedTo = matter.assignedTo || '';
+  await run('UPDATE matters SET assignedTo=? WHERE id=?', [trimmed, req.params.id]);
+  const updated = await get('SELECT m.*, c.name clientName, (SELECT MIN(date) FROM appearances a WHERE a.matterId=m.id AND a.date>=?) nextCourtDate FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.id=?', [new Date().toISOString().slice(0, 10), req.params.id]);
+  await logAudit(req, 'reassign', 'matter', req.params.id, `Reassigned matter ${matter.title} from "${oldAssignedTo}" to "${trimmed}"`);
+  await recordAuditEvent(req, { action: 'matter_reassigned', entityType: 'matter', entityId: req.params.id, metadata: { oldAssignedTo, newAssignedTo: trimmed, matterTitle: matter.title || '', matterReference: matter.reference || '' } }).catch(() => {});
+  res.json(updated);
+});
+
 app.get('/api/tasks', requireStaff, async (req, res) => {
   let query = 'SELECT * FROM tasks';
   const params = [];

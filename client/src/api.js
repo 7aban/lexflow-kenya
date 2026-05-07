@@ -86,6 +86,7 @@ export const getMatter = id => req('GET', `/api/matters/${id}`);
 export const createMatter = body => req('POST', '/api/matters', body);
 export const updateMatter = (id, body) => req('PATCH', `/api/matters/${id}`, body);
 export const updateMatterStatus = (id, body) => req('PATCH', `/api/matters/${id}/status`, body);
+export const reassignMatter = (id, assignedTo) => req('PATCH', `/api/matters/${id}/reassign`, { assignedTo });
 export const deleteMatter = id => req('DELETE', `/api/matters/${id}`);
 
 export const getTasks = () => req('GET', '/api/tasks');

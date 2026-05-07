@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { API_BASE, api, fileToDataUrl, readSession } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
-import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets } from '../api.js';
+import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, Skeleton, Stat, statusTone, Sub, Table } from '../components/ui.jsx';
 import MatterDocuments from '../components/MatterDocuments.jsx';
 import TaskTimer, { taskTimerActive } from '../components/TaskTimer.jsx';
@@ -175,9 +175,15 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   const [eventForm, setEventForm] = useState(emptyEventForm);
   const [note, setNote] = useState('');
   const [taskTimer, setTaskTimer] = useState(null);
+  const [advocates, setAdvocates] = useState([]);
+  const [reassignTo, setReassignTo] = useState('');
+  const [reassigning, setReassigning] = useState(false);
+  const session = readSession();
+  const isAdmin = session?.user?.role === 'admin';
   const selected = data.matters.find(m => m.id === selectedId) || data.matters[0];
 
   useEffect(() => { if (selected?.id) { setSelectedId(selected.id); loadDetail(selected.id); } else { setDetail(null); setSuggestions([]); } }, [selected?.id]);
+  useEffect(() => { if (detail && isAdmin) getUsers(true).then(users => { setAdvocates((users || []).filter(u => u.role === 'advocate' && u.isActive)); setReassignTo(detail.assignedTo || ''); }).catch(() => {}); }, [detail?.id]);
   useEffect(() => {
     if (!focus?.matterId) return;
     setSelectedId(focus.matterId);
@@ -213,6 +219,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   async function deleteTaskRecord(task) { try { await api(`/tasks/${task.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Task deleted.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteDocumentRecord(doc) { try { await api(`/documents/${doc.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Document deleted.' }); await loadDetail(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteInvoiceRecord(invoice) { try { await api(`/invoices/${invoice.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Invoice deleted.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
+  async function handleReassign() { if (!detail || !reassignTo || reassignTo === detail.assignedTo) return; setReassigning(true); try { await reassignMatter(detail.id, reassignTo); notify({ type: 'success', message: `Matter reassigned to ${reassignTo}.` }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } finally { setReassigning(false); } }
   async function saveEvent(event, values) { try { await api(`/appearances/${event.id}`, { method: 'PATCH', body: values }); setEditingEvent(null); notify({ type: 'success', message: 'Appearance updated.' }); await loadDetail(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteEventRecord(event) { try { await api(`/appearances/${event.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Appearance deleted.' }); await loadDetail(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function saveTimeEntry(entry, values) { try { await api(`/time-entries/${entry.id}`, { method: 'PATCH', body: values }); setEditingTime(null); notify({ type: 'success', message: 'Time entry updated.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
@@ -258,6 +265,16 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
                 <Badge tone="blue">{detail.stage || 'Intake'}</Badge>
                 <span>{detail.clientName || 'No client'}</span>
                 <span>{detail.practiceArea || 'General'}</span>
+                {isAdmin && (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 8 }}>
+                    <Badge tone="navy">Advocate: {detail.assignedTo || 'Unassigned'}</Badge>
+                    <select style={{ ...styles.input, width: 160, fontSize: 12, padding: '2px 6px' }} value={reassignTo} onChange={e => setReassignTo(e.target.value)}>
+                      <option value="">Select advocate</option>
+                      {advocates.map(a => <option key={a.id} value={a.fullName}>{a.fullName}</option>)}
+                    </select>
+                    <button style={{ ...styles.ghostButton, fontSize: 12, padding: '2px 10px' }} disabled={reassigning || !reassignTo || reassignTo === detail.assignedTo} onClick={handleReassign}>{reassigning ? '...' : 'Reassign'}</button>
+                  </span>
+                )}
               </div>
               <div style={styles.tabList}>
                 {['Workspace', 'Assistant'].map(tab => (
