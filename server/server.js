@@ -29,6 +29,7 @@ const createOAuth = require('./lib/oauth');
 const { signState, verifyState } = require('./lib/oauthState');
 const googleOAuth = require('./lib/oauthGoogle');
 const microsoftOAuth = require('./lib/oauthMicrosoft');
+const themeValidation = require('./lib/themeValidation');
 
 const app = express();
 const db = new sqlite3.Database(config.DATABASE_PATH);
@@ -142,7 +143,15 @@ async function ensureClientUserSupport() {
 async function getFirmSettings() {
   const settings = await get('SELECT * FROM firm_settings WHERE id=?', ['default']);
   const reminderSettings = await getReminderSettings();
-  return { ...defaultFirmSettings, ...(settings || {}), reminderSettings };
+  let theme = null;
+  if (settings?.themeJson) {
+    try {
+      theme = JSON.parse(settings.themeJson);
+    } catch {
+      theme = null;
+    }
+  }
+  return { ...defaultFirmSettings, ...(settings || {}), reminderSettings, theme: theme || null };
 }
 
 async function initDb() {
@@ -194,6 +203,7 @@ async function initDb() {
   await ensureColumn('matters', 'invoiceRemindersEnabled', "TEXT DEFAULT 'firm_default'");
   await ensureColumn('reminder_logs', 'invoiceId', 'TEXT');
   await ensureColumn('time_entries', 'taskId', 'TEXT');
+  await ensureColumn('firm_settings', 'themeJson', 'TEXT');
   await seedReminderTemplates();
 
   const userCount = await get('SELECT COUNT(*) AS count FROM users');
@@ -344,6 +354,67 @@ app.put('/api/firm-settings', authenticate, requireAdmin, async (req, res) => {
   await logAudit(req, 'update', 'firm_settings', 'default', `Updated firm settings for ${settings.name}`);
   await recordAuditEvent(req, { action: 'firm_settings_updated', entityType: 'firm_settings', entityId: 'default', metadata: { name: settings.name, fieldsUpdated: Object.keys(req.body).filter(k => k !== 'reminderSettings') } }).catch(() => {});
   res.json(await getFirmSettings());
+});
+
+app.get('/api/firm-settings/theme', authenticate, async (req, res) => {
+  try {
+    const settings = await get('SELECT themeJson FROM firm_settings WHERE id=?', ['default']);
+    let theme = null;
+    if (settings && settings.themeJson) {
+      try { theme = JSON.parse(settings.themeJson); } catch { theme = null; }
+    }
+    res.json({ theme });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/firm-settings/theme/preview', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const validation = themeValidation.validateThemeInput(req.body);
+    if (validation.error) return res.status(400).json({ error: validation.error });
+    const { warnings, blocks } = themeValidation.validateThemeAccessibility(validation.value);
+    if (blocks.length > 0) return res.status(400).json({ error: 'Theme blocked', details: blocks });
+    res.json({ theme: validation.value, warnings, blocks });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/firm-settings/theme', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const validation = themeValidation.validateThemeInput(req.body);
+    if (validation.error) return res.status(400).json({ error: validation.error });
+    const { warnings, blocks } = themeValidation.validateThemeAccessibility(validation.value);
+    if (blocks.length > 0) return res.status(400).json({ error: 'Theme blocked', details: blocks });
+    const themeJson = JSON.stringify(validation.value);
+    const existing = await get('SELECT id FROM firm_settings WHERE id=?', ['default']);
+    if (existing) {
+      await run('UPDATE firm_settings SET themeJson=? WHERE id=?', [themeJson, 'default']);
+    } else {
+      await run(`INSERT INTO firm_settings (id,name,logo,primaryColor,accentColor,websiteURL,email,phone,address,themeJson)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        ['default', defaultFirmSettings.name, '', defaultFirmSettings.primaryColor, defaultFirmSettings.accentColor, '', defaultFirmSettings.email, defaultFirmSettings.phone, defaultFirmSettings.address, themeJson]);
+    }
+    await logAudit(req, 'update', 'firm_theme', 'default', 'Updated firm theme');
+    await recordAuditEvent(req, { action: 'firm_theme_updated', entityType: 'firm_theme', entityId: 'default', metadata: { source: validation.value.source || 'manual', warnings } }).catch(() => {});
+    const settings = await get('SELECT themeJson FROM firm_settings WHERE id=?', ['default']);
+    res.json({ theme: JSON.parse(settings.themeJson), warnings });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/firm-settings/theme/reset', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const existing = await get('SELECT id FROM firm_settings WHERE id=?', ['default']);
+    if (existing) {
+      await run('UPDATE firm_settings SET themeJson=NULL WHERE id=?', ['default']);
+    }
+    await logAudit(req, 'update', 'firm_theme', 'default', 'Reset firm theme to default');
+    await recordAuditEvent(req, { action: 'firm_theme_reset', entityType: 'firm_theme', entityId: 'default' }).catch(() => {});
+    res.json({ theme: null, message: 'Theme reset to default' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/firm-settings/theme/presets', authenticate, async (req, res) => {
+  try {
+    res.json({ presets: themeValidation.getPresets() });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // --- Staff OAuth routes (no authentication required) ---

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, API_BASE, AUTH_FAILURE_MESSAGE, clearSession, getNotifications, markNotificationsRead, readSession, saveSession } from './lib/apiClient.js';
 import { globalSearch } from './api.js';
-import { defaultFirmSettings, styles, StyleTag, theme } from './theme.jsx';
+import { defaultFirmSettings, styles, StyleTag, theme, loadAndApplyFirmTheme } from './theme.jsx';
 import { Logo, Skeleton, Toast, Alert } from './components/ui.jsx';
 import LoginPage from './components/LoginPage.jsx';
 import OAuthCallback from './views/OAuthCallback.jsx';
@@ -120,6 +120,10 @@ export default function App() {
 
   useEffect(() => {
     if (authenticated) refresh();
+  }, [authenticated]);
+
+  useEffect(() => {
+    if (authenticated) loadAndApplyFirmTheme();
   }, [authenticated]);
 
   useEffect(() => {

@@ -68,6 +68,11 @@ export const deleteUser = id => req('DELETE', `/api/auth/users/${id}`);
 export const globalSearch = q => req('GET', `/api/search?q=${encodeURIComponent(q)}`);
 export const getFirmSettings = () => req('GET', '/api/firm-settings');
 export const updateFirmSettings = data => req('PUT', '/api/firm-settings', data);
+export const getFirmTheme = () => req('GET', '/api/firm-settings/theme');
+export const previewFirmTheme = data => req('POST', '/api/firm-settings/theme/preview', data);
+export const updateFirmTheme = data => req('PUT', '/api/firm-settings/theme', data);
+export const resetFirmTheme = () => req('POST', '/api/firm-settings/theme/reset');
+export const getThemePresets = () => req('GET', '/api/firm-settings/theme/presets');
 export const getClientDashboard = () => req('GET', '/api/client/dashboard');
 
 export const getClients = () => req('GET', '/api/clients');

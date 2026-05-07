@@ -59,16 +59,16 @@ export function StyleTag() { return <style>{`
 
 export const styles = {
   shell: { minHeight: '100vh', display: 'grid', gridTemplateColumns: '220px minmax(0,1fr)', background: '#F5F7FA', color: theme.ink, fontFamily: 'Segoe UI, Roboto, -apple-system, BlinkMacSystemFont, sans-serif', fontSize: 13 },
-  sidebar: { position: 'sticky', top: 0, minHeight: '100vh', background: 'var(--lf-primary, #0F1B33)', color: '#fff', padding: 16, display: 'flex', flexDirection: 'column', gap: 16, boxShadow: '1px 0 0 rgba(255,255,255,.05)' },
+  sidebar: { position: 'sticky', top: 0, minHeight: '100vh', background: 'var(--lf-sidebar, var(--lf-primary, #0F1B33))', color: 'var(--lf-sidebar-text, #fff)', padding: 16, display: 'flex', flexDirection: 'column', gap: 16, boxShadow: '1px 0 0 rgba(255,255,255,.05)' },
   brandPanel: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 8px 14px', borderBottom: '1px solid rgba(255,255,255,.10)' },
-  logo: { width: 36, height: 36, borderRadius: 8, display: 'grid', placeItems: 'center', background: 'var(--lf-accent, #D4A34A)', color: '#fff', fontWeight: 900, fontSize: 18, boxShadow: '0 8px 18px rgba(212,163,74,.20)', overflow: 'hidden' }, logoImage: { width: '100%', height: '100%', objectFit: 'cover' },
+  logo: { width: 36, height: 36, borderRadius: 8, display: 'grid', placeItems: 'center', background: 'var(--lf-accent, var(--lf-button, #D4A34A))', color: 'var(--lf-button-text, #fff)', fontWeight: 900, fontSize: 18, boxShadow: '0 8px 18px rgba(212,163,74,.20)', overflow: 'hidden' }, logoImage: { width: '100%', height: '100%', objectFit: 'cover' },
   brand: { fontSize: 16, fontWeight: 700, letterSpacing: 0 }, brandSub: { fontSize: 11, color: '#9CA8BA', marginTop: 2 }, sideSectionLabel: { color: '#7F8CA3', fontSize: 11, fontWeight: 700, letterSpacing: 0, textTransform: 'uppercase', padding: '0 8px' },
-  navList: { display: 'grid', gap: 7 }, navGroup: { display: 'grid', gap: 3 }, navGroupButton: { border: 0, background: 'transparent', color: '#7F8CA3', borderRadius: 6, padding: '6px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: 10, fontWeight: 800, letterSpacing: .8, textTransform: 'uppercase' }, navGroupChevron: { color: 'var(--lf-accent, #D4A34A)', fontSize: 11, fontWeight: 900 }, navGroupItems: { display: 'grid', gap: 3 }, navItem: { border: 0, borderLeft: '3px solid transparent', background: 'transparent', color: '#C9D3E2', borderRadius: 6, padding: '9px 10px', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontWeight: 600, textAlign: 'left' }, navActive: { background: 'rgba(255,255,255,.10)', color: '#fff', borderLeftColor: 'var(--lf-accent, #D4A34A)' }, navNumber: { width: 24, height: 24, borderRadius: 6, background: 'rgba(255,255,255,.08)', display: 'grid', placeItems: 'center', fontSize: 10, color: 'var(--lf-accent, #D4A34A)', fontWeight: 800 },
-  quickLinksPanel: { display: 'grid', gap: 7, paddingTop: 2 }, quickLinksHeader: { border: 0, background: 'transparent', color: '#7F8CA3', borderRadius: 6, padding: '5px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: 10, fontWeight: 800, letterSpacing: .8, textTransform: 'uppercase' }, quickLinksChevron: { color: 'var(--lf-accent, #D4A34A)', fontSize: 11, fontWeight: 900 }, quickLinksList: { display: 'grid', gap: 3 }, quickLink: { borderLeft: '3px solid transparent', color: '#C9D3E2', borderRadius: 6, padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 9, fontWeight: 600, textDecoration: 'none', transition: 'background .16s ease, color .16s ease' }, quickLinkIcon: { width: 24, height: 24, borderRadius: 6, background: 'rgba(255,255,255,.08)', display: 'grid', placeItems: 'center', fontSize: 9, color: 'var(--lf-accent, #D4A34A)', fontWeight: 900 },
+  navList: { display: 'grid', gap: 7 }, navGroup: { display: 'grid', gap: 3 }, navGroupButton: { border: 0, background: 'transparent', color: '#7F8CA3', borderRadius: 6, padding: '6px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: 10, fontWeight: 800, letterSpacing: .8, textTransform: 'uppercase' },   navGroupChevron: { color: 'var(--lf-accent, var(--lf-button, #D4A34A))', fontSize: 11, fontWeight: 900 }, navGroupItems: { display: 'grid', gap: 3 }, navItem: { border: 0, borderLeft: '3px solid transparent', background: 'transparent', color: '#C9D3E2', borderRadius: 6, padding: '9px 10px', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontWeight: 600, textAlign: 'left' }, navActive: { background: 'rgba(255,255,255,.10)', color: '#fff', borderLeftColor: 'var(--lf-accent, var(--lf-button, #D4A34A)))' }, navNumber: { width: 24, height: 24, borderRadius: 6, background: 'rgba(255,255,255,.08)', display: 'grid', placeItems: 'center', fontSize: 10, color: 'var(--lf-accent, var(--lf-button, #D4A34A))', fontWeight: 800 },
+  quickLinksPanel: { display: 'grid', gap: 7, paddingTop: 2 }, quickLinksHeader: { border: 0, background: 'transparent', color: '#7F8CA3', borderRadius: 6, padding: '5px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: 10, fontWeight: 800, letterSpacing: .8, textTransform: 'uppercase' }, quickLinksChevron: { color: 'var(--lf-accent, #D4A34A)', fontSize: 11, fontWeight: 900 }, quickLinksList: { display: 'grid', gap: 3 },   quickLink: { borderLeft: '3px solid transparent', color: '#C9D3E2', borderRadius: 6, padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 9, fontWeight: 600, textDecoration: 'none', transition: 'background .16s ease, color .16s ease' }, quickLinkIcon: { width: 24, height: 24, borderRadius: 6, background: 'rgba(255,255,255,.08)', display: 'grid', placeItems: 'center', fontSize: 9, color: 'var(--lf-accent, var(--lf-button, #D4A34A)))', fontWeight: 900 },
   timerCard: { marginTop: 'auto', padding: 12, borderRadius: 8, background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.10)', display: 'grid', gap: 4 }, timerTop: { color: '#DDE5F1', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }, liveDot: { width: 8, height: 8, borderRadius: 999, background: '#22C55E', boxShadow: '0 0 0 4px rgba(34,197,94,.13)' },
   userCard: { display: 'grid', gridTemplateColumns: '34px 1fr auto', gap: 8, alignItems: 'center', paddingTop: 12, borderTop: '1px solid rgba(255,255,255,.10)' }, avatar: { width: 34, height: 34, borderRadius: 8, background: '#243653', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 12 }, userName: { fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }, userRole: { color: '#AAB4C3', fontSize: 11, textTransform: 'capitalize' }, logout: { border: '1px solid rgba(255,255,255,.18)', color: '#fff', background: 'transparent', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', fontSize: 12 },
   main: { padding: 24, minWidth: 0 }, topbar: { display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', marginBottom: 20 }, eyebrow: { color: theme.goldDark, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0 }, title: { margin: '2px 0 0', fontSize: 20, fontWeight: 700, lineHeight: 1.2 }, subtitle: { margin: '5px 0 0', color: theme.muted, maxWidth: 680 }, topActions: { display: 'flex', gap: 8, alignItems: 'center' }, search: { width: 260, border: `1px solid ${theme.line}`, borderRadius: 6, padding: '7px 11px', background: '#fff', fontSize: 13 },
-  pageStack: { display: 'grid', gap: 16 }, heroCard: { borderRadius: 10, background: 'linear-gradient(135deg, var(--lf-primary, #0F1B33), #1B3A5C)', color: '#fff', padding: 24, display: 'flex', justifyContent: 'space-between', gap: 20, alignItems: 'end', boxShadow: theme.shadow }, heroKicker: { color: 'var(--lf-accent, #D4A34A)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase' }, heroFigure: { fontSize: 24, fontWeight: 700, color: 'var(--lf-accent, #D4A34A)' },
+  pageStack: { display: 'grid', gap: 16 },   heroCard: { borderRadius: 10, background: 'linear-gradient(135deg, var(--lf-primary, #0F1B33), var(--lf-sidebar, #1B3A5C))', color: '#fff', padding: 24, display: 'flex', justifyContent: 'space-between', gap: 20, alignItems: 'end', boxShadow: theme.shadow }, heroKicker: { color: 'var(--lf-accent, var(--lf-button, #D4A34A)))', fontSize: 11, fontWeight: 700, textTransform: 'uppercase' }, heroFigure: { fontSize: 24, fontWeight: 700, color: 'var(--lf-accent, var(--lf-button, #D4A34A)))' },
   warningPanel: { display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 10, border: '1px solid #FDE68A', background: theme.amberBg, color: theme.amber, boxShadow: theme.shadow }, warningIcon: { width: 28, height: 28, borderRadius: 999, display: 'grid', placeItems: 'center', background: '#FDE68A', fontWeight: 900 }, 
   statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 12 }, stat: { position: 'relative', overflow: 'hidden', background: '#fff', border: `1px solid ${theme.line}`, borderLeft: '4px solid', borderRadius: 10, padding: 16, boxShadow: theme.shadow, display: 'grid', gap: 6 }, 
   splitGrid: { display: 'grid', gridTemplateColumns: 'minmax(260px,.72fr) minmax(0,1.28fr)', gap: 16 }, dashboardGrid: { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 16 }, matterGrid: { display: 'grid', gridTemplateColumns: '300px minmax(0,1fr)', gap: 16 },
@@ -83,3 +83,45 @@ export const styles = {
   logoPreview: { display: 'flex', alignItems: 'center', gap: 10, minHeight: 36 }, formHelper: { color: theme.muted, fontSize: 12, lineHeight: 1.4, alignSelf: 'center' }, clientShell: { minHeight: '100vh', background: '#F5F7FA' }, clientHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, padding: '16px 24px', background: '#fff', borderBottom: `1px solid ${theme.line}`, boxShadow: theme.shadow }, clientBrand: { display: 'flex', alignItems: 'center', gap: 10 }, clientActions: { display: 'flex', alignItems: 'center', gap: 8 }, clientMain: { display: 'grid', gridTemplateColumns: '300px minmax(0,1fr)', gap: 16, padding: 24 }, clientMatterList: { minWidth: 0 }, clientStatusGrid: { display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }, clientDescription: { color: theme.muted, marginTop: 12 }, profileTooltip: { position: 'fixed', zIndex: 5000, pointerEvents: 'none', width: 260, display: 'grid', gridTemplateColumns: '42px 1fr', gap: 10, background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 12, boxShadow: theme.shadowLift }, tooltipAvatar: { width: 42, height: 42, borderRadius: 10, background: 'var(--lf-primary, #1B3A5C)', color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 900 },
   noticeAttachmentPreview: { gridColumn: '1 / -1', display: 'grid', gap: 8, padding: 10, border: `1px solid ${theme.line}`, borderRadius: 8, background: '#F8FAFC' }, noticeAttachmentPreviewItem: { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 10, alignItems: 'center', padding: '8px 10px', border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff' }, noticeAttachmentSummary: { display: 'flex', flexWrap: 'wrap', gap: 6 }, noticeList: { display: 'grid', gap: 12 }, noticeItem: { display: 'grid', gap: 10, padding: 14, border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff' }, noticeItemHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }, noticeTitle: { margin: 0, fontSize: 15, color: theme.ink, lineHeight: 1.25 }, noticeBody: { margin: 0, color: theme.ink, lineHeight: 1.55, whiteSpace: 'pre-wrap' }, noticeFileGrid: { display: 'grid', gap: 8 }, noticeFileLink: { display: 'grid', gridTemplateColumns: '42px minmax(0,1fr) auto', gap: 10, alignItems: 'center', padding: '9px 10px', border: `1px solid ${theme.line}`, borderRadius: 8, background: '#F8FAFC', color: theme.navy600, textDecoration: 'none', fontWeight: 700 }, noticeFileIcon: { width: 42, minHeight: 28, borderRadius: 6, display: 'grid', placeItems: 'center', background: theme.blueBg, color: theme.blue, fontSize: 10, fontWeight: 900 },
 };
+
+const THEME_CSS_MAP = {
+  primaryColor: '--lf-primary',
+  accentColor: '--lf-accent',
+  backgroundColor: '--lf-background',
+  surfaceColor: '--lf-surface',
+  textColor: '--lf-text',
+  textSecondaryColor: '--lf-text-muted',
+  sidebarColor: '--lf-sidebar',
+  sidebarTextColor: '--lf-sidebar-text',
+  buttonColor: '--lf-button',
+  buttonTextColor: '--lf-button-text',
+  borderColor: '--lf-border',
+  linkColor: '--lf-link',
+  successColor: '--lf-success',
+  warningColor: '--lf-warning',
+  errorColor: '--lf-danger',
+  infoColor: '--lf-info',
+};
+
+export function applyFirmTheme(theme) {
+  if (!theme || typeof theme !== 'object') return;
+  const root = document.documentElement;
+  Object.entries(THEME_CSS_MAP).forEach(([key, cssVar]) => {
+    if (theme[key]) root.style.setProperty(cssVar, theme[key]);
+  });
+}
+
+export function clearFirmTheme() {
+  const root = document.documentElement;
+  Object.values(THEME_CSS_MAP).forEach(cssVar => root.style.removeProperty(cssVar));
+}
+
+export async function loadAndApplyFirmTheme() {
+  try {
+    const { api } = await import('./lib/apiClient.js');
+    const data = await api('/firm-settings/theme');
+    if (data?.theme) applyFirmTheme(data.theme);
+  } catch {
+    // Keep default theme if fetch fails
+  }
+}

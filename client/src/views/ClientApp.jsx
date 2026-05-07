@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { API_BASE, api, fileToDataUrl, readSession } from '../lib/apiClient.js';
-import { styles, StyleTag, theme } from '../theme.jsx';
+import { styles, StyleTag, theme, loadAndApplyFirmTheme } from '../theme.jsx';
 import { Badge, Card, Empty, Field, kes, Logo, MeetingLink, Skeleton, Stat, statusTone, Table, Toast } from '../components/ui.jsx';
 import ClientChatWidget from '../components/ClientChatWidget.jsx';
 import MatterDocuments from '../components/MatterDocuments.jsx';
@@ -42,7 +42,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
   const matterEvents = dashboard.appearances.filter(a => a.matterId === selected?.id);
   const firmName = firm?.name || 'LexFlow Kenya';
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); loadAndApplyFirmTheme(); }, []);
   useEffect(() => { if (selected?.id) setSelectedId(selected.id); }, [selected?.id]);
 
   const stats = useMemo(() => {

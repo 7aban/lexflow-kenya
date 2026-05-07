@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { API_BASE, api, fileToDataUrl, readSession } from '../lib/apiClient.js';
-import { defaultFirmSettings, styles, theme } from '../theme.jsx';
+import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
+import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, Skeleton, Stat, statusTone, Sub, Table } from '../components/ui.jsx';
 import MatterDocuments from '../components/MatterDocuments.jsx';
 import TaskTimer, { taskTimerActive } from '../components/TaskTimer.jsx';
@@ -327,6 +328,11 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
   const [notices, setNotices] = useState([]);
   const [noticeForm, setNoticeForm] = useState(emptyNoticeForm);
   const [publishingNotice, setPublishingNotice] = useState(false);
+  const [theme, setTheme] = useState(null);
+  const [presets, setPresets] = useState([]);
+  const [themeLoading, setThemeLoading] = useState(false);
+  const [themePreview, setThemePreview] = useState(null);
+  const [themeError, setThemeError] = useState('');
 
   useEffect(() => setForm({ ...defaultFirmSettings, ...settings }), [settings]);
   useEffect(() => { loadNotices(); }, []);
@@ -361,6 +367,75 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
 
   function removeNoticeFile(index) {
     setNoticeForm(current => ({ ...current, files: current.files.filter((_, fileIndex) => fileIndex !== index) }));
+  }
+
+  useEffect(() => {
+    loadTheme();
+    loadPresets();
+  }, []);
+
+  async function loadTheme() {
+    try {
+      const data = await getFirmTheme();
+      setTheme(data?.theme || null);
+      if (data?.theme) applyFirmTheme(data.theme);
+    } catch (err) { setThemeError(err.message); }
+  }
+
+  async function loadPresets() {
+    try { setPresets(await getThemePresets()); }
+    catch { setPresets([]); }
+  }
+
+  async function handlePreview(presetId) {
+    const sourceTheme = presetId ? presets.find(p => p.id === presetId) : theme;
+    if (!sourceTheme) return;
+    setThemeLoading(true);
+    setThemeError('');
+    try {
+      const data = await previewFirmTheme({ ...sourceTheme, source: presetId ? 'preset' : sourceTheme.source });
+      if (data?.theme) {
+        setThemePreview(data.theme);
+        applyFirmTheme(data.theme);
+      }
+      if (data?.warnings?.length) setThemeError(`Preview warnings: ${data.warnings.join(', ')}`);
+    } catch (err) { setThemeError(err.message); }
+    finally { setThemeLoading(false); }
+  }
+
+  async function handleSave() {
+    if (!themePreview && !theme) return;
+    setThemeLoading(true);
+    setThemeError('');
+    try {
+      const payload = themePreview || theme;
+      const data = await updateFirmTheme(payload);
+      if (data?.theme) {
+        setTheme(data.theme);
+        setThemePreview(null);
+        applyFirmTheme(data.theme);
+        notify({ type: 'success', message: 'Theme saved.' });
+      }
+    } catch (err) { setThemeError(err.message); }
+    finally { setThemeLoading(false); }
+  }
+
+  async function handleReset() {
+    if (!window.confirm('Reset firm theme to default? This clears custom colors.')) return;
+    setThemeLoading(true);
+    setThemeError('');
+    try {
+      const data = await resetFirmTheme();
+      setTheme(null);
+      setThemePreview(null);
+      clearFirmTheme();
+      if (data?.theme) {
+        setTheme(data.theme);
+        applyFirmTheme(data.theme);
+      }
+      notify({ type: 'success', message: data?.message || 'Theme reset to default.' });
+    } catch (err) { setThemeError(err.message); }
+    finally { setThemeLoading(false); }
   }
 
   async function submit(event) {
@@ -428,6 +503,42 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
           </div>
           <button style={styles.primaryButton}>Save settings</button>
         </form>
+      </Card>
+
+      <Card title="Firm Branding / Theme" hint="Customize colors and preview firm identity across the workspace">
+        <div style={{ ...styles.formGrid, marginBottom: 16 }}>
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: theme.muted }}><span>Presets</span></label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+              {presets.map(p => (
+                <button key={p.id} type="button" onClick={() => handlePreview(p.id)} style={{ ...styles.ghostButton, borderColor: themePreview?.source === 'preset' && themePreview?.id === p.id ? theme.gold : undefined }} disabled={themeLoading}>
+                  {p.id === 'lexflow-default' ? 'LexFlow Default' : p.id === 'emerald-gold' ? 'Emerald Gold' : p.id === 'midnight-slate' ? 'Midnight Slate' : p.id}
+                </button>
+              ))}
+              <button type="button" onClick={() => handlePreview(null)} style={styles.ghostButton} disabled={themeLoading}>Custom (current)</button>
+            </div>
+          </div>
+          <Field label="Primary Color"><input type="color" style={styles.colorInput} value={(themePreview || theme)?.primaryColor || '#0F1B33'} onChange={e => { setThemePreview(prev => ({ ...(prev || theme || {}), primaryColor: e.target.value, source: 'manual' })); }} /></Field>
+          <Field label="Accent Color"><input type="color" style={styles.colorInput} value={(themePreview || theme)?.accentColor || '#D4A34A'} onChange={e => { setThemePreview(prev => ({ ...(prev || theme || {}), accentColor: e.target.value, source: 'manual' })); }} /></Field>
+          <Field label="Background"><input type="color" style={styles.colorInput} value={(themePreview || theme)?.backgroundColor || '#0A0F1A'} onChange={e => { setThemePreview(prev => ({ ...(prev || theme || {}), backgroundColor: e.target.value, source: 'manual' })); }} /></Field>
+          <Field label="Surface"><input type="color" style={styles.colorInput} value={(themePreview || theme)?.surfaceColor || '#111827'} onChange={e => { setThemePreview(prev => ({ ...(prev || theme || {}), surfaceColor: e.target.value, source: 'manual' })); }} /></Field>
+          <Field label="Text"><input type="color" style={styles.colorInput} value={(themePreview || theme)?.textColor || '#E5E7EB'} onChange={e => { setThemePreview(prev => ({ ...(prev || theme || {}), textColor: e.target.value, source: 'manual' })); }} /></Field>
+          <Field label="Text Muted"><input type="color" style={styles.colorInput} value={(themePreview || theme)?.textSecondaryColor || '#9CA3AF'} onChange={e => { setThemePreview(prev => ({ ...(prev || theme || {}), textSecondaryColor: e.target.value, source: 'manual' })); }} /></Field>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+          <button style={styles.primaryButton} onClick={handleSave} disabled={themeLoading}>{themeLoading ? 'Saving...' : 'Save Theme'}</button>
+          <button style={styles.ghostButton} onClick={() => { applyFirmTheme(themePreview || theme || {}); setThemePreview(null); setThemeError(''); }} disabled={!themePreview || themeLoading}>Apply Preview</button>
+          <button style={styles.dangerButton} onClick={handleReset} disabled={themeLoading}>{themeLoading ? 'Resetting...' : 'Reset to Default'}</button>
+        </div>
+        {themeError && <div style={{ ...styles.alert, ...(themeError.startsWith('Preview warnings') ? {} : styles.alertDanger), padding: 10, borderRadius: 6 }}>{themeError}</div>}
+        <div style={{ marginTop: 12, padding: 14, borderRadius: 8, background: 'var(--lf-surface, #111827)', border: `1px solid var(--lf-border, ${theme.line})`, color: 'var(--lf-text, #E5E7EB)' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', marginBottom: 8, color: 'var(--lf-text-muted, #9CA3AF)' }}>Theme Preview</div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+            <button style={{ border: 0, borderRadius: 6, padding: '6px 14px', background: 'var(--lf-button, #D4A34A)', color: 'var(--lf-button-text, #fff)', fontWeight: 700, cursor: 'pointer' }}>Primary Button</button>
+            <button style={{ border: `1px solid var(--lf-border, ${theme.line})`, borderRadius: 6, padding: '6px 14px', background: '#fff', color: 'var(--lf-primary, #0F1B33)', fontWeight: 700, cursor: 'pointer' }}>Ghost Button</button>
+          </div>
+          <div style={{ padding: 10, borderRadius: 6, background: 'var(--lf-background, #0A0F1A)', border: `1px solid var(--lf-border, ${theme.line})`, fontSize: 12, color: 'var(--lf-text-muted, #9CA3AF)' }}>Surface / Card sample with <a href="#" style={{ color: 'var(--lf-link, #D4A34A)', textDecoration: 'none' }}>link sample</a> and <span style={{ color: 'var(--lf-success, #047857)' }}>success</span>, <span style={{ color: 'var(--lf-warning, #B45309)' }}>warning</span>, <span style={{ color: 'var(--lf-danger, #B91C1C)' }}>danger</span> text.</div>
+        </div>
       </Card>
 
       <Card title="Client Reminder Automation" hint="Quiet reminders for court dates and invoice follow-ups. Templates use firm defaults and run silently in the background.">
