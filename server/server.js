@@ -203,6 +203,7 @@ async function initDb() {
   await ensureColumn('matters', 'invoiceRemindersEnabled', "TEXT DEFAULT 'firm_default'");
   await ensureColumn('reminder_logs', 'invoiceId', 'TEXT');
   await ensureColumn('time_entries', 'taskId', 'TEXT');
+  await ensureColumn('users', 'isActive', 'INTEGER DEFAULT 1');
   await ensureColumn('firm_settings', 'themeJson', 'TEXT');
   await seedReminderTemplates();
 
@@ -270,6 +271,10 @@ app.post('/api/auth/login', authLimiter, validate(loginValidation), async (req, 
       await recordAuditEvent(req, { action: 'login_failure', entityType: 'user', metadata: { email, reason: 'invalid credentials' } }).catch(() => {});
       return res.status(401).json({ error: 'Invalid email or password' });
     }
+    if (user.isActive === 0) {
+      await recordAuditEvent(req, { action: 'login_failure', entityType: 'user', entityId: user.id, metadata: { email: user.email, role: user.role, reason: 'account inactive' } }).catch(() => {});
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
     if (user.role === 'client') return res.status(403).json({ error: 'Please use the Client Portal login.' });
     const token = signAccessToken(user);
     // Log successful login
@@ -283,6 +288,10 @@ app.post('/api/auth/client-login', authLimiter, validate(loginValidation), async
     const { email, password } = req.body;
     const user = await get('SELECT * FROM users WHERE lower(email)=lower(?) AND role=?', [email || '', 'client']);
     if (!user || !(await verifyPassword(password || '', user.password || ''))) return res.status(401).json({ error: 'Invalid client email or password' });
+    if (user.isActive === 0) {
+      await recordAuditEvent(req, { action: 'login_failure', entityType: 'user', entityId: user.id, metadata: { email: user.email, role: user.role, reason: 'account inactive' } }).catch(() => {});
+      return res.status(401).json({ error: 'Invalid client email or password' });
+    }
     const token = signAccessToken(user);
     res.json({ token, user: { id: user.id, email: user.email, fullName: user.fullName, name: user.fullName, role: user.role, clientId: user.clientId || '' } });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -516,7 +525,14 @@ app.post('/api/auth/change-password', async (req, res) => {
     res.json({ message: 'Password changed successfully' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.get('/api/auth/users', requireAdmin, async (req, res) => res.json(await all('SELECT id,email,fullName,role,clientId,createdAt FROM users ORDER BY createdAt DESC')));
+app.get('/api/auth/users', requireAdmin, async (req, res) => {
+  const includeInactive = req.query.include_inactive === 'true';
+  const sql = includeInactive
+    ? 'SELECT id,email,fullName,role,clientId,createdAt,isActive FROM users ORDER BY createdAt DESC'
+    : 'SELECT id,email,fullName,role,clientId,createdAt,isActive FROM users WHERE COALESCE(isActive,1)=1 ORDER BY createdAt DESC';
+  const users = await all(sql);
+  res.json(users.map(u => ({ ...u, isActive: Boolean(u.isActive ?? 1) })));
+});
 app.post('/api/auth/register', requireAdmin, validate(registerValidation), async (req, res) => {
   try {
     const { email, password, fullName, role = 'assistant', clientId = '' } = req.body;
@@ -544,10 +560,49 @@ app.delete('/api/auth/users/:id', requireAdmin, async (req, res) => {
     await run('ROLLBACK').catch(() => {});
     return res.status(500).json({ error: err.message });
   }
-  await logAudit(req, 'delete', 'user', req.params.id, `Deleted user ${user?.email || req.params.id}`);
-  await recordAuditEvent(req, { action: 'user_deactivated', entityType: 'user', entityId: req.params.id, metadata: { role: user?.role || '', email: user?.email || '' } }).catch(() => {});
-  res.json({ id: req.params.id, deleted: true });
-});
+    await logAudit(req, 'delete', 'user', req.params.id, `Deleted user ${user?.email || req.params.id}`);
+    await recordAuditEvent(req, { action: 'user_deactivated', entityType: 'user', entityId: req.params.id, metadata: { role: user?.role || '', email: user?.email || '' } }).catch(() => {});
+    res.json({ id: req.params.id, deleted: true });
+  });
+
+  app.patch('/api/auth/users/:id/role', requireAdmin, async (req, res) => {
+    if (req.params.id === req.user.userId) return res.status(400).json({ error: 'You cannot change your own role' });
+    const { role } = req.body;
+    if (!['admin', 'advocate', 'assistant', 'client'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+    const user = await get('SELECT id, email, role as oldRole FROM users WHERE id=?', [req.params.id]);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (user.oldRole === role) return res.json({ id: user.id, email: user.email, role, message: 'Role unchanged' });
+    // Prevent removing the last active admin
+    if (user.oldRole === 'admin' && role !== 'admin') {
+      const adminCount = await get('SELECT COUNT(*) as count FROM users WHERE role=? AND isActive=1', ['admin']);
+      if (adminCount.count <= 1) return res.status(400).json({ error: 'Cannot remove the last active admin' });
+    }
+    await run('UPDATE users SET role=? WHERE id=?', [role, req.params.id]);
+    await logAudit(req, 'update', 'user', req.params.id, `Changed role from ${user.oldRole} to ${role}`);
+    await recordAuditEvent(req, { action: 'user_role_changed', entityType: 'user', entityId: req.params.id, metadata: { oldRole: user.oldRole, newRole: role, email: user.email || '' } }).catch(() => {});
+    const updated = await get('SELECT id, email, fullName, role, clientId, createdAt, isActive FROM users WHERE id=?', [req.params.id]);
+    res.json({ id: updated.id, email: updated.email, fullName: updated.fullName, role: updated.role, clientId: updated.clientId || '', createdAt: updated.createdAt, isActive: Boolean(updated.isActive) });
+  });
+
+  app.patch('/api/auth/users/:id/toggle-active', requireAdmin, async (req, res) => {
+    if (req.params.id === req.user.userId) return res.status(400).json({ error: 'You cannot deactivate your own account' });
+    const { isActive } = req.body;
+    if (typeof isActive !== 'boolean') return res.status(400).json({ error: 'isActive must be a boolean' });
+    const user = await get('SELECT id, email, role, isActive as wasActive FROM users WHERE id=?', [req.params.id]);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (Boolean(user.wasActive) === isActive) return res.json({ id: user.id, email: user.email, role: user.role, isActive, message: 'No change' });
+    // Prevent deactivating the last active admin
+    if (isActive === false && user.role === 'admin') {
+      const activeAdminCount = await get('SELECT COUNT(*) as count FROM users WHERE role=? AND isActive=1', ['admin']);
+      if (activeAdminCount.count <= 1) return res.status(400).json({ error: 'Cannot deactivate the last active admin' });
+    }
+    await run('UPDATE users SET isActive=? WHERE id=?', [isActive ? 1 : 0, req.params.id]);
+    const action = isActive ? 'user_activated' : 'user_deactivated';
+    await logAudit(req, 'update', 'user', req.params.id, `${isActive ? 'Activated' : 'Deactivated'} user ${user.email}`);
+    await recordAuditEvent(req, { action, entityType: 'user', entityId: req.params.id, metadata: { role: user.role, email: user.email || '', wasActive: Boolean(user.wasActive), isActive } }).catch(() => {});
+    const updated = await get('SELECT id, email, fullName, role, clientId, createdAt, isActive FROM users WHERE id=?', [req.params.id]);
+    res.json({ id: updated.id, email: updated.email, fullName: updated.fullName, role: updated.role, clientId: updated.clientId || '', createdAt: updated.createdAt, isActive: Boolean(updated.isActive) });
+  });
 
 // OAuth account management (staff only)
 app.get('/api/auth/oauth/accounts', requireStaff, async (req, res) => {

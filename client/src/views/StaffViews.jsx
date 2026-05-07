@@ -609,10 +609,54 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
 export function Users({ clients = [], notify }) {
   const [users, setUsers] = useState([]);
   const [form, setForm] = useState({ email: '', password: '', fullName: '', role: 'assistant', clientId: '' });
-  useEffect(() => { load(); }, []);
-  async function load() { try { setUsers(await api('/auth/users')); } catch (err) { notify({ type: 'danger', message: err.message }); } }
+  const [includeInactive, setIncludeInactive] = useState(false);
+  useEffect(() => { load(); }, [includeInactive]);
+  async function load() { try { setUsers(await api(`/auth/users${includeInactive ? '?include_inactive=true' : ''}`)); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function submit(event) { event.preventDefault(); try { await api('/auth/register', { method: 'POST', body: form }); setForm({ email: '', password: '', fullName: '', role: 'assistant', clientId: '' }); notify({ type: 'success', message: 'User created.' }); await load(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
-  return <div style={styles.splitGrid}><Card title="Create user" hint="Role-based access"><form onSubmit={submit} style={styles.formGrid}><Field label="Full name"><input required style={styles.input} value={form.fullName} onChange={e => setForm({ ...form, fullName: e.target.value })} /></Field><Field label="Email"><input required style={styles.input} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field><Field label="Password"><input required type="password" style={styles.input} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} /></Field><Field label="Role"><select style={styles.input} value={form.role} onChange={e => setForm({ ...form, role: e.target.value, clientId: e.target.value === 'client' ? form.clientId : '' })}><option value="assistant">Assistant</option><option value="advocate">Advocate</option><option value="admin">Admin</option><option value="client">Client</option></select></Field>{form.role === 'client' && <><Field label="Linked Client"><select required style={styles.input} value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })}><option value="">Select client</option>{clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field><div style={styles.formHelper}>Client users can view only the linked client's matters, documents, invoices, and messages. Share credentials manually after creating the account.</div></>}<button style={styles.primaryButton}>Create user</button></form></Card><Card title="Team" hint={`${users.length} users`}><Table columns={['Name', 'Email', 'Role', 'Client']} rows={users.map(u => [u.fullName, u.email, <Badge key={u.id} tone="blue">{u.role}</Badge>, u.clientId ? clients.find(c => c.id === u.clientId)?.name || u.clientId : '-'])} empty="No users found." /></Card></div>;
+  async function updateRole(userId, newRole, fullName) {
+    try {
+      await api(`/auth/users/${userId}/role`, { method: 'PATCH', body: { role: newRole } });
+      notify({ type: 'success', message: `Role updated for ${fullName}.` });
+      await load();
+    } catch (err) { notify({ type: 'danger', message: err.message }); }
+  }
+  async function toggleActive(userId, isActive, fullName) {
+    try {
+      await api(`/auth/users/${userId}/toggle-active`, { method: 'PATCH', body: { isActive } });
+      notify({ type: 'success', message: `${isActive ? 'Activated' : 'Deactivated'} ${fullName}.` });
+      await load();
+    } catch (err) { notify({ type: 'danger', message: err.message }); }
+  }
+  return <div style={styles.splitGrid}>
+    <Card title="Create user" hint="Role-based access"><form onSubmit={submit} style={styles.formGrid}>
+      <Field label="Full name"><input required style={styles.input} value={form.fullName} onChange={e => setForm({ ...form, fullName: e.target.value })} /></Field>
+      <Field label="Email"><input required style={styles.input} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field>
+      <Field label="Password"><input required type="password" style={styles.input} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} /></Field>
+      <Field label="Role"><select style={styles.input} value={form.role} onChange={e => setForm({ ...form, role: e.target.value, clientId: e.target.value === 'client' ? form.clientId : '' })}><option value="assistant">Assistant</option><option value="advocate">Advocate</option><option value="admin">Admin</option><option value="client">Client</option></select></Field>
+      {form.role === 'client' && <><Field label="Linked Client"><select required style={styles.input} value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })}><option value="">Select client</option>{clients.map(c => <option key={c.id}>{c.name}</option>)}</select></Field><div style={styles.formHelper}>Client users can view only the linked client's matters, documents, invoices, and messages. Share credentials manually after creating the account.</div></>}
+      <button style={styles.primaryButton}>Create user</button>
+    </form></Card>
+    <Card title="Team" hint={`${users.length} users`}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}>
+        <input type="checkbox" checked={includeInactive} onChange={e => setIncludeInactive(e.target.checked)} />
+        Show inactive users
+      </label>
+      <Table columns={['Name', 'Email', 'Role', 'Status', 'Client', 'Actions']} rows={users.map(u => [
+        u.fullName,
+        u.email,
+        <select key={`role-${u.id}`} style={{ ...styles.input, width: 140 }} value={u.role} disabled={u.role === 'client'} onChange={e => updateRole(u.id, e.target.value, u.fullName)}>
+          <option value="assistant">Assistant</option>
+          <option value="advocate">Advocate</option>
+          <option value="admin">Admin</option>
+        </select>,
+        <Badge key={`status-${u.id}`} tone={u.isActive ? 'green' : 'red'}>{u.isActive ? 'Active' : 'Inactive'}</Badge>,
+        u.clientId ? clients.find(c => c.id === u.clientId)?.name || u.clientId : '-',
+        <div key={`actions-${u.id}`} style={{ display: 'flex', gap: 6 }}>
+          <button style={styles.tinyButton} onClick={() => toggleActive(u.id, !u.isActive, u.fullName)}>{u.isActive ? 'Deactivate' : 'Activate'}</button>
+        </div>,
+      ])} empty="No users found." />
+    </Card>
+  </div>;
 }
 
 function TaskEditorList({ tasks, entries = [], matter, canManage, editingTask, setEditingTask, saveTask, toggle, confirmDelete, taskTimer, setTaskTimer, notify, onTimerSaved }) {

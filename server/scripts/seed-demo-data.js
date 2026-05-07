@@ -38,7 +38,7 @@ async function createSchema() {
   await run('PRAGMA foreign_keys=OFF');
   for (const table of tables) await run(`DROP TABLE IF EXISTS ${table}`);
 
-  await run(`CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT UNIQUE, password TEXT, fullName TEXT, role TEXT CHECK(role IN ('advocate','assistant','admin','client')) DEFAULT 'assistant', clientId TEXT, createdAt TEXT, tokenVersion INTEGER DEFAULT 1)`);
+  await run(`CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT UNIQUE, password TEXT, fullName TEXT, role TEXT CHECK(role IN ('advocate','assistant','admin','client')) DEFAULT 'assistant', clientId TEXT, createdAt TEXT, tokenVersion INTEGER DEFAULT 1, isActive INTEGER DEFAULT 1)`);
   await run(`CREATE TABLE clients (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT DEFAULT 'Individual', contact TEXT, email TEXT, phone TEXT, status TEXT DEFAULT 'Active', joinDate TEXT, conflictCleared INTEGER DEFAULT 0, retainer REAL DEFAULT 0, remindersEnabled INTEGER DEFAULT 1, preferredChannel TEXT DEFAULT 'firm_default')`);
   await run(`CREATE TABLE matters (id TEXT PRIMARY KEY, reference TEXT UNIQUE, clientId TEXT NOT NULL, title TEXT NOT NULL, practiceArea TEXT, stage TEXT DEFAULT 'Intake', assignedTo TEXT, paralegal TEXT, openDate TEXT, description TEXT, court TEXT, judge TEXT, caseNo TEXT, opposingCounsel TEXT, billingRate REAL DEFAULT 0, retainerBalance REAL DEFAULT 0, totalBilled REAL DEFAULT 0, priority TEXT DEFAULT 'Medium', solDate TEXT, billingType TEXT DEFAULT 'hourly', fixedFee REAL DEFAULT 0, remindersEnabled TEXT DEFAULT 'firm_default', courtRemindersEnabled TEXT DEFAULT 'firm_default', invoiceRemindersEnabled TEXT DEFAULT 'firm_default')`);
   await run(`CREATE TABLE tasks (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT NOT NULL, completed INTEGER DEFAULT 0, assignee TEXT, dueDate TEXT, auto_generated INTEGER DEFAULT 0)`);
@@ -94,7 +94,7 @@ async function main() {
     { id: id('U'), email: 'lisa.achieng@achokilaw.co.ke', fullName: 'Lisa Achieng', role: 'assistant' },
   ];
   for (const user of [admin, ...advocates, ...assistants]) {
-    await run('INSERT INTO users (id,email,password,fullName,role,clientId,createdAt,tokenVersion) VALUES (?,?,?,?,?,?,?,?)', [user.id, user.email, password, user.fullName, user.role, '', nowIso(), 1]);
+    await run('INSERT INTO users (id,email,password,fullName,role,clientId,createdAt,tokenVersion,isActive) VALUES (?,?,?,?,?,?,?,?,?)', [user.id, user.email, password, user.fullName, user.role, '', nowIso(), 1, 1]);
   }
 
   const clientSpecs = [
@@ -113,7 +113,7 @@ async function main() {
     const client = { id: id('C'), userId: id('U'), name, type, status, email, phone, retainer, joinDate: daysAgo(joinedDays) };
     clients.push(client);
     await run('INSERT INTO clients (id,name,type,contact,email,phone,status,joinDate,conflictCleared,retainer,remindersEnabled,preferredChannel) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', [client.id, name, type, name, email, phone, status, client.joinDate, 1, retainer, 1, i % 3 === 0 ? 'both' : 'firm_default']);
-    await run('INSERT INTO users (id,email,password,fullName,role,clientId,createdAt,tokenVersion) VALUES (?,?,?,?,?,?,?,?)', [client.userId, email, password, name, 'client', client.id, nowIso(), 1]);
+    await run('INSERT INTO users (id,email,password,fullName,role,clientId,createdAt,tokenVersion,isActive) VALUES (?,?,?,?,?,?,?,?,?)', [client.userId, email, password, name, 'client', client.id, nowIso(), 1, 1]);
   }
 
   const matterSpecs = [
