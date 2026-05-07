@@ -116,6 +116,12 @@ module.exports = ({ get, all }) => {
     return ''; // admin/assistant - no scoping
   };
 
+  const isBillingVisibleFor = async (req) => {
+    if (req.user?.role !== 'advocate') return true;
+    const row = await get('SELECT advocateBillingVisibility FROM firm_settings LIMIT 1');
+    return row ? Number(row.advocateBillingVisibility) !== 0 : true;
+  };
+
   return {
     canAccessMatter,
     canAccessNotice,
@@ -128,5 +134,6 @@ module.exports = ({ get, all }) => {
     canAccessTimeEntry,
     scopeMattersQuery,
     scopeClientsQuery,
+    isBillingVisibleFor,
   };
 };

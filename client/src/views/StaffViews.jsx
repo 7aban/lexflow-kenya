@@ -518,6 +518,13 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
             {form.logo ? <img src={form.logo} alt="Firm logo preview" /> : <span>LF</span>}
             <button type="button" style={styles.tinyButton} onClick={() => setForm({ ...form, logo: '' })}>Clear logo</button>
           </div>
+          <Field label="Allow advocates to see billing information">
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input type="checkbox" checked={Number(form.advocateBillingVisibility ?? 1) !== 0} onChange={e => setForm({ ...form, advocateBillingVisibility: e.target.checked ? 1 : 0 })} />
+              Advocates can view billing data
+            </label>
+            <div style={styles.formHelper}>When unchecked, advocates cannot see revenue, invoice amounts, invoice PDFs, billing rates, or time-entry rates.</div>
+          </Field>
           <button style={styles.primaryButton}>Save settings</button>
         </form>
       </Card>

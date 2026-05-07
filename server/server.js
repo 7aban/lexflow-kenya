@@ -34,7 +34,7 @@ const themeValidation = require('./lib/themeValidation');
 const app = express();
 const db = new sqlite3.Database(config.DATABASE_PATH);
 const { run, get, all } = createDb(db);
-const { canAccessMatter, canAccessClient, canAccessInvoice, canAccessTask, canAccessTimeEntry, canAccessAppearance, canAccessNotice, canAccessConversation, canAccessDocument } = createAccess({ get });
+const { canAccessMatter, canAccessClient, canAccessInvoice, canAccessTask, canAccessTimeEntry, canAccessAppearance, canAccessNotice, canAccessConversation, canAccessDocument, isBillingVisibleFor } = createAccess({ get });
 const { logClientActivity, logAudit } = createLogging({ run });
 const { notifyStaff } = createNotifications({ run, all, genId });
 const { appBaseUrl, invitationUrl, checkInvitationRateLimit } = createInvitations();
@@ -119,7 +119,7 @@ const {
   startReminderJobs,
 } = require('./lib/reminders')({ run, get, all, genId, money, defaultFirmSettings, today, addDays });
 const { monthStart, sixMonthKeys, advocatePerformanceRows, cachedAdvocatePerformance, advocatePerformanceDetail } = require('./lib/performance')({ get, all, today, addDays });
-const { advocateDashboard, staffDashboard } = require('./lib/dashboard')({ get, all, today });
+const { advocateDashboard, staffDashboard } = require('./lib/dashboard')({ get, all, today, isBillingVisibleFor });
 const { getClientDashboardData } = require('./lib/clientDashboard')({ get, all, documentListColumns, clientDocumentVisibilitySql, publicDocument, publicNotice });
 
 async function ensureColumn(table, column, definition) {
@@ -205,6 +205,7 @@ async function initDb() {
   await ensureColumn('time_entries', 'taskId', 'TEXT');
   await ensureColumn('users', 'isActive', 'INTEGER DEFAULT 1');
   await ensureColumn('firm_settings', 'themeJson', 'TEXT');
+  await ensureColumn('firm_settings', 'advocateBillingVisibility', 'INTEGER DEFAULT 1');
   await seedReminderTemplates();
 
   const userCount = await get('SELECT COUNT(*) AS count FROM users');
@@ -359,6 +360,9 @@ app.put('/api/firm-settings', authenticate, requireAdmin, async (req, res) => {
   if (req.body.reminderSettings) {
     await saveReminderSettings(req.body.reminderSettings);
     await logAudit(req, 'update', 'reminder_settings', 'default', 'Updated reminder channel settings');
+  }
+  if (req.body.advocateBillingVisibility !== undefined) {
+    await run('UPDATE firm_settings SET advocateBillingVisibility=?', [Number(req.body.advocateBillingVisibility)]);
   }
   await logAudit(req, 'update', 'firm_settings', 'default', `Updated firm settings for ${settings.name}`);
   await recordAuditEvent(req, { action: 'firm_settings_updated', entityType: 'firm_settings', entityId: 'default', metadata: { name: settings.name, fieldsUpdated: Object.keys(req.body).filter(k => k !== 'reminderSettings') } }).catch(() => {});
@@ -865,7 +869,7 @@ app.get('/api/reminder-logs', requireAdmin, async (req, res) => {
 
 app.get('/api/dashboard', requireStaff, async (req, res) => {
   const data = req.user.role === 'advocate'
-    ? await advocateDashboard(req.user.fullName || '')
+    ? await advocateDashboard(req.user.fullName || '', req)
     : await staffDashboard();
   res.json(data);
 });
@@ -1028,6 +1032,12 @@ app.get('/api/matters/:id', async (req, res) => {
     all('SELECT * FROM invoices WHERE matterId=? ORDER BY date DESC', [req.params.id]),
     all('SELECT * FROM appearances WHERE matterId=? ORDER BY date', [req.params.id])
   ]);
+  if (req.user.role === 'advocate' && !(await isBillingVisibleFor(req))) {
+    matter.totalBilled = null;
+    matter.fixedFee = null;
+    for (const te of timeEntries) te.rate = null;
+    for (const inv of invoices) inv.amount = null;
+  }
   res.json({ ...matter, tasks, timeEntries, documents: documents.map(publicDocument), notes, invoices, appearances });
 });
 app.get('/api/matters/:id/suggestions', async (req, res) => {
@@ -1206,7 +1216,11 @@ app.get('/api/time-entries', requireStaff, async (req, res) => {
     params.push(req.user.fullName || '', req.user.fullName || '');
   }
   query += ' ORDER BY date DESC';
-  res.json(await all(query, params));
+  const entries = await all(query, params);
+  if (req.user?.role === 'advocate' && !(await isBillingVisibleFor(req))) {
+    for (const e of entries) e.rate = null;
+  }
+  res.json(entries);
 });
 app.get('/api/time-entries/:id', requireStaff, async (req, res) => {
   if (!(await canAccessTimeEntry(req, req.params.id))) {
@@ -1214,6 +1228,9 @@ app.get('/api/time-entries/:id', requireStaff, async (req, res) => {
     return res.status(403).json({ error: 'Time entry access denied' });
   }
   const entry = await get('SELECT * FROM time_entries WHERE id=?', [req.params.id]);
+  if (entry && req.user?.role === 'advocate' && !(await isBillingVisibleFor(req))) {
+    entry.rate = null;
+  }
   entry ? res.json(entry) : res.status(404).json({ error: 'Time entry not found' });
 });
 
@@ -1487,9 +1504,18 @@ app.post('/api/matters/:id/notes', async (req, res) => {
 });
 
 app.get('/api/invoices', async (req, res) => {
-  if (req.user.role === 'client') return res.json(await all(`SELECT i.*, m.title matterTitle, m.reference, c.name clientName FROM invoices i LEFT JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId WHERE i.clientId=? ORDER BY i.date DESC, i.number DESC`, [req.user.clientId || '']));
-  if (req.user.role === 'advocate') return res.json(await all(`SELECT i.*, m.title matterTitle, m.reference, c.name clientName FROM invoices i LEFT JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId WHERE m.assignedTo=? ORDER BY i.date DESC, i.number DESC`, [req.user.fullName || '']));
-  res.json(await all(`SELECT i.*, m.title matterTitle, m.reference, c.name clientName FROM invoices i LEFT JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId ORDER BY i.date DESC, i.number DESC`));
+  let invoices;
+  if (req.user.role === 'client') {
+    invoices = await all(`SELECT i.*, m.title matterTitle, m.reference, c.name clientName FROM invoices i LEFT JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId WHERE i.clientId=? ORDER BY i.date DESC, i.number DESC`, [req.user.clientId || '']);
+  } else if (req.user.role === 'advocate') {
+    invoices = await all(`SELECT i.*, m.title matterTitle, m.reference, c.name clientName FROM invoices i LEFT JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId WHERE m.assignedTo=? ORDER BY i.date DESC, i.number DESC`, [req.user.fullName || '']);
+  } else {
+    invoices = await all(`SELECT i.*, m.title matterTitle, m.reference, c.name clientName FROM invoices i LEFT JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId ORDER BY i.date DESC, i.number DESC`);
+  }
+  if (req.user.role === 'advocate' && !(await isBillingVisibleFor(req))) {
+    for (const inv of invoices) inv.amount = null;
+  }
+  res.json(invoices);
 });
 
 app.get('/api/invoices/:id', async (req, res) => {
@@ -1499,9 +1525,18 @@ app.get('/api/invoices/:id', async (req, res) => {
     await recordAuditEvent(req, { action: 'forbidden_invoice_access', entityType: 'invoice', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
     return res.status(403).json({ error: 'Invoice access denied' });
   }
+  if (req.user.role === 'advocate' && !(await isBillingVisibleFor(req))) {
+    invoice.amount = null;
+    if (invoice.items) {
+      for (const item of invoice.items) { item.rate = null; item.amount = null; }
+    }
+  }
   res.json(invoice);
 });
 app.post('/api/invoices/generate', requireAdvocateOrAdmin, validate(generateInvoiceValidation), async (req, res) => {
+  if (req.user.role === 'advocate' && !(await isBillingVisibleFor(req))) {
+    return res.status(403).json({ error: 'Billing access restricted' });
+  }
   try {
     const matter = await get('SELECT * FROM matters WHERE id=?', [req.body.matterId]);
     if (!matter) return res.status(404).json({ error: 'Matter not found' });
@@ -1553,6 +1588,10 @@ app.delete('/api/invoices/:id', requireAdvocateOrAdmin, async (req, res) => {
   res.json({ id: req.params.id, deleted: true });
 });
 app.get('/api/invoices/:id/pdf', async (req, res) => {
+  if (req.user.role === 'advocate' && !(await isBillingVisibleFor(req))) {
+    await recordAuditEvent(req, { action: 'forbidden_invoice_pdf', entityType: 'invoice', entityId: req.params.id, metadata: { reason: 'billing_visibility_disabled' } }).catch(() => {});
+    return res.status(403).json({ error: 'Billing access restricted' });
+  }
   if (!(await canAccessInvoice(req, req.params.id))) {
     await recordAuditEvent(req, { action: 'forbidden_invoice_access', entityType: 'invoice', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
     return res.status(403).json({ error: 'Invoice access denied' });

@@ -22,7 +22,7 @@ export const theme = {
   shadowLift: '0 14px 32px rgba(15,27,51,0.12)',
 };
 
-export const defaultFirmSettings = { name: 'LexFlow Kenya', logo: '', primaryColor: '#0F1B33', accentColor: '#D4A34A', websiteURL: '', email: 'accounts@lexflow.co.ke', phone: '+254 700 123456', address: 'Nairobi, Kenya' };
+export const defaultFirmSettings = { name: 'LexFlow Kenya', logo: '', primaryColor: '#0F1B33', accentColor: '#D4A34A', websiteURL: '', email: 'accounts@lexflow.co.ke', phone: '+254 700 123456', address: 'Nairobi, Kenya', advocateBillingVisibility: 1 };
 
 export function StyleTag() { return <style>{`
   * { box-sizing: border-box; }
