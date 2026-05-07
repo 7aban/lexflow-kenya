@@ -233,15 +233,15 @@ async function clientUploadsFolder(matterId, userId = '') {
 
 async function matterFolders(matterId, req = null) {
   if (req?.user?.role === 'client') {
-    const visibleCount = await get(`SELECT COUNT(*) documentCount FROM documents d WHERE d.matterId=? AND ${clientDocumentVisibilitySql('d')}`, [matterId, req.user.clientId || '']);
-    const clientFolder = await get(`SELECT f.*, (SELECT COUNT(*) FROM documents d WHERE d.folderId=f.id AND ${clientDocumentVisibilitySql('d')}) documentCount
+    const visibleCount = await get(`SELECT COUNT(*) documentCount FROM documents d WHERE d.matterId=? AND d.deletedAt IS NULL AND ${clientDocumentVisibilitySql('d')}`, [matterId, req.user.clientId || '']);
+    const clientFolder = await get(`SELECT f.*, (SELECT COUNT(*) FROM documents d WHERE d.folderId=f.id AND d.deletedAt IS NULL AND ${clientDocumentVisibilitySql('d')}) documentCount
       FROM folders f
       WHERE f.matterId=? AND lower(f.name)=lower('Client Uploads')`, [req.user.clientId || '', matterId]);
     const folders = clientFolder ? [{ ...clientFolder, name: 'Client Uploads' }] : [];
     return [{ id: 'all', matterId, name: 'All Documents', virtual: true, documentCount: visibleCount?.documentCount || 0 }, ...folders];
   }
-  const folders = await all(`SELECT f.*, (SELECT COUNT(*) FROM documents d WHERE d.folderId=f.id) documentCount FROM folders f WHERE f.matterId=? ORDER BY CASE WHEN lower(f.name)=lower('Client Uploads') THEN 0 ELSE 1 END, lower(f.name)`, [matterId]);
-  const uncategorised = await get('SELECT COUNT(*) documentCount FROM documents WHERE matterId=? AND (folderId IS NULL OR folderId="")', [matterId]);
+  const folders = await all(`SELECT f.*, (SELECT COUNT(*) FROM documents d WHERE d.folderId=f.id AND d.deletedAt IS NULL) documentCount FROM folders f WHERE f.matterId=? ORDER BY CASE WHEN lower(f.name)=lower('Client Uploads') THEN 0 ELSE 1 END, lower(f.name)`, [matterId]);
+  const uncategorised = await get('SELECT COUNT(*) documentCount FROM documents WHERE matterId=? AND deletedAt IS NULL AND (folderId IS NULL OR folderId="")', [matterId]);
   return [{ id: 'all', matterId, name: 'All Documents', virtual: true }, { id: 'uncategorised', matterId, name: 'Uncategorised', virtual: true, documentCount: uncategorised.documentCount || 0 }, ...folders];
 }
 
@@ -336,6 +336,7 @@ app.put('/api/firm-settings', authenticate, requireAdmin, async (req, res) => {
     await logAudit(req, 'update', 'reminder_settings', 'default', 'Updated reminder channel settings');
   }
   await logAudit(req, 'update', 'firm_settings', 'default', `Updated firm settings for ${settings.name}`);
+  await recordAuditEvent(req, { action: 'firm_settings_updated', entityType: 'firm_settings', entityId: 'default', metadata: { name: settings.name, fieldsUpdated: Object.keys(req.body).filter(k => k !== 'reminderSettings') } }).catch(() => {});
   res.json(await getFirmSettings());
 });
 
@@ -384,6 +385,7 @@ app.delete('/api/auth/users/:id', requireAdmin, async (req, res) => {
   const user = await get('SELECT id,email,fullName,role FROM users WHERE id=?', [req.params.id]);
   await run('DELETE FROM users WHERE id=?', [req.params.id]);
   await logAudit(req, 'delete', 'user', req.params.id, `Deleted user ${user?.email || req.params.id}`);
+  await recordAuditEvent(req, { action: 'user_deactivated', entityType: 'user', entityId: req.params.id, metadata: { role: user?.role || '', email: user?.email || '' } }).catch(() => {});
   res.json({ id: req.params.id, deleted: true });
 });
 
@@ -570,7 +572,7 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
   }
   await logAudit(req, 'create', 'message', id, `Added message to conversation ${conversation.subject || req.params.id}`);
   const message = await get('SELECT msg.*, u.fullName senderName FROM messages msg LEFT JOIN users u ON u.id=msg.senderId WHERE msg.id=?', [id]);
-  const messageAttachments = await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.messageId=? ORDER BY d.date DESC`, [id]);
+  const messageAttachments = await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.messageId=? AND d.deletedAt IS NULL ORDER BY d.date DESC`, [id]);
   res.json({ ...message, attachments: messageAttachments.map(publicDocument) });
 });
 
@@ -702,6 +704,7 @@ app.delete('/api/deadlines/:id', requireAdvocateOrAdmin, async (req, res) => {
   const deadline = await get('SELECT * FROM deadlines WHERE id=?', [req.params.id]);
   await run('DELETE FROM deadlines WHERE id=?', [req.params.id]);
   await logAudit(req, 'delete', 'deadline', req.params.id, `Deleted deadline ${deadline?.title || req.params.id}`);
+  await recordAuditEvent(req, { action: 'deadline_deleted', entityType: 'deadline', entityId: req.params.id, metadata: { title: deadline?.title || '', type: deadline?.type || '' } }).catch(() => {});
   res.json({ id: req.params.id, deleted: true });
 });
 app.get('/api/compliance-guidance', requireStaff, async (req, res) => {
@@ -761,6 +764,7 @@ app.delete('/api/clients/:id', requireAdvocateOrAdmin, async (req, res) => {
     await run('DELETE FROM clients WHERE id=?', [req.params.id]);
     await run('COMMIT');
     await logAudit(req, 'delete', 'client', req.params.id, `Deleted client ${client?.name || req.params.id} and ${matters.length} related matter(s)`);
+    await recordAuditEvent(req, { action: 'client_deleted', entityType: 'client', entityId: req.params.id, metadata: { name: client?.name || '', matterCount: matters.length } }).catch(() => {});
     res.json({ id: req.params.id, deleted: true });
   } catch (err) {
     await run('ROLLBACK').catch(() => {});
@@ -783,7 +787,7 @@ app.get('/api/matters/:id', async (req, res) => {
     return res.status(403).json({ error: 'Matter access denied' });
   }
   const documentParams = [req.params.id];
-  let documentWhere = 'd.matterId=?';
+  let documentWhere = 'd.matterId=? AND d.deletedAt IS NULL';
   if (req.user.role === 'client') {
     documentWhere += ` AND ${clientDocumentVisibilitySql('d')}`;
     documentParams.push(req.user.clientId || '');
@@ -807,7 +811,7 @@ app.get('/api/matters/:id/suggestions', async (req, res) => {
   const [taskStats, timeStats, docStats, noteStats, invoiceStats, nextAppearance] = await Promise.all([
     get('SELECT COUNT(*) total, SUM(CASE WHEN completed=0 AND dueDate < ? THEN 1 ELSE 0 END) overdue FROM tasks WHERE matterId=?', [todayDate, req.params.id]),
     get('SELECT COUNT(*) total, COALESCE(SUM(CASE WHEN billed=0 THEN hours*rate ELSE 0 END),0) unbilled FROM time_entries WHERE matterId=?', [req.params.id]),
-    get('SELECT COUNT(*) total FROM documents WHERE matterId=?', [req.params.id]),
+    get('SELECT COUNT(*) total FROM documents WHERE matterId=? AND deletedAt IS NULL', [req.params.id]),
     get('SELECT COUNT(*) total FROM case_notes WHERE matterId=?', [req.params.id]),
     get(`SELECT COUNT(*) total, SUM(CASE WHEN status='Outstanding' THEN 1 ELSE 0 END) outstanding FROM invoices WHERE matterId=?`, [req.params.id]),
     get('SELECT * FROM appearances WHERE matterId=? AND date>=? ORDER BY date LIMIT 1', [req.params.id, todayDate]),
@@ -905,6 +909,7 @@ app.delete('/api/matters/:id', requireAdvocateOrAdmin, async (req, res) => {
     await deleteMatterCascade(req.params.id);
     await run('COMMIT');
     await logAudit(req, 'delete', 'matter', req.params.id, `Deleted matter ${matter.title} (${matter.reference || matter.id})`);
+    await recordAuditEvent(req, { action: 'matter_deleted', entityType: 'matter', entityId: req.params.id, metadata: { title: matter.title || '', reference: matter.reference || '' } }).catch(() => {});
     res.json({ id: req.params.id, deleted: true });
   } catch (err) {
     await run('ROLLBACK').catch(() => {});
@@ -941,6 +946,7 @@ app.delete('/api/tasks/:id', requireAdvocateOrAdmin, async (req, res) => {
   const task = await get('SELECT * FROM tasks WHERE id=?', [req.params.id]);
   await run('DELETE FROM tasks WHERE id=?', [req.params.id]);
   await logAudit(req, 'delete', 'task', req.params.id, `Deleted task ${task?.title || req.params.id}`);
+  await recordAuditEvent(req, { action: 'task_deleted', entityType: 'task', entityId: req.params.id, metadata: { title: task?.title || '' } }).catch(() => {});
   res.json({ id: req.params.id, deleted: true });
 });
 
@@ -1048,6 +1054,7 @@ app.delete('/api/appearances/:id', requireAdvocateOrAdmin, async (req, res) => {
   const event = await get('SELECT * FROM appearances WHERE id=?', [req.params.id]);
   await run('DELETE FROM appearances WHERE id=?', [req.params.id]);
   await logAudit(req, 'delete', 'appearance', req.params.id, `Deleted appearance ${event?.title || event?.type || req.params.id}`);
+  await recordAuditEvent(req, { action: 'appearance_deleted', entityType: 'appearance', entityId: req.params.id, metadata: { title: event?.title || '', type: event?.type || '' } }).catch(() => {});
   res.json({ id: req.params.id, deleted: true });
 });
 
@@ -1294,6 +1301,7 @@ app.delete('/api/invoices/:id', requireAdvocateOrAdmin, async (req, res) => {
   await run('DELETE FROM invoice_items WHERE invoiceId=?', [req.params.id]);
   await run('DELETE FROM invoices WHERE id=?', [req.params.id]);
   await logAudit(req, 'delete', 'invoice', req.params.id, `Deleted invoice ${invoice.number || req.params.id}`);
+  await recordAuditEvent(req, { action: 'invoice_deleted', entityType: 'invoice', entityId: req.params.id, metadata: { number: invoice.number || '', status: invoice.status || '' } }).catch(() => {});
   res.json({ id: req.params.id, deleted: true });
 });
 app.get('/api/invoices/:id/pdf', async (req, res) => {
@@ -1378,7 +1386,7 @@ app.get('/api/search', requireStaff, async (req, res) => {
     const tasks = await all(`SELECT t.id,t.title,t.assignee,t.matterId FROM tasks t LEFT JOIN matters m ON m.id=t.matterId WHERE (t.assignee=? OR m.assignedTo=?) AND (t.title LIKE ? OR t.assignee LIKE ?) LIMIT 5`, [name, name, q, q]);
     const invoices = await all(`SELECT i.id,i.number,i.description,i.status,i.matterId FROM invoices i INNER JOIN matters m ON m.id=i.matterId WHERE m.assignedTo=? AND (i.number LIKE ? OR i.description LIKE ? OR i.status LIKE ?) LIMIT 5`, [name, q, q, q]);
     const appearances = await all(`SELECT a.id,a.title,a.date,a.time,a.type,a.location,a.attorney,a.matterId FROM appearances a LEFT JOIN matters m ON m.id=a.matterId WHERE (a.attorney=? OR m.assignedTo=?) AND (a.title LIKE ? OR a.location LIKE ? OR a.type LIKE ?) LIMIT 5`, [name, name, q, q, q]);
-    const documents = await all(`SELECT d.id,d.displayName,d.name,d.type,d.matterId FROM documents d INNER JOIN matters m ON m.id=d.matterId WHERE m.assignedTo=? AND (d.displayName LIKE ? OR d.name LIKE ?) LIMIT 5`, [name, q, q]);
+    const documents = await all(`SELECT d.id,d.displayName,d.name,d.type,d.matterId FROM documents d INNER JOIN matters m ON m.id=d.matterId WHERE m.assignedTo=? AND d.deletedAt IS NULL AND (d.displayName LIKE ? OR d.name LIKE ?) LIMIT 5`, [name, q, q]);
     const conversations = await all(`SELECT conv.id,conv.matterId,conv.subject,m.title matterTitle FROM conversations conv INNER JOIN matters m ON m.id=conv.matterId WHERE m.assignedTo=? AND conv.subject LIKE ? LIMIT 5`, [name, q]);
     return res.json([
       ...matters.map(m => ({ type: 'Matter', id: m.id, matterId: m.id, title: m.title, subtitle: `${m.reference || ''} ${m.clientName || ''}`.trim() })),
@@ -1396,7 +1404,7 @@ app.get('/api/search', requireStaff, async (req, res) => {
   const tasks = await all(`SELECT id,title,assignee,matterId FROM tasks WHERE title LIKE ? OR assignee LIKE ? LIMIT 5`, [q, q]);
   const invoices = await all(`SELECT id,number,description,status,matterId FROM invoices WHERE number LIKE ? OR description LIKE ? OR status LIKE ? LIMIT 5`, [q, q, q]);
   const appearances = await all(`SELECT id,title,date,time,type,location,attorney,matterId FROM appearances WHERE title LIKE ? OR location LIKE ? OR type LIKE ? LIMIT 5`, [q, q, q]);
-  const documents = await all(`SELECT id,displayName,name,type,matterId FROM documents WHERE displayName LIKE ? OR name LIKE ? LIMIT 5`, [q, q]);
+  const documents = await all(`SELECT id,displayName,name,type,matterId FROM documents WHERE deletedAt IS NULL AND (displayName LIKE ? OR name LIKE ?) LIMIT 5`, [q, q]);
   const conversations = await all(`SELECT conv.id,conv.matterId,conv.subject,m.title matterTitle FROM conversations conv LEFT JOIN matters m ON m.id=conv.matterId WHERE conv.subject LIKE ? LIMIT 5`, [q]);
   res.json([
     ...matters.map(m => ({ type: 'Matter', id: m.id, matterId: m.id, title: m.title, subtitle: `${m.reference || ''} ${m.clientName || ''}`.trim() })),

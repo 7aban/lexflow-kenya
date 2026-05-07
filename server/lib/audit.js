@@ -34,7 +34,7 @@ module.exports = ({ run, get }) => {
   // Helper to redact sensitive data from metadata
   function redactSensitive(metadata) {
     if (!metadata || typeof metadata !== 'object') return metadata;
-    const sensitive = ['password', 'token', 'jwt', 'secret', 'document_text', 'message_body', 'legal_advice'];
+    const sensitive = ['password', 'token', 'jwt', 'secret', 'document_text', 'message_body', 'legal_advice', 'backup_key', 'key', 'private_key', 'decrypted'];
     const redacted = { ...metadata };
     for (const key of Object.keys(redacted)) {
       if (sensitive.some(s => key.toLowerCase().includes(s))) {
