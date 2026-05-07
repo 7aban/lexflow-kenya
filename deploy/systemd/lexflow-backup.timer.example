@@ -1,0 +1,18 @@
+# systemd timer for daily LexFlow backup
+# Copy to /etc/systemd/system/lexflow-backup.timer and adjust.
+
+[Unit]
+Description=Run LexFlow Encrypted Database Backup Daily
+Requires=lexflow-backup.service
+
+[Timer]
+# Run daily at 2:00 AM
+OnCalendar=*-*-* 02:00:00
+Timezone=UTC
+# If the scheduled time was missed, run immediately
+Persistent=true
+# Add up to 5 minutes of random delay to avoid thundering herd
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,42 @@
+# systemd service for LexFlow backend
+# Copy to /etc/systemd/system/lexflow.service and adjust paths.
+
+[Unit]
+Description=LexFlow Kenya Legal Practice Management
+After=network.target
+# If using a separate database server in the future, add:
+# After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=lexflow
+Group=www-data
+WorkingDirectory=/opt/lexflow/server
+ExecStart=/usr/bin/node server.js
+
+# Environment file — must be readable by the service user
+EnvironmentFile=/opt/lexflow/server/.env.production
+
+# Restart policy
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lexflow
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/lexflow/server /opt/lexflow/backups /opt/lexflow/logs
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

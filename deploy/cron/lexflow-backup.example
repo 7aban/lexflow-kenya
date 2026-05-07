@@ -1,0 +1,10 @@
+# Cron job for daily LexFlow encrypted backup
+# Install: sudo cp lexflow-backup /etc/cron.d/lexflow-backup
+# Ensure the backup user has read access to the server directory.
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Run daily at 2:00 AM as the lexflow user
+# Environment variables are passed inline for the backup script
+0 2 * * * lexflow cd /opt/lexflow/server && NODE_ENV=production LEXFLOW_BACKUP_KEY=$(grep LEXFLOW_BACKUP_KEY /opt/lexflow/server/.env.production | cut -d= -f2-) node scripts/backup.js >> /var/log/lexflow/backup-cron.log 2>&1

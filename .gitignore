@@ -18,6 +18,11 @@ backups/
 
 # Local environment and logs
 .env
+.env.*
+!.env.example
+!.env.production.example
 *.log
 npm-debug.log*
 server/.env
+server/.env.*
+!server/.env.production.example

@@ -1,0 +1,24 @@
+# systemd service for LexFlow backup (run by timer)
+# Copy to /etc/systemd/system/lexflow-backup.service and adjust paths.
+
+[Unit]
+Description=LexFlow Encrypted Database Backup
+After=lexflow.service
+
+[Service]
+Type=oneshot
+User=lexflow
+Group=www-data
+WorkingDirectory=/opt/lexflow/server
+ExecStart=/usr/bin/node scripts/backup.js
+
+# Load environment from .env.production
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/lexflow/server/.env.production
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lexflow-backup
+
+[Install]
+WantedBy=multi-user.target
