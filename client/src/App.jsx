@@ -28,22 +28,25 @@ const navIcons = {
   Users: IconUsersGroup,
   'Firm Settings': IconSettings,
   'Audit Log': IconListSearch,
+  'eFiling CTS': IconExternalLink,
+  eCitizen: IconExternalLink,
+  'Ardhi Sasa': IconExternalLink,
 };
 
 const initialData = { dashboard: {}, clients: [], matters: [], tasks: [], invoices: [], firmSettings: defaultFirmSettings };
 const navGroups = [
-  { title: 'Dashboard', items: [['Dashboard', ['admin', 'advocate', 'assistant']], ['Performance', ['admin']]] },
-  { title: 'Clients', items: [['Clients', ['admin', 'advocate', 'assistant']], ['Invitations', ['admin']]] },
+  { title: 'Overview', items: [['Dashboard', ['admin', 'advocate', 'assistant']], ['Performance', ['admin']]] },
+  { title: 'Relationships', items: [['Clients', ['admin', 'advocate', 'assistant']], ['Invitations', ['admin']]] },
   { title: 'Matters', items: [['Matters', ['admin', 'advocate', 'assistant']]] },
   { title: 'Work', items: [['Tasks', ['admin', 'advocate', 'assistant']], ['Deadlines', ['admin', 'advocate', 'assistant']]] },
   { title: 'Finance', items: [['Invoices', ['admin']]] },
   { title: 'Communications', items: [['Communications', ['admin', 'advocate', 'assistant']]] },
   { title: 'Administration', items: [['Users', ['admin']], ['Firm Settings', ['admin']], ['Audit Log', ['admin']]] },
-];
-const legalResources = [
-  ['eFiling CTS Judiciary', 'https://efiling.court.go.ke/auth'],
-  ['eCitizen', 'https://www.ecitizen.go.ke'],
-  ['Ardhi Sasa', 'https://ardhisasa.lands.go.ke/home'],
+  { title: 'Resources', items: [
+    ['eFiling CTS', ['admin', 'advocate', 'assistant'], 'https://efiling.court.go.ke/auth'],
+    ['eCitizen', ['admin', 'advocate', 'assistant'], 'https://www.ecitizen.go.ke'],
+    ['Ardhi Sasa', ['admin', 'advocate', 'assistant'], 'https://ardhisasa.lands.go.ke/home'],
+  ] },
 ];
 
 function allowedNavGroups(role) {
@@ -53,7 +56,7 @@ function allowedNavGroups(role) {
 }
 
 function defaultNavGroup(role) {
-  return allowedNavGroups(role)[0]?.title || 'Dashboard';
+  return allowedNavGroups(role)[0]?.title || 'Overview';
 }
 
 function readOpenNavGroups(role) {
@@ -74,7 +77,6 @@ export default function App() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const searchRef = useRef(null);
-  const [quickLinksOpen, setQuickLinksOpen] = useState(true);
   const [openNavGroups, setOpenNavGroups] = useState(() => {
     const currentRole = session?.user?.role || 'assistant';
     const saved = readOpenNavGroups(currentRole);
@@ -324,61 +326,57 @@ export default function App() {
           </div>
         </div>
 
-        <div style={styles.sideSectionLabel}>Workspace</div>
+        <div style={styles.sideSectionLabel}>Navigation</div>
         <nav style={styles.navList}>
-          {visibleGroups.map(group => (
-            <div key={group.title} style={styles.navGroup}>
-              <button
-                type="button"
-                className="lf-nav-group"
-                onClick={() => {
-                  setOpenNavGroups(prev => {
-                    const next = new Set(prev);
-                    if (next.has(group.title)) { next.delete(group.title); }
-                    else { next.add(group.title); }
-                    try { localStorage.setItem('lexflowOpenNavGroups', JSON.stringify([...next])); } catch {}
-                    return next;
-                  });
-                }}
-                style={styles.navGroupButton}
-                aria-expanded={openNavGroups.has(group.title)}
-              >
-                <span>{group.title}</span>
-                <span style={styles.navGroupChevron}>{openNavGroups.has(group.title) ? 'v' : '>'}</span>
-              </button>
-              {openNavGroups.has(group.title) && (
-                <div style={styles.navGroupItems}>
-                  {group.items.map(([label]) => {
-                    const NavIcon = navIcons[label];
-                    return (
-                      <button key={label} type="button" className="lf-nav" onClick={() => setView(label)} style={{ ...styles.navItem, ...(view === label ? styles.navActive : {}) }}>
-                        <span style={styles.navNumber}>{NavIcon ? <NavIcon size={16} /> : null}</span>
-                        <span>{label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          ))}
+          {visibleGroups.map(group => {
+            const isFlattened = (group.title === 'Matters' || group.title === 'Communications') && group.items.length === 1;
+            return (
+              <div key={group.title} style={styles.navGroup}>
+                {!isFlattened && (
+                  <button
+                    type="button"
+                    className="lf-nav-group"
+                    onClick={() => {
+                      setOpenNavGroups(prev => {
+                        const next = new Set(prev);
+                        if (next.has(group.title)) { next.delete(group.title); }
+                        else { next.add(group.title); }
+                        try { localStorage.setItem('lexflowOpenNavGroups', JSON.stringify([...next])); } catch {}
+                        return next;
+                      });
+                    }}
+                    style={styles.navGroupButton}
+                    aria-expanded={openNavGroups.has(group.title)}
+                  >
+                    <span>{group.title}</span>
+                    <span style={styles.navGroupChevron}>{openNavGroups.has(group.title) ? 'v' : '>'}</span>
+                  </button>
+                )}
+                {(isFlattened || openNavGroups.has(group.title)) && (
+                  <div style={styles.navGroupItems}>
+                    {group.items.map(([label, , url]) => {
+                      const NavIcon = navIcons[label];
+                      if (url) {
+                        return (
+                          <a key={label} className="lf-nav lf-resource-link" style={{ ...styles.navItem, textDecoration: 'none' }} href={url} target="_blank" rel="noopener noreferrer">
+                            <span style={styles.navNumber}>{NavIcon ? <NavIcon size={16} /> : null}</span>
+                            <span>{label}</span>
+                          </a>
+                        );
+                      }
+                      return (
+                        <button key={label} type="button" className="lf-nav" onClick={() => setView(label)} style={{ ...styles.navItem, ...(view === label ? styles.navActive : {}) }}>
+                          <span style={styles.navNumber}>{NavIcon ? <NavIcon size={16} /> : null}</span>
+                          <span>{label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </nav>
-
-        <div style={styles.quickLinksPanel}>
-          <button type="button" className="lf-quick-toggle" onClick={() => setQuickLinksOpen(open => !open)} style={styles.quickLinksHeader} aria-expanded={quickLinksOpen}>
-            <span>Legal Resources</span>
-            <span style={styles.quickLinksChevron}>{quickLinksOpen ? 'v' : '>'}</span>
-          </button>
-          {quickLinksOpen && (
-            <div style={styles.quickLinksList}>
-                {legalResources.map(([name, href]) => (
-                  <a key={name} className="lf-resource-link" style={styles.quickLink} href={href} target="_blank" rel="noopener noreferrer">
-                    <span style={styles.quickLinkIcon}><IconExternalLink size={14} /></span>
-                    <span>{name}</span>
-                  </a>
-                ))}
-            </div>
-          )}
-        </div>
 
         <button type="button" onClick={() => setView('Tasks')} style={{ ...styles.timerCard, border: 'none', cursor: 'pointer', textAlign: 'left', color: 'inherit' }}>
           <div style={styles.timerTop}><span style={styles.liveDot} /> Timekeeper</div>
