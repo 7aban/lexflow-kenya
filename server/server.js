@@ -249,6 +249,46 @@ async function clientUploadsFolder(matterId, userId = '') {
   return folder;
 }
 
+function documentAuditContext(doc = {}) {
+  if (doc.messageId) return 'communication_attachment';
+  if (doc.noticeId) return 'notice_attachment';
+  if (doc.source === 'client') return 'client_uploaded_document';
+  if (Number(doc.clientVisible || 0) === 1) return 'client_visible_document';
+  return 'matter_document';
+}
+
+async function documentAuditClientId(doc = {}, req = null) {
+  if (req?.user?.role === 'client' && req.user.clientId) return req.user.clientId;
+  if (doc.matterId) {
+    const matter = await get('SELECT clientId FROM matters WHERE id=?', [doc.matterId]);
+    if (matter?.clientId) return matter.clientId;
+  }
+  if (doc.noticeId) {
+    const notice = await get('SELECT clientId FROM firm_notices WHERE id=?', [doc.noticeId]);
+    if (notice?.clientId) return notice.clientId;
+  }
+  if (doc.messageId) {
+    const conversation = await get(`SELECT conv.clientId
+      FROM messages msg
+      JOIN conversations conv ON conv.id=msg.conversationId
+      WHERE msg.id=?`, [doc.messageId]);
+    if (conversation?.clientId) return conversation.clientId;
+  }
+  return '';
+}
+
+function safeDocumentMetadata(doc = {}, context, route, extra = {}) {
+  return {
+    documentId: doc.id || '',
+    filename: cleanDocumentName(doc.displayName || doc.name || doc.id || ''),
+    mimeType: doc.mimeType || '',
+    source: doc.source || '',
+    context,
+    route,
+    ...extra,
+  };
+}
+
 async function matterFolders(matterId, req = null) {
   if (req?.user?.role === 'client') {
     const visibleCount = await get(`SELECT COUNT(*) documentCount FROM documents d WHERE d.matterId=? AND d.deletedAt IS NULL AND ${clientDocumentVisibilitySql('d')}`, [matterId, req.user.clientId || '']);
@@ -1431,6 +1471,17 @@ app.post('/api/matters/:id/documents', async (req, res) => {
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [id, req.params.id, cleanName, cleanDisplayName, type, mimeType, today(), `${Math.max(1, Math.round(buffer.length / 1024))} KB`, buffer, source, folderId || null, null, null, clientVisible, req.user.userId || '']);
   const doc = await get(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=?`, [id]);
   await logAudit(req, 'upload', 'document', id, `Uploaded document ${doc.name}`);
+  const uploadContext = documentAuditContext(doc);
+  await recordAuditEvent(req, {
+    action: 'document_uploaded',
+    entityType: 'document',
+    entityId: id,
+    matterId: req.params.id,
+    clientId: await documentAuditClientId(doc, req),
+    metadata: safeDocumentMetadata(doc, uploadContext, 'document_upload', {
+      clientVisible: Boolean(clientVisible),
+    }),
+  }).catch(() => {});
   if (req.user.role === 'client') {
     const matter = await get('SELECT m.title, m.reference, c.id clientId, c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.id=?', [req.params.id]);
     await notifyStaff('client_document', req.params.id, 'Client uploaded a document', `${matter?.clientName || req.user.fullName || 'Client'} uploaded ${doc.name} for ${matter?.title || 'a matter'}.`, matter?.clientId || req.user.clientId || '');
@@ -1441,11 +1492,20 @@ app.post('/api/matters/:id/documents', async (req, res) => {
 app.get('/api/documents/:id/download', async (req, res) => {
   const doc = await get('SELECT * FROM documents WHERE id=? AND deletedAt IS NULL', [req.params.id]);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
-  if (!(await canAccessDocument(req, doc))) return res.status(403).json({ error: 'Document access denied' });
+  if (!(await canAccessDocument(req, doc))) {
+    await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: req.params.id, matterId: doc.matterId || '', clientId: await documentAuditClientId(doc, req), metadata: { reason: 'insufficient permissions', context: documentAuditContext(doc), route: 'document_download' } }).catch(() => {});
+    return res.status(403).json({ error: 'Document access denied' });
+  }
   if (req.user.role === 'client') {
     await logClientActivity({ clientId: req.user.clientId || '', matterId: doc.matterId || '', userId: req.user.userId || '', action: 'downloaded_document', summary: `Downloaded ${doc.displayName || doc.name || req.params.id}`, entityType: 'document', entityId: req.params.id });
   }
-  await recordAuditEvent(req, { action: 'document_accessed', entityType: 'document', entityId: req.params.id, matterId: doc.matterId || '', clientId: req.user.role === 'client' ? (req.user.clientId || '') : '', metadata: { documentId: req.params.id, matterId: doc.matterId || '', mimeType: doc.mimeType || '' } }).catch(() => {});
+  const downloadContext = documentAuditContext(doc);
+  const downloadClientId = await documentAuditClientId(doc, req);
+  const downloadMetadata = safeDocumentMetadata(doc, downloadContext, 'document_download', {
+    matterId: doc.matterId || '',
+  });
+  await recordAuditEvent(req, { action: 'document_accessed', entityType: 'document', entityId: req.params.id, matterId: doc.matterId || '', clientId: downloadClientId, metadata: { documentId: req.params.id, matterId: doc.matterId || '', mimeType: doc.mimeType || '' } }).catch(() => {});
+  await recordAuditEvent(req, { action: 'document_downloaded', entityType: 'document', entityId: req.params.id, matterId: doc.matterId || '', clientId: downloadClientId, metadata: downloadMetadata }).catch(() => {});
   res.setHeader('Content-Type', doc.mimeType || 'application/octet-stream');
   res.setHeader('Content-Disposition', `attachment; filename="${cleanDocumentName(doc.displayName || doc.name)}"`);
   res.send(doc.content);
@@ -1480,10 +1540,39 @@ app.patch('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
   await run(`UPDATE documents SET ${updates.join(',')} WHERE id=?`, [...values, req.params.id]);
   await logAudit(req, 'update', 'document', req.params.id, `Updated document ${doc.name}`);
   const updated = await get(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=?`, [req.params.id]);
+  const changedFields = [
+    req.body.folderId !== undefined ? 'folderId' : null,
+    req.body.displayName !== undefined ? 'displayName' : null,
+  ].filter(Boolean);
+  const updateContext = documentAuditContext(updated);
+  const updateClientId = await documentAuditClientId(updated, req);
+  if (changedFields.length) {
+    await recordAuditEvent(req, {
+      action: 'document_updated',
+      entityType: 'document',
+      entityId: req.params.id,
+      matterId: updated.matterId || '',
+      clientId: updateClientId,
+      metadata: safeDocumentMetadata(updated, updateContext, 'document_update', { changedFields }),
+    }).catch(() => {});
+  }
+  if (req.body.clientVisible !== undefined) {
+    await recordAuditEvent(req, {
+      action: 'document_visibility_updated',
+      entityType: 'document',
+      entityId: req.params.id,
+      matterId: updated.matterId || '',
+      clientId: updateClientId,
+      metadata: safeDocumentMetadata(updated, updateContext, 'document_visibility_update', {
+        oldClientVisible: Boolean(doc.clientVisible),
+        newClientVisible: Boolean(updated.clientVisible),
+      }),
+    }).catch(() => {});
+  }
   res.json(publicDocument(updated));
 });
 app.delete('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
-  const doc = await get('SELECT id,name,matterId FROM documents WHERE id=? AND deletedAt IS NULL', [req.params.id]);
+  const doc = await get('SELECT * FROM documents WHERE id=? AND deletedAt IS NULL', [req.params.id]);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
   if (doc.matterId && !(await canAccessMatter(req, doc.matterId))) {
     await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
@@ -1491,6 +1580,14 @@ app.delete('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
   }
   await run("UPDATE documents SET deletedAt=? WHERE id=?", [new Date().toISOString(), req.params.id]);
   await logAudit(req, 'delete', 'document', req.params.id, `Soft-deleted document ${doc?.name || req.params.id}`);
+  await recordAuditEvent(req, {
+    action: 'document_deleted',
+    entityType: 'document',
+    entityId: req.params.id,
+    matterId: doc.matterId || '',
+    clientId: await documentAuditClientId(doc, req),
+    metadata: safeDocumentMetadata(doc, documentAuditContext(doc), 'document_delete'),
+  }).catch(() => {});
   res.json({ id: req.params.id, deleted: true });
 });
 
@@ -1606,6 +1703,21 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
   }
   const invoice = await invoiceWithDetails(req.params.id);
   if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+  await recordAuditEvent(req, {
+    action: 'invoice_pdf_downloaded',
+    entityType: 'invoice',
+    entityId: req.params.id,
+    matterId: invoice.matterId || '',
+    clientId: invoice.clientId || '',
+    metadata: {
+      invoiceId: req.params.id,
+      number: invoice.number || '',
+      status: invoice.status || '',
+      amount: Number(invoice.amount || 0),
+      billingVisible: true,
+      route: 'invoice_pdf_download',
+    },
+  }).catch(() => {});
   const firm = await getFirmSettings();
   const subtotal = Number(invoice.amount || 0);
   const vat = subtotal * 0.16;
