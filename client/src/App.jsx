@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { IconLayoutDashboard, IconChartLine, IconUsers, IconUserPlus, IconBriefcase, IconCheckbox, IconCalendarDue, IconFileInvoice, IconMessages, IconUsersGroup, IconSettings, IconListSearch, IconExternalLink } from '@tabler/icons-react';
 import { api, API_BASE, AUTH_FAILURE_MESSAGE, clearSession, getNotifications, markNotificationsRead, readSession, saveSession } from './lib/apiClient.js';
 import { globalSearch } from './api.js';
 import { defaultFirmSettings, styles, StyleTag, theme, loadAndApplyFirmTheme } from './theme.jsx';
@@ -14,25 +15,40 @@ import DeadlineCenter from './views/DeadlineCenter.jsx';
 import Invitations from './views/Invitations.jsx';
 import { Clients, Dashboard, FirmSettings, Invoices, Matters, Tasks, Users } from './views/StaffViews.jsx';
 
+const navIcons = {
+  Dashboard: IconLayoutDashboard,
+  Performance: IconChartLine,
+  Clients: IconUsers,
+  Invitations: IconUserPlus,
+  Matters: IconBriefcase,
+  Tasks: IconCheckbox,
+  Deadlines: IconCalendarDue,
+  Invoices: IconFileInvoice,
+  Communications: IconMessages,
+  Users: IconUsersGroup,
+  'Firm Settings': IconSettings,
+  'Audit Log': IconListSearch,
+};
+
 const initialData = { dashboard: {}, clients: [], matters: [], tasks: [], invoices: [], firmSettings: defaultFirmSettings };
 const navGroups = [
-  { title: 'Dashboard', items: [['Dashboard', 'OV', ['admin', 'advocate', 'assistant']], ['Performance', 'PF', ['admin']]] },
-  { title: 'Clients', items: [['Clients', 'CL', ['admin', 'advocate', 'assistant']], ['Invitations', 'IV', ['admin']]] },
-  { title: 'Matters', items: [['Matters', 'MT', ['admin', 'advocate', 'assistant']]] },
-  { title: 'Work', items: [['Tasks', 'TK', ['admin', 'advocate', 'assistant']], ['Deadlines', 'DL', ['admin', 'advocate', 'assistant']]] },
-  { title: 'Finance', items: [['Invoices', 'IN', ['admin']]] },
-  { title: 'Communications', items: [['Communications', 'CM', ['admin', 'advocate', 'assistant']]] },
-  { title: 'Administration', items: [['Users', 'US', ['admin']], ['Firm Settings', 'FS', ['admin']], ['Audit Log', 'AL', ['admin']]] },
+  { title: 'Dashboard', items: [['Dashboard', ['admin', 'advocate', 'assistant']], ['Performance', ['admin']]] },
+  { title: 'Clients', items: [['Clients', ['admin', 'advocate', 'assistant']], ['Invitations', ['admin']]] },
+  { title: 'Matters', items: [['Matters', ['admin', 'advocate', 'assistant']]] },
+  { title: 'Work', items: [['Tasks', ['admin', 'advocate', 'assistant']], ['Deadlines', ['admin', 'advocate', 'assistant']]] },
+  { title: 'Finance', items: [['Invoices', ['admin']]] },
+  { title: 'Communications', items: [['Communications', ['admin', 'advocate', 'assistant']]] },
+  { title: 'Administration', items: [['Users', ['admin']], ['Firm Settings', ['admin']], ['Audit Log', ['admin']]] },
 ];
 const legalResources = [
-  ['eFiling CTS Judiciary', 'https://efiling.court.go.ke/auth', 'CT'],
-  ['eCitizen', 'https://www.ecitizen.go.ke', 'EC'],
-  ['Ardhi Sasa', 'https://ardhisasa.lands.go.ke/home', 'AS'],
+  ['eFiling CTS Judiciary', 'https://efiling.court.go.ke/auth'],
+  ['eCitizen', 'https://www.ecitizen.go.ke'],
+  ['Ardhi Sasa', 'https://ardhisasa.lands.go.ke/home'],
 ];
 
 function allowedNavGroups(role) {
   return navGroups
-    .map(group => ({ ...group, items: group.items.filter(([, , roles]) => !roles || roles.includes(role)) }))
+    .map(group => ({ ...group, items: group.items.filter(([, roles]) => !roles || roles.includes(role)) }))
     .filter(group => group.items.length);
 }
 
@@ -332,12 +348,15 @@ export default function App() {
               </button>
               {openNavGroups.has(group.title) && (
                 <div style={styles.navGroupItems}>
-                  {group.items.map(([label, number]) => (
-                    <button key={label} type="button" className="lf-nav" onClick={() => setView(label)} style={{ ...styles.navItem, ...(view === label ? styles.navActive : {}) }}>
-                      <span style={styles.navNumber}>{number}</span>
-                      <span>{label}</span>
-                    </button>
-                  ))}
+                  {group.items.map(([label]) => {
+                    const NavIcon = navIcons[label];
+                    return (
+                      <button key={label} type="button" className="lf-nav" onClick={() => setView(label)} style={{ ...styles.navItem, ...(view === label ? styles.navActive : {}) }}>
+                        <span style={styles.navNumber}>{NavIcon ? <NavIcon size={16} /> : null}</span>
+                        <span>{label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -351,12 +370,12 @@ export default function App() {
           </button>
           {quickLinksOpen && (
             <div style={styles.quickLinksList}>
-              {legalResources.map(([name, href, icon]) => (
-                <a key={name} className="lf-resource-link" style={styles.quickLink} href={href} target="_blank" rel="noopener noreferrer">
-                  <span style={styles.quickLinkIcon}>{icon || 'EX'}</span>
-                  <span>{name}</span>
-                </a>
-              ))}
+                {legalResources.map(([name, href]) => (
+                  <a key={name} className="lf-resource-link" style={styles.quickLink} href={href} target="_blank" rel="noopener noreferrer">
+                    <span style={styles.quickLinkIcon}><IconExternalLink size={14} /></span>
+                    <span>{name}</span>
+                  </a>
+                ))}
             </div>
           )}
         </div>

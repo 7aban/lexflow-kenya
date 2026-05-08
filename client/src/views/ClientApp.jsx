@@ -1,17 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
+import { IconLayoutDashboard, IconBriefcase, IconBell, IconFile, IconUserCircle } from '@tabler/icons-react';
 import { API_BASE, api, fileToDataUrl, readSession } from '../lib/apiClient.js';
 import { styles, StyleTag, theme, loadAndApplyFirmTheme } from '../theme.jsx';
 import { Badge, Card, Empty, Field, kes, Logo, MeetingLink, Skeleton, Stat, statusTone, Table, Toast } from '../components/ui.jsx';
 import ClientChatWidget from '../components/ClientChatWidget.jsx';
 import MatterDocuments from '../components/MatterDocuments.jsx';
 
-const portalNav = [
-  ['Dashboard', 'DB'],
-  ['My Matters', 'MT'],
-  ['Notices', 'NT'],
-  ['Documents', 'DC'],
-  ['Account', 'AC'],
-];
+const portalIcons = {
+  Dashboard: IconLayoutDashboard,
+  'My Matters': IconBriefcase,
+  Notices: IconBell,
+  Documents: IconFile,
+  Account: IconUserCircle,
+};
+
+const portalNav = ['Dashboard', 'My Matters', 'Notices', 'Documents', 'Account'];
 
 function tokenQuery() {
   return encodeURIComponent(readSession()?.token || '');
@@ -114,11 +117,14 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
         </div>
         <div style={styles.sideSectionLabel}>Portal</div>
         <nav style={styles.navList}>
-          {portalNav.map(([label, code]) => (
-            <button key={label} type="button" className="lf-nav" onClick={() => switchView(label)} style={{ ...styles.navItem, ...(view === label ? styles.navActive : {}) }}>
-              <span style={styles.navNumber}>{code}</span><span>{label}</span>
-            </button>
-          ))}
+          {portalNav.map(label => {
+            const PortalIcon = portalIcons[label];
+            return (
+              <button key={label} type="button" className="lf-nav" onClick={() => switchView(label)} style={{ ...styles.navItem, ...(view === label ? styles.navActive : {}) }}>
+                <span style={styles.navNumber}>{PortalIcon ? <PortalIcon size={16} /> : null}</span><span>{label}</span>
+              </button>
+            );
+          })}
         </nav>
         <div style={styles.timerCard}>
           <div style={styles.timerTop}>Secure access</div>

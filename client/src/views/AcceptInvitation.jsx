@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { IconScale } from '@tabler/icons-react';
 import { acceptInvitation, verifyInvitation } from '../lib/apiClient.js';
 import { styles, StyleTag, theme } from '../theme.jsx';
 import { Alert, Field } from '../components/ui.jsx';
@@ -50,7 +51,7 @@ export default function AcceptInvitation({ firm, onAccepted }) {
       <StyleTag />
       <form onSubmit={submit} style={styles.loginCard}>
         <div style={{ display: 'grid', placeItems: 'center', textAlign: 'center', gap: 8 }}>
-          <div style={styles.loginLogo}>{firm?.logo ? <img src={firm.logo} alt={`${firmName} logo`} style={styles.logoImage} /> : 'LF'}</div>
+          <div style={styles.loginLogo}>{firm?.logo ? <img src={firm.logo} alt={`${firmName} logo`} style={styles.logoImage} /> : <IconScale size={28} />}</div>
           <div>
             <h1 style={{ margin: 0, fontSize: 24, color: theme.ink }}>{firmName}</h1>
             <p style={{ margin: '5px 0 0', color: theme.muted }}>Set your password to activate your secure client portal.</p>

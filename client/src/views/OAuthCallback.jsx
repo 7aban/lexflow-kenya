@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { IconScale } from '@tabler/icons-react';
 import { saveSession } from '../lib/apiClient.js';
 import { styles, StyleTag, theme } from '../theme.jsx';
 import { Alert } from '../components/ui.jsx';
@@ -46,7 +47,7 @@ export default function OAuthCallback({ firm, onLogin }) {
       <div style={{ ...styles.loginShell, '--lf-primary': firm?.primaryColor || theme.navy800, '--lf-accent': firm?.accentColor || theme.gold }}>
         <StyleTag />
         <div style={{ ...styles.loginCard, textAlign: 'center' }}>
-          <div style={{ ...styles.loginLogo, marginBottom: 16 }}>{firm?.logo ? <img src={firm.logo} alt={`${firmName} logo`} style={styles.logoImage} /> : 'LF'}</div>
+          <div style={{ ...styles.loginLogo, marginBottom: 16 }}>{firm?.logo ? <img src={firm.logo} alt={`${firmName} logo`} style={styles.logoImage} /> : <IconScale size={28} />}</div>
           <h1 style={{ margin: '0 0 8px', fontSize: 20, color: theme.ink }}>Completing sign in...</h1>
           <p style={{ margin: 0, color: theme.muted, fontSize: 14 }}>Please wait while we finish authenticating you.</p>
           <div style={{ marginTop: 20, width: 32, height: 32, border: `3px solid ${theme.line}`, borderTopColor: theme.navy800, borderRadius: '50%', margin: '20px auto 0', animation: 'lfSpin 0.8s linear infinite' }} />
@@ -60,7 +61,7 @@ export default function OAuthCallback({ firm, onLogin }) {
     <div style={{ ...styles.loginShell, '--lf-primary': firm?.primaryColor || theme.navy800, '--lf-accent': firm?.accentColor || theme.gold }}>
       <StyleTag />
       <div style={{ ...styles.loginCard, textAlign: 'center' }}>
-        <div style={{ ...styles.loginLogo, marginBottom: 16 }}>{firm?.logo ? <img src={firm.logo} alt={`${firmName} logo`} style={styles.logoImage} /> : 'LF'}</div>
+        <div style={{ ...styles.loginLogo, marginBottom: 16 }}>{firm?.logo ? <img src={firm.logo} alt={`${firmName} logo`} style={styles.logoImage} /> : <IconScale size={28} />}</div>
         <h1 style={{ margin: '0 0 8px', fontSize: 20, color: theme.ink }}>Sign in failed</h1>
         <Alert tone="danger">{error}</Alert>
         <button
