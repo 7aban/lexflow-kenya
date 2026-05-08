@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { IconLayoutDashboard, IconChartLine, IconUsers, IconUserPlus, IconBriefcase, IconCheckbox, IconCalendarDue, IconFileInvoice, IconMessages, IconUsersGroup, IconSettings, IconListSearch, IconExternalLink, IconChevronDown } from '@tabler/icons-react';
+import { IconLayoutDashboard, IconChartLine, IconUsers, IconUserPlus, IconBriefcase, IconCheckbox, IconCalendarDue, IconFileInvoice, IconMessages, IconUsersGroup, IconSettings, IconListSearch, IconExternalLink, IconChevronDown, IconShield } from '@tabler/icons-react';
 import { api, API_BASE, AUTH_FAILURE_MESSAGE, clearSession, getNotifications, markNotificationsRead, readSession, saveSession } from './lib/apiClient.js';
 import { globalSearch } from './api.js';
 import { defaultFirmSettings, styles, StyleTag, theme, loadAndApplyFirmTheme } from './theme.jsx';
@@ -9,6 +9,7 @@ import OAuthCallback from './views/OAuthCallback.jsx';
 import AcceptInvitation from './views/AcceptInvitation.jsx';
 import AdvocatePerformance from './views/AdvocatePerformance.jsx';
 import AuditLog from './views/AuditLog.jsx';
+import StructuredAuditLog from './views/StructuredAuditLog.jsx';
 import ClientApp from './views/ClientApp.jsx';
 import Communications from './views/Communications.jsx';
 import DeadlineCenter from './views/DeadlineCenter.jsx';
@@ -28,6 +29,7 @@ const navIcons = {
   Users: IconUsersGroup,
   'Firm Settings': IconSettings,
   'Audit Log': IconListSearch,
+  'Structured Audit': IconShield,
   'eFiling CTS': IconExternalLink,
   eCitizen: IconExternalLink,
   'Ardhi Sasa': IconExternalLink,
@@ -41,7 +43,7 @@ const navGroups = [
   { title: 'Work', items: [['Tasks', ['admin', 'advocate', 'assistant']], ['Deadlines', ['admin', 'advocate', 'assistant']]] },
   { title: 'Finance', items: [['Invoices', ['admin']]] },
   { title: 'Communications', items: [['Communications', ['admin', 'advocate', 'assistant']]] },
-  { title: 'Administration', items: [['Users', ['admin']], ['Firm Settings', ['admin']], ['Audit Log', ['admin']]] },
+  { title: 'Administration', items: [['Users', ['admin']], ['Firm Settings', ['admin']], ['Audit Log', ['admin']], ['Structured Audit', ['admin']]] },
   { title: 'Resources', items: [
     ['eFiling CTS', ['admin', 'advocate', 'assistant'], 'https://efiling.court.go.ke/auth'],
     ['eCitizen', ['admin', 'advocate', 'assistant'], 'https://www.ecitizen.go.ke'],
@@ -325,6 +327,7 @@ export default function App() {
     Users: 'Role-based access for advocates, assistants and administrators.',
     Invitations: 'Secure client portal onboarding links and invitation status.',
     'Audit Log': 'A secure activity trail for important changes and accountability.',
+    'Structured Audit': 'Structured event trail for security, access, and operational auditing.',
   };
 
   return (
@@ -480,6 +483,7 @@ export default function App() {
         {!loading && view === 'Users' && isAdmin && <Users clients={data.clients} notify={setToast} />}
         {!loading && view === 'Invitations' && isAdmin && <Invitations clients={data.clients} notify={setToast} />}
         {!loading && view === 'Audit Log' && isAdmin && <AuditLog notify={setToast} navigate={setView} />}
+        {!loading && view === 'Structured Audit' && isAdmin && <StructuredAuditLog notify={setToast} />}
       </main>
       <Toast toast={toast} onClose={() => setToast(null)} />
     </div>

@@ -126,6 +126,15 @@ export function getAuditLogs(params = {}) {
   return api(`/audit-logs${suffix}`);
 }
 
+export function getAuditEvents(params = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') query.set(key, value);
+  });
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  return api(`/audit-events${suffix}`);
+}
+
 function queryPath(path, params = {}) {
   const query = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
