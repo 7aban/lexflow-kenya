@@ -14,8 +14,9 @@ function dbAll(sql, params = []) {
 }
 
 async function latestAudit(action) {
+  await new Promise(r => setTimeout(r, 50));
   const rows = await dbAll(
-    "SELECT * FROM audit_events WHERE action=? ORDER BY timestamp DESC LIMIT 1",
+    "SELECT * FROM audit_events WHERE action=? ORDER BY timestamp DESC, id DESC LIMIT 1",
     [action],
   );
   return rows[0];
