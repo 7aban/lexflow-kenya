@@ -1866,7 +1866,27 @@ app.get('/api/search', requireStaff, async (req, res) => {
 
 app.post('/api/mpesa/stk-push', requireStaff, async (req, res) => { const id = genId('MPESA'); await run('INSERT INTO integrations_log (id,type,matterId,clientId,recipient,message,status,createdAt) VALUES (?,?,?,?,?,?,?,?)', [id, 'mpesa', req.body.matterId || '', req.body.clientId || '', req.body.phone || '', `STK push amount ${req.body.amount}`, 'Queued', new Date().toISOString()]); res.json({ id, status: 'Queued', checkoutRequestId: `ws_CO_${Date.now()}`, message: 'STK push queued. Add Daraja credentials for live payments.' }); });
 app.post('/api/whatsapp/reminders', requireStaff, async (req, res) => { const rows = await all(`SELECT a.*,m.clientId,m.title matterTitle,c.name clientName,c.phone FROM appearances a LEFT JOIN matters m ON m.id=a.matterId LEFT JOIN clients c ON c.id=m.clientId WHERE a.date BETWEEN ? AND ?`, [today(), addDays(Number(req.body.days || 3))]); const reminders = rows.map(r => ({ id: genId('WA'), matterId: r.matterId, clientName: r.clientName, phone: r.phone, message: `Reminder: ${r.title} for ${r.matterTitle} is on ${r.date} at ${r.time || 'TBA'}.`, status: r.phone ? 'Queued' : 'Missing phone' })); res.json({ count: reminders.length, reminders }); });
-app.get('/api/exports/:type.:format', requireStaff, async (req, res) => { const rows = req.params.type === 'itax' ? await all(`SELECT i.number,i.date,c.name client,i.amount,i.status FROM invoices i LEFT JOIN clients c ON c.id=i.clientId`) : await all(`SELECT m.reference,m.title,c.name client,m.practiceArea,m.stage,m.totalBilled FROM matters m LEFT JOIN clients c ON c.id=m.clientId`); if (req.params.format === 'pdf') { const doc = new PDFDocument(); res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', `attachment; filename="${req.params.type}-report.pdf"`); doc.pipe(res); doc.fontSize(18).text(`${req.params.type.toUpperCase()} Report`); rows.forEach(r => doc.fontSize(10).text(Object.values(r).join(' | '))); doc.end(); } else { res.setHeader('Content-Type', 'application/vnd.ms-excel'); res.setHeader('Content-Disposition', `attachment; filename="${req.params.type}-report.xls"`); res.send(rows.map(r => Object.values(r).map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')); } });
+app.get('/api/exports/:type.:format', requireStaff, async (req, res) => {
+  const exportType = req.params.type;
+  const format = req.params.format;
+  const rows = exportType === 'itax'
+    ? await all(`SELECT i.number,i.date,c.name client,i.amount,i.status FROM invoices i LEFT JOIN clients c ON c.id=i.clientId`)
+    : await all(`SELECT m.reference,m.title,c.name client,m.practiceArea,m.stage,m.totalBilled FROM matters m LEFT JOIN clients c ON c.id=m.clientId`);
+  if (format === 'pdf') {
+    const doc = new PDFDocument();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${exportType}-report.pdf"`);
+    doc.pipe(res);
+    doc.fontSize(18).text(`${exportType.toUpperCase()} Report`);
+    rows.forEach(r => doc.fontSize(10).text(Object.values(r).join(' | ')));
+    doc.end();
+  } else {
+    res.setHeader('Content-Type', 'application/vnd.ms-excel');
+    res.setHeader('Content-Disposition', `attachment; filename="${exportType}-report.xls"`);
+    res.send(rows.map(r => Object.values(r).map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n'));
+  }
+  recordAuditEvent(req, { action: 'export_downloaded', entityType: 'export', entityId: `${exportType}.${format}`, metadata: { exportType, format, recordCount: rows.length } }).catch(() => {});
+});
 
 // Health check endpoint — public, no auth, no sensitive data
 app.get('/health', (_req, res) => {
