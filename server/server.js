@@ -598,6 +598,7 @@ app.post('/api/auth/register', requireAdmin, validate(registerValidation), async
     const createdAt = new Date().toISOString();
     await run('INSERT INTO users (id,email,password,fullName,role,clientId,createdAt) VALUES (?,?,?,?,?,?,?)', [id, email, await hashPassword(password), fullName, role, role === 'client' ? clientId : '', createdAt]);
     await logAudit(req, 'create', 'user', id, `Created ${role} user ${email}`);
+    await recordAuditEvent(req, { action: 'user_created', entityType: 'user', entityId: id, metadata: { role: role || '', email: email || '', fullName: fullName || '' } }).catch(() => {});
     res.json({ id, email, fullName, name: fullName, role, clientId: role === 'client' ? clientId : '', createdAt });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
