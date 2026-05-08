@@ -111,43 +111,69 @@ export default function LoginPage({ firm, onLogin }) {
     ? { title: 'Client Portal', hint: 'Access your case files, notices, invoices and shared documents.', placeholder: 'client@example.com', button: 'Enter client portal' }
     : { title: 'Welcome back', hint: 'Enter your advocate credentials to manage the firm workspace.', placeholder: 'admin@lexflow.co.ke', button: 'Sign in securely' };
 
+  const primaryColor = firm?.primaryColor || theme.navy800;
+  const accentColor = firm?.accentColor || theme.gold;
+
   return (
-    <div style={{ ...styles.loginShell, '--lf-primary': firm?.primaryColor || theme.navy800, '--lf-accent': firm?.accentColor || theme.gold }}>
+    <div className="lf-login-root" style={{ '--lf-primary': primaryColor, '--lf-accent': accentColor }}>
       <StyleTag />
-      <form onSubmit={submit} style={styles.loginCard}>
-        <div style={{ display: 'grid', placeItems: 'center', textAlign: 'center', gap: 8 }}>
-          <div style={styles.loginLogo}>{firm?.logo ? <img src={firm.logo} alt={`${firmName} logo`} style={styles.logoImage} /> : <IconScale size={28} />}</div>
-          <div>
-            <h1 style={{ margin: 0, fontSize: 24, color: theme.ink }}>{firmName}</h1>
-            <p style={{ margin: '5px 0 0', color: theme.muted }}>{modeCopy.hint}</p>
+      <div className="lf-login-split" style={styles.loginSplit}>
+        <div className="lf-login-brand" style={styles.loginBrand}>
+          <div style={{ maxWidth: 360, display: 'grid', gap: 28 }}>
+            <div style={{ display: 'grid', gap: 20, textAlign: 'center' }}>
+              <div style={styles.loginBrandLogo}>
+                {firm?.logo ? <img src={firm.logo} alt={`${firmName} logo`} style={styles.logoImage} /> : <IconScale size={36} />}
+              </div>
+              <div>
+                <h1 style={styles.loginBrandName}>{firmName}</h1>
+                <p style={styles.loginBrandTagline}>Kenyan legal practice command centre</p>
+              </div>
+            </div>
+            <div className="lf-login-brand-features" style={styles.loginBrandFeatures}>
+              <div style={styles.loginFeatureItem}>Matter management</div>
+              <div style={styles.loginFeatureItem}>Client portal</div>
+              <div style={styles.loginFeatureItem}>Court deadlines</div>
+              <div style={styles.loginFeatureItem}>Invoice & billing</div>
+            </div>
+            <div>
+              <div style={styles.loginBrandDivider} />
+              <p style={styles.loginBrandFooter}>Secure access for authorised firm users and clients</p>
+            </div>
           </div>
         </div>
-        <div style={styles.loginModeSwitch} role="tablist" aria-label="Login type">
-          <button type="button" onClick={() => setMode('staff')} style={{ ...styles.loginModeButton, ...(mode === 'staff' ? styles.loginModeActive : {}) }}>Staff Login</button>
-          <button type="button" onClick={() => setMode('client')} style={{ ...styles.loginModeButton, ...(mode === 'client' ? styles.loginModeActive : {}) }}>Client Portal</button>
-        </div>
-        <h2 style={{ margin: '14px 0 4px', fontSize: 18 }}>{modeCopy.title}</h2>
-        {error && <Alert tone="danger">{error}</Alert>}
-        {oauthBusy && <Alert tone="info">Redirecting to provider...</Alert>}
-        <Field label="Email">
-          <input style={styles.input} value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" placeholder={modeCopy.placeholder} />
-        </Field>
-        <Field label="Password">
-          <input style={styles.input} type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" placeholder={mode === 'client' ? 'Portal password' : 'Workspace password'} />
-        </Field>
-        <button disabled={busy} style={{ ...styles.primaryButton, width: '100%', marginTop: 16 }}>{busy ? 'Signing in...' : modeCopy.button}</button>
-        {mode === 'staff' && oauthEnabled && (
-          <>
-            <OAuthDivider />
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}>
-              <OAuthButton provider="google" onClick={() => handleOAuth('google')} />
-              <OAuthButton provider="microsoft" onClick={() => handleOAuth('microsoft')} />
+        <div className="lf-login-card-wrap" style={styles.loginCardWrap}>
+          <form onSubmit={submit} style={styles.loginCardForm}>
+            <div style={{ display: 'grid', gap: 16, marginBottom: 24 }}>
+              <div style={styles.loginModeSwitch} role="tablist" aria-label="Login type">
+                <button type="button" onClick={() => setMode('staff')} style={{ ...styles.loginModeButton, ...(mode === 'staff' ? styles.loginModeActive : {}) }}>Staff Login</button>
+                <button type="button" onClick={() => setMode('client')} style={{ ...styles.loginModeButton, ...(mode === 'client' ? styles.loginModeActive : {}) }}>Client Portal</button>
+              </div>
+              <h2 style={styles.loginCardTitle}>{modeCopy.title}</h2>
+              <p style={{ margin: 0, color: theme.muted, fontSize: 13 }}>{modeCopy.hint}</p>
             </div>
-            <div style={{ fontSize: 11, color: theme.muted, textAlign: 'center', marginTop: 4 }}>For authorised firm users only.</div>
-          </>
-        )}
-        {mode === 'staff' && <div style={styles.loginHint}>admin@lexflow.co.ke / password123</div>}
-      </form>
+            {error && <Alert tone="danger">{error}</Alert>}
+            {oauthBusy && <Alert tone="info">Redirecting to provider...</Alert>}
+            <Field label="Email">
+              <input style={styles.input} value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" placeholder={modeCopy.placeholder} />
+            </Field>
+            <Field label="Password">
+              <input style={styles.input} type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" placeholder={mode === 'client' ? 'Portal password' : 'Workspace password'} />
+            </Field>
+            <button disabled={busy} style={{ ...styles.primaryButton, width: '100%', marginTop: 16, padding: '10px 16px', fontSize: 14 }}>{busy ? 'Signing in...' : modeCopy.button}</button>
+            {mode === 'staff' && oauthEnabled && (
+              <>
+                <OAuthDivider />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}>
+                  <OAuthButton provider="google" onClick={() => handleOAuth('google')} />
+                  <OAuthButton provider="microsoft" onClick={() => handleOAuth('microsoft')} />
+                </div>
+                <div style={{ fontSize: 11, color: theme.muted, textAlign: 'center', marginTop: 4 }}>For authorised firm users only.</div>
+              </>
+            )}
+            {mode === 'staff' && <div style={styles.loginHint}>admin@lexflow.co.ke / password123</div>}
+          </form>
+        </div>
+      </div>
     </div>
   );
 }
