@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { IconBriefcase, IconClock, IconCoin, IconAlertTriangle } from '@tabler/icons-react';
 import { API_BASE, api, fileToDataUrl, readSession } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
@@ -15,6 +15,18 @@ function formatFileSize(bytes = 0) {
 
 function noticeFileName(file) {
   return file?.friendlyName || file?.displayName || file?.name || 'Attachment';
+}
+
+function parseDateValue(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) return parsed;
+  const dayOnly = new Date(`${value}T00:00:00`);
+  return Number.isNaN(dayOnly.getTime()) ? null : dayOnly;
+}
+
+function isoDateOnly() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 export function Dashboard({ data, user, onNavigate }) {
@@ -281,6 +293,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
                 <AssistantSuggestions suggestions={suggestions} />
               ) : (
                 <>
+                  <MatterCommandSummary detail={detail} suggestions={suggestions} />
                   <form onSubmit={logTime} style={styles.formGrid}>
                     <Field label="Hours"><input type="number" min="0" step="0.1" style={styles.input} value={time.hours} onChange={e => setTime({ ...time, hours: Number(e.target.value) })} /></Field>
                     <Field label="Description"><input style={styles.input} value={time.description} onChange={e => setTime({ ...time, description: e.target.value })} /></Field>
@@ -775,6 +788,100 @@ function AssistantSuggestions({ suggestions }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function MatterCommandSummary({ detail, suggestions = [] }) {
+  const summary = useMemo(() => {
+    const today = isoDateOnly();
+    const notes = detail?.notes || [];
+    const entries = detail?.timeEntries || [];
+    const appearances = detail?.appearances || [];
+    const documents = detail?.documents || [];
+    const invoices = detail?.invoices || [];
+    const tasks = detail?.tasks || [];
+
+    const latestCandidates = [
+      ...notes.map(note => ({ label: `Case note by ${note.author || 'staff'}`, at: note.createdAt })),
+      ...entries.map(entry => ({ label: `Time entry (${Number(entry.hours || 0).toFixed(1)}h)`, at: entry.date })),
+      ...documents.map(doc => ({ label: `Document: ${doc.displayName || doc.name || 'File'}`, at: doc.date })),
+      ...invoices.map(invoice => ({ label: `Invoice ${invoice.number || invoice.id}`, at: invoice.date })),
+      ...appearances.map(event => ({ label: `Court event: ${event.title || event.type || 'Appearance'}`, at: event.date })),
+    ].map(item => ({ ...item, parsed: parseDateValue(item.at) })).filter(item => item.parsed);
+
+    latestCandidates.sort((a, b) => b.parsed.getTime() - a.parsed.getTime());
+    const lastActivity = latestCandidates[0];
+
+    const upcomingAppearance = appearances
+      .filter(event => event.date && event.date >= today)
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)))[0] || null;
+
+    const nextTask = tasks
+      .filter(task => !task.completed && task.dueDate && task.dueDate >= today)
+      .sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)))[0] || null;
+
+    const nextInvoice = invoices
+      .filter(invoice => invoice.status !== 'Paid' && invoice.dueDate && invoice.dueDate >= today)
+      .sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)))[0] || null;
+
+    const solDate = detail?.solDate || '';
+    const upcomingSol = solDate && solDate >= today ? solDate : '';
+
+    const nextCandidates = [
+      upcomingAppearance ? { label: `${upcomingAppearance.type || 'Court'} on ${upcomingAppearance.date}`, date: upcomingAppearance.date } : null,
+      nextTask ? { label: `Task due ${nextTask.dueDate}: ${nextTask.title}`, date: nextTask.dueDate } : null,
+      upcomingSol ? { label: `SOL advisory date ${upcomingSol}`, date: upcomingSol } : null,
+      nextInvoice ? { label: `Invoice due ${nextInvoice.dueDate}: ${nextInvoice.number || nextInvoice.id}`, date: nextInvoice.dueDate } : null,
+    ].filter(Boolean).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+
+    const overdueTasks = tasks.filter(task => !task.completed && task.dueDate && task.dueDate < today).length;
+    const overdueInvoices = invoices.filter(invoice => (invoice.status === 'Overdue') || (invoice.status !== 'Paid' && invoice.dueDate && invoice.dueDate < today)).length;
+
+    return {
+      owner: detail?.assignedTo || 'Unassigned',
+      paralegal: detail?.paralegal || '',
+      stage: detail?.stage || 'Intake',
+      lastActivity: lastActivity ? `${lastActivity.label} (${lastActivity.parsed.toLocaleString()})` : 'No recent activity recorded',
+      nextStep: nextCandidates[0]?.label || 'No upcoming item recorded',
+      court: upcomingAppearance
+        ? `${upcomingAppearance.date} - ${upcomingAppearance.type || 'Appearance'}${upcomingAppearance.location ? ` (${upcomingAppearance.location})` : ''}`
+        : 'No upcoming court appearance recorded',
+      overdue: overdueTasks + overdueInvoices,
+      overdueLabel: overdueTasks + overdueInvoices
+        ? `${overdueTasks} overdue task${overdueTasks === 1 ? '' : 's'}${overdueInvoices ? `, ${overdueInvoices} overdue invoice${overdueInvoices === 1 ? '' : 's'}` : ''}`
+        : 'No overdue work found',
+      sol: solDate ? `${solDate} (advisory; confirm statute and facts)` : 'No SOL date recorded',
+      topSuggestion: suggestions.length ? suggestions[0] : 'No recommendation available from current matter signals.',
+    };
+  }, [detail, suggestions]);
+
+  return (
+    <section aria-label="Matter Command Summary" style={{ border: `1px solid ${theme.line}`, background: '#fff', borderRadius: 10, padding: 14, display: 'grid', gap: 10 }}>
+      <div style={{ display: 'grid', gap: 2 }}>
+        <strong style={{ fontSize: 13 }}>Matter Command Summary</strong>
+        <span style={{ color: theme.muted, fontSize: 12 }}>Read-only snapshot from current matter data.</span>
+      </div>
+      <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))' }}>
+        <SummaryCell label="Stage" value={summary.stage} />
+        <SummaryCell label="Owner" value={summary.paralegal ? `${summary.owner} / ${summary.paralegal}` : summary.owner} />
+        <SummaryCell label="Last activity" value={summary.lastActivity} />
+        <SummaryCell label="Next step" value={summary.nextStep} />
+        <SummaryCell label="Court" value={summary.court} />
+        <SummaryCell label="Overdue" value={summary.overdueLabel} tone={summary.overdue ? 'red' : ''} />
+        <SummaryCell label="SOL / Limitation" value={summary.sol} tone={detail?.solDate ? 'amber' : ''} />
+        <SummaryCell label="Top suggestion" value={summary.topSuggestion} />
+      </div>
+    </section>
+  );
+}
+
+function SummaryCell({ label, value, tone = '' }) {
+  const color = tone === 'red' ? theme.red : tone === 'amber' ? theme.amber : theme.ink;
+  return (
+    <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: 10, background: '#fff', display: 'grid', gap: 5 }}>
+      <span style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: theme.muted }}>{label}</span>
+      <span style={{ fontSize: 13, color }}>{value}</span>
     </div>
   );
 }
