@@ -1688,6 +1688,7 @@ app.post('/api/invoices/generate', requireAdvocateOrAdmin, validate(generateInvo
     if (source === 'hourly' && items.length) await run(`UPDATE time_entries SET billed=1 WHERE id IN (${items.map(() => '?').join(',')})`, items.map(i => i.timeEntryId));
     await run('UPDATE matters SET totalBilled=COALESCE(totalBilled,0)+? WHERE id=?', [amount, matter.id]);
     await logAudit(req, 'generate', 'invoice', id, `Generated invoice ${number} for matter ${matter.title}`);
+    await recordAuditEvent(req, { action: 'invoice_generated', entityType: 'invoice', entityId: id, matterId: matter.id, clientId: matter.clientId, metadata: { invoiceId: id, number, amount, source, matterId: matter.id, clientId: matter.clientId } }).catch(() => {});
     res.json(await invoiceWithDetails(id));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1698,7 +1699,17 @@ async function invoiceWithDetails(id) {
   return invoice;
 }
 app.get('/api/invoices/:id', async (req, res) => { const invoice = await invoiceWithDetails(req.params.id); if (!invoice) return res.status(404).json({ error: 'Invoice not found' }); if (!(await canAccessInvoice(req, req.params.id))) return res.status(403).json({ error: 'Invoice access denied' }); res.json(invoice); });
-app.patch('/api/invoices/:id/status', requireAdmin, async (req, res) => { if (!['Paid', 'Outstanding', 'Overdue'].includes(req.body.status)) return res.status(400).json({ error: 'Invalid invoice status' }); await run('UPDATE invoices SET status=? WHERE id=?', [req.body.status, req.params.id]); const invoice = await invoiceWithDetails(req.params.id); await logAudit(req, 'status', 'invoice', req.params.id, `Set invoice ${invoice?.number || req.params.id} status to ${req.body.status}`); res.json(invoice); });
+app.patch('/api/invoices/:id/status', requireAdmin, async (req, res) => {
+  if (!['Paid', 'Outstanding', 'Overdue'].includes(req.body.status)) return res.status(400).json({ error: 'Invalid invoice status' });
+  const oldInvoice = await get('SELECT number,status,matterId,clientId FROM invoices WHERE id=?', [req.params.id]);
+  if (!oldInvoice) return res.status(404).json({ error: 'Invoice not found' });
+  const oldStatus = oldInvoice.status;
+  await run('UPDATE invoices SET status=? WHERE id=?', [req.body.status, req.params.id]);
+  const invoice = await invoiceWithDetails(req.params.id);
+  await logAudit(req, 'status', 'invoice', req.params.id, `Set invoice ${invoice?.number || req.params.id} status to ${req.body.status}`);
+  await recordAuditEvent(req, { action: 'invoice_status_updated', entityType: 'invoice', entityId: req.params.id, matterId: oldInvoice.matterId || '', clientId: oldInvoice.clientId || '', metadata: { invoiceId: req.params.id, number: oldInvoice.number || '', oldStatus, newStatus: req.body.status } }).catch(() => {});
+  res.json(invoice);
+});
 app.delete('/api/invoices/:id', requireAdvocateOrAdmin, async (req, res) => {
   if (!(await canAccessInvoice(req, req.params.id))) {
     await recordAuditEvent(req, { action: 'forbidden_invoice_access', entityType: 'invoice', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
@@ -1801,6 +1812,7 @@ app.post('/api/payment-proofs', async (req, res) => {
     new Date().toISOString(),
   ]);
   await logAudit(req, 'upload', 'payment_proof', id, `Uploaded payment proof ${reference} for matter ${matterId}`);
+  await recordAuditEvent(req, { action: 'payment_proof_uploaded', entityType: 'payment_proof', entityId: id, matterId, clientId: req.user.clientId || '', metadata: { paymentProofId: id, invoiceId: invoiceId || '', matterId, method, reference, amount: Number(amount || 0) } }).catch(() => {});
   res.json(await get('SELECT id,invoiceId,matterId,clientId,method,reference,amount,note,fileName,mimeType,size,createdAt FROM payment_proofs WHERE id=?', [id]));
 });
 
