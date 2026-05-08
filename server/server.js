@@ -1311,6 +1311,11 @@ app.get('/api/time-entries/:id', requireStaff, async (req, res) => {
 });
 
 app.post('/api/time-entries', requireStaff, async (req, res) => {
+  const matterId = req.body.matterId;
+  if (!(await canAccessMatter(req, matterId))) {
+    await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: matterId || '', metadata: { reason: 'insufficient permissions', route: 'time_entry_create' } }).catch(() => {});
+    return res.status(403).json({ error: 'Matter access denied' });
+  }
   const taskId = req.body.taskId || '';
   if (taskId) {
     const task = await get('SELECT id,matterId,title FROM tasks WHERE id=?', [taskId]);
@@ -1673,6 +1678,10 @@ app.post('/api/invoices/generate', requireAdvocateOrAdmin, validate(generateInvo
   try {
     const matter = await get('SELECT * FROM matters WHERE id=?', [req.body.matterId]);
     if (!matter) return res.status(404).json({ error: 'Matter not found' });
+    if (!(await canAccessMatter(req, matter.id))) {
+      await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: matter.id, clientId: matter.clientId || '', metadata: { reason: 'insufficient permissions', route: 'invoice_generate' } }).catch(() => {});
+      return res.status(403).json({ error: 'Matter access denied' });
+    }
     const date = today();
     const dueDate = req.body.dueDate || addDays(30);
     const id = genId('INV');
