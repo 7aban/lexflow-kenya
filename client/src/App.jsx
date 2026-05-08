@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { IconLayoutDashboard, IconChartLine, IconUsers, IconUserPlus, IconBriefcase, IconCheckbox, IconCalendarDue, IconFileInvoice, IconMessages, IconUsersGroup, IconSettings, IconListSearch, IconExternalLink } from '@tabler/icons-react';
+import { IconLayoutDashboard, IconChartLine, IconUsers, IconUserPlus, IconBriefcase, IconCheckbox, IconCalendarDue, IconFileInvoice, IconMessages, IconUsersGroup, IconSettings, IconListSearch, IconExternalLink, IconChevronDown } from '@tabler/icons-react';
 import { api, API_BASE, AUTH_FAILURE_MESSAGE, clearSession, getNotifications, markNotificationsRead, readSession, saveSession } from './lib/apiClient.js';
 import { globalSearch } from './api.js';
 import { defaultFirmSettings, styles, StyleTag, theme, loadAndApplyFirmTheme } from './theme.jsx';
@@ -77,6 +77,8 @@ export default function App() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const searchRef = useRef(null);
+  const accountMenuRef = useRef(null);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [openNavGroups, setOpenNavGroups] = useState(() => {
     const currentRole = session?.user?.role || 'assistant';
     const saved = readOpenNavGroups(currentRole);
@@ -203,6 +205,17 @@ export default function App() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [searchOpen]);
+
+  useEffect(() => {
+    if (!accountMenuOpen) return;
+    function handleClickOutside(e) {
+      if (accountMenuRef.current && !accountMenuRef.current.contains(e.target)) {
+        setAccountMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [accountMenuOpen]);
 
   async function refresh() {
     setLoading(true);
@@ -390,7 +403,25 @@ export default function App() {
             <div style={styles.userName}>{user?.fullName || user?.name || 'Signed in'}</div>
             <div style={styles.userRole}>{user?.role || 'user'}</div>
           </div>
-          <button type="button" onClick={logout} style={styles.logout}>Exit</button>
+          <div ref={accountMenuRef} style={{ position: 'relative' }}>
+            <button type="button" onClick={() => setAccountMenuOpen(o => !o)} style={{ ...styles.logout, display: 'flex', alignItems: 'center', gap: 2 }}>
+              <IconChevronDown size={14} />
+            </button>
+            {accountMenuOpen && (
+              <div style={{ ...styles.actionMenu, position: 'absolute', bottom: '100%', right: 0, marginBottom: 4 }}>
+                <button type="button" style={styles.actionMenuItem} onClick={() => {
+                  setAccountMenuOpen(false);
+                  if (isAdmin) { setView('Firm Settings'); }
+                  else { setToast({ type: 'info', message: 'Account settings coming soon' }); }
+                }}>
+                  Account
+                </button>
+                <button type="button" style={{ ...styles.actionMenuItem, color: theme.red, background: theme.redBg }} onClick={() => { setAccountMenuOpen(false); logout(); }}>
+                  Exit
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </aside>
 
