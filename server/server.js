@@ -129,6 +129,13 @@ async function ensureColumn(table, column, definition) {
   }
 }
 
+function normalizeBillable(value, fallback = 1) {
+  if (value === undefined) return fallback;
+  if (value === true || value === 1 || value === '1' || value === 'true') return 1;
+  if (value === false || value === 0 || value === '0' || value === 'false') return 0;
+  return null;
+}
+
 async function ensureClientUserSupport() {
   const schema = await get("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'");
   if (schema?.sql && !schema.sql.includes("'client'")) {
@@ -159,7 +166,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS clients (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT DEFAULT 'Individual', contact TEXT, email TEXT, phone TEXT, status TEXT DEFAULT 'Active', joinDate TEXT, conflictCleared INTEGER DEFAULT 0, retainer REAL DEFAULT 0)`);
   await run(`CREATE TABLE IF NOT EXISTS matters (id TEXT PRIMARY KEY, reference TEXT UNIQUE, clientId TEXT NOT NULL, title TEXT NOT NULL, practiceArea TEXT, stage TEXT DEFAULT 'Intake', assignedTo TEXT, paralegal TEXT, openDate TEXT, description TEXT, court TEXT, judge TEXT, caseNo TEXT, opposingCounsel TEXT, billingRate REAL DEFAULT 0, retainerBalance REAL DEFAULT 0, totalBilled REAL DEFAULT 0, priority TEXT DEFAULT 'Medium', solDate TEXT, billingType TEXT DEFAULT 'hourly', fixedFee REAL DEFAULT 0)`);
   await run(`CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT NOT NULL, completed INTEGER DEFAULT 0, assignee TEXT, dueDate TEXT, auto_generated INTEGER DEFAULT 0)`);
-  await run(`CREATE TABLE IF NOT EXISTS time_entries (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, attorney TEXT, date TEXT, hours REAL DEFAULT 0, activity TEXT, description TEXT, rate REAL DEFAULT 0, billed INTEGER DEFAULT 0)`);
+  await run(`CREATE TABLE IF NOT EXISTS time_entries (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, attorney TEXT, date TEXT, hours REAL DEFAULT 0, activity TEXT, description TEXT, rate REAL DEFAULT 0, billed INTEGER DEFAULT 0, billable INTEGER DEFAULT 1)`);
   await run(`CREATE TABLE IF NOT EXISTS appearances (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT, date TEXT, time TEXT, type TEXT, location TEXT, meetingLink TEXT, attorney TEXT, prepNote TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS folders (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT NOT NULL, createdBy TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT, displayName TEXT, type TEXT, mimeType TEXT, date TEXT, size TEXT, content BLOB, source TEXT DEFAULT 'firm', folderId TEXT, messageId TEXT, noticeId TEXT, clientVisible INTEGER DEFAULT 0, uploadedBy TEXT)`);
@@ -203,6 +210,8 @@ async function initDb() {
   await ensureColumn('matters', 'invoiceRemindersEnabled', "TEXT DEFAULT 'firm_default'");
   await ensureColumn('reminder_logs', 'invoiceId', 'TEXT');
   await ensureColumn('time_entries', 'taskId', 'TEXT');
+  await ensureColumn('time_entries', 'billable', 'INTEGER DEFAULT 1');
+  await run('UPDATE time_entries SET billable=1 WHERE billable IS NULL');
   await ensureColumn('users', 'isActive', 'INTEGER DEFAULT 1');
   await ensureColumn('firm_settings', 'themeJson', 'TEXT');
   await ensureColumn('firm_settings', 'advocateBillingVisibility', 'INTEGER DEFAULT 1');
@@ -1322,8 +1331,10 @@ app.post('/api/time-entries', requireStaff, async (req, res) => {
     if (!task) return res.status(400).json({ error: 'Task not found' });
     if (task.matterId !== req.body.matterId) return res.status(400).json({ error: 'Task does not belong to this matter' });
   }
+  const billable = normalizeBillable(req.body.billable, 1);
+  if (billable === null) return res.status(400).json({ error: 'Invalid billable value' });
   const id = genId('TIME');
-  await run('INSERT INTO time_entries (id,matterId,taskId,attorney,date,hours,activity,description,rate,billed) VALUES (?,?,?,?,?,?,?,?,?,?)', [id, req.body.matterId, taskId, req.body.attorney || req.user.fullName || '', req.body.date || today(), Number(req.body.hours || 0), req.body.activity || '', req.body.description || '', Number(req.body.rate || 0), req.body.billed ? 1 : 0]);
+  await run('INSERT INTO time_entries (id,matterId,taskId,attorney,date,hours,activity,description,rate,billed,billable) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [id, req.body.matterId, taskId, req.body.attorney || req.user.fullName || '', req.body.date || today(), Number(req.body.hours || 0), req.body.activity || '', req.body.description || '', Number(req.body.rate || 0), req.body.billed ? 1 : 0, billable]);
   const entry = await get('SELECT * FROM time_entries WHERE id=?', [id]);
   await logAudit(req, 'create', 'time_entry', id, `Logged ${entry.hours} hour(s) for matter ${entry.matterId}${entry.taskId ? ` task ${entry.taskId}` : ''}`);
   res.json(entry);
@@ -1333,18 +1344,22 @@ app.patch('/api/time-entries/:id', requireAdvocateOrAdmin, async (req, res) => {
     await recordAuditEvent(req, { action: 'forbidden_time_entry_access', entityType: 'time_entry', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
     return res.status(403).json({ error: 'Time entry access denied' });
   }
-  const fields = ['matterId','taskId','attorney','date','hours','activity','description','rate','billed'];
+  const fields = ['matterId','taskId','attorney','date','hours','activity','description','rate','billed','billable'];
   const updates = fields.filter(f => req.body[f] !== undefined);
   if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
+  const billable = updates.includes('billable') ? normalizeBillable(req.body.billable) : undefined;
+  if (updates.includes('billable') && billable === null) return res.status(400).json({ error: 'Invalid billable value' });
+  const oldEntry = updates.includes('billable') ? await get('SELECT billable FROM time_entries WHERE id=?', [req.params.id]) : null;
   if (req.body.taskId) {
     const matterId = req.body.matterId || (await get('SELECT matterId FROM time_entries WHERE id=?', [req.params.id]))?.matterId;
     const task = await get('SELECT id,matterId FROM tasks WHERE id=?', [req.body.taskId]);
     if (!task) return res.status(400).json({ error: 'Task not found' });
     if (task.matterId !== matterId) return res.status(400).json({ error: 'Task does not belong to this matter' });
   }
-  await run(`UPDATE time_entries SET ${updates.map(f => `${f}=?`).join(',')} WHERE id=?`, [...updates.map(f => ['hours','rate'].includes(f) ? Number(req.body[f] || 0) : f === 'billed' ? (req.body[f] ? 1 : 0) : req.body[f]), req.params.id]);
+  await run(`UPDATE time_entries SET ${updates.map(f => `${f}=?`).join(',')} WHERE id=?`, [...updates.map(f => ['hours','rate'].includes(f) ? Number(req.body[f] || 0) : f === 'billed' ? (req.body[f] ? 1 : 0) : f === 'billable' ? billable : req.body[f]), req.params.id]);
   const entry = await get('SELECT * FROM time_entries WHERE id=?', [req.params.id]);
-  if (entry) await logAudit(req, req.body.billed !== undefined ? 'bill_toggle' : 'update', 'time_entry', req.params.id, `${req.body.billed !== undefined ? (entry.billed ? 'Marked billed' : 'Marked unbilled') : 'Updated'} time entry for matter ${entry.matterId}`);
+  const billableChanged = entry && oldEntry && updates.includes('billable') && Number(oldEntry.billable) !== Number(entry.billable);
+  if (entry) await logAudit(req, req.body.billed !== undefined ? 'bill_toggle' : billableChanged ? 'billable_toggle' : 'update', 'time_entry', req.params.id, `${req.body.billed !== undefined ? (entry.billed ? 'Marked billed' : 'Marked unbilled') : billableChanged ? `Marked ${entry.billable ? 'billable' : 'non-billable'}` : 'Updated'} time entry for matter ${entry.matterId}`);
   entry ? res.json(entry) : res.status(404).json({ error: 'Time entry not found' });
 });
 app.delete('/api/time-entries/:id', requireAdvocateOrAdmin, async (req, res) => {
@@ -1694,7 +1709,7 @@ app.post('/api/invoices/generate', requireAdvocateOrAdmin, validate(generateInvo
       source = 'fixed';
       items = [{ description: 'Legal Services (Fixed Fee)', hours: 0, rate: 0, amount }];
     } else {
-      const entries = await all('SELECT * FROM time_entries WHERE matterId=? AND billed=0', [matter.id]);
+      const entries = await all('SELECT * FROM time_entries WHERE matterId=? AND billed=0 AND billable=1', [matter.id]);
       items = entries.map(t => ({ timeEntryId: t.id, date: t.date, description: t.description || t.activity || 'Legal Services', hours: Number(t.hours || 0), rate: Number(t.rate || 0), amount: Number(t.hours || 0) * Number(t.rate || 0) }));
       amount = items.reduce((sum, item) => sum + item.amount, 0);
     }
