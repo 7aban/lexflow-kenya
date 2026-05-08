@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { API_BASE, createConversation, fileToDataUrl, getConversationMessages, getConversations, readSession, sendConversationMessage } from '../lib/apiClient.js';
+import { createConversation, downloadWithAuth, fileToDataUrl, getConversationMessages, getConversations, sendConversationMessage } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Badge, Empty, Field } from './ui.jsx';
 
@@ -114,6 +114,14 @@ export default function ClientChatWidget({ firm, matters = [], selectedMatterId 
     }
   }
 
+  async function downloadAttachment(file) {
+    try {
+      await downloadWithAuth(`/api/documents/${file.id}/download`, file.displayName || file.name || 'attachment');
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    }
+  }
+
   return (
     <>
       <button
@@ -224,7 +232,7 @@ export default function ClientChatWidget({ firm, matters = [], selectedMatterId 
                     <div style={{ maxWidth: '86%', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 10, background: item.senderRole === 'client' ? theme.blueBg : '#fff' }}>
                       <strong>{item.senderRole === 'client' ? 'You' : item.senderName || 'Firm team'}</strong>
                       {item.body && <p style={{ margin: '5px 0 0', color: theme.ink }}>{item.body}</p>}
-                      {!!item.attachments?.length && <div style={{ display: 'grid', gap: 4, marginTop: 8 }}>{item.attachments.map(file => <a key={file.id} style={styles.link} href={`${API_BASE}/documents/${file.id}/download?token=${encodeURIComponent(readSession()?.token || '')}`}>{file.displayName || file.name || 'Attachment'}</a>)}</div>}
+                      {!!item.attachments?.length && <div style={{ display: 'grid', gap: 4, marginTop: 8 }}>{item.attachments.map(file => <button key={file.id} type="button" style={{ ...styles.link, border: 0, background: 'transparent', padding: 0, cursor: 'pointer', textAlign: 'left' }} onClick={() => downloadAttachment(file)}>{file.displayName || file.name || 'Attachment'}</button>)}</div>}
                       <small style={{ color: theme.muted }}>{item.createdAt ? new Date(item.createdAt).toLocaleString() : ''}</small>
                     </div>
                   </div>

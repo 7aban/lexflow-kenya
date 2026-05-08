@@ -1,11 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { API_BASE, createConversation, fileToDataUrl, getClientActivity, getConversationMessages, getConversations, readSession, sendConversationMessage } from '../lib/apiClient.js';
+import { createConversation, downloadWithAuth, fileToDataUrl, getClientActivity, getConversationMessages, getConversations, sendConversationMessage } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Badge, Card, Empty, Field, Skeleton, Table } from '../components/ui.jsx';
-
-function tokenQuery() {
-  return encodeURIComponent(readSession()?.token || '');
-}
 
 function titleFor(conversation) {
   return conversation.subject || conversation.matterTitle || conversation.clientName || 'Client conversation';
@@ -15,14 +11,21 @@ function previewTime(value) {
   return value ? new Date(value).toLocaleString() : '-';
 }
 
-function attachmentList(files = []) {
+function attachmentList(files = [], notify) {
   if (!files.length) return null;
+  const downloadAttachment = async (file) => {
+    try {
+      await downloadWithAuth(`/api/documents/${file.id}/download`, file.displayName || file.name || 'attachment');
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    }
+  };
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
       {files.map(file => (
-        <a key={file.id} style={styles.tinyButton} href={`${API_BASE}/documents/${file.id}/download?token=${tokenQuery()}`}>
+        <button key={file.id} type="button" style={styles.tinyButton} onClick={() => downloadAttachment(file)}>
           {file.displayName || file.name || 'Attachment'}
-        </a>
+        </button>
       ))}
     </div>
   );
@@ -208,7 +211,7 @@ export default function Communications({ clients = [], matters = [], focus, noti
                             <Badge tone={firmSide ? 'blue' : 'amber'}>{message.senderRole}</Badge>
                           </div>
                           {message.body && <p style={{ marginTop: 7, color: theme.ink }}>{message.body}</p>}
-                          {attachmentList(message.attachments)}
+                          {attachmentList(message.attachments, notify)}
                           <small style={{ color: theme.muted }}>{previewTime(message.createdAt)}</small>
                         </div>
                       </div>

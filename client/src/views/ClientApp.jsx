@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { IconLayoutDashboard, IconBriefcase, IconBell, IconFile, IconUserCircle } from '@tabler/icons-react';
-import { API_BASE, api, fileToDataUrl, readSession } from '../lib/apiClient.js';
+import { api, downloadWithAuth, fileToDataUrl } from '../lib/apiClient.js';
 import { styles, StyleTag, theme, loadAndApplyFirmTheme } from '../theme.jsx';
 import { Badge, Card, Empty, Field, kes, Logo, MeetingLink, Skeleton, Stat, statusTone, Table, Toast } from '../components/ui.jsx';
 import ClientChatWidget from '../components/ClientChatWidget.jsx';
@@ -15,10 +15,6 @@ const portalIcons = {
 };
 
 const portalNav = ['Dashboard', 'My Matters', 'Notices', 'Documents', 'Account'];
-
-function tokenQuery() {
-  return encodeURIComponent(readSession()?.token || '');
-}
 
 function noticeFileName(file) {
   return file?.friendlyName || file?.displayName || file?.name || 'Attachment';
@@ -168,8 +164,8 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
             notify={notify}
           />
         )}
-        {!loading && view === 'Notices' && <Notices notices={dashboard.notices} />}
-        {!loading && view === 'Documents' && <Documents documents={dashboard.documents} matters={dashboard.matters} />}
+        {!loading && view === 'Notices' && <Notices notices={dashboard.notices} notify={notify} />}
+        {!loading && view === 'Documents' && <Documents documents={dashboard.documents} matters={dashboard.matters} notify={notify} />}
         {!loading && view === 'Account' && <Account user={user} client={dashboard.client} firm={firm} />}
       </main>
       <ClientChatWidget firm={firm} matters={dashboard.matters} selectedMatterId={selected?.id || ''} user={user} notify={notify} />
@@ -223,7 +219,7 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
         </Card>
         <MatterDocuments matterId={selected.id} clientMode notify={notify} />
         <Card title="Invoices and payment proof" hint="Upload M-PESA or bank transfer confirmation">
-          <Table columns={['Invoice', 'Amount', 'Status', 'PDF']} rows={invoices.map(i => [i.number || i.id, kes(i.amount), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <a key={`${i.id}-pdf`} style={styles.link} href={`${API_BASE}/invoices/${i.id}/pdf?token=${tokenQuery()}`}>PDF</a>])} empty="No invoices shared yet." />
+          <Table columns={['Invoice', 'Amount', 'Status', 'PDF']} rows={invoices.map(i => [i.number || i.id, kes(i.amount), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <DownloadButton key={`${i.id}-pdf`} label="PDF" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />])} empty="No invoices shared yet." />
           <form onSubmit={submitPayment} style={{ ...styles.formGrid, marginTop: 14 }}>
             <Field label="Invoice"><select style={styles.input} value={payment.invoiceId} onChange={e => setPayment({ ...payment, invoiceId: e.target.value })}><option value="">General payment</option>{invoices.map(i => <option key={i.id} value={i.id}>{i.number || i.id}</option>)}</select></Field>
             <Field label="Method"><select style={styles.input} value={payment.method} onChange={e => setPayment({ ...payment, method: e.target.value })}><option>M-PESA</option><option>Bank Transfer</option><option>Cash Deposit</option></select></Field>
@@ -240,15 +236,15 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
   );
 }
 
-function Notices({ notices }) {
+function Notices({ notices, notify }) {
   return (
     <Card title="Firm Notices" hint="Updates and bulletins from the firm">
-      {notices.length ? <div style={styles.noticeList}>{notices.map(notice => <NoticeItem key={notice.id} notice={notice} />)}</div> : <Empty title="No notices" text="The firm has not posted any notices yet." />}
+      {notices.length ? <div style={styles.noticeList}>{notices.map(notice => <NoticeItem key={notice.id} notice={notice} notify={notify} />)}</div> : <Empty title="No notices" text="The firm has not posted any notices yet." />}
     </Card>
   );
 }
 
-function NoticeItem({ notice }) {
+function NoticeItem({ notice, notify }) {
   const direct = notice.audience === 'direct';
   return (
     <article style={styles.noticeItem}>
@@ -261,11 +257,11 @@ function NoticeItem({ notice }) {
       {!!notice.attachments?.length && (
         <div style={styles.noticeFileGrid}>
           {notice.attachments.map(file => (
-            <a key={file.id} style={styles.noticeFileLink} href={`${API_BASE}/documents/${file.id}/download?token=${tokenQuery()}`} download title={`Download ${noticeFileName(file)}`}>
+            <button key={file.id} type="button" style={{ ...styles.noticeFileLink, width: '100%', cursor: 'pointer', textAlign: 'left' }} title={`Download ${noticeFileName(file)}`} onClick={() => downloadWithNotify(`/api/documents/${file.id}/download`, noticeFileName(file), notify)}>
               <span style={styles.noticeFileIcon}>{noticeFileType(file)}</span>
               <span>{noticeFileName(file)}</span>
               <small style={styles.mutedText}>{file.size || 'Download'}</small>
-            </a>
+            </button>
           ))}
         </div>
       )}
@@ -273,8 +269,24 @@ function NoticeItem({ notice }) {
   );
 }
 
-function Documents({ documents, matters }) {
-  return <Card title="All Documents" hint="Files shared across your matters"><Table columns={['Name', 'Matter', 'Source', 'Type', 'Download']} rows={documents.map(d => [d.displayName || d.name, matters.find(m => m.id === d.matterId)?.title || d.matterId, <Badge key={`${d.id}-source`} tone={d.source === 'client' ? 'green' : 'blue'}>{d.source === 'client' ? 'Shared by you' : 'Firm'}</Badge>, d.type, <a key={d.id} style={styles.link} href={`${API_BASE}/documents/${d.id}/download?token=${tokenQuery()}`}>Download</a>])} empty="No documents shared yet." /></Card>;
+function Documents({ documents, matters, notify }) {
+  return <Card title="All Documents" hint="Files shared across your matters"><Table columns={['Name', 'Matter', 'Source', 'Type', 'Download']} rows={documents.map(d => [d.displayName || d.name, matters.find(m => m.id === d.matterId)?.title || d.matterId, <Badge key={`${d.id}-source`} tone={d.source === 'client' ? 'green' : 'blue'}>{d.source === 'client' ? 'Shared by you' : 'Firm'}</Badge>, d.type, <DownloadButton key={d.id} label="Download" path={`/api/documents/${d.id}/download`} filename={d.displayName || d.name || 'document'} notify={notify} />])} empty="No documents shared yet." /></Card>;
+}
+
+async function downloadWithNotify(path, filename, notify) {
+  try {
+    await downloadWithAuth(path, filename);
+  } catch (err) {
+    notify?.({ type: 'danger', message: err.message });
+  }
+}
+
+function DownloadButton({ label, path, filename, notify }) {
+  return (
+    <button type="button" style={{ ...styles.link, border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }} onClick={() => downloadWithNotify(path, filename, notify)}>
+      {label}
+    </button>
+  );
 }
 
 function Account({ user, client, firm }) {

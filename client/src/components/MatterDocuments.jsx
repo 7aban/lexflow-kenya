@@ -1,11 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { API_BASE, api, createFolder, deleteFolder, fileToDataUrl, getMatterDocuments, getMatterFolders, moveDocument, readSession, updateDocument, updateFolder } from '../lib/apiClient.js';
+import { api, createFolder, deleteFolder, downloadWithAuth, fileToDataUrl, getMatterDocuments, getMatterFolders, moveDocument, updateDocument, updateFolder } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, Table } from './ui.jsx';
-
-function tokenQuery() {
-  return encodeURIComponent(readSession()?.token || '');
-}
 
 function folderIcon(folder) {
   if (folder.id === 'all') return 'ALL';
@@ -127,6 +123,14 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     } catch (err) { notify?.({ type: 'danger', message: err.message }); }
   }
 
+  async function downloadDoc(doc) {
+    try {
+      await downloadWithAuth(`/api/documents/${doc.id}/download`, documentLabel(doc));
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    }
+  }
+
   const realFolders = folders.filter(folder => !folder.virtual);
   const folderOptions = useMemo(() => [{ id: 'uncategorised', name: 'Uncategorised' }, ...realFolders], [realFolders]);
   const selectedName = folders.find(folder => folder.id === selectedFolder)?.name || 'All Documents';
@@ -175,7 +179,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
           <Table
             columns={canManage ? ['Name', 'Folder', 'Date', 'Size', 'Source', 'Client Access', 'Move', 'Actions'] : ['Name', 'Folder', 'Date', 'Size', 'Source', 'Download']}
             rows={documents.map(doc => {
-              const download = <a key={`${doc.id}-download`} style={styles.link} href={`${API_BASE}/documents/${doc.id}/download?token=${tokenQuery()}`}>Download</a>;
+              const download = <button key={`${doc.id}-download`} type="button" style={{ ...styles.link, border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }} onClick={() => downloadDoc(doc)}>Download</button>;
               if (!canManage) return [documentLabel(doc), doc.folderName || 'Uncategorised', doc.date || '-', doc.size || '-', sourceBadge(doc, clientMode), download];
               return [
                 documentLabel(doc),
@@ -189,7 +193,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
                 <select key={`${doc.id}-move`} style={styles.tableSelect} value={doc.folderId || 'uncategorised'} onChange={e => moveDoc(doc, e.target.value)}>
                   {folderOptions.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
                 </select>,
-                <ActionGroup key={`${doc.id}-actions`} actions={[['Download', () => window.open(`${API_BASE}/documents/${doc.id}/download?token=${tokenQuery()}`, '_blank')], ['Delete', () => setConfirm({ title: 'Delete document?', message: 'Delete this document?', onConfirm: () => deleteDoc(doc) })]]} />,
+                <ActionGroup key={`${doc.id}-actions`} actions={[['Download', () => downloadDoc(doc)], ['Delete', () => setConfirm({ title: 'Delete document?', message: 'Delete this document?', onConfirm: () => deleteDoc(doc) })]]} />,
               ];
             })}
             empty="No documents."

@@ -46,10 +46,7 @@ async function req(method, path, body) {
 }
 
 export const apiUrl = (path) => {
-  const token = getStoredToken();
-  if (!token || !path.startsWith('/api/')) return `${BASE}${path}`;
-  const sep = path.includes('?') ? '&' : '?';
-  return `${BASE}${path}${sep}token=${encodeURIComponent(token)}`;
+  return `${BASE}${path}`;
 };
 
 const fileToDataUrl = file => new Promise((resolve, reject) => {
