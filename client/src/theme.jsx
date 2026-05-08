@@ -47,6 +47,12 @@ export function StyleTag() { return <style>{`
     .lf-login-root .lf-login-brand { padding: 32px 24px !important; }
     .lf-login-root .lf-login-brand-features { display: none !important; }
     .lf-login-root .lf-login-card-wrap { padding: 16px !important; }
+    #root .lf-matter-grid { grid-template-columns: 1fr !important; }
+    #root .lf-court-mode-stack { gap: 10px !important; }
+  }
+  @media (max-width: 480px) {
+    #root .lf-court-mode-card { padding: 12px !important; }
+    #root .lf-court-mode-stack { gap: 8px !important; }
   }
   @keyframes lfPulse { 0% { opacity: .55; } 50% { opacity: 1; } 100% { opacity: .55; } }
   @keyframes lfSlideIn { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }

@@ -486,7 +486,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   async function deleteTimeEntryRecord(entry) { try { await api(`/time-entries/${entry.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Time entry deleted.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
 
   return (
-    <div style={styles.matterGrid}>
+    <div className="lf-matter-grid" style={styles.matterGrid}>
       <Card title="Matter list" hint={`${data.matters.length} active files`}>
         {data.matters.length ? data.matters.map(m => (
           <button key={m.id} onClick={() => setSelectedId(m.id)} onMouseMove={e => setTooltip({ x: e.clientX, y: e.clientY, title: m.title, lines: [m.reference || m.id, `Stage: ${m.stage || 'Intake'}`, `Priority: ${m.priority || 'Medium'}`, `Advocate: ${m.assignedTo || '-'}`, `Next court: ${nextCourtDate(m)}`], initial: (m.title || 'M').slice(0, 1) })} onMouseLeave={() => setTooltip(null)} style={{ ...styles.matterButton, ...(selected?.id === m.id ? styles.matterActive : {}) }}>
@@ -537,12 +537,14 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
                 )}
               </div>
               <div style={styles.tabList}>
-                {['Workspace', 'Assistant'].map(tab => (
+                {['Workspace', 'Assistant', 'Court'].map(tab => (
                   <button key={tab} type="button" onClick={() => setDetailTab(tab)} style={{ ...styles.tabButton, ...(detailTab === tab ? styles.tabActive : {}) }}>{tab}</button>
                 ))}
               </div>
               {detailTab === 'Assistant' ? (
                 <AssistantSuggestions suggestions={suggestions} />
+              ) : detailTab === 'Court' ? (
+                <MatterCourtMode detail={detail} nextActionHints={nextActionHints} />
               ) : (
                 <>
                   <MatterCommandSummary detail={detail} nextActionHints={nextActionHints} />
@@ -1332,6 +1334,160 @@ function SummaryCell({ label, value, tone = '' }) {
     <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: 10, background: '#fff', display: 'grid', gap: 5 }}>
       <span style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: theme.muted }}>{label}</span>
       <span style={{ fontSize: 13, color }}>{value}</span>
+    </div>
+  );
+}
+
+function getNextAppearance(detail) {
+  const appearances = Array.isArray(detail?.appearances) ? detail.appearances : [];
+  const today = isoDateOnly();
+  return appearances
+    .filter(a => a.date && a.date >= today)
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)))[0] || null;
+}
+
+function getRecentDocuments(detail) {
+  const documents = Array.isArray(detail?.documents) ? detail.documents : [];
+  return [...documents]
+    .sort((a, b) => {
+      const aDate = parseDateValue(a.date || a.createdAt);
+      const bDate = parseDateValue(b.date || b.createdAt);
+      return (bDate?.getTime() || 0) - (aDate?.getTime() || 0);
+    })
+    .slice(0, 5);
+}
+
+function CourtModeField({ label, value }) {
+  if (value === null || value === undefined || value === '') return null;
+  return (
+    <div style={{ display: 'grid', gap: 2 }}>
+      <span style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: theme.muted }}>{label}</span>
+      <div style={{ fontSize: 13, color: theme.ink }}>{value}</div>
+    </div>
+  );
+}
+
+function MatterCourtMode({ detail, nextActionHints }) {
+  const nextAppearance = useMemo(() => getNextAppearance(detail), [detail]);
+  const recentDocs = useMemo(() => getRecentDocuments(detail), [detail]);
+  const recentTimeline = useMemo(() => {
+    const timeline = [];
+    const addEvent = ({ date, title, detail: secondary }) => {
+      const parsed = parseDateValue(date);
+      if (!parsed) return;
+      timeline.push({ date: parsed, title, secondary });
+    };
+    (Array.isArray(detail?.notes) ? detail.notes : []).forEach(note => {
+      addEvent({ date: note.createdAt, title: 'Case note recorded', detail: note.author ? `By ${note.author}` : 'Internal note' });
+    });
+    (Array.isArray(detail?.appearances) ? detail.appearances : []).forEach(appearance => {
+      addEvent({ date: appearance.date, title: 'Court appearance', detail: [appearance.title || appearance.type || 'Appearance', appearance.time, appearance.location].filter(Boolean).join(' - ') });
+    });
+    (Array.isArray(detail?.documents) ? detail.documents : []).forEach(doc => {
+      addEvent({ date: doc.date || doc.createdAt, title: 'Document added', detail: doc.displayName || doc.name || 'Document' });
+    });
+    return timeline.sort((a, b) => b.date.getTime() - a.date.getTime()).slice(0, 5);
+  }, [detail]);
+
+  return (
+    <div className="lf-court-mode-stack" style={{ display: 'grid', gap: 12 }}>
+      <div className="lf-court-mode-card" style={{ border: `1px solid ${theme.line}`, borderRadius: 10, padding: 16, background: '#fff', boxShadow: theme.shadow, display: 'grid', gap: 10 }}>
+        <strong style={{ fontSize: 13 }}>Matter Summary</strong>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+          <CourtModeField label="Title" value={detail?.title} />
+          <CourtModeField label="Reference" value={detail?.reference} />
+          <CourtModeField label="Stage" value={detail?.stage} />
+          <CourtModeField label="Advocate" value={detail?.assignedTo} />
+          {detail?.paralegal && <CourtModeField label="Paralegal" value={detail.paralegal} />}
+          {detail?.court && <CourtModeField label="Court" value={detail.court} />}
+          {detail?.judge && <CourtModeField label="Judge" value={detail.judge} />}
+          {detail?.caseNo && <CourtModeField label="Case No." value={detail.caseNo} />}
+          {detail?.opposingCounsel && <CourtModeField label="Opposing Counsel" value={detail.opposingCounsel} />}
+        </div>
+      </div>
+
+      {nextAppearance && (
+        <div className="lf-court-mode-card" style={{ border: `1px solid ${theme.line}`, borderRadius: 10, padding: 16, background: '#fff', boxShadow: theme.shadow, display: 'grid', gap: 10 }}>
+          <strong style={{ fontSize: 13 }}>Next Appearance</strong>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+            <CourtModeField label="Date" value={formatTimelineDate(nextAppearance.date)} />
+            {nextAppearance.time && <CourtModeField label="Time" value={nextAppearance.time} />}
+            {nextAppearance.type && <CourtModeField label="Type" value={nextAppearance.type} />}
+            {nextAppearance.location && <CourtModeField label="Location" value={nextAppearance.location} />}
+            {nextAppearance.attorney && <CourtModeField label="Attorney" value={nextAppearance.attorney} />}
+            {nextAppearance.prepNote && <CourtModeField label="Prep Note" value={nextAppearance.prepNote} />}
+            {nextAppearance.meetingLink && <CourtModeField label="Virtual Court" value={<a href={nextAppearance.meetingLink} target="_blank" rel="noopener noreferrer" style={styles.link}>{nextAppearance.meetingLink}</a>} />}
+          </div>
+        </div>
+      )}
+
+      {detail?.clientName && (
+        <div className="lf-court-mode-card" style={{ border: `1px solid ${theme.line}`, borderRadius: 10, padding: 16, background: '#fff', boxShadow: theme.shadow, display: 'grid', gap: 10 }}>
+          <strong style={{ fontSize: 13 }}>Client Contact</strong>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+            <CourtModeField label="Name" value={detail.clientName} />
+            {detail.clientEmail && <CourtModeField label="Email" value={<a href={`mailto:${detail.clientEmail}`} style={styles.link}>{detail.clientEmail}</a>} />}
+            {detail.clientPhone && <CourtModeField label="Phone" value={<a href={`tel:${detail.clientPhone}`} style={styles.link}>{detail.clientPhone}</a>} />}
+          </div>
+        </div>
+      )}
+
+      {detail?.solDate && (
+        <div style={{ border: `1px solid #FDE68A`, borderRadius: 10, padding: 14, background: theme.amberBg, color: theme.amber, display: 'grid', gap: 4 }}>
+          <strong style={{ fontSize: 13 }}>Limitation / SOL Date</strong>
+          <span>{formatTimelineDate(detail.solDate)}{daysFromToday(detail.solDate) < 0 ? ' (passed)' : daysFromToday(detail.solDate) <= 30 ? ' (within 30 days)' : ''}</span>
+        </div>
+      )}
+
+      {nextActionHints?.length > 0 && (
+        <div className="lf-court-mode-card" style={{ border: `1px solid ${theme.line}`, borderRadius: 10, padding: 16, background: '#fff', boxShadow: theme.shadow, display: 'grid', gap: 10 }}>
+          <strong style={{ fontSize: 13 }}>Action Items</strong>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {nextActionHints.slice(0, 5).map((hint, i) => (
+              <div key={`${hint.title}-${i}`} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                <Badge tone={hintTone(hint.severity)}>{hint.severity}</Badge>
+                <div style={{ display: 'grid', gap: 2, minWidth: 0 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: theme.ink }}>{hint.title}</span>
+                  <span style={{ fontSize: 12, color: theme.muted }}>{hint.why}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="lf-court-mode-card" style={{ border: `1px solid ${theme.line}`, borderRadius: 10, padding: 16, background: '#fff', boxShadow: theme.shadow, display: 'grid', gap: 10 }}>
+        <strong style={{ fontSize: 13 }}>Recent Activity</strong>
+        {recentTimeline.length > 0 ? (
+          <div style={{ display: 'grid', gap: 8 }}>
+            {recentTimeline.map((event, i) => (
+              <div key={`tl-${i}`} style={{ display: 'grid', gap: 3, borderLeft: `3px solid ${theme.blue}`, paddingLeft: 10 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: theme.ink }}>{event.date.toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                <span style={{ fontSize: 13, color: theme.ink }}>{event.title}</span>
+                {event.secondary && <span style={{ fontSize: 12, color: theme.muted }}>{event.secondary}</span>}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <span style={{ color: theme.muted, fontSize: 12 }}>No recent activity recorded.</span>
+        )}
+      </div>
+
+      <div className="lf-court-mode-card" style={{ border: `1px solid ${theme.line}`, borderRadius: 10, padding: 16, background: '#fff', boxShadow: theme.shadow, display: 'grid', gap: 10 }}>
+        <strong style={{ fontSize: 13 }}>Recent Documents</strong>
+        {recentDocs.length > 0 ? (
+          <div style={{ display: 'grid', gap: 8 }}>
+            {recentDocs.map((doc, i) => (
+              <div key={`doc-${doc.id || i}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
+                <span style={{ fontSize: 13, color: theme.ink, fontWeight: 600 }}>{noticeFileName(doc)}</span>
+                <span style={{ fontSize: 12, color: theme.muted, whiteSpace: 'nowrap' }}>{formatFileSize(doc.size)}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <span style={{ color: theme.muted, fontSize: 12 }}>No documents recorded.</span>
+        )}
+      </div>
     </div>
   );
 }
