@@ -328,12 +328,21 @@ app.post('/api/auth/client-login', authLimiter, validate(loginValidation), async
   try {
     const { email, password } = req.body;
     const user = await get('SELECT * FROM users WHERE lower(email)=lower(?) AND role=?', [email || '', 'client']);
-    if (!user || !(await verifyPassword(password || '', user.password || ''))) return res.status(401).json({ error: 'Invalid client email or password' });
+    if (!user) {
+      await recordAuditEvent(req, { action: 'client_login_failure', entityType: 'user', metadata: { email, reason: 'unknown_client', loginMethod: 'client_portal' } }).catch(() => {});
+      return res.status(401).json({ error: 'Invalid client email or password' });
+    }
+    if (!(await verifyPassword(password || '', user.password || ''))) {
+      await recordAuditEvent(req, { action: 'client_login_failure', entityType: 'user', entityId: user.id, clientId: user.clientId || '', metadata: { email: user.email, role: user.role, reason: 'invalid_credentials', loginMethod: 'client_portal' } }).catch(() => {});
+      return res.status(401).json({ error: 'Invalid client email or password' });
+    }
     if (user.isActive === 0) {
       await recordAuditEvent(req, { action: 'login_failure', entityType: 'user', entityId: user.id, metadata: { email: user.email, role: user.role, reason: 'account inactive' } }).catch(() => {});
+      await recordAuditEvent(req, { action: 'client_login_failure', entityType: 'user', entityId: user.id, clientId: user.clientId || '', metadata: { email: user.email, role: user.role, reason: 'inactive_account', loginMethod: 'client_portal' } }).catch(() => {});
       return res.status(401).json({ error: 'Invalid client email or password' });
     }
     const token = signAccessToken(user);
+    await recordAuditEvent(req, { action: 'client_login_success', entityType: 'user', entityId: user.id, clientId: user.clientId || '', metadata: { email: user.email, role: user.role, loginMethod: 'client_portal' } }).catch(() => {});
     res.json({ token, user: { id: user.id, email: user.email, fullName: user.fullName, name: user.fullName, role: user.role, clientId: user.clientId || '' } });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
