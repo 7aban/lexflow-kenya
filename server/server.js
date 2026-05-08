@@ -1044,6 +1044,10 @@ app.get('/api/matters/:id/suggestions', async (req, res) => {
   if (req.user.role === 'client') return res.status(403).json({ error: 'Staff access required' });
   const matter = await get('SELECT m.*, c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.id=?', [req.params.id]);
   if (!matter) return res.status(404).json({ error: 'Matter not found' });
+  if (!(await canAccessMatter(req, req.params.id))) {
+    await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Matter access denied' });
+  }
 
   const todayDate = today();
   const [taskStats, timeStats, docStats, noteStats, invoiceStats, nextAppearance] = await Promise.all([
@@ -1059,11 +1063,10 @@ app.get('/api/matters/:id/suggestions', async (req, res) => {
   const taskTotal = Number(taskStats?.total || 0);
   const overdueTasks = Number(taskStats?.overdue || 0);
   const timeTotal = Number(timeStats?.total || 0);
-  const unbilled = Number(timeStats?.unbilled || 0);
   const docTotal = Number(docStats?.total || 0);
   const noteTotal = Number(noteStats?.total || 0);
-  const invoiceTotal = Number(invoiceStats?.total || 0);
-  const outstandingInvoices = Number(invoiceStats?.outstanding || 0);
+
+  const billingVisible = req.user.role !== 'advocate' || (await isBillingVisibleFor(req));
 
   if ((matter.stage || '').toLowerCase() === 'intake' && taskTotal === 0 && timeTotal === 0 && noteTotal === 0) {
     suggestions.push('This matter is still in Intake with no activity. Consider moving it to Conflict Check or creating the first task.');
@@ -1075,10 +1078,15 @@ app.get('/api/matters/:id/suggestions', async (req, res) => {
     if (!nextAppearance.prepNote) suggestions.push('The next court appearance has no preparation note. Add a short prep note so the team knows what to review.');
   }
   if (docTotal === 0) suggestions.push('No documents are linked to this matter yet. Upload key pleadings, engagement letters, or court notices for quick reference.');
-  if (unbilled > 0) suggestions.push(`There is ${unbilled.toLocaleString('en-KE', { style: 'currency', currency: 'KES', maximumFractionDigits: 0 })} in unbilled time. Consider generating an invoice.`);
-  if ((matter.billingType || '').toLowerCase() === 'fixed' && Number(matter.fixedFee || 0) > 0 && invoiceTotal === 0) suggestions.push('This is a fixed-fee matter with no invoice yet. Generate the fixed-fee invoice when engagement is confirmed.');
-  if (Number(matter.retainerBalance || 0) > 0 && Number(matter.retainerBalance || 0) < 50000) suggestions.push('Retainer balance is running low. Consider requesting a top-up before more billable work is done.');
-  if ((matter.stage || '').toLowerCase() === 'closed' && outstandingInvoices > 0) suggestions.push('This matter is closed but still has an outstanding invoice. Follow up with the client or mark payment when received.');
+  if (billingVisible) {
+    const unbilled = Number(timeStats?.unbilled || 0);
+    const invoiceTotal = Number(invoiceStats?.total || 0);
+    const outstandingInvoices = Number(invoiceStats?.outstanding || 0);
+    if (unbilled > 0) suggestions.push(`There is ${unbilled.toLocaleString('en-KE', { style: 'currency', currency: 'KES', maximumFractionDigits: 0 })} in unbilled time. Consider generating an invoice.`);
+    if ((matter.billingType || '').toLowerCase() === 'fixed' && Number(matter.fixedFee || 0) > 0 && invoiceTotal === 0) suggestions.push('This is a fixed-fee matter with no invoice yet. Generate the fixed-fee invoice when engagement is confirmed.');
+    if (Number(matter.retainerBalance || 0) > 0 && Number(matter.retainerBalance || 0) < 50000) suggestions.push('Retainer balance is running low. Consider requesting a top-up before more billable work is done.');
+    if ((matter.stage || '').toLowerCase() === 'closed' && outstandingInvoices > 0) suggestions.push('This matter is closed but still has an outstanding invoice. Follow up with the client or mark payment when received.');
+  }
   if (noteTotal === 0 && taskTotal > 0) suggestions.push('There are tasks on this file but no case notes. Add a short status note to preserve matter context.');
   if (!suggestions.length) suggestions.push('This matter looks up to date. No urgent action is needed right now.');
 
