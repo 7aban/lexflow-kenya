@@ -401,6 +401,8 @@ app.post('/api/invitations/:token/accept', async (req, res) => {
   res.json({ message: 'Client portal account created.', token, user: { id, email: invitation.email, fullName: name, name, role: 'client', clientId: invitation.clientId || '' } });
 });
 app.put('/api/firm-settings', authenticate, requireAdmin, async (req, res) => {
+  const existing = await get('SELECT * FROM firm_settings WHERE id=?', ['default']);
+  const oldBillingVisibility = existing ? Number(existing.advocateBillingVisibility) : 1;
   const settings = { ...defaultFirmSettings, ...req.body, id: 'default' };
   await run(`INSERT INTO firm_settings (id,name,logo,primaryColor,accentColor,websiteURL,email,phone,address)
     VALUES (?,?,?,?,?,?,?,?,?)
@@ -413,8 +415,13 @@ app.put('/api/firm-settings', authenticate, requireAdmin, async (req, res) => {
   if (req.body.advocateBillingVisibility !== undefined) {
     await run('UPDATE firm_settings SET advocateBillingVisibility=?', [Number(req.body.advocateBillingVisibility)]);
   }
+  const fieldsUpdated = Object.keys(req.body).filter(k => k !== 'reminderSettings');
+  const metadata = { name: settings.name, fieldsUpdated };
+  if (req.body.advocateBillingVisibility !== undefined && req.body.advocateBillingVisibility !== oldBillingVisibility) {
+    metadata.advocateBillingVisibility = { old: oldBillingVisibility, new: Number(req.body.advocateBillingVisibility) };
+  }
   await logAudit(req, 'update', 'firm_settings', 'default', `Updated firm settings for ${settings.name}`);
-  await recordAuditEvent(req, { action: 'firm_settings_updated', entityType: 'firm_settings', entityId: 'default', metadata: { name: settings.name, fieldsUpdated: Object.keys(req.body).filter(k => k !== 'reminderSettings') } }).catch(() => {});
+  await recordAuditEvent(req, { action: 'firm_settings_updated', entityType: 'firm_settings', entityId: 'default', metadata }).catch(() => {});
   res.json(await getFirmSettings());
 });
 
