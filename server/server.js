@@ -1148,6 +1148,7 @@ app.post('/api/matters', requireAdvocateOrAdmin, validate(createMatterValidation
   await run(`INSERT INTO matters (id,reference,clientId,title,practiceArea,stage,assignedTo,paralegal,openDate,description,court,judge,caseNo,opposingCounsel,billingRate,retainerBalance,totalBilled,priority,solDate,billingType,fixedFee,remindersEnabled,courtRemindersEnabled,invoiceRemindersEnabled) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [id, reference, req.body.clientId, req.body.title, req.body.practiceArea || '', req.body.stage || 'Intake', req.body.assignedTo || '', req.body.paralegal || '', req.body.openDate || today(), req.body.description || '', req.body.court || '', req.body.judge || '', req.body.caseNo || '', req.body.opposingCounsel || '', Number(req.body.billingRate || 0), Number(req.body.retainerBalance || 0), 0, req.body.priority || 'Medium', req.body.solDate || '', req.body.billingType || 'hourly', Number(req.body.fixedFee || 0), req.body.remindersEnabled || 'firm_default', req.body.courtRemindersEnabled || 'firm_default', req.body.invoiceRemindersEnabled || 'firm_default']);
   const matter = await get('SELECT * FROM matters WHERE id=?', [id]);
   await logAudit(req, 'create', 'matter', id, `Created matter ${matter.title} (${matter.reference})`);
+  await recordAuditEvent(req, { action: 'matter_created', entityType: 'matter', entityId: id, clientId: matter.clientId || '', metadata: { title: matter.title || '', reference: matter.reference || '', stage: matter.stage || '', practiceArea: matter.practiceArea || '' } }).catch(() => {});
   res.json(matter);
 });
 app.patch('/api/matters/:id', requireAdvocateOrAdmin, async (req, res) => {
@@ -1160,7 +1161,10 @@ app.patch('/api/matters/:id', requireAdvocateOrAdmin, async (req, res) => {
   if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
   await run(`UPDATE matters SET ${updates.map(f => `${f}=?`).join(',')} WHERE id=?`, [...updates.map(f => ['billingRate','fixedFee','retainerBalance','totalBilled'].includes(f) ? Number(req.body[f] || 0) : req.body[f]), req.params.id]);
   const matter = await get('SELECT * FROM matters WHERE id=?', [req.params.id]);
-  if (matter) await logAudit(req, 'update', 'matter', req.params.id, `Updated matter ${matter.title}`);
+  if (matter) {
+    await logAudit(req, 'update', 'matter', req.params.id, `Updated matter ${matter.title}`);
+    await recordAuditEvent(req, { action: 'matter_updated', entityType: 'matter', entityId: req.params.id, clientId: matter.clientId || '', metadata: { title: matter.title || '', updatedFields: updates.join(','), stage: matter.stage || '' } }).catch(() => {});
+  }
   matter ? res.json(matter) : res.status(404).json({ error: 'Matter not found' });
 });
 app.patch('/api/matters/:id/status', requireAdvocateOrAdmin, async (req, res) => {
@@ -1170,7 +1174,10 @@ app.patch('/api/matters/:id/status', requireAdvocateOrAdmin, async (req, res) =>
   }
   await run('UPDATE matters SET stage=? WHERE id=?', [req.body.stage || 'Closed', req.params.id]);
   const matter = await get('SELECT * FROM matters WHERE id=?', [req.params.id]);
-  if (matter) await logAudit(req, 'archive', 'matter', req.params.id, `Set matter ${matter.title} stage to ${matter.stage}`);
+  if (matter) {
+    await logAudit(req, 'archive', 'matter', req.params.id, `Set matter ${matter.title} stage to ${matter.stage}`);
+    await recordAuditEvent(req, { action: 'matter_archived', entityType: 'matter', entityId: req.params.id, clientId: matter.clientId || '', metadata: { title: matter.title || '', stage: matter.stage || '' } }).catch(() => {});
+  }
   matter ? res.json(matter) : res.status(404).json({ error: 'Matter not found' });
 });
 async function deleteMatterCascade(matterId) {
