@@ -1009,6 +1009,7 @@ app.post('/api/clients', requireStaff, validate(createClientValidation), async (
   await run('INSERT INTO clients (id,name,type,contact,email,phone,status,joinDate,conflictCleared,retainer,remindersEnabled,preferredChannel) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', [id, req.body.name, req.body.type || 'Individual', req.body.contact || '', req.body.email || '', req.body.phone || '', 'Active', today(), 0, Number(req.body.retainer || 0), req.body.remindersEnabled === undefined ? 1 : (req.body.remindersEnabled ? 1 : 0), req.body.preferredChannel || 'firm_default']);
   const client = await get('SELECT * FROM clients WHERE id=?', [id]);
   await logAudit(req, 'create', 'client', id, `Created client ${client.name}`);
+  await recordAuditEvent(req, { action: 'client_created', entityType: 'client', entityId: id, metadata: { name: client.name || '', type: client.type || '' } }).catch(() => {});
   res.json(client);
 });
 app.patch('/api/clients/:id', requireAdvocateOrAdmin, async (req, res) => {
@@ -1017,7 +1018,10 @@ app.patch('/api/clients/:id', requireAdvocateOrAdmin, async (req, res) => {
   if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
   await run(`UPDATE clients SET ${updates.map(f => `${f}=?`).join(',')} WHERE id=?`, [...updates.map(f => f === 'retainer' ? Number(req.body[f] || 0) : f === 'remindersEnabled' ? (req.body[f] ? 1 : 0) : req.body[f]), req.params.id]);
   const client = await get('SELECT * FROM clients WHERE id=?', [req.params.id]);
-  if (client) await logAudit(req, 'update', 'client', req.params.id, `Updated client ${client.name}`);
+  if (client) {
+    await logAudit(req, 'update', 'client', req.params.id, `Updated client ${client.name}`);
+    await recordAuditEvent(req, { action: 'client_updated', entityType: 'client', entityId: req.params.id, metadata: { name: client.name || '', updatedFields: updates.join(',') } }).catch(() => {});
+  }
   client ? res.json(client) : res.status(404).json({ error: 'Client not found' });
 });
 app.get('/api/clients/:id/activity', requireStaff, async (req, res) => {
