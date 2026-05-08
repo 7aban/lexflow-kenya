@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { IconBriefcase, IconClock, IconCoin, IconAlertTriangle } from '@tabler/icons-react';
 import { API_BASE, api, fileToDataUrl, readSession } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
@@ -30,7 +31,7 @@ export function Dashboard({ data, user }) {
       <section style={styles.heroCard}>
         <div>
           <div style={styles.heroKicker}>{isAdvocate ? 'Your workload' : 'Firm position'}</div>
-          <h2>Today feels manageable.</h2>
+          <h2>{isAdvocate ? 'Your assigned matters' : 'Firm matters overview'}</h2>
           {isAdvocate ? (
             <p>{data.matters.length} matters assigned, {data.dashboard.overdueTaskCount || 0} overdue task{data.dashboard.overdueTaskCount === 1 ? '' : 's'}. Outstanding: {kes(outstanding)}.</p>
           ) : (
@@ -40,34 +41,24 @@ export function Dashboard({ data, user }) {
         <div style={styles.heroFigure}>{kes(paid + outstanding)}</div>
       </section>
 
-      {!isAdvocate && overdueTasks > 0 && (
+      {isAdvocate ? data.dashboard.overdueTaskCount : overdueTasks > 0 && (
         <div style={styles.warningPanel}>
           <div style={styles.warningIcon}>!</div>
           <div>
-            <strong>{overdueTasks} overdue task{overdueTasks === 1 ? '' : 's'} need attention.</strong>
-            <span>Review the task board and clear critical deadlines before the close of day.</span>
-          </div>
-        </div>
-      )}
-
-      {isAdvocate && data.dashboard.overdueTaskCount > 0 && (
-        <div style={styles.warningPanel}>
-          <div style={styles.warningIcon}>!</div>
-          <div>
-            <strong>{data.dashboard.overdueTaskCount} overdue task{data.dashboard.overdueTaskCount === 1 ? '' : 's'} need attention.</strong>
-            <span>Review your task board and clear critical deadlines before the close of day.</span>
+            <strong>{isAdvocate ? data.dashboard.overdueTaskCount : overdueTasks} overdue task{(isAdvocate ? data.dashboard.overdueTaskCount : overdueTasks) === 1 ? '' : 's'} need attention.</strong>
+            <span>Review {isAdvocate ? 'your' : 'the'} task board and clear critical deadlines before the close of day.</span>
           </div>
         </div>
       )}
 
       <div style={styles.statsGrid}>
-        <Stat label="Active matters" value={data.dashboard.activeMattersCount ?? data.matters.length} tone="navy" />
-        <Stat label="Month hours" value={Number(data.dashboard.monthHours || 0).toFixed(1)} tone="gold" />
-        <Stat label={isAdvocate ? 'My billed revenue' : 'Revenue month'} value={kes(data.dashboard.monthRevenue)} tone="green" />
-        <Stat label="Overdue tasks" value={isAdvocate ? data.dashboard.overdueTaskCount : overdueTasks} tone="red" />
+        <Stat icon={IconBriefcase} label="Active matters" value={data.dashboard.activeMattersCount ?? data.matters.length} tone="navy" />
+        <Stat icon={IconClock} label="Month hours" value={Number(data.dashboard.monthHours || 0).toFixed(1)} tone="gold" />
+        <Stat icon={IconCoin} label={isAdvocate ? 'My billed revenue' : 'Revenue month'} value={kes(data.dashboard.monthRevenue)} tone="green" />
+        <Stat icon={IconAlertTriangle} label="Overdue tasks" value={isAdvocate ? data.dashboard.overdueTaskCount : overdueTasks} tone="red" />
       </div>
 
-      <div style={styles.dashboardGrid}>
+      <div className="lf-dashboard-grid" style={styles.dashboardGrid}>
         <Card title={isAdvocate ? 'My matters' : 'Matter pipeline'} hint={isAdvocate ? 'Assigned files' : 'Stage distribution'}>
           {Object.keys(stages).length ? Object.entries(stages).map(([stage, count]) => (
             <div key={stage} style={styles.pipelineRow}>
@@ -83,8 +74,9 @@ export function Dashboard({ data, user }) {
       </div>
 
       <Card title="Upcoming court dates" hint="Appearances and virtual court links">
-        <Table columns={['Appearance', 'Date', 'Time', 'Location', 'Virtual Court']} rows={upcomingEvents.map(event => [
+        <Table columns={['Appearance', 'Matter', 'Date', 'Time', 'Location', 'Virtual Court']} rows={upcomingEvents.map(event => [
           event.title || event.type || 'Court appearance',
+          event.matterTitle || event.reference || '-',
           event.date || '-',
           event.time || '-',
           event.location || '-',
