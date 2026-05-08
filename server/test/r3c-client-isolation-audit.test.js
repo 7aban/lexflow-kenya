@@ -148,7 +148,7 @@ describe('R3c Client Isolation & Audit Completion', () => {
       const events = await new Promise((resolve, reject) => {
         const db = new sqlite3.Database(config.DATABASE_PATH);
         db.all(
-          `SELECT * FROM audit_events WHERE action='backup_created' ORDER BY timestamp DESC LIMIT 1`,
+          `SELECT * FROM audit_events WHERE action='backup_created' ORDER BY timestamp DESC, id DESC LIMIT 1`,
           (err, rows) => {
             db.close();
             if (err) return reject(err);
@@ -213,7 +213,7 @@ describe('R3c Client Isolation & Audit Completion', () => {
       const events = await new Promise((resolve, reject) => {
         const db = new sqlite3.Database(config.DATABASE_PATH);
         db.all(
-          `SELECT * FROM audit_events WHERE action='task_deleted' AND entity_id=? ORDER BY timestamp DESC LIMIT 1`,
+          `SELECT * FROM audit_events WHERE action='task_deleted' AND entity_id=? ORDER BY timestamp DESC, id DESC LIMIT 1`,
           [taskId],
           (err, rows) => {
             db.close();
@@ -239,7 +239,7 @@ describe('R3c Client Isolation & Audit Completion', () => {
       const events = await new Promise((resolve, reject) => {
         const db = new sqlite3.Database(config.DATABASE_PATH);
         db.all(
-          `SELECT * FROM audit_events WHERE action='firm_settings_updated' ORDER BY timestamp DESC LIMIT 1`,
+          `SELECT * FROM audit_events WHERE action='firm_settings_updated' ORDER BY timestamp DESC, id DESC LIMIT 1`,
           (err, rows) => {
             db.close();
             if (err) return reject(err);
@@ -262,7 +262,7 @@ describe('R3c Client Isolation & Audit Completion', () => {
       const events = await new Promise((resolve, reject) => {
         const db = new sqlite3.Database(config.DATABASE_PATH);
         db.all(
-          `SELECT metadata_json FROM audit_events ORDER BY timestamp DESC LIMIT 50`,
+          `SELECT metadata_json FROM audit_events ORDER BY timestamp DESC, id DESC LIMIT 50`,
           (err, rows) => {
             db.close();
             if (err) return reject(err);

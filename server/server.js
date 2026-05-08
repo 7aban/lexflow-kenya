@@ -1885,7 +1885,7 @@ app.get('/api/exports/:type.:format', requireStaff, async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="${exportType}-report.xls"`);
     res.send(rows.map(r => Object.values(r).map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n'));
   }
-  recordAuditEvent(req, { action: 'export_downloaded', entityType: 'export', entityId: `${exportType}.${format}`, metadata: { exportType, format, recordCount: rows.length } }).catch(() => {});
+  await recordAuditEvent(req, { action: 'export_downloaded', entityType: 'export', entityId: `${exportType}.${format}`, metadata: { exportType, format, recordCount: rows.length } }).catch(() => {});
 });
 
 // Health check endpoint — public, no auth, no sensitive data
