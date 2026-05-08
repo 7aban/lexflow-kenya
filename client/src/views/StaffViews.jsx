@@ -29,6 +29,12 @@ function isoDateOnly() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function formatTimelineDate(value) {
+  const parsed = parseDateValue(value);
+  if (!parsed) return 'Date not recorded';
+  return parsed.toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 export function Dashboard({ data, user, onNavigate }) {
   const isAdvocate = user?.role === 'advocate';
   const outstanding = data.invoices.filter(i => i.status === 'Outstanding').reduce((sum, i) => sum + Number(i.amount || 0), 0);
@@ -294,6 +300,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
               ) : (
                 <>
                   <MatterCommandSummary detail={detail} suggestions={suggestions} />
+                  <MatterActivityTimeline detail={detail} />
                   <form onSubmit={logTime} style={styles.formGrid}>
                     <Field label="Hours"><input type="number" min="0" step="0.1" style={styles.input} value={time.hours} onChange={e => setTime({ ...time, hours: Number(e.target.value) })} /></Field>
                     <Field label="Description"><input style={styles.input} value={time.description} onChange={e => setTime({ ...time, description: e.target.value })} /></Field>
@@ -872,6 +879,152 @@ function MatterCommandSummary({ detail, suggestions = [] }) {
         <SummaryCell label="SOL / Limitation" value={summary.sol} tone={detail?.solDate ? 'amber' : ''} />
         <SummaryCell label="Top suggestion" value={summary.topSuggestion} />
       </div>
+    </section>
+  );
+}
+
+function timelineToneColor(tone) {
+  if (tone === 'green') return theme.green;
+  if (tone === 'amber') return theme.amber;
+  if (tone === 'red') return theme.red;
+  return theme.blue;
+}
+
+function MatterActivityTimeline({ detail }) {
+  const events = useMemo(() => {
+    const timeline = [];
+    const addEvent = ({ date, source, tone = 'blue', title, detail: secondary }) => {
+      timeline.push({
+        date,
+        parsed: parseDateValue(date),
+        source,
+        tone,
+        title,
+        secondary
+      });
+    };
+
+    if (detail?.openDate) {
+      addEvent({
+        date: detail.openDate,
+        source: 'Matter',
+        title: 'Matter opened',
+        detail: detail.reference || detail.title || detail.clientName || 'Matter file'
+      });
+    }
+
+    (Array.isArray(detail?.notes) ? detail.notes : []).forEach(note => {
+      addEvent({
+        date: note.createdAt,
+        source: 'Note',
+        title: 'Case note recorded',
+        detail: note.author ? `By ${note.author}` : 'Internal note'
+      });
+    });
+
+    (Array.isArray(detail?.tasks) ? detail.tasks : []).forEach(task => {
+      const status = task.completed ? 'Completed' : 'Open';
+      addEvent({
+        date: task.dueDate,
+        source: 'Task',
+        tone: task.completed ? 'green' : 'amber',
+        title: 'Task due',
+        detail: [status, task.title || 'Task', task.assignee && `Responsible: ${task.assignee}`].filter(Boolean).join(' - ')
+      });
+    });
+
+    (Array.isArray(detail?.appearances) ? detail.appearances : []).forEach(appearance => {
+      addEvent({
+        date: appearance.date,
+        source: 'Court',
+        tone: 'red',
+        title: 'Court appearance',
+        detail: [appearance.title || appearance.type || 'Appearance', appearance.time, appearance.location].filter(Boolean).join(' - ')
+      });
+    });
+
+    (Array.isArray(detail?.documents) ? detail.documents : []).forEach(document => {
+      addEvent({
+        date: document.date || document.createdAt,
+        source: 'Document',
+        title: 'Document added',
+        detail: [
+          document.displayName || document.name || 'Document',
+          document.source === 'client' ? 'Client upload' : document.source === 'firm' ? 'Firm document' : null,
+          document.clientVisible ? 'Client-visible' : 'Staff-only'
+        ].filter(Boolean).join(' - ')
+      });
+    });
+
+    (Array.isArray(detail?.timeEntries) ? detail.timeEntries : []).forEach(entry => {
+      const hours = Number(entry.hours);
+      addEvent({
+        date: entry.date,
+        source: 'Time',
+        tone: 'green',
+        title: 'Time logged',
+        detail: [Number.isFinite(hours) ? `${hours.toFixed(1)}h` : null, entry.activity || entry.description || 'Matter work'].filter(Boolean).join(' - ')
+      });
+    });
+
+    (Array.isArray(detail?.invoices) ? detail.invoices : []).forEach(invoice => {
+      const label = [invoice.number || invoice.id || 'Invoice', invoice.status || 'Status not set'].filter(Boolean).join(' - ');
+      addEvent({
+        date: invoice.date,
+        source: 'Invoice',
+        tone: 'amber',
+        title: 'Invoice issued',
+        detail: label
+      });
+      if (invoice.dueDate) {
+        addEvent({
+          date: invoice.dueDate,
+          source: 'Invoice',
+          tone: 'amber',
+          title: 'Invoice due',
+          detail: label
+        });
+      }
+    });
+
+    return timeline.sort((a, b) => {
+      const aTime = a.parsed ? a.parsed.getTime() : -Infinity;
+      const bTime = b.parsed ? b.parsed.getTime() : -Infinity;
+      if (bTime !== aTime) return bTime - aTime;
+      return `${a.source}${a.title}`.localeCompare(`${b.source}${b.title}`);
+    });
+  }, [detail]);
+
+  return (
+    <section aria-label="Matter Activity Timeline" style={{ border: `1px solid ${theme.line}`, borderRadius: 10, padding: 14, background: '#fff', display: 'grid', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ display: 'grid', gap: 2 }}>
+          <strong style={{ fontSize: 13 }}>Matter Activity Timeline</strong>
+          <span style={{ color: theme.muted, fontSize: 12 }}>Read-only sequence from current matter records.</span>
+        </div>
+        <Badge tone="blue">{events.length} events</Badge>
+      </div>
+      {events.length === 0 ? (
+        <div style={{ border: `1px dashed ${theme.line}`, borderRadius: 8, padding: 12, color: theme.muted, fontSize: 13 }}>
+          No activity recorded for this matter yet.
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 8 }}>
+          {events.map((event, index) => (
+            <div
+              key={`${event.source}-${event.title}-${event.date || 'undated'}-${index}`}
+              style={{ border: `1px solid ${theme.line}`, borderLeft: `4px solid ${timelineToneColor(event.tone)}`, borderRadius: 8, padding: 10, background: '#F8FAFC', display: 'grid', gap: 6 }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: theme.ink }}>{formatTimelineDate(event.date)}</span>
+                <Badge tone={event.tone}>{event.source}</Badge>
+              </div>
+              <strong style={{ fontSize: 13 }}>{event.title}</strong>
+              {event.secondary ? <span style={{ color: theme.muted, fontSize: 12 }}>{event.secondary}</span> : null}
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
