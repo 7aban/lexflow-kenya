@@ -2,6 +2,19 @@
 
 LexFlow Kenya is a local-first legal practice management app for Kenyan law firms. It includes JWT authentication, role-based access, clients, matters, tasks, documents, case notes, invoices, virtual court links, firm branding, and a lightweight client portal.
 
+## Runtime Requirements
+
+- **Node.js 22 LTS** (22.22.2 recommended; Node 24 is unstable on Windows with Jest)
+- npm 10.9.x
+
+To activate the correct Node version (if you use `nvm-windows` or `nvm`):
+
+```powershell
+nvm use 22
+```
+
+A `.nvmrc` file is provided at the repository root for automatic version switching.
+
 ## Tech Stack
 
 - Frontend: React 18 + Vite, in `client/`

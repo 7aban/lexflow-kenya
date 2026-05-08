@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "dev": "vite --host localhost --port 5173",
     "dev:ip": "vite --host 127.0.0.1 --port 5173",
