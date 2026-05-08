@@ -35,6 +35,251 @@ function formatTimelineDate(value) {
   return parsed.toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+function daysFromToday(value) {
+  const parsed = parseDateValue(value);
+  const today = parseDateValue(isoDateOnly());
+  if (!parsed || !today) return null;
+  const targetDay = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  const currentDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  return Math.round((targetDay.getTime() - currentDay.getTime()) / 86400000);
+}
+
+function formatDayDistance(days) {
+  if (days === null || days === undefined) return null;
+  if (days === 0) return 'today';
+  if (days === 1) return 'tomorrow';
+  if (days > 0) return `in ${days} days`;
+  const overdueDays = Math.abs(days);
+  return `${overdueDays} day${overdueDays === 1 ? '' : 's'} overdue`;
+}
+
+function buildMatterNextActionHints(detail) {
+  if (!detail) return [];
+
+  const tasks = Array.isArray(detail.tasks) ? detail.tasks : [];
+  const appearances = Array.isArray(detail.appearances) ? detail.appearances : [];
+  const documents = Array.isArray(detail.documents) ? detail.documents : [];
+  const notes = Array.isArray(detail.notes) ? detail.notes : [];
+  const timeEntries = Array.isArray(detail.timeEntries) ? detail.timeEntries : [];
+  const invoices = Array.isArray(detail.invoices) ? detail.invoices : [];
+  const hints = [];
+  const severityRank = { critical: 0, high: 1, medium: 2, low: 3 };
+  const categoryRank = { urgent: 0, upcoming: 1, risk: 2, 'missing-information': 3, billing: 4, workflow: 5, informational: 6 };
+
+  const addHint = (hint) => {
+    const evidence = (Array.isArray(hint.evidence) ? hint.evidence : [])
+      .filter(Boolean)
+      .map(String)
+      .slice(0, 3);
+    hints.push({
+      title: hint.title,
+      category: hint.category,
+      severity: hint.severity,
+      why: hint.why,
+      evidence: evidence.length ? evidence : ['Available matter data'],
+      rank: hint.rank ?? 50,
+    });
+  };
+
+  const openTasks = tasks.filter(task => !task.completed);
+  const overdueTasks = openTasks
+    .map(task => ({ ...task, daysAway: daysFromToday(task.dueDate) }))
+    .filter(task => Number.isFinite(task.daysAway) && task.daysAway < 0)
+    .sort((a, b) => a.daysAway - b.daysAway);
+
+  if (overdueTasks.length) {
+    const oldest = overdueTasks[0];
+    const oldestAge = Math.abs(oldest.daysAway);
+    addHint({
+      title: `${overdueTasks.length} overdue open task${overdueTasks.length === 1 ? '' : 's'}`,
+      category: 'urgent',
+      severity: overdueTasks.length >= 3 || oldestAge >= 7 ? 'critical' : 'high',
+      why: 'Open tasks are past their due dates and need staff follow-up.',
+      evidence: [
+        oldest.title || oldest.description || 'Open task',
+        `Due ${formatTimelineDate(oldest.dueDate)}`,
+        formatDayDistance(oldest.daysAway),
+      ],
+      rank: 1,
+    });
+  }
+
+  const upcomingAppearances = appearances
+    .map(appearance => ({ ...appearance, daysAway: daysFromToday(appearance.date) }))
+    .filter(appearance => Number.isFinite(appearance.daysAway) && appearance.daysAway >= 0)
+    .sort((a, b) => a.daysAway - b.daysAway);
+
+  const nextAppearance = upcomingAppearances[0];
+  if (nextAppearance && nextAppearance.daysAway <= 7) {
+    addHint({
+      title: nextAppearance.daysAway === 0 ? 'Court appearance today' : `Court appearance ${formatDayDistance(nextAppearance.daysAway)}`,
+      category: 'upcoming',
+      severity: 'high',
+      why: 'A court date is approaching; confirm attendance, materials, and responsible staff.',
+      evidence: [
+        formatTimelineDate(nextAppearance.date),
+        nextAppearance.court || nextAppearance.location || 'Court appearance',
+        nextAppearance.type || nextAppearance.purpose || null,
+      ],
+      rank: 3,
+    });
+  }
+
+  if (nextAppearance && !nextAppearance.prepNote) {
+    addHint({
+      title: 'Court preparation note not recorded',
+      category: 'missing-information',
+      severity: 'medium',
+      why: 'The next court appearance has no prep note in the current matter detail.',
+      evidence: [
+        formatTimelineDate(nextAppearance.date),
+        nextAppearance.court || nextAppearance.location || 'Court appearance',
+        'No prep note',
+      ],
+      rank: 8,
+    });
+  }
+
+  const solDays = daysFromToday(detail.solDate);
+  if (Number.isFinite(solDays)) {
+    if (solDays < 0) {
+      addHint({
+        title: 'Recorded limitation date has passed',
+        category: 'risk',
+        severity: 'high',
+        why: 'Confirm limitation date and underlying facts.',
+        evidence: [
+          `SOL ${formatTimelineDate(detail.solDate)}`,
+          formatDayDistance(solDays),
+          detail.stage ? `Stage: ${detail.stage}` : null,
+        ],
+        rank: 2,
+      });
+    } else if (solDays <= 30) {
+      addHint({
+        title: 'Limitation date within 30 days',
+        category: 'risk',
+        severity: 'high',
+        why: 'Confirm limitation date and underlying facts.',
+        evidence: [
+          `SOL ${formatTimelineDate(detail.solDate)}`,
+          formatDayDistance(solDays),
+          detail.stage ? `Stage: ${detail.stage}` : null,
+        ],
+        rank: 4,
+      });
+    } else {
+      addHint({
+        title: 'Limitation date recorded',
+        category: 'risk',
+        severity: 'low',
+        why: 'Confirm limitation date and underlying facts remain current.',
+        evidence: [
+          `SOL ${formatTimelineDate(detail.solDate)}`,
+          formatDayDistance(solDays),
+          detail.stage ? `Stage: ${detail.stage}` : null,
+        ],
+        rank: 18,
+      });
+    }
+  }
+
+  if (!documents.length) {
+    addHint({
+      title: 'No documents recorded',
+      category: 'missing-information',
+      severity: 'medium',
+      why: 'The current matter detail has no document records to support the file.',
+      evidence: [
+        '0 documents',
+        detail.stage ? `Stage: ${detail.stage}` : null,
+        detail.assignedTo ? `Assigned: ${detail.assignedTo}` : null,
+      ],
+      rank: 9,
+    });
+  }
+
+  if (!notes.length) {
+    addHint({
+      title: 'No matter notes recorded',
+      category: 'workflow',
+      severity: 'low',
+      why: 'No staff notes are available in the current matter detail.',
+      evidence: [
+        '0 notes',
+        detail.assignedTo ? `Assigned: ${detail.assignedTo}` : null,
+        detail.paralegal ? `Paralegal: ${detail.paralegal}` : null,
+      ],
+      rank: 20,
+    });
+  }
+
+  const overdueInvoices = invoices
+    .map(invoice => ({ ...invoice, daysAway: daysFromToday(invoice.dueDate), statusText: String(invoice.status || '').toLowerCase() }))
+    .filter(invoice => invoice.statusText.includes('overdue') || (Number.isFinite(invoice.daysAway) && invoice.daysAway < 0 && !invoice.statusText.includes('paid')))
+    .sort((a, b) => (a.daysAway ?? 0) - (b.daysAway ?? 0));
+
+  if (overdueInvoices.length) {
+    const oldestInvoice = overdueInvoices[0];
+    addHint({
+      title: `${overdueInvoices.length} overdue invoice${overdueInvoices.length === 1 ? '' : 's'}`,
+      category: 'billing',
+      severity: 'medium',
+      why: 'An invoice is overdue or marked outstanding in the current matter detail; review status without relying on hidden amounts.',
+      evidence: [
+        oldestInvoice.invoiceNumber || oldestInvoice.id || 'Invoice',
+        oldestInvoice.dueDate ? `Due ${formatTimelineDate(oldestInvoice.dueDate)}` : 'Due date not recorded',
+        oldestInvoice.status || 'Status not recorded',
+      ],
+      rank: 10,
+    });
+  }
+
+  const unbilledTime = timeEntries.filter(entry => !entry.billed);
+  if (unbilledTime.length) {
+    const visibleHours = unbilledTime.reduce((sum, entry) => sum + (Number(entry.hours) || 0), 0);
+    const latestEntry = [...unbilledTime]
+      .sort((a, b) => (parseDateValue(b.date)?.getTime() || 0) - (parseDateValue(a.date)?.getTime() || 0))[0];
+    addHint({
+      title: `${unbilledTime.length} unbilled time entr${unbilledTime.length === 1 ? 'y' : 'ies'}`,
+      category: 'billing',
+      severity: visibleHours >= 5 || unbilledTime.length >= 3 ? 'medium' : 'low',
+      why: 'Unbilled time is visible in this matter; review billing status without exposing rates or amounts.',
+      evidence: [
+        `${visibleHours.toFixed(1)}h logged`,
+        latestEntry?.date ? `Latest ${formatTimelineDate(latestEntry.date)}` : null,
+        `${unbilledTime.length} entries`,
+      ],
+      rank: 14,
+    });
+  }
+
+  if (!hints.length) {
+    addHint({
+      title: 'Matter appears current from available signals',
+      category: 'informational',
+      severity: 'low',
+      why: 'No overdue open tasks, near court dates, limitation-date risk, missing file basics, overdue invoices, or visible unbilled time were found.',
+      evidence: [
+        detail.stage ? `Stage: ${detail.stage}` : 'Stage not recorded',
+        detail.priority ? `Priority: ${detail.priority}` : null,
+        detail.assignedTo ? `Assigned: ${detail.assignedTo}` : null,
+      ],
+      rank: 30,
+    });
+  }
+
+  return hints
+    .sort((a, b) => {
+      const severityDelta = (severityRank[a.severity] ?? 9) - (severityRank[b.severity] ?? 9);
+      if (severityDelta) return severityDelta;
+      const rankDelta = a.rank - b.rank;
+      if (rankDelta) return rankDelta;
+      return (categoryRank[a.category] ?? 9) - (categoryRank[b.category] ?? 9);
+    })
+    .map(({ rank, ...hint }) => hint);
+}
+
 export function Dashboard({ data, user, onNavigate }) {
   const isAdvocate = user?.role === 'advocate';
   const outstanding = data.invoices.filter(i => i.status === 'Outstanding').reduce((sum, i) => sum + Number(i.amount || 0), 0);
@@ -195,6 +440,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   const session = readSession();
   const isAdmin = session?.user?.role === 'admin';
   const selected = data.matters.find(m => m.id === selectedId) || data.matters[0];
+  const nextActionHints = useMemo(() => buildMatterNextActionHints(detail), [detail]);
 
   useEffect(() => { if (selected?.id) { setSelectedId(selected.id); loadDetail(selected.id); } else { setDetail(null); setSuggestions([]); } }, [selected?.id]);
   useEffect(() => { if (detail && isAdmin) getUsers(true).then(users => { setAdvocates((users || []).filter(u => u.role === 'advocate' && u.isActive)); setReassignTo(detail.assignedTo || ''); }).catch(() => {}); }, [detail?.id]);
@@ -299,7 +545,8 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
                 <AssistantSuggestions suggestions={suggestions} />
               ) : (
                 <>
-                  <MatterCommandSummary detail={detail} suggestions={suggestions} />
+                  <MatterCommandSummary detail={detail} nextActionHints={nextActionHints} />
+                  <MatterNextActionHints hints={nextActionHints} />
                   <MatterActivityTimeline detail={detail} />
                   <form onSubmit={logTime} style={styles.formGrid}>
                     <Field label="Hours"><input type="number" min="0" step="0.1" style={styles.input} value={time.hours} onChange={e => setTime({ ...time, hours: Number(e.target.value) })} /></Field>
@@ -799,7 +1046,57 @@ function AssistantSuggestions({ suggestions }) {
   );
 }
 
-function MatterCommandSummary({ detail, suggestions = [] }) {
+function hintTone(severity) {
+  if (severity === 'critical' || severity === 'high') return 'red';
+  if (severity === 'medium') return 'amber';
+  return 'blue';
+}
+
+function hintLabel(value) {
+  return String(value || '').replace(/-/g, ' ');
+}
+
+function MatterNextActionHints({ hints = [] }) {
+  const visibleHints = hints.slice(0, 5);
+
+  return (
+    <section aria-label="Matter Next-Action Hints" style={{ border: `1px solid ${theme.line}`, background: '#fff', borderRadius: 10, padding: 14, display: 'grid', gap: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <div style={{ display: 'grid', gap: 2 }}>
+          <strong style={{ fontSize: 13 }}>Next-Action Hints</strong>
+          <span style={{ color: theme.muted, fontSize: 12 }}>Rule-based from current matter detail only.</span>
+        </div>
+        <Badge tone="blue">{visibleHints.length} shown</Badge>
+      </div>
+      {visibleHints.length ? (
+        <div style={{ display: 'grid', gap: 8 }}>
+          {visibleHints.map((hint, index) => {
+            const tone = hintTone(hint.severity);
+            return (
+              <div key={`${hint.title}-${index}`} style={{ border: `1px solid ${theme.line}`, borderLeft: `4px solid ${timelineToneColor(tone)}`, borderRadius: 8, background: '#F8FAFC', padding: 10, display: 'grid', gap: 7 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <Badge tone={tone}>{hintLabel(hint.severity)}</Badge>
+                  <Badge tone="blue">{hintLabel(hint.category)}</Badge>
+                </div>
+                <strong style={{ fontSize: 13 }}>{hint.title}</strong>
+                <span style={{ color: theme.muted, fontSize: 12 }}>{hint.why}</span>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {(hint.evidence || []).map((item, itemIndex) => (
+                    <span key={`${item}-${itemIndex}`} style={{ border: `1px solid ${theme.line}`, background: '#fff', borderRadius: 999, color: theme.ink, fontSize: 11, fontWeight: 700, padding: '3px 8px' }}>{item}</span>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <span style={{ color: theme.muted, fontSize: 12 }}>Matter appears current from available signals.</span>
+      )}
+    </section>
+  );
+}
+
+function MatterCommandSummary({ detail, nextActionHints = [] }) {
   const summary = useMemo(() => {
     const today = isoDateOnly();
     const notes = detail?.notes || [];
@@ -859,9 +1156,9 @@ function MatterCommandSummary({ detail, suggestions = [] }) {
         ? `${overdueTasks} overdue task${overdueTasks === 1 ? '' : 's'}${overdueInvoices ? `, ${overdueInvoices} overdue invoice${overdueInvoices === 1 ? '' : 's'}` : ''}`
         : 'No overdue work found',
       sol: solDate ? `${solDate} (advisory; confirm statute and facts)` : 'No SOL date recorded',
-      topSuggestion: suggestions.length ? suggestions[0] : 'No recommendation available from current matter signals.',
+      topSuggestion: nextActionHints[0]?.title || 'No recommendation available from current matter signals.',
     };
-  }, [detail, suggestions]);
+  }, [detail, nextActionHints]);
 
   return (
     <section aria-label="Matter Command Summary" style={{ border: `1px solid ${theme.line}`, background: '#fff', borderRadius: 10, padding: 14, display: 'grid', gap: 10 }}>
