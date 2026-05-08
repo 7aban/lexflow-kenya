@@ -17,7 +17,7 @@ function noticeFileName(file) {
   return file?.friendlyName || file?.displayName || file?.name || 'Attachment';
 }
 
-export function Dashboard({ data, user }) {
+export function Dashboard({ data, user, onNavigate }) {
   const isAdvocate = user?.role === 'advocate';
   const outstanding = data.invoices.filter(i => i.status === 'Outstanding').reduce((sum, i) => sum + Number(i.amount || 0), 0);
   const paid = data.invoices.filter(i => i.status === 'Paid').reduce((sum, i) => sum + Number(i.amount || 0), 0);
@@ -52,10 +52,14 @@ export function Dashboard({ data, user }) {
       )}
 
       <div style={styles.statsGrid}>
-        <Stat icon={IconBriefcase} label="Active matters" value={data.dashboard.activeMattersCount ?? data.matters.length} tone="navy" />
-        <Stat icon={IconClock} label="Month hours" value={Number(data.dashboard.monthHours || 0).toFixed(1)} tone="gold" />
-        <Stat icon={IconCoin} label={isAdvocate ? 'My billed revenue' : 'Revenue month'} value={kes(data.dashboard.monthRevenue)} tone="green" />
-        <Stat icon={IconAlertTriangle} label="Overdue tasks" value={isAdvocate ? data.dashboard.overdueTaskCount : overdueTasks} tone="red" />
+        <Stat icon={IconBriefcase} label="Active matters" value={data.dashboard.activeMattersCount ?? data.matters.length} tone="navy" onClick={() => onNavigate?.('Matters')} ariaLabel="View active matters" />
+        <Stat icon={IconClock} label="Month hours" value={Number(data.dashboard.monthHours || 0).toFixed(1)} tone="gold" onClick={() => onNavigate?.('Tasks')} ariaLabel="View month hours" />
+        {user?.role === 'admin' ? (
+          <Stat icon={IconCoin} label={isAdvocate ? 'My billed revenue' : 'Revenue month'} value={kes(data.dashboard.monthRevenue)} tone="green" onClick={() => onNavigate?.('Invoices')} ariaLabel="View revenue" />
+        ) : (
+          <Stat icon={IconCoin} label={isAdvocate ? 'My billed revenue' : 'Revenue month'} value={kes(data.dashboard.monthRevenue)} tone="green" />
+        )}
+        <Stat icon={IconAlertTriangle} label="Overdue tasks" value={isAdvocate ? data.dashboard.overdueTaskCount : overdueTasks} tone="red" onClick={() => onNavigate?.('Tasks')} ariaLabel="View overdue tasks" />
       </div>
 
       <div className="lf-dashboard-grid" style={styles.dashboardGrid}>
