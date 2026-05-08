@@ -83,6 +83,11 @@ describe('R13i firm settings audit detail', () => {
     expect(metadata.advocateBillingVisibility).toBeDefined();
     expect(metadata.advocateBillingVisibility.old).toBeDefined();
     expect(metadata.advocateBillingVisibility.new).toBe(0);
+
+    await request(app)
+      .put('/api/firm-settings')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ advocateBillingVisibility: 1 });
   });
 
   test('metadata records changed field names', async () => {
