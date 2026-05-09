@@ -1122,7 +1122,7 @@ app.get('/api/matters/:id/suggestions', async (req, res) => {
   const todayDate = today();
   const [taskStats, timeStats, docStats, noteStats, invoiceStats, nextAppearance] = await Promise.all([
     get('SELECT COUNT(*) total, SUM(CASE WHEN completed=0 AND dueDate < ? THEN 1 ELSE 0 END) overdue FROM tasks WHERE matterId=?', [todayDate, req.params.id]),
-    get('SELECT COUNT(*) total, COALESCE(SUM(CASE WHEN billed=0 THEN hours*rate ELSE 0 END),0) unbilled FROM time_entries WHERE matterId=?', [req.params.id]),
+    get('SELECT COUNT(*) total, COALESCE(SUM(CASE WHEN billed=0 AND billable=1 THEN hours*rate ELSE 0 END),0) unbilled FROM time_entries WHERE matterId=?', [req.params.id]),
     get('SELECT COUNT(*) total FROM documents WHERE matterId=? AND deletedAt IS NULL', [req.params.id]),
     get('SELECT COUNT(*) total FROM case_notes WHERE matterId=?', [req.params.id]),
     get(`SELECT COUNT(*) total, SUM(CASE WHEN status='Outstanding' THEN 1 ELSE 0 END) outstanding FROM invoices WHERE matterId=?`, [req.params.id]),
