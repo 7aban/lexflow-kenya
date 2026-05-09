@@ -157,18 +157,26 @@ describe('R13b document and download audit events', () => {
     const otherInvoice = allInvoices.body.find(row => row.clientId !== clientUser.clientId);
     expect(otherInvoice).toBeDefined();
 
+    const boundaryRows = await dbAll('SELECT COALESCE(MAX(rowid),0) rowid FROM audit_events');
+    const auditBoundary = Number(boundaryRows[0]?.rowid || 0);
+
     const forbiddenRes = await request(app)
       .get(`/api/invoices/${otherInvoice.id}/pdf`)
       .set('Authorization', `Bearer ${clientToken}`);
     expect(forbiddenRes.statusCode).toBe(403);
 
-    const forbidden = await latestAudit('forbidden_invoice_access', otherInvoice.id);
+    const forbiddenRows = await dbAll(
+      'SELECT rowid,* FROM audit_events WHERE rowid>? AND action=? AND entity_id=? AND actor_email=?',
+      [auditBoundary, 'forbidden_invoice_access', otherInvoice.id, clientUser.email],
+    );
+    expect(forbiddenRows).toHaveLength(1);
+    const forbidden = forbiddenRows[0];
     expect(forbidden.action).toBe('forbidden_invoice_access');
     parseMetadata(forbidden);
 
     const forbiddenSuccessRows = await dbAll(
-      'SELECT * FROM audit_events WHERE action=? AND entity_id=?',
-      ['invoice_pdf_downloaded', otherInvoice.id],
+      'SELECT rowid,* FROM audit_events WHERE rowid>? AND action=? AND entity_id=? AND actor_email=?',
+      [auditBoundary, 'invoice_pdf_downloaded', otherInvoice.id, clientUser.email],
     );
     expect(forbiddenSuccessRows).toHaveLength(0);
   });
