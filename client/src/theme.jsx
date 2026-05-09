@@ -60,6 +60,17 @@ export function StyleTag() { return <style>{`
     #root .lf-split-grid { grid-template-columns: 1fr !important; }
     #root .lf-doc-grid { grid-template-columns: 1fr !important; }
     #root .lf-court-mode-stack { gap: 10px !important; }
+    /* R15d-1: Mobile touch targets */
+    #root button:not(.lf-nav-item):not(.lf-nav-group-button) { min-width: 44px; min-height: 44px; }
+    #root input, #root select, #root textarea { min-height: 44px; padding-top: 10px !important; padding-bottom: 10px !important; }
+    /* R15d-1: Mobile card/container sizing */
+    #root section { padding: 14px 16px !important; }
+    #root section > div:first-child { flex-wrap: wrap !important; gap: 8px !important; }
+    #root div[style*="border-left: 4px solid"] { padding: 12px !important; }
+    /* R15d-1: Mobile toast - safe width on narrow viewports */
+    #root div[role="status"] { left: 16px !important; right: 16px !important; min-width: 0 !important; max-width: calc(100vw - 32px) !important; }
+    /* R15d-1: Mobile modal - tighter backdrop padding */
+    #root div[style*="z-index: 3000"] { padding: 16px !important; }
   }
   @media (max-width: 480px) {
     #root .lf-court-mode-card { padding: 12px !important; }
