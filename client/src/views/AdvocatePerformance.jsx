@@ -102,7 +102,7 @@ export default function AdvocatePerformance({ notify }) {
       <div style={styles.statsGrid}>
         <Stat label="Advocates" value={totals.advocates} tone="navy" />
         <Stat label="Active matters" value={totals.activeMatters} tone="gold" />
-        <Stat label="Month hours" value={fmtHours(totals.monthHours)} tone="green" />
+        <Stat label="Total month hours" value={fmtHours(totals.monthHours)} tone="green" />
         <Stat label="Month revenue" value={kes(totals.monthRevenue)} tone="red" />
       </div>
 
@@ -124,7 +124,7 @@ export default function AdvocatePerformance({ notify }) {
           </Field>
           <Field label="Sort">
             <select style={styles.input} value={sort.key} onChange={event => setSortKey(event.target.value)}>
-              <option value="thisMonthHours">Month hours</option>
+              <option value="thisMonthHours">Total month hours</option>
               <option value="thisMonthRevenue">Month revenue</option>
               <option value="activeMatters">Active matters</option>
               <option value="overdueTasks">Overdue tasks</option>
@@ -135,7 +135,7 @@ export default function AdvocatePerformance({ notify }) {
         </div>
         {loading ? <Skeleton rows={3} /> : (
           <Table
-            columns={['Name', 'Active Matters', 'Tasks Done / Pending', 'Hours This Month', 'Revenue This Month', 'Upcoming Court']}
+            columns={['Name', 'Active Matters', 'Tasks Done / Pending', 'Total Hours This Month', 'Revenue This Month', 'Upcoming Court']}
             rows={tableRows}
             empty="No advocate users found."
           />
@@ -198,7 +198,7 @@ function PerformanceDrawer({ advocate, detail, loading, onClose }) {
             <>
               <div style={styles.statsGrid}>
                 <Stat label="Active" value={detail.activeMatters} tone="navy" />
-                <Stat label="Month hrs" value={fmtHours(detail.thisMonthHours)} tone="green" />
+                <Stat label="Total month hrs" value={fmtHours(detail.thisMonthHours)} tone="green" />
                 <Stat label="Revenue" value={kes(detail.thisMonthRevenue)} tone="gold" />
               </div>
               <Card title="Six-month output" hint="Hours and revenue trend">

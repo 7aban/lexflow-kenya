@@ -247,7 +247,7 @@ function buildMatterNextActionHints(detail) {
     });
   }
 
-  const unbilledTime = timeEntries.filter(entry => !entry.billed);
+  const unbilledTime = timeEntries.filter(entry => !entry.billed && isBillableValue(entry.billable));
   if (unbilledTime.length) {
     const visibleHours = unbilledTime.reduce((sum, entry) => sum + (Number(entry.hours) || 0), 0);
     const latestEntry = [...unbilledTime]
@@ -328,7 +328,7 @@ export function Dashboard({ data, user, onNavigate }) {
 
       <div style={styles.statsGrid}>
         <Stat icon={IconBriefcase} label="Active matters" value={data.dashboard.activeMattersCount ?? data.matters.length} tone="navy" onClick={() => onNavigate?.('Matters')} ariaLabel="View active matters" />
-        <Stat icon={IconClock} label="Month hours" value={Number(data.dashboard.monthHours || 0).toFixed(1)} tone="gold" onClick={() => onNavigate?.('Tasks')} ariaLabel="View month hours" />
+        <Stat icon={IconClock} label="Billable hours this month" value={Number(data.dashboard.monthHours || 0).toFixed(1)} tone="gold" onClick={() => onNavigate?.('Tasks')} ariaLabel="View billable hours this month" />
         {user?.role === 'admin' ? (
           <Stat icon={IconCoin} label={isAdvocate ? 'My billed revenue' : 'Revenue month'} value={kes(data.dashboard.monthRevenue)} tone="green" onClick={() => onNavigate?.('Invoices')} ariaLabel="View revenue" />
         ) : (
