@@ -136,7 +136,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const selectedName = folders.find(folder => folder.id === selectedFolder)?.name || 'All Documents';
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '220px minmax(0,1fr)', gap: 16 }}>
+    <div className="lf-doc-grid" style={{ display: 'grid', gridTemplateColumns: '220px minmax(0,1fr)', gap: 16 }}>
       <Card title="Folders" hint="Matter document categories">
         <div style={{ display: 'grid', gap: 6 }}>
           {folders.map(folder => (

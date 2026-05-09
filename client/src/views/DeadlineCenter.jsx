@@ -188,7 +188,7 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
         )}
       </Card>
 
-      <div style={styles.splitGrid}>
+      <div className="lf-split-grid" style={styles.splitGrid}>
         <Card title="Add Deadline" hint="Capture client promises, internal bring-ups, tax and statutory filing dates.">
           <form onSubmit={submit} style={styles.formGrid}>
             <Field label="Title">

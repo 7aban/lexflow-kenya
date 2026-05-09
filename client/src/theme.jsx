@@ -57,6 +57,8 @@ export function StyleTag() { return <style>{`
     .lf-login-root .lf-login-brand-features { display: none !important; }
     .lf-login-root .lf-login-card-wrap { padding: 16px !important; }
     #root .lf-matter-grid { grid-template-columns: 1fr !important; }
+    #root .lf-split-grid { grid-template-columns: 1fr !important; }
+    #root .lf-doc-grid { grid-template-columns: 1fr !important; }
     #root .lf-court-mode-stack { gap: 10px !important; }
   }
   @media (max-width: 480px) {
