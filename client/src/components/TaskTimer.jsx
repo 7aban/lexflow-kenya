@@ -4,6 +4,7 @@ import { styles, theme } from '../theme.jsx';
 import { Badge, Field } from './ui.jsx';
 
 const ACTIVITY_CODES = ['Legal Research', 'Drafting', 'Court Attendance', 'Client Communication', 'Document Review', 'Filing', 'Preparation', 'Other'];
+const BILLABLE_TIME_GUIDANCE = 'Billable time may be included in hourly invoices. Non-billable time is tracked for workload and productivity but excluded from hourly invoice generation.';
 
 function secondsNow(timer, taskId) {
   if (!timer || timer.taskId !== taskId) return 0;
@@ -23,10 +24,10 @@ function hoursFromSeconds(seconds) {
   return Math.max(0.01, Math.round((seconds / 3600) * 100) / 100);
 }
 
-export default function TaskTimer({ task, matterId, matterRate = 15000, timer, setTimer, notify, onSaved }) {
+export default function TaskTimer({ task, matterId, matterRate = 15000, showRate = true, timer, setTimer, notify, onSaved }) {
   const [tick, setTick] = useState(Date.now());
   const [showSave, setShowSave] = useState(false);
-  const [form, setForm] = useState({ activity: ACTIVITY_CODES[0], description: '', rate: matterRate || 15000 });
+  const [form, setForm] = useState({ activity: ACTIVITY_CODES[0], description: '', rate: showRate ? matterRate || 15000 : 0, billable: true });
   const [saving, setSaving] = useState(false);
   const active = timer?.taskId === task.id;
   const running = active && timer?.running;
@@ -39,8 +40,8 @@ export default function TaskTimer({ task, matterId, matterRate = 15000, timer, s
   }, [running]);
 
   useEffect(() => {
-    setForm(current => ({ ...current, rate: matterRate || current.rate || 15000 }));
-  }, [matterRate]);
+    setForm(current => ({ ...current, rate: showRate ? matterRate || current.rate || 15000 : 0 }));
+  }, [matterRate, showRate]);
 
   const canSave = active && elapsed > 0 && !running;
   const logged = useMemo(() => (task.timeEntries || []).reduce((sum, entry) => sum + Number(entry.hours || 0), 0), [task.timeEntries]);
@@ -77,20 +78,22 @@ export default function TaskTimer({ task, matterId, matterRate = 15000, timer, s
     if (!seconds) return;
     setSaving(true);
     try {
+      const body = {
+        matterId,
+        taskId: task.id,
+        hours: hoursFromSeconds(seconds),
+        activity: form.activity,
+        description: form.description || `${form.activity}: ${task.title}`,
+        billable: Boolean(form.billable),
+      };
+      if (showRate) body.rate = Number(form.rate || 0);
       await api('/time-entries', {
         method: 'POST',
-        body: {
-          matterId,
-          taskId: task.id,
-          hours: hoursFromSeconds(seconds),
-          activity: form.activity,
-          description: form.description || `${form.activity}: ${task.title}`,
-          rate: Number(form.rate || 0),
-        },
+        body,
       });
       setTimer(current => current?.taskId === task.id ? null : current);
       setShowSave(false);
-      setForm({ activity: ACTIVITY_CODES[0], description: '', rate: matterRate || 15000 });
+      setForm({ activity: ACTIVITY_CODES[0], description: '', rate: showRate ? matterRate || 15000 : 0, billable: true });
       notify?.({ type: 'success', message: `Saved ${formatClock(seconds)} against ${task.title}.` });
       await onSaved?.();
     } catch (err) {
@@ -112,20 +115,29 @@ export default function TaskTimer({ task, matterId, matterRate = 15000, timer, s
         {canSave && <button type="button" title="Save time entry" onClick={() => setShowSave(open => !open)} style={styles.tinyButton}>💾 Save</button>}
         {logged > 0 && <Badge tone="green">{logged.toFixed(2)}h logged</Badge>}
       </div>
-      <div style={{ maxHeight: showSave ? 220 : 0, overflow: 'hidden', transition: 'max-height .18s ease' }}>
+      <div style={{ maxHeight: showSave ? 420 : 0, overflow: 'hidden', transition: 'max-height .18s ease' }}>
         {showSave && (
-          <form onSubmit={save} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, padding: 10, border: `1px solid ${theme.line}`, borderRadius: 8, background: '#FAFAFB' }}>
+          <form onSubmit={save} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 8, padding: 10, border: `1px solid ${theme.line}`, borderRadius: 8, background: '#FAFAFB' }}>
             <Field label="Activity">
               <select style={styles.input} value={form.activity} onChange={event => setForm({ ...form, activity: event.target.value })}>
                 {ACTIVITY_CODES.map(code => <option key={code}>{code}</option>)}
               </select>
             </Field>
-            <Field label="Rate">
-              <input type="number" style={styles.input} value={form.rate} onChange={event => setForm({ ...form, rate: event.target.value })} />
+            {showRate && (
+              <Field label="Rate">
+                <input type="number" style={styles.input} value={form.rate} onChange={event => setForm({ ...form, rate: event.target.value })} />
+              </Field>
+            )}
+            <Field label="Billing class">
+              <select style={styles.input} value={form.billable ? 'billable' : 'non_billable'} onChange={event => setForm({ ...form, billable: event.target.value === 'billable' })}>
+                <option value="billable">Billable</option>
+                <option value="non_billable">Non-billable</option>
+              </select>
             </Field>
             <Field label="Description">
               <input style={styles.input} value={form.description} onChange={event => setForm({ ...form, description: event.target.value })} placeholder={task.title} />
             </Field>
+            <div style={{ ...styles.formHelper, gridColumn: '1 / -1' }}>{BILLABLE_TIME_GUIDANCE}</div>
             <button type="submit" disabled={saving} style={{ ...styles.primaryButton, alignSelf: 'end' }}>{saving ? 'Saving...' : 'Save entry'}</button>
           </form>
         )}
