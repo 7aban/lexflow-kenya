@@ -16,6 +16,21 @@ const portalIcons = {
 
 const portalNav = ['Dashboard', 'My Matters', 'Notices', 'Documents', 'Account'];
 
+function PortalNavigation({ view, onSelect, onNavigate }) {
+  return (
+    <nav style={styles.navList}>
+      {portalNav.map(label => {
+        const PortalIcon = portalIcons[label];
+        return (
+          <button key={label} type="button" className="lf-nav" onClick={() => { onSelect(label); onNavigate?.(); }} style={{ ...styles.navItem, ...(view === label ? styles.navActive : {}) }}>
+            <span style={styles.navNumber}>{PortalIcon ? <PortalIcon size={16} /> : null}</span><span>{label}</span>
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
 function noticeFileName(file) {
   return file?.friendlyName || file?.displayName || file?.name || 'Attachment';
 }
@@ -35,6 +50,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
   const [uploading, setUploading] = useState(false);
   const [payment, setPayment] = useState({ invoiceId: '', method: 'M-PESA', reference: '', amount: '', note: '', file: null });
   const [loading, setLoading] = useState(true);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const selected = dashboard.matters.find(m => m.id === selectedId) || dashboard.matters[0];
   const matterDocs = dashboard.documents.filter(d => d.matterId === selected?.id);
   const matterInvoices = dashboard.invoices.filter(i => i.matterId === selected?.id);
@@ -43,6 +59,14 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
 
   useEffect(() => { load(); loadAndApplyFirmTheme(); }, []);
   useEffect(() => { if (selected?.id) setSelectedId(selected.id); }, [selected?.id]);
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    function handleEscape(event) {
+      if (event.key === 'Escape') setMobileMenuOpen(false);
+    }
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [mobileMenuOpen]);
 
   const stats = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
@@ -64,6 +88,11 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
   function switchView(next) {
     setView(next);
     if (next === 'Dashboard') load();
+  }
+
+  function switchMobileView(next) {
+    switchView(next);
+    setMobileMenuOpen(false);
   }
 
   async function uploadDoc(event) {
@@ -106,22 +135,13 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
   return (
     <div className="lf-app-shell" style={{ ...styles.shell, '--lf-primary': firm?.primaryColor || theme.navy800, '--lf-accent': firm?.accentColor || theme.gold }}>
       <StyleTag />
-      <aside style={styles.sidebar}>
+      <aside className="lf-desktop-sidebar" style={styles.sidebar}>
         <div style={styles.brandPanel}>
           <Logo firm={firm} />
           <div><div style={styles.brand}>{firmName}</div><div style={styles.brandSub}>Client portal</div></div>
         </div>
         <div style={styles.sideSectionLabel}>Portal</div>
-        <nav style={styles.navList}>
-          {portalNav.map(label => {
-            const PortalIcon = portalIcons[label];
-            return (
-              <button key={label} type="button" className="lf-nav" onClick={() => switchView(label)} style={{ ...styles.navItem, ...(view === label ? styles.navActive : {}) }}>
-                <span style={styles.navNumber}>{PortalIcon ? <PortalIcon size={16} /> : null}</span><span>{label}</span>
-              </button>
-            );
-          })}
-        </nav>
+        <PortalNavigation view={view} onSelect={switchView} />
         <div style={styles.timerCard}>
           <div style={styles.timerTop}>Secure access</div>
           <strong>{dashboard.matters.length} matter{dashboard.matters.length === 1 ? '' : 's'}</strong>
@@ -133,14 +153,46 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
           <button type="button" onClick={logout} style={styles.logout}>Exit</button>
         </div>
       </aside>
+      {mobileMenuOpen && (
+        <div className="lf-mobile-drawer-layer" style={styles.mobileDrawerLayer}>
+          <button type="button" aria-label="Close portal navigation menu" title="Close portal navigation menu" style={styles.mobileBackdrop} onClick={() => setMobileMenuOpen(false)} />
+          <aside aria-label="Client portal mobile navigation" style={styles.mobileDrawer}>
+            <div style={styles.mobileDrawerHead}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                <Logo firm={firm} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={styles.brand}>{firmName}</div>
+                  <div style={styles.brandSub}>Client portal</div>
+                </div>
+              </div>
+              <button type="button" aria-label="Close portal navigation menu" title="Close portal navigation menu" onClick={() => setMobileMenuOpen(false)} style={styles.mobileCloseButton}>x</button>
+            </div>
+            <div style={styles.sideSectionLabel}>Portal</div>
+            <PortalNavigation view={view} onSelect={switchMobileView} />
+            <div style={styles.timerCard}>
+              <div style={styles.timerTop}>Secure access</div>
+              <strong>{dashboard.matters.length} matter{dashboard.matters.length === 1 ? '' : 's'}</strong>
+              <span>Your private client workspace</span>
+            </div>
+            <div style={styles.userCard}>
+              <div style={styles.avatar}>{(user?.fullName || 'C').slice(0, 1).toUpperCase()}</div>
+              <div style={{ minWidth: 0 }}><div style={styles.userName}>{user?.fullName || 'Client'}</div><div style={styles.userRole}>client</div></div>
+              <button type="button" onClick={() => { setMobileMenuOpen(false); logout(); }} style={styles.logout}>Exit</button>
+            </div>
+          </aside>
+        </div>
+      )}
       <main style={styles.main}>
         <header style={styles.topbar}>
-          <div>
-            <div style={styles.eyebrow}>{firmName}</div>
-            <h1 style={styles.title}>{view}</h1>
-            <p style={styles.subtitle}>Your secure matter portal for documents, court dates, invoices and firm notices.</p>
+          <div className="lf-topbar-title" style={styles.topbarTitle}>
+            <button type="button" className="lf-mobile-only" aria-label="Open portal navigation menu" title="Open portal navigation menu" onClick={() => setMobileMenuOpen(true)} style={styles.mobileMenuButton}>Menu</button>
+            <div style={{ minWidth: 0 }}>
+              <div style={styles.eyebrow}>{firmName}</div>
+              <h1 style={styles.title}>{view}</h1>
+              <p style={styles.subtitle}>Your secure matter portal for documents, court dates, invoices and firm notices.</p>
+            </div>
           </div>
-          <div style={styles.topActions}>
+          <div className="lf-top-actions" style={styles.topActions}>
             {firm?.websiteURL && <a style={styles.ghostButton} href={firm.websiteURL} target="_blank" rel="noopener noreferrer">Visit website</a>}
             <button type="button" onClick={load} disabled={loading} style={styles.ghostButton}>{loading ? 'Refreshing...' : 'Refresh'}</button>
           </div>

@@ -70,6 +70,61 @@ function readOpenNavGroups(role) {
   }
 }
 
+function StaffNavigation({ visibleGroups, openNavGroups, setOpenNavGroups, view, setView, onNavigate }) {
+  return (
+    <nav style={styles.navList}>
+      {visibleGroups.map(group => {
+        const isFlattened = (group.title === 'Matters' || group.title === 'Communications') && group.items.length === 1;
+        return (
+          <div key={group.title} style={styles.navGroup}>
+            {!isFlattened && (
+              <button
+                type="button"
+                className="lf-nav-group"
+                onClick={() => {
+                  setOpenNavGroups(prev => {
+                    const next = new Set(prev);
+                    if (next.has(group.title)) { next.delete(group.title); }
+                    else { next.add(group.title); }
+                    try { localStorage.setItem('lexflowOpenNavGroups', JSON.stringify([...next])); } catch {}
+                    return next;
+                  });
+                }}
+                style={styles.navGroupButton}
+                aria-expanded={openNavGroups.has(group.title)}
+              >
+                <span>{group.title}</span>
+                <span style={styles.navGroupChevron}>{openNavGroups.has(group.title) ? 'v' : '>'}</span>
+              </button>
+            )}
+            {(isFlattened || openNavGroups.has(group.title)) && (
+              <div style={styles.navGroupItems}>
+                {group.items.map(([label, , url]) => {
+                  const NavIcon = navIcons[label];
+                  if (url) {
+                    return (
+                      <a key={label} className="lf-nav lf-resource-link" style={{ ...styles.navItem, textDecoration: 'none' }} href={url} target="_blank" rel="noopener noreferrer" onClick={onNavigate}>
+                        <span style={styles.navNumber}>{NavIcon ? <NavIcon size={16} /> : null}</span>
+                        <span>{label}</span>
+                      </a>
+                    );
+                  }
+                  return (
+                    <button key={label} type="button" className="lf-nav" onClick={() => { setView(label); onNavigate?.(); }} style={{ ...styles.navItem, ...(view === label ? styles.navActive : {}) }}>
+                      <span style={styles.navNumber}>{NavIcon ? <NavIcon size={16} /> : null}</span>
+                      <span>{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </nav>
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState(readSession);
   const [user, setUser] = useState(session?.user || null);
@@ -93,6 +148,7 @@ export default function App() {
   const [taskFocus, setTaskFocus] = useState(null);
   const [clientFocus, setClientFocus] = useState(null);
   const [appearanceFocus, setAppearanceFocus] = useState(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
   const [data, setData] = useState(initialData);
@@ -219,6 +275,15 @@ export default function App() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [accountMenuOpen]);
 
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    function handleEscape(event) {
+      if (event.key === 'Escape') setMobileMenuOpen(false);
+    }
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [mobileMenuOpen]);
+
   async function refresh() {
     setLoading(true);
     try {
@@ -333,7 +398,7 @@ export default function App() {
   return (
     <div className="lf-app-shell" style={{ ...styles.shell, '--lf-primary': firm.primaryColor || theme.navy800, '--lf-accent': firm.accentColor || theme.gold }}>
       <StyleTag />
-      <aside style={styles.sidebar}>
+      <aside className="lf-desktop-sidebar" style={styles.sidebar}>
         <div style={styles.brandPanel}>
           <Logo firm={firm} />
           <div>
@@ -343,56 +408,7 @@ export default function App() {
         </div>
 
         <div style={styles.sideSectionLabel}>Navigation</div>
-        <nav style={styles.navList}>
-          {visibleGroups.map(group => {
-            const isFlattened = (group.title === 'Matters' || group.title === 'Communications') && group.items.length === 1;
-            return (
-              <div key={group.title} style={styles.navGroup}>
-                {!isFlattened && (
-                  <button
-                    type="button"
-                    className="lf-nav-group"
-                    onClick={() => {
-                      setOpenNavGroups(prev => {
-                        const next = new Set(prev);
-                        if (next.has(group.title)) { next.delete(group.title); }
-                        else { next.add(group.title); }
-                        try { localStorage.setItem('lexflowOpenNavGroups', JSON.stringify([...next])); } catch {}
-                        return next;
-                      });
-                    }}
-                    style={styles.navGroupButton}
-                    aria-expanded={openNavGroups.has(group.title)}
-                  >
-                    <span>{group.title}</span>
-                    <span style={styles.navGroupChevron}>{openNavGroups.has(group.title) ? 'v' : '>'}</span>
-                  </button>
-                )}
-                {(isFlattened || openNavGroups.has(group.title)) && (
-                  <div style={styles.navGroupItems}>
-                    {group.items.map(([label, , url]) => {
-                      const NavIcon = navIcons[label];
-                      if (url) {
-                        return (
-                          <a key={label} className="lf-nav lf-resource-link" style={{ ...styles.navItem, textDecoration: 'none' }} href={url} target="_blank" rel="noopener noreferrer">
-                            <span style={styles.navNumber}>{NavIcon ? <NavIcon size={16} /> : null}</span>
-                            <span>{label}</span>
-                          </a>
-                        );
-                      }
-                      return (
-                        <button key={label} type="button" className="lf-nav" onClick={() => setView(label)} style={{ ...styles.navItem, ...(view === label ? styles.navActive : {}) }}>
-                          <span style={styles.navNumber}>{NavIcon ? <NavIcon size={16} /> : null}</span>
-                          <span>{label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </nav>
+        <StaffNavigation visibleGroups={visibleGroups} openNavGroups={openNavGroups} setOpenNavGroups={setOpenNavGroups} view={view} setView={setView} />
 
         <button type="button" onClick={() => setView('Tasks')} style={{ ...styles.timerCard, border: 'none', cursor: 'pointer', textAlign: 'left', color: 'inherit' }}>
           <div style={styles.timerTop}><span style={styles.liveDot} /> Timekeeper</div>
@@ -428,15 +444,51 @@ export default function App() {
         </div>
       </aside>
 
+      {mobileMenuOpen && (
+        <div className="lf-mobile-drawer-layer" style={styles.mobileDrawerLayer}>
+          <button type="button" aria-label="Close navigation menu" title="Close navigation menu" style={styles.mobileBackdrop} onClick={() => setMobileMenuOpen(false)} />
+          <aside aria-label="Mobile navigation" style={styles.mobileDrawer}>
+            <div style={styles.mobileDrawerHead}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                <Logo firm={firm} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={styles.brand}>{firm.name || 'LexFlow Kenya'}</div>
+                  <div style={styles.brandSub}>Practice suite</div>
+                </div>
+              </div>
+              <button type="button" aria-label="Close navigation menu" title="Close navigation menu" onClick={() => setMobileMenuOpen(false)} style={styles.mobileCloseButton}>x</button>
+            </div>
+            <div style={styles.sideSectionLabel}>Navigation</div>
+            <StaffNavigation visibleGroups={visibleGroups} openNavGroups={openNavGroups} setOpenNavGroups={setOpenNavGroups} view={view} setView={setView} onNavigate={() => setMobileMenuOpen(false)} />
+            <button type="button" onClick={() => { setView('Tasks'); setMobileMenuOpen(false); }} style={{ ...styles.timerCard, border: 'none', cursor: 'pointer', textAlign: 'left', color: 'inherit' }}>
+              <div style={styles.timerTop}><span style={styles.liveDot} /> Timekeeper</div>
+              <strong>Log billable time</strong>
+              <span>Open Tasks to start a timer</span>
+            </button>
+            <div style={styles.userCard}>
+              <div style={styles.avatar}>{(user?.fullName || user?.name || 'U').slice(0, 1).toUpperCase()}</div>
+              <div style={{ minWidth: 0 }}>
+                <div style={styles.userName}>{user?.fullName || user?.name || 'Signed in'}</div>
+                <div style={styles.userRole}>{user?.role || 'user'}</div>
+              </div>
+              <button type="button" onClick={() => { setMobileMenuOpen(false); logout(); }} style={styles.logout}>Exit</button>
+            </div>
+          </aside>
+        </div>
+      )}
+
       <main style={styles.main}>
         <header style={styles.topbar}>
-          <div>
-            <div style={styles.eyebrow}>{firm.name || 'LexFlow Kenya'}</div>
-            <h1 style={styles.title}>{view}</h1>
-            <p style={styles.subtitle}>{subtitles[view]}</p>
+          <div className="lf-topbar-title" style={styles.topbarTitle}>
+            <button type="button" className="lf-mobile-only" aria-label="Open navigation menu" title="Open navigation menu" onClick={() => setMobileMenuOpen(true)} style={styles.mobileMenuButton}>Menu</button>
+            <div style={{ minWidth: 0 }}>
+              <div style={styles.eyebrow}>{firm.name || 'LexFlow Kenya'}</div>
+              <h1 style={styles.title}>{view}</h1>
+              <p style={styles.subtitle}>{subtitles[view]}</p>
+            </div>
           </div>
-          <div style={styles.topActions}>
-            <div ref={searchRef} style={{ position: 'relative' }}>
+          <div className="lf-top-actions" style={styles.topActions}>
+            <div ref={searchRef} className="lf-mobile-search" style={{ position: 'relative' }}>
               <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search workspace" style={styles.search} />
               {searchOpen && (
                 <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', width: 320, maxWidth: 'calc(100vw - 32px)', zIndex: 2200, background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, boxShadow: theme.shadowLift, padding: 0, maxHeight: 400, overflowY: 'auto', animation: 'lfDropIn .16s ease-out' }}>
