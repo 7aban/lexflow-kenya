@@ -1,5 +1,5 @@
 const request = require('supertest');
-const { app } = require('../server.js');
+const { app, dbReady } = require('../server.js');
 
 describe('Access Control - P3-Access-2', () => {
   let adminToken;
@@ -18,6 +18,7 @@ describe('Access Control - P3-Access-2', () => {
   let timeEntryIdForOther;
 
   beforeAll(async () => {
+    await dbReady;
     // Admin login
     const adminRes = await request(app)
       .post('/api/auth/login')
