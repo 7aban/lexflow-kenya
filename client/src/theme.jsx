@@ -136,6 +136,66 @@ export function StyleTag() { return <style>{`
     #root .lf-doc-cards-client td:nth-child(4)::before { content: "Size"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
     #root .lf-doc-cards-client td:nth-child(5)::before { content: "Source"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
     #root .lf-doc-cards-client td:nth-child(6)::before { content: "Download"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    /* R15e-1: Client portal My Matters mobile cards */
+    #root .lf-client-matters-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
+    #root .lf-client-matters-cards table { min-width: 0 !important; }
+    #root .lf-client-matters-cards thead { display: none !important; }
+    #root .lf-client-matters-cards tbody tr { display: block; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    #root .lf-client-matters-cards tbody td { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: none; background: transparent !important; }
+    #root .lf-client-matters-cards tbody tr:hover td { background: transparent !important; }
+    #root .lf-client-matters-cards td:nth-child(1)::before { content: "Matter"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-client-matters-cards td:nth-child(2)::before { content: "Stage"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-client-matters-cards td:nth-child(3)::before { content: "Next Court"; min-width: 80px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-client-matters-cards td:nth-child(4)::before { content: "Action"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    /* R15e-1: Client portal Court Appearances mobile cards */
+    #root .lf-client-events-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
+    #root .lf-client-events-cards table { min-width: 0 !important; }
+    #root .lf-client-events-cards thead { display: none !important; }
+    #root .lf-client-events-cards tbody tr { display: block; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    #root .lf-client-events-cards tbody td { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: none; background: transparent !important; }
+    #root .lf-client-events-cards tbody tr:hover td { background: transparent !important; }
+    #root .lf-client-events-cards td:nth-child(1)::before { content: "Event"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-client-events-cards td:nth-child(2)::before { content: "Date"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-client-events-cards td:nth-child(3)::before { content: "Time"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-client-events-cards td:nth-child(4)::before { content: "Location"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-client-events-cards td:nth-child(5)::before { content: "Virtual Court"; min-width: 80px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    /* R15e-1: Client portal Invoices mobile cards */
+    #root .lf-client-invoices-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
+    #root .lf-client-invoices-cards table { min-width: 0 !important; }
+    #root .lf-client-invoices-cards thead { display: none !important; }
+    #root .lf-client-invoices-cards tbody tr { display: block; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    #root .lf-client-invoices-cards tbody td { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: none; background: transparent !important; }
+    #root .lf-client-invoices-cards tbody tr:hover td { background: transparent !important; }
+    #root .lf-client-invoices-cards td:nth-child(1)::before { content: "Invoice"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-client-invoices-cards td:nth-child(2)::before { content: "Amount"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-client-invoices-cards td:nth-child(3)::before { content: "Status"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-client-invoices-cards td:nth-child(4)::before { content: "PDF"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    /* R15e-1: Client portal Payment Proofs mobile cards */
+    #root .lf-client-proofs-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
+    #root .lf-client-proofs-cards table { min-width: 0 !important; }
+    #root .lf-client-proofs-cards thead { display: none !important; }
+    #root .lf-client-proofs-cards tbody tr { display: block; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    #root .lf-client-proofs-cards tbody td { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: none; background: transparent !important; }
+    #root .lf-client-proofs-cards tbody tr:hover td { background: transparent !important; }
+    #root .lf-client-proofs-cards td:nth-child(1)::before { content: "Reference"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-client-proofs-cards td:nth-child(2)::before { content: "Method"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-client-proofs-cards td:nth-child(3)::before { content: "Amount"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-client-proofs-cards td:nth-child(4)::before { content: "Uploaded"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    /* R15e-1: Client portal All Documents mobile cards */
+    #root .lf-client-all-docs-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
+    #root .lf-client-all-docs-cards table { min-width: 0 !important; }
+    #root .lf-client-all-docs-cards thead { display: none !important; }
+    #root .lf-client-all-docs-cards tbody tr { display: block; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    #root .lf-client-all-docs-cards tbody td { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: none; background: transparent !important; }
+    #root .lf-client-all-docs-cards tbody tr:hover td { background: transparent !important; }
+    #root .lf-client-all-docs-cards td:nth-child(1)::before { content: "Name"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-client-all-docs-cards td:nth-child(2)::before { content: "Matter"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-client-all-docs-cards td:nth-child(3)::before { content: "Source"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-client-all-docs-cards td:nth-child(4)::before { content: "Type"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-client-all-docs-cards td:nth-child(5)::before { content: "Download"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    /* R15e-1: Client portal notice attachment grid - stack on narrow mobile */
+    #root .lf-notice-attachment-grid button { grid-template-columns: 42px minmax(0,1fr) !important; }
+    #root .lf-notice-attachment-grid button small { display: block; grid-column: 1 / -1; padding-left: 0; }
   }
   @media (max-width: 480px) {
     #root .lf-court-mode-card { padding: 12px !important; }

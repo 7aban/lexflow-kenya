@@ -241,10 +241,10 @@ function ClientDashboard({ data, stats, selectMatter }) {
       </div>
       <div style={styles.dashboardGrid}>
         <Card title="My matters" hint="Latest matter status">
-          <Table columns={['Matter', 'Stage', 'Next Court', 'Action']} rows={data.matters.map(m => {
+          <div className="lf-client-matters-cards"><Table columns={['Matter', 'Stage', 'Next Court', 'Action']} rows={data.matters.map(m => {
             const next = nextEventFor(m, data.appearances);
             return [m.title, <Badge key={m.id} tone="blue">{m.stage || 'Intake'}</Badge>, next?.date || '-', <button key={`${m.id}-view`} type="button" style={styles.tinyButton} onClick={() => selectMatter(m.id)}>View</button>];
-          })} empty="No matters have been shared yet." />
+          })} empty="No matters have been shared yet." /></div>
         </Card>
         <Card title="Notices" hint="Latest firm updates">
           {data.notices.slice(0, 3).length ? data.notices.slice(0, 3).map(notice => <NoticeItem key={notice.id} notice={notice} />) : <Empty title="No notices" text="Firm notices will appear here." />}
@@ -267,11 +267,11 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
           <p style={styles.clientDescription}>{selected.description || 'No public description has been added yet.'}</p>
         </Card>
         <Card title="Court appearances" hint="Virtual court links appear on hearing days">
-          <Table columns={['Event', 'Date', 'Time', 'Location', 'Virtual Court']} rows={events.map(a => [a.title || a.type || 'Appearance', a.date || '-', a.time || '-', a.location || '-', <MeetingLink key={a.id} event={a} />])} empty="No court dates shared yet." />
+          <div className="lf-client-events-cards"><Table columns={['Event', 'Date', 'Time', 'Location', 'Virtual Court']} rows={events.map(a => [a.title || a.type || 'Appearance', a.date || '-', a.time || '-', a.location || '-', <MeetingLink key={a.id} event={a} />])} empty="No court dates shared yet." /></div>
         </Card>
         <MatterDocuments matterId={selected.id} clientMode notify={notify} />
         <Card title="Invoices and payment proof" hint="Upload M-PESA or bank transfer confirmation">
-          <Table columns={['Invoice', 'Amount', 'Status', 'PDF']} rows={invoices.map(i => [i.number || i.id, kes(i.amount), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <DownloadButton key={`${i.id}-pdf`} label="PDF" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />])} empty="No invoices shared yet." />
+          <div className="lf-client-invoices-cards"><Table columns={['Invoice', 'Amount', 'Status', 'PDF']} rows={invoices.map(i => [i.number || i.id, kes(i.amount), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <DownloadButton key={`${i.id}-pdf`} label="PDF" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />])} empty="No invoices shared yet." /></div>
           <form onSubmit={submitPayment} style={{ ...styles.formGrid, marginTop: 14 }}>
             <Field label="Invoice"><select style={styles.input} value={payment.invoiceId} onChange={e => setPayment({ ...payment, invoiceId: e.target.value })}><option value="">General payment</option>{invoices.map(i => <option key={i.id} value={i.id}>{i.number || i.id}</option>)}</select></Field>
             <Field label="Method"><select style={styles.input} value={payment.method} onChange={e => setPayment({ ...payment, method: e.target.value })}><option>M-PESA</option><option>Bank Transfer</option><option>Cash Deposit</option></select></Field>
@@ -281,7 +281,7 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
             <Field label="Note"><input style={styles.input} value={payment.note} onChange={e => setPayment({ ...payment, note: e.target.value })} placeholder="Optional note" /></Field>
             <button style={styles.primaryButton}>Upload proof</button>
           </form>
-          <Table columns={['Reference', 'Method', 'Amount', 'Uploaded']} rows={proofs.map(p => [p.reference, p.method, kes(p.amount), p.createdAt ? new Date(p.createdAt).toLocaleString() : '-'])} empty="No payment proof uploaded yet." />
+          <div className="lf-client-proofs-cards"><Table columns={['Reference', 'Method', 'Amount', 'Uploaded']} rows={proofs.map(p => [p.reference, p.method, kes(p.amount), p.createdAt ? new Date(p.createdAt).toLocaleString() : '-'])} empty="No payment proof uploaded yet." /></div>
         </Card>
       </div>
     </div>
@@ -307,7 +307,7 @@ function NoticeItem({ notice, notify }) {
       <h3 style={styles.noticeTitle}>{notice.title}</h3>
       <p style={styles.noticeBody}>{notice.content}</p>
       {!!notice.attachments?.length && (
-        <div style={styles.noticeFileGrid}>
+        <div className="lf-notice-attachment-grid" style={styles.noticeFileGrid}>
           {notice.attachments.map(file => (
             <button key={file.id} type="button" style={{ ...styles.noticeFileLink, width: '100%', cursor: 'pointer', textAlign: 'left' }} title={`Download ${noticeFileName(file)}`} onClick={() => downloadWithNotify(`/api/documents/${file.id}/download`, noticeFileName(file), notify)}>
               <span style={styles.noticeFileIcon}>{noticeFileType(file)}</span>
@@ -322,7 +322,7 @@ function NoticeItem({ notice, notify }) {
 }
 
 function Documents({ documents, matters, notify }) {
-  return <Card title="All Documents" hint="Files shared across your matters"><Table columns={['Name', 'Matter', 'Source', 'Type', 'Download']} rows={documents.map(d => [d.displayName || d.name, matters.find(m => m.id === d.matterId)?.title || d.matterId, <Badge key={`${d.id}-source`} tone={d.source === 'client' ? 'green' : 'blue'}>{d.source === 'client' ? 'Shared by you' : 'Firm'}</Badge>, d.type, <DownloadButton key={d.id} label="Download" path={`/api/documents/${d.id}/download`} filename={d.displayName || d.name || 'document'} notify={notify} />])} empty="No documents shared yet." /></Card>;
+  return <Card title="All Documents" hint="Files shared across your matters"><div className="lf-client-all-docs-cards"><Table columns={['Name', 'Matter', 'Source', 'Type', 'Download']} rows={documents.map(d => [d.displayName || d.name, matters.find(m => m.id === d.matterId)?.title || d.matterId, <Badge key={`${d.id}-source`} tone={d.source === 'client' ? 'green' : 'blue'}>{d.source === 'client' ? 'Shared by you' : 'Firm'}</Badge>, d.type, <DownloadButton key={d.id} label="Download" path={`/api/documents/${d.id}/download`} filename={d.displayName || d.name || 'document'} notify={notify} />])} empty="No documents shared yet." /></div></Card>;
 }
 
 async function downloadWithNotify(path, filename, notify) {
