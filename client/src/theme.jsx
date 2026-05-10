@@ -71,6 +71,29 @@ export function StyleTag() { return <style>{`
     #root div[role="status"] { left: 16px !important; right: 16px !important; min-width: 0 !important; max-width: calc(100vw - 32px) !important; }
     /* R15d-1: Mobile modal - tighter backdrop padding */
     #root div[style*="z-index: 3000"] { padding: 16px !important; }
+    /* R15d-3: Dashboard card tables */
+    #root .lf-receivables-cards > div,
+    #root .lf-court-dates-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
+    #root .lf-receivables-cards table,
+    #root .lf-court-dates-cards table { min-width: 0 !important; }
+    #root .lf-receivables-cards thead,
+    #root .lf-court-dates-cards thead { display: none !important; }
+    #root .lf-receivables-cards tbody tr,
+    #root .lf-court-dates-cards tbody tr { display: block; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    #root .lf-receivables-cards tbody td,
+    #root .lf-court-dates-cards tbody td { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: none; background: transparent !important; }
+    #root .lf-receivables-cards tbody tr:hover td,
+    #root .lf-court-dates-cards tbody tr:hover td { background: transparent !important; }
+    #root .lf-receivables-cards td:nth-child(1)::before { content: "Invoice"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-receivables-cards td:nth-child(2)::before { content: "Client"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-receivables-cards td:nth-child(3)::before { content: "Amount"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-receivables-cards td:nth-child(4)::before { content: "Status"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-court-dates-cards td:nth-child(1)::before { content: "Appearance"; min-width: 80px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-court-dates-cards td:nth-child(2)::before { content: "Matter"; min-width: 80px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-court-dates-cards td:nth-child(3)::before { content: "Date"; min-width: 80px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-court-dates-cards td:nth-child(4)::before { content: "Time"; min-width: 80px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-court-dates-cards td:nth-child(5)::before { content: "Location"; min-width: 80px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-court-dates-cards td:nth-child(6)::before { content: "Virtual Court"; min-width: 80px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
   }
   @media (max-width: 480px) {
     #root .lf-court-mode-card { padding: 12px !important; }

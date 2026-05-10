@@ -348,19 +348,19 @@ export function Dashboard({ data, user, onNavigate }) {
           )) : <Empty title={isAdvocate ? 'No assigned matters' : 'No matters yet'} text={isAdvocate ? 'Your assigned matters will appear here.' : 'Create a client and matter to populate the board.'} />}
         </Card>
         <Card title="Receivables" hint="Latest invoice status">
-          <Table columns={['Invoice', 'Client', 'Amount', 'Status']} rows={data.invoices.slice(0, 6).map(i => [i.number || i.id, i.clientName || '-', kes(i.amount), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>])} empty="No invoices yet." />
+          <div className="lf-receivables-cards"><Table columns={['Invoice', 'Client', 'Amount', 'Status']} rows={data.invoices.slice(0, 6).map(i => [i.number || i.id, i.clientName || '-', kes(i.amount), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>])} empty="No invoices yet." /></div>
         </Card>
       </div>
 
       <Card title="Upcoming court dates" hint="Appearances and virtual court links">
-        <Table columns={['Appearance', 'Matter', 'Date', 'Time', 'Location', 'Virtual Court']} rows={upcomingEvents.map(event => [
+        <div className="lf-court-dates-cards"><Table columns={['Appearance', 'Matter', 'Date', 'Time', 'Location', 'Virtual Court']} rows={upcomingEvents.map(event => [
           event.title || event.type || 'Court appearance',
           event.matterTitle || event.reference || '-',
           event.date || '-',
           event.time || '-',
           event.location || '-',
           <MeetingLink key={event.id || `${event.date}-${event.title}`} event={event} dashboard />,
-        ])} empty="No upcoming court dates." />
+        ])} empty="No upcoming court dates." /></div>
       </Card>
     </div>
   );
