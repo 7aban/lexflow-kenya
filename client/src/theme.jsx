@@ -196,6 +196,19 @@ export function StyleTag() { return <style>{`
     /* R15e-1: Client portal notice attachment grid - stack on narrow mobile */
     #root .lf-notice-attachment-grid button { grid-template-columns: 42px minmax(0,1fr) !important; }
     #root .lf-notice-attachment-grid button small { display: block; grid-column: 1 / -1; padding-left: 0; }
+    /* R15d-12: Task board mobile cards */
+    #root .lf-task-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
+    #root .lf-task-cards table { min-width: 0 !important; }
+    #root .lf-task-cards thead { display: none !important; }
+    #root .lf-task-cards tbody tr { display: block; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    #root .lf-task-cards tbody td { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: none; background: transparent !important; }
+    #root .lf-task-cards tbody tr:hover td { background: transparent !important; }
+    #root .lf-task-cards td:nth-child(1)::before { content: "Task"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-task-cards td:nth-child(2)::before { content: "Assignee"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-task-cards td:nth-child(3)::before { content: "Due"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-task-cards td:nth-child(4)::before { content: "Status"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-task-cards td:nth-child(5)::before { content: "Timer"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-task-cards td:nth-child(6)::before { content: "Actions"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
   }
   @media (max-width: 480px) {
     #root .lf-court-mode-card { padding: 12px !important; }

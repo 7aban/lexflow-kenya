@@ -982,7 +982,7 @@ export function Users({ clients = [], notify }) {
 function TaskEditorList({ tasks, entries = [], matter, canManage, canViewBilling = true, editingTask, setEditingTask, saveTask, toggle, confirmDelete, taskTimer, setTaskTimer, notify, onTimerSaved }) {
   if (!tasks.length) return <Empty title="No tasks yet." text="Once records exist, they will appear here." />;
   return (
-    <div style={styles.tableWrap}>
+    <div className="lf-task-cards" style={styles.tableWrap}>
       <table style={styles.table}>
         <thead><tr>{['Task', 'Assignee', 'Due', 'Status', 'Timer', 'Actions'].map(h => <th key={h}>{h}</th>)}</tr></thead>
         <tbody>{tasks.map(task => {
