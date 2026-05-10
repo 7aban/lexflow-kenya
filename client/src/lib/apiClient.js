@@ -25,6 +25,53 @@ export function clearSession() {
   localStorage.removeItem('token');
 }
 
+const LEXFLOW_KEY_PREFIX = 'lexflow';
+const LEXFLOW_CACHE_PREFIX = 'lexflow-';
+
+const LEXFLOW_STORAGE_KEYS = [
+  'lexflowSession',
+  'lexflowToken',
+  'token',
+  'lexflowOpenNavGroups',
+];
+
+export async function clearAllLexFlowStorage() {
+  for (const key of LEXFLOW_STORAGE_KEYS) {
+    localStorage.removeItem(key);
+  }
+
+  for (let i = localStorage.length - 1; i >= 0; i--) {
+    const key = localStorage.key(i);
+    if (key && key.toLowerCase().startsWith(LEXFLOW_KEY_PREFIX.toLowerCase())) {
+      localStorage.removeItem(key);
+    }
+  }
+
+  try {
+    if ('caches' in window) {
+      const cacheKeys = await caches.keys();
+      for (const key of cacheKeys) {
+        if (key.startsWith(LEXFLOW_CACHE_PREFIX)) {
+          await caches.delete(key);
+        }
+      }
+    }
+  } catch {
+    // Cache API may be restricted; continue without failing
+  }
+
+  try {
+    if ('serviceWorker' in navigator) {
+      const registration = await navigator.serviceWorker.getRegistration();
+      if (registration?.active) {
+        registration.active.postMessage({ type: 'LEXFLOW_LOGOUT_CLEAR' });
+      }
+    }
+  } catch {
+    // SW messaging may be restricted; continue without failing
+  }
+}
+
 function emitAuthFailure() {
   window.dispatchEvent(new CustomEvent('lexflow:auth-failure', {
     detail: { message: AUTH_FAILURE_MESSAGE },

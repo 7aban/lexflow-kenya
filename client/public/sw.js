@@ -113,6 +113,18 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "LEXFLOW_LOGOUT_CLEAR") {
+    caches.keys().then((keys) =>
+      Promise.all(
+        keys
+          .filter((key) => key.startsWith("lexflow-"))
+          .map((key) => caches.delete(key))
+      )
+    );
+  }
+});
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);

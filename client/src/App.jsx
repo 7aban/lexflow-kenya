@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { IconLayoutDashboard, IconChartLine, IconUsers, IconUserPlus, IconBriefcase, IconCheckbox, IconCalendarDue, IconFileInvoice, IconMessages, IconUsersGroup, IconSettings, IconListSearch, IconExternalLink, IconChevronDown, IconShield } from '@tabler/icons-react';
-import { api, API_BASE, AUTH_FAILURE_MESSAGE, clearSession, getNotifications, markNotificationsRead, readSession, saveSession } from './lib/apiClient.js';
+import { api, API_BASE, AUTH_FAILURE_MESSAGE, clearSession, clearAllLexFlowStorage, getNotifications, markNotificationsRead, readSession, saveSession } from './lib/apiClient.js';
 import { globalSearch } from './api.js';
 import { defaultFirmSettings, styles, StyleTag, theme, loadAndApplyFirmTheme } from './theme.jsx';
 import { Logo, Skeleton, Toast, Alert } from './components/ui.jsx';
@@ -333,6 +333,7 @@ export default function App() {
     setSession(null);
     setUser(null);
     setData(initialData);
+    clearAllLexFlowStorage();
   }
 
   if (window.location.pathname.startsWith('/invite/')) {
