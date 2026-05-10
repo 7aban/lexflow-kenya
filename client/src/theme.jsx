@@ -142,6 +142,29 @@ export function StyleTag() { return <style>{`
     #root .lf-doc-cards-client td:nth-child(4)::before { content: "Size"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
     #root .lf-doc-cards-client td:nth-child(5)::before { content: "Source"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
     #root .lf-doc-cards-client td:nth-child(6)::before { content: "Download"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    /* R15d-14a: Staff Client directory mobile cards */
+    #root .lf-client-cards,
+    #root .lf-client-cards * { box-sizing: border-box !important; }
+    #root .lf-client-cards { width: 100% !important; max-width: 100% !important; overflow: visible !important; }
+    #root .lf-client-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; width: 100% !important; max-width: 100% !important; }
+    #root .lf-client-cards table,
+    #root .lf-client-cards tbody { display: block !important; width: 100% !important; min-width: 0 !important; max-width: 100% !important; }
+    #root .lf-client-cards thead { display: none !important; }
+    #root .lf-client-cards tbody tr { display: block; width: 100%; min-width: 0; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    #root .lf-client-cards tbody td { display: grid; grid-template-columns: minmax(0,1fr); align-items: start; gap: 4px; width: 100%; min-width: 0; padding: 6px 0; border-top: none; background: transparent !important; white-space: normal !important; overflow-wrap: anywhere; word-break: break-word; }
+    #root .lf-client-cards tbody td > * { min-width: 0 !important; max-width: 100% !important; overflow-wrap: anywhere; }
+    #root .lf-client-cards tbody td button { white-space: normal !important; max-width: 100% !important; }
+    #root .lf-client-cards tbody td span { white-space: normal !important; max-width: 100% !important; }
+    #root .lf-client-cards tbody tr:hover td { background: transparent !important; }
+    #root .lf-client-cards td::before { min-width: 0 !important; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; overflow-wrap: normal; word-break: normal; }
+    #root .lf-client-cards td:nth-child(1)::before { content: "Name"; }
+    #root .lf-client-cards td:nth-child(2)::before { content: "Type"; }
+    #root .lf-client-cards td:nth-child(3)::before { content: "Email"; }
+    #root .lf-client-cards td:nth-child(4)::before { content: "Phone"; }
+    #root .lf-client-cards td:nth-child(5)::before { content: "Status"; }
+    #root .lf-client-cards td:nth-child(6)::before { content: "Reminders"; }
+    #root .lf-client-cards td:nth-child(7)::before { content: "Portal"; }
+    #root .lf-client-cards td:nth-child(8)::before { content: "Actions"; }
     /* R15e-1: Client portal My Matters mobile cards */
     #root .lf-client-matters-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
     #root .lf-client-matters-cards table { min-width: 0 !important; }
