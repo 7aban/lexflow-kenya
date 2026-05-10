@@ -1008,7 +1008,7 @@ function TaskEditorList({ tasks, entries = [], matter, canManage, canViewBilling
 function AppearanceEditorList({ events, canManage, editingEvent, setEditingEvent, saveEvent, confirmDelete }) {
   if (!events.length) return <Empty title="No court appearances." text="Scheduled appearances will appear here." />;
   return (
-    <div style={styles.tableWrap}>
+    <div style={styles.tableWrap} className="lf-appearance-cards">
       <table style={styles.table}>
         <thead><tr>{['Title', 'Date', 'Time', 'Type', 'Location', 'Virtual Court', 'Actions'].map(h => <th key={h}>{h}</th>)}</tr></thead>
         <tbody>{events.map(event => {
