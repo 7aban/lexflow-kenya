@@ -250,7 +250,9 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
 
       <Card title="Deadline Timeline" hint="Court dates, tasks, invoices, limitation dates and custom obligations in one list.">
         {loading ? <Skeleton rows={3} /> : rows.length ? (
-          <Table columns={['Due', 'Type', 'Deadline', 'Matter / Client', 'Owner', 'Status', 'Action']} rows={rows} rowIds={deadlines.map(r => `deadline-${r.id}`)} empty="No deadlines found." />
+          <div className="lf-deadline-cards">
+            <Table columns={['Due', 'Type', 'Deadline', 'Matter / Client', 'Owner', 'Status', 'Action']} rows={rows} rowIds={deadlines.map(r => `deadline-${r.id}`)} empty="No deadlines found." />
+          </div>
         ) : (
           <Empty title="No deadlines found" text="Create a custom deadline or add tasks, appearances, invoices and SOL dates to populate this timeline." />
         )}
