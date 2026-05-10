@@ -108,6 +108,34 @@ export function StyleTag() { return <style>{`
     #root .lf-deadline-cards td:nth-child(5)::before { content: "Owner"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
     #root .lf-deadline-cards td:nth-child(6)::before { content: "Status"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
     #root .lf-deadline-cards td:nth-child(7)::before { content: "Action"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    /* R15d-9: MatterDocuments staff mobile cards (8 columns) */
+    #root .lf-doc-cards-staff > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
+    #root .lf-doc-cards-staff table { min-width: 0 !important; }
+    #root .lf-doc-cards-staff thead { display: none !important; }
+    #root .lf-doc-cards-staff tbody tr { display: block; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    #root .lf-doc-cards-staff tbody td { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: none; background: transparent !important; }
+    #root .lf-doc-cards-staff tbody tr:hover td { background: transparent !important; }
+    #root .lf-doc-cards-staff td:nth-child(1)::before { content: "Name"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-doc-cards-staff td:nth-child(2)::before { content: "Folder"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-doc-cards-staff td:nth-child(3)::before { content: "Date"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-doc-cards-staff td:nth-child(4)::before { content: "Size"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-doc-cards-staff td:nth-child(5)::before { content: "Source"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-doc-cards-staff td:nth-child(6)::before { content: "Access"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-doc-cards-staff td:nth-child(7)::before { content: "Move"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-doc-cards-staff td:nth-child(8)::before { content: "Actions"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    /* R15d-9: MatterDocuments client mobile cards (6 columns) */
+    #root .lf-doc-cards-client > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
+    #root .lf-doc-cards-client table { min-width: 0 !important; }
+    #root .lf-doc-cards-client thead { display: none !important; }
+    #root .lf-doc-cards-client tbody tr { display: block; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    #root .lf-doc-cards-client tbody td { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: none; background: transparent !important; }
+    #root .lf-doc-cards-client tbody tr:hover td { background: transparent !important; }
+    #root .lf-doc-cards-client td:nth-child(1)::before { content: "Name"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-doc-cards-client td:nth-child(2)::before { content: "Folder"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-doc-cards-client td:nth-child(3)::before { content: "Date"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-doc-cards-client td:nth-child(4)::before { content: "Size"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-doc-cards-client td:nth-child(5)::before { content: "Source"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-doc-cards-client td:nth-child(6)::before { content: "Download"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
   }
   @media (max-width: 480px) {
     #root .lf-court-mode-card { padding: 12px !important; }

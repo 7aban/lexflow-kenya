@@ -176,6 +176,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
           </Field>
         </div>
         {loading ? <div style={styles.alert}>Loading documents...</div> : documents.length ? (
+          <div className={canManage ? "lf-doc-cards-staff" : "lf-doc-cards-client"}>
           <Table
             columns={canManage ? ['Name', 'Folder', 'Date', 'Size', 'Source', 'Client Access', 'Move', 'Actions'] : ['Name', 'Folder', 'Date', 'Size', 'Source', 'Download']}
             rows={documents.map(doc => {
@@ -198,6 +199,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
             })}
             empty="No documents."
           />
+          </div>
         ) : <Empty title="This folder is empty" text="Documents uploaded or moved here will appear in this folder." />}
       </Card>
       <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
