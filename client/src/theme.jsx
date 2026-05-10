@@ -58,6 +58,9 @@ export function StyleTag() { return <style>{`
     .lf-login-root .lf-login-card-wrap { padding: 16px !important; }
     #root .lf-matter-grid { grid-template-columns: 1fr !important; }
     #root .lf-split-grid { grid-template-columns: 1fr !important; }
+    #root .lf-task-split-grid { display: grid !important; grid-template-columns: minmax(0,1fr) !important; width: 100% !important; max-width: 100% !important; justify-items: stretch !important; }
+    #root .lf-task-split-grid > section { width: 100% !important; max-width: 100% !important; min-width: 0 !important; }
+    #root .lf-task-split-grid form { grid-template-columns: minmax(0,1fr) !important; }
     #root .lf-doc-grid { grid-template-columns: 1fr !important; }
     #root .lf-court-mode-stack { gap: 10px !important; }
     /* R15d-1: Mobile touch targets */
@@ -70,7 +73,10 @@ export function StyleTag() { return <style>{`
     /* R15d-1: Mobile toast - safe width on narrow viewports */
     #root div[role="status"] { left: 16px !important; right: 16px !important; min-width: 0 !important; max-width: calc(100vw - 32px) !important; }
     /* R15d-1: Mobile modal - tighter backdrop padding */
-    #root div[style*="z-index: 3000"] { padding: 16px !important; }
+    #root div[style*="z-index: 3000"] { box-sizing: border-box !important; width: 100vw !important; max-width: 100vw !important; padding: 16px !important; align-items: center !important; justify-items: center !important; overflow: auto !important; overflow-x: hidden !important; }
+    #root div[role="dialog"] > div { box-sizing: border-box !important; width: calc(100vw - 32px) !important; max-width: calc(100vw - 32px) !important; min-width: 0 !important; max-height: calc(100vh - 32px) !important; overflow: auto !important; overflow-x: hidden !important; }
+    #root div[role="dialog"] div[style*="justify-content: flex-end"] { flex-wrap: wrap !important; justify-content: stretch !important; }
+    #root div[role="dialog"] div[style*="justify-content: flex-end"] > button { flex: 1 1 0 !important; min-width: 0 !important; }
     /* R15d-3: Dashboard card tables */
     #root .lf-receivables-cards > div,
     #root .lf-court-dates-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
@@ -197,11 +203,20 @@ export function StyleTag() { return <style>{`
     #root .lf-notice-attachment-grid button { grid-template-columns: 42px minmax(0,1fr) !important; }
     #root .lf-notice-attachment-grid button small { display: block; grid-column: 1 / -1; padding-left: 0; }
     /* R15d-12: Task board mobile cards */
-    #root .lf-task-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
-    #root .lf-task-cards table { min-width: 0 !important; }
+    #root .lf-task-cards,
+    #root .lf-task-cards * { box-sizing: border-box !important; }
+    #root .lf-task-cards { width: 100% !important; max-width: 100% !important; overflow: visible !important; }
+    #root .lf-task-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; width: 100% !important; max-width: 100% !important; }
+    #root .lf-task-cards table,
+    #root .lf-task-cards tbody { display: block !important; width: 100% !important; min-width: 0 !important; max-width: 100% !important; }
     #root .lf-task-cards thead { display: none !important; }
-    #root .lf-task-cards tbody tr { display: block; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-    #root .lf-task-cards tbody td { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: none; background: transparent !important; }
+    #root .lf-task-cards tbody tr { display: block; width: 100%; min-width: 0; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    #root .lf-task-cards tbody td { display: grid; grid-template-columns: minmax(0,1fr); align-items: start; gap: 4px; width: 100%; min-width: 0; padding: 6px 0; border-top: none; background: transparent !important; white-space: normal !important; overflow-wrap: anywhere; word-break: break-word; }
+    #root .lf-task-cards tbody td > * { min-width: 0 !important; max-width: 100% !important; overflow-wrap: anywhere; }
+    #root .lf-task-cards tbody td input,
+    #root .lf-task-cards tbody td select,
+    #root .lf-task-cards tbody td textarea { width: 100% !important; max-width: 100% !important; min-width: 0 !important; }
+    #root .lf-task-cards tbody td::before { min-width: 0 !important; }
     #root .lf-task-cards tbody tr:hover td { background: transparent !important; }
     #root .lf-task-cards td:nth-child(1)::before { content: "Task"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
     #root .lf-task-cards td:nth-child(2)::before { content: "Assignee"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
@@ -217,6 +232,7 @@ export function StyleTag() { return <style>{`
   @keyframes lfPulse { 0% { opacity: .55; } 50% { opacity: 1; } 100% { opacity: .55; } }
   @keyframes lfSlideIn { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
   @keyframes lfDropIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+  @media (min-width: 768px) and (max-width: 900px) { #root .lf-task-split-grid { grid-template-columns: minmax(0,1fr) !important; width: 100% !important; max-width: 100% !important; } }
   @media (max-width: 760px) { #root .lf-dashboard-grid { grid-template-columns: 1fr !important; } }
   table th { text-align: left; padding: 9px 12px; background: #F3F4F6; color: #6B7280; font-size: 11px; text-transform: uppercase; letter-spacing: 0; font-weight: 700; }
   table td { padding: 10px 12px; border-top: 1px solid #E5E7EB; vertical-align: middle; }
