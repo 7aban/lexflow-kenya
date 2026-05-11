@@ -261,6 +261,20 @@ export function StyleTag() { return <style>{`
     #root .lf-appearance-cards td:nth-child(5)::before { content: "Location"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
     #root .lf-appearance-cards td:nth-child(6)::before { content: "Virtual Court"; min-width: 80px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
     #root .lf-appearance-cards td:nth-child(7)::before { content: "Actions"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    /* R15g-2: Invoice Register mobile cards */
+    #root .lf-invoice-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
+    #root .lf-invoice-cards table { min-width: 0 !important; }
+    #root .lf-invoice-cards thead { display: none !important; }
+    #root .lf-invoice-cards tbody tr { display: block; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    #root .lf-invoice-cards tbody td { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: none; background: transparent !important; }
+    #root .lf-invoice-cards tbody tr:hover td { background: transparent !important; }
+    #root .lf-invoice-cards td:nth-child(1)::before { content: "Invoice"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-invoice-cards td:nth-child(2)::before { content: "Client"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-invoice-cards td:nth-child(3)::before { content: "Matter"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-invoice-cards td:nth-child(4)::before { content: "Amount"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-invoice-cards td:nth-child(5)::before { content: "Status"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-invoice-cards td:nth-child(6)::before { content: "PDF"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-invoice-cards td:nth-child(7)::before { content: "Actions"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
   }
   @media (max-width: 480px) {
     #root .lf-court-mode-card { padding: 12px !important; }
