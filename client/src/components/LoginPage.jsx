@@ -37,7 +37,7 @@ function OAuthButton({ provider, onClick }) {
   );
 }
 
-export default function LoginPage({ firm, onLogin }) {
+export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, installDismissed, setInstallDismissed, onInstall }) {
   const [mode, setMode] = useState('staff');
   const [email, setEmail] = useState('admin@lexflow.co.ke');
   const [password, setPassword] = useState('password123');
@@ -153,6 +153,21 @@ export default function LoginPage({ firm, onLogin }) {
             </div>
             {error && <Alert tone="danger">{error}</Alert>}
             {oauthBusy && <Alert tone="info">Redirecting to provider...</Alert>}
+            {!isInstalled && !installDismissed && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, border: '1px solid #E5E7EB', background: '#F9FAFB', fontSize: 12, color: '#4B5563' }}>
+                <span style={{ flex: 1 }}>
+                  {deferredPrompt
+                    ? 'Install LexFlow for offline access and quick launch.'
+                    : (typeof window !== 'undefined' && window.navigator && /iPad|iPhone|iPod/.test(navigator.userAgent)
+                      ? 'Install LexFlow from the Share menu for the best experience.'
+                      : 'Install LexFlow for quick access.')}
+                </span>
+                {deferredPrompt && (
+                  <button type="button" onClick={onInstall} style={{ padding: '4px 10px', borderRadius: 6, border: 'none', background: '#0F1B33', color: '#fff', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>Install</button>
+                )}
+                <button type="button" onClick={() => setInstallDismissed(true)} style={{ padding: '4px 6px', borderRadius: 4, border: 'none', background: 'transparent', color: '#9CA3AF', fontSize: 14, cursor: 'pointer', lineHeight: 1 }} title="Dismiss">&times;</button>
+              </div>
+            )}
             <Field label="Email">
               <input style={styles.input} value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" placeholder={modeCopy.placeholder} />
             </Field>

@@ -152,6 +152,9 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState(null);
   const [data, setData] = useState(initialData);
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [isInstalled, setIsInstalled] = useState(false);
+  const [installDismissed, setInstallDismissed] = useState(false);
 
   const authenticated = Boolean(session?.token);
   const isAdmin = user?.role === 'admin';
@@ -195,6 +198,43 @@ export default function App() {
       window.removeEventListener('lexflow:unauthorized', handleAuthFailure);
     };
   }, []);
+
+  useEffect(() => {
+    function handleBeforeInstall(e) {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    }
+    function handleAppInstalled() {
+      setDeferredPrompt(null);
+      setIsInstalled(true);
+    }
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    window.addEventListener('appinstalled', handleAppInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(display-mode: standalone)');
+    const isStandalone = mq.matches || window.navigator.standalone === true;
+    setIsInstalled(isStandalone);
+    function handleChange(e) {
+      setIsInstalled(e.matches || window.navigator.standalone === true);
+    }
+    mq.addEventListener('change', handleChange);
+    return () => mq.removeEventListener('change', handleChange);
+  }, []);
+
+  function handleInstall() {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    deferredPrompt.userChoice.then(result => {
+      if (result.outcome === 'accepted') setIsInstalled(true);
+      setDeferredPrompt(null);
+    });
+  }
 
   useEffect(() => {
     if (authenticated) refresh();
@@ -370,7 +410,7 @@ export default function App() {
   if (!authenticated) {
     return (
       <>
-        <LoginPage firm={firm} onLogin={login} />
+        <LoginPage firm={firm} onLogin={login} deferredPrompt={deferredPrompt} isInstalled={isInstalled} installDismissed={installDismissed} setInstallDismissed={setInstallDismissed} onInstall={handleInstall} />
         <Toast toast={toast} onClose={() => setToast(null)} />
       </>
     );
