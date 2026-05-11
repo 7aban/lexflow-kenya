@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { IconScale } from '@tabler/icons-react';
-import { saveSession } from '../lib/apiClient.js';
+import { exchangeOAuthCode, saveSession } from '../lib/apiClient.js';
 import { styles, StyleTag, theme } from '../theme.jsx';
 import { Alert } from '../components/ui.jsx';
 
@@ -11,8 +11,9 @@ export default function OAuthCallback({ firm, onLogin }) {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const errorParam = params.get('error');
-    const tokenParam = params.get('token');
-    const userParam = params.get('user');
+    const codeParam = params.get('code');
+
+    window.history.replaceState({}, '', '/');
 
     if (errorParam) {
       setError(decodeURIComponent(errorParam));
@@ -20,24 +21,22 @@ export default function OAuthCallback({ firm, onLogin }) {
       return;
     }
 
-    if (!tokenParam || !userParam) {
+    if (!codeParam) {
       setError('OAuth login did not complete. Try again.');
       setBusy(false);
       return;
     }
 
-    try {
-      const token = decodeURIComponent(tokenParam);
-      const user = JSON.parse(decodeURIComponent(userParam));
-      const sessionData = { token, user };
-      saveSession(sessionData);
-
-      window.history.replaceState({}, '', '/');
-      onLogin(sessionData);
-    } catch {
-      setError('OAuth login failed. Try again.');
-      setBusy(false);
-    }
+    exchangeOAuthCode(codeParam)
+      .then(data => {
+        const sessionData = { token: data.token, user: data.user };
+        saveSession(sessionData);
+        onLogin(sessionData);
+      })
+      .catch(() => {
+        setError('OAuth login failed. Try again.');
+        setBusy(false);
+      });
   }, [onLogin]);
 
   const firmName = firm?.name || 'LexFlow Kenya';

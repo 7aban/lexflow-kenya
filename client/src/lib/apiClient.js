@@ -19,6 +19,17 @@ export function saveSession(session) {
   localStorage.setItem('token', session.token);
 }
 
+export async function exchangeOAuthCode(code) {
+  const res = await fetch(`${API_BASE}/auth/oauth/exchange`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'OAuth exchange failed');
+  return data;
+}
+
 export function clearSession() {
   localStorage.removeItem('lexflowSession');
   localStorage.removeItem('lexflowToken');

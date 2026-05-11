@@ -1,6 +1,8 @@
 const request = require('supertest');
 const crypto = require('crypto');
 const { app } = require('../server.js');
+const googleOAuth = require('../lib/oauthGoogle');
+const microsoftOAuth = require('../lib/oauthMicrosoft');
 
 describe('R4 Staff OAuth Backend', () => {
   let adminToken;
@@ -19,6 +21,7 @@ describe('R4 Staff OAuth Backend', () => {
 
     try {
       await run(`CREATE TABLE IF NOT EXISTS oauth_accounts (id TEXT PRIMARY KEY, userId TEXT NOT NULL, provider TEXT CHECK(provider IN ('google','microsoft')) NOT NULL, providerSubject TEXT NOT NULL, email TEXT NOT NULL, emailVerified INTEGER DEFAULT 0, revokedAt TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, lastLoginAt TEXT, UNIQUE(provider, providerSubject))`);
+      await run("DELETE FROM oauth_accounts WHERE providerSubject LIKE 'test-subject-%'");
     } finally {
       await close();
     }
@@ -249,6 +252,134 @@ describe('R4 Staff OAuth Backend', () => {
         expect(keys.some(k => k.toLowerCase().includes('secret'))).toBe(false);
         expect(keys.some(k => k.toLowerCase().includes('password'))).toBe(false);
       }
+    });
+  });
+
+  describe('G. OAuth one-time code exchange', () => {
+    let spyGoogle;
+    let spyMicrosoft;
+
+    beforeAll(async () => {
+      const sqlite3 = require('sqlite3');
+      const cfg = require('../lib/config');
+      const db = new sqlite3.Database(cfg.DATABASE_PATH);
+      await new Promise((resolve, reject) => {
+        db.run("DELETE FROM oauth_accounts WHERE providerSubject LIKE 'test-subject-%'", (err) => {
+          err ? reject(err) : resolve();
+        });
+      });
+      db.close();
+
+      spyGoogle = jest.spyOn(googleOAuth, 'handleCallback').mockResolvedValue({
+        provider: 'google',
+        providerSubject: 'test-subject-google',
+        email: 'admin@lexflow.co.ke',
+        emailVerified: true,
+      });
+      spyMicrosoft = jest.spyOn(microsoftOAuth, 'handleCallback').mockResolvedValue({
+        provider: 'microsoft',
+        providerSubject: 'test-subject-microsoft',
+        email: 'admin@lexflow.co.ke',
+        emailVerified: true,
+      });
+    });
+
+    afterAll(() => {
+      spyGoogle.mockRestore();
+      spyMicrosoft.mockRestore();
+    });
+
+    test('G1. Google callback redirect uses code= not token=', async () => {
+      const res = await request(app)
+        .get('/api/auth/oauth/google/callback')
+        .query({ code: 'any-code', state: signState('google') });
+      expect(res.status).toBe(302);
+      const location = res.header.location;
+      expect(location).not.toContain('token=');
+      expect(location).not.toContain('user=');
+      expect(location).toContain('code=');
+      const url = new URL(location);
+      expect(url.searchParams.get('code')).toBeTruthy();
+    });
+
+    test('G2. Microsoft callback redirect uses code= not token=', async () => {
+      const res = await request(app)
+        .get('/api/auth/oauth/microsoft/callback')
+        .query({ code: 'any-code', state: signState('microsoft') });
+      expect(res.status).toBe(302);
+      const location = res.header.location;
+      expect(location).not.toContain('token=');
+      expect(location).not.toContain('user=');
+      expect(location).toContain('code=');
+      const url = new URL(location);
+      expect(url.searchParams.get('code')).toBeTruthy();
+    });
+
+    test('G3. Successful exchange returns token and user', async () => {
+      const callbackRes = await request(app)
+        .get('/api/auth/oauth/google/callback')
+        .query({ code: 'g3-code', state: signState('google') });
+      const url = new URL(callbackRes.header.location);
+      const exchangeCode = url.searchParams.get('code');
+      expect(exchangeCode).toBeTruthy();
+
+      const exchangeRes = await request(app)
+        .post('/api/auth/oauth/exchange')
+        .send({ code: exchangeCode });
+      expect(exchangeRes.status).toBe(200);
+      expect(exchangeRes.body.token).toBeDefined();
+      expect(exchangeRes.body.token).toEqual(expect.any(String));
+      expect(exchangeRes.body.user).toBeDefined();
+      expect(exchangeRes.body.user.email).toBe('admin@lexflow.co.ke');
+    });
+
+    test('G4. Exchange code is single-use', async () => {
+      const callbackRes = await request(app)
+        .get('/api/auth/oauth/google/callback')
+        .query({ code: 'g4-code', state: signState('google') });
+      const url = new URL(callbackRes.header.location);
+      const exchangeCode = url.searchParams.get('code');
+
+      const first = await request(app)
+        .post('/api/auth/oauth/exchange')
+        .send({ code: exchangeCode });
+      expect(first.status).toBe(200);
+      expect(first.body.token).toBeDefined();
+
+      const second = await request(app)
+        .post('/api/auth/oauth/exchange')
+        .send({ code: exchangeCode });
+      expect(second.status).toBe(400);
+    });
+
+    test('G5. Missing exchange code returns 400', async () => {
+      const res = await request(app)
+        .post('/api/auth/oauth/exchange')
+        .send({});
+      expect(res.status).toBe(400);
+    });
+
+    test('G6. Invalid exchange code returns 400', async () => {
+      const res = await request(app)
+        .post('/api/auth/oauth/exchange')
+        .send({ code: 'this-code-does-not-exist-in-the-map' });
+      expect(res.status).toBe(400);
+    });
+
+    test('G7. Expired exchange code returns 400', async () => {
+      const callbackRes = await request(app)
+        .get('/api/auth/oauth/google/callback')
+        .query({ code: 'g7-exp', state: signState('google') });
+      const url = new URL(callbackRes.header.location);
+      const exchangeCode = url.searchParams.get('code');
+      expect(exchangeCode).toBeTruthy();
+      jest.useFakeTimers({ doNotFake: ['nextTick', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
+      jest.advanceTimersByTime(61000);
+      const expiredRes = await request(app)
+        .post('/api/auth/oauth/exchange')
+        .send({ code: exchangeCode });
+      expect(expiredRes.status).toBe(400);
+      jest.useRealTimers();
     });
   });
 });

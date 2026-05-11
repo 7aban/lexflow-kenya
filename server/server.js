@@ -495,6 +495,36 @@ app.get('/api/firm-settings/theme/presets', authenticate, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// In-memory one-time exchange code store for OAuth callback flow.
+// Codes are 32 random bytes (64 hex chars), single-use, TTL 60 seconds.
+// Never persisted to database — survives only in process memory.
+const oauthExchangeCodes = new Map();
+const OAUTH_CODE_TTL_MS = 60000;
+
+function createOAuthExchangeCode(result) {
+  pruneExpiredCodes();
+  const code = crypto.randomBytes(32).toString('hex');
+  oauthExchangeCodes.set(code, { token: result.token, user: result.user, expiresAt: Date.now() + OAUTH_CODE_TTL_MS });
+  return code;
+}
+
+function consumeOAuthExchangeCode(code) {
+  pruneExpiredCodes();
+  if (!code || typeof code !== 'string') return null;
+  const entry = oauthExchangeCodes.get(code);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) { oauthExchangeCodes.delete(code); return null; }
+  oauthExchangeCodes.delete(code);
+  return { token: entry.token, user: entry.user };
+}
+
+function pruneExpiredCodes() {
+  const now = Date.now();
+  for (const [code, entry] of oauthExchangeCodes) {
+    if (now > entry.expiresAt) oauthExchangeCodes.delete(code);
+  }
+}
+
 // --- Staff OAuth routes (no authentication required) ---
 app.get('/api/auth/oauth/google/start', async (req, res) => {
   if (!config.OAUTH_STAFF_ENABLED) return res.status(503).json({ error: 'Staff OAuth is not enabled.' });
@@ -526,7 +556,8 @@ app.get('/api/auth/oauth/google/callback', async (req, res) => {
       return res.redirect(`${config.BASE_URL}/oauth/callback?error=${encodeURIComponent(result.message)}`);
     }
     await recordAuditEvent(req, { action: 'oauth_login_succeeded', entityType: 'user', entityId: result.user.id, metadata: { provider: 'google', role: result.user.role } }).catch(() => {});
-    res.redirect(`${config.BASE_URL}/oauth/callback?token=${encodeURIComponent(result.token)}&user=${encodeURIComponent(JSON.stringify(result.user))}`);
+    const exchangeCode = createOAuthExchangeCode(result);
+    res.redirect(`${config.BASE_URL}/oauth/callback?code=${exchangeCode}`);
   } catch (err) {
     await recordAuditEvent(req, { action: 'oauth_login_failed', entityType: 'oauth', metadata: { provider: 'google', reason: 'exchange_error' } }).catch(() => {});
     res.redirect(`${config.BASE_URL}/oauth/callback?error=${encodeURIComponent('OAuth login failed.')}`);
@@ -563,11 +594,21 @@ app.get('/api/auth/oauth/microsoft/callback', async (req, res) => {
       return res.redirect(`${config.BASE_URL}/oauth/callback?error=${encodeURIComponent(result.message)}`);
     }
     await recordAuditEvent(req, { action: 'oauth_login_succeeded', entityType: 'user', entityId: result.user.id, metadata: { provider: 'microsoft', role: result.user.role } }).catch(() => {});
-    res.redirect(`${config.BASE_URL}/oauth/callback?token=${encodeURIComponent(result.token)}&user=${encodeURIComponent(JSON.stringify(result.user))}`);
+    const exchangeCode = createOAuthExchangeCode(result);
+    res.redirect(`${config.BASE_URL}/oauth/callback?code=${exchangeCode}`);
   } catch (err) {
     await recordAuditEvent(req, { action: 'oauth_login_failed', entityType: 'oauth', metadata: { provider: 'microsoft', reason: 'exchange_error' } }).catch(() => {});
     res.redirect(`${config.BASE_URL}/oauth/callback?error=${encodeURIComponent('OAuth login failed.')}`);
   }
+});
+
+app.post('/api/auth/oauth/exchange', async (req, res) => {
+  const { code } = req.body || {};
+  const result = consumeOAuthExchangeCode(code);
+  if (!result) {
+    return res.status(400).json({ error: 'Invalid or expired exchange code. Please re-authenticate.' });
+  }
+  res.json({ token: result.token, user: result.user });
 });
 
 app.use('/api', authenticate);
