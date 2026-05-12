@@ -299,6 +299,36 @@ export function StyleTag() { return <style>{`
     #root .lf-user-cards td:nth-child(4)::before { content: "Status"; }
     #root .lf-user-cards td:nth-child(5)::before { content: "Client"; }
     #root .lf-user-cards td:nth-child(6)::before { content: "Actions"; }
+    /* R15g-4: TimeEntryEditorList mobile cards */
+    #root .lf-time-entry-cards,
+    #root .lf-time-entry-cards * { box-sizing: border-box !important; }
+    #root .lf-time-entry-cards { width: 100% !important; max-width: 100% !important; overflow: visible !important; border: none !important; border-radius: 0 !important; }
+    #root .lf-time-entry-cards table,
+    #root .lf-time-entry-cards tbody { display: block !important; width: 100% !important; min-width: 0 !important; max-width: 100% !important; }
+    #root .lf-time-entry-cards thead { display: none !important; }
+    #root .lf-time-entry-cards tbody tr { display: block; width: 100%; min-width: 0; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    #root .lf-time-entry-cards tbody td { display: grid; grid-template-columns: minmax(0,1fr); align-items: start; gap: 4px; width: 100%; min-width: 0; padding: 6px 0; border-top: none; background: transparent !important; white-space: normal !important; overflow-wrap: anywhere; word-break: break-word; }
+    #root .lf-time-entry-cards tbody td > * { min-width: 0 !important; max-width: 100% !important; overflow-wrap: anywhere; }
+    #root .lf-time-entry-cards tbody td input,
+    #root .lf-time-entry-cards tbody td select,
+    #root .lf-time-entry-cards tbody td textarea { width: 100% !important; max-width: 100% !important; min-width: 0 !important; }
+    #root .lf-time-entry-cards tbody td button { white-space: normal !important; max-width: 100% !important; }
+    #root .lf-time-entry-cards tbody td span { white-space: normal !important; max-width: 100% !important; }
+    #root .lf-time-entry-cards tbody td::before { min-width: 0 !important; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; overflow-wrap: normal; word-break: normal; }
+    #root .lf-time-entry-cards tbody tr:hover td { background: transparent !important; }
+    /* Shared first three columns */
+    #root .lf-time-entry-cards td:nth-child(1)::before { content: "Date"; }
+    #root .lf-time-entry-cards td:nth-child(2)::before { content: "Description"; }
+    #root .lf-time-entry-cards td:nth-child(3)::before { content: "Hours"; }
+    /* canViewBilling=true variant (7 columns, default) */
+    #root .lf-time-entry-cards:not(.lf-time-entry-cards-no-rate) td:nth-child(4)::before { content: "Rate"; }
+    #root .lf-time-entry-cards:not(.lf-time-entry-cards-no-rate) td:nth-child(5)::before { content: "Billing class"; }
+    #root .lf-time-entry-cards:not(.lf-time-entry-cards-no-rate) td:nth-child(6)::before { content: "Invoice status"; }
+    #root .lf-time-entry-cards:not(.lf-time-entry-cards-no-rate) td:nth-child(7)::before { content: "Actions"; }
+    /* canViewBilling=false variant (6 columns) */
+    #root .lf-time-entry-cards.lf-time-entry-cards-no-rate td:nth-child(4)::before { content: "Billing class"; }
+    #root .lf-time-entry-cards.lf-time-entry-cards-no-rate td:nth-child(5)::before { content: "Invoice status"; }
+    #root .lf-time-entry-cards.lf-time-entry-cards-no-rate td:nth-child(6)::before { content: "Actions"; }
   }
   @media (max-width: 480px) {
     #root .lf-court-mode-card { padding: 12px !important; }

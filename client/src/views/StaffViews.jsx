@@ -1036,7 +1036,7 @@ function TimeEntryEditorList({ entries, canManage, canViewBilling = true, editin
   if (!entries.length) return <Empty title="No time entries." text="Logged time will appear here." />;
   const columns = ['Date', 'Description', 'Hours', ...(canViewBilling ? ['Rate'] : []), 'Billing class', 'Invoice status', 'Actions'];
   return (
-    <div style={styles.tableWrap}>
+    <div className={`lf-time-entry-cards${canViewBilling ? '' : ' lf-time-entry-cards-no-rate'}`} style={styles.tableWrap}>
       <table style={styles.table}>
         <thead><tr>{columns.map(h => <th key={h}>{h}</th>)}</tr></thead>
         <tbody>{entries.map(entry => {
