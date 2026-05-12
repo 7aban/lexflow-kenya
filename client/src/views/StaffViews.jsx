@@ -961,20 +961,22 @@ export function Users({ clients = [], notify }) {
         <input type="checkbox" checked={includeInactive} onChange={e => setIncludeInactive(e.target.checked)} />
         Show inactive users
       </label>
-      <Table columns={['Name', 'Email', 'Role', 'Status', 'Client', 'Actions']} rows={users.map(u => [
-        u.fullName,
-        u.email,
-        <select key={`role-${u.id}`} style={{ ...styles.input, width: 140 }} value={u.role} disabled={u.role === 'client'} onChange={e => updateRole(u.id, e.target.value, u.fullName)}>
-          <option value="assistant">Assistant</option>
-          <option value="advocate">Advocate</option>
-          <option value="admin">Admin</option>
-        </select>,
-        <Badge key={`status-${u.id}`} tone={u.isActive ? 'green' : 'red'}>{u.isActive ? 'Active' : 'Inactive'}</Badge>,
-        u.clientId ? clients.find(c => c.id === u.clientId)?.name || u.clientId : '-',
-        <div key={`actions-${u.id}`} style={{ display: 'flex', gap: 6 }}>
-          <button style={styles.tinyButton} onClick={() => toggleActive(u.id, !u.isActive, u.fullName)}>{u.isActive ? 'Deactivate' : 'Activate'}</button>
-        </div>,
-      ])} empty="No users found." />
+      <div className="lf-user-cards">
+        <Table columns={['Name', 'Email', 'Role', 'Status', 'Client', 'Actions']} rows={users.map(u => [
+          u.fullName,
+          u.email,
+          <select key={`role-${u.id}`} style={{ ...styles.input, width: 140 }} value={u.role} disabled={u.role === 'client'} onChange={e => updateRole(u.id, e.target.value, u.fullName)}>
+            <option value="assistant">Assistant</option>
+            <option value="advocate">Advocate</option>
+            <option value="admin">Admin</option>
+          </select>,
+          <Badge key={`status-${u.id}`} tone={u.isActive ? 'green' : 'red'}>{u.isActive ? 'Active' : 'Inactive'}</Badge>,
+          u.clientId ? clients.find(c => c.id === u.clientId)?.name || u.clientId : '-',
+          <div key={`actions-${u.id}`} style={{ display: 'flex', gap: 6 }}>
+            <button style={styles.tinyButton} onClick={() => toggleActive(u.id, !u.isActive, u.fullName)}>{u.isActive ? 'Deactivate' : 'Activate'}</button>
+          </div>,
+        ])} empty="No users found." />
+      </div>
     </Card>
   </div>;
 }
