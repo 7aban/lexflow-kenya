@@ -339,6 +339,159 @@ export function StyleTag() { return <style>{`
     #root .lf-time-entry-cards.lf-time-entry-cards-no-rate td:nth-child(4)::before { content: "Billing class"; }
     #root .lf-time-entry-cards.lf-time-entry-cards-no-rate td:nth-child(5)::before { content: "Invoice status"; }
     #root .lf-time-entry-cards.lf-time-entry-cards-no-rate td:nth-child(6)::before { content: "Actions"; }
+    /* R15g-6-C: Admin reassignment control narrow */
+    #root .lf-admin-reassign-control { flex-wrap: wrap; max-width: 100%; min-width: 0; width: 100%; margin-left: 0; gap: 4px; }
+    #root .lf-admin-reassign-control select { max-width: 100%; min-width: 0; width: auto; flex: 1 1 auto; }
+    #root .lf-admin-reassign-control button { max-width: 100%; min-width: 0; white-space: normal !important; }
+    /* R15g-6-C: Matter detail card row containment at 360px */
+    #root .lf-matter-detail-workspace .lf-task-cards tbody tr,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards tbody tr,
+    #root .lf-matter-detail-workspace .lf-appearance-cards tbody tr,
+    #root .lf-matter-detail-workspace .lf-invoice-cards tbody tr,
+    #root .lf-matter-detail-workspace .lf-matter-notes-cards tbody tr { width: 100% !important; max-width: 100% !important; box-sizing: border-box !important; }
+    #root .lf-matter-detail-workspace .lf-task-cards tbody td,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards tbody td,
+    #root .lf-matter-detail-workspace .lf-appearance-cards tbody td,
+    #root .lf-matter-detail-workspace .lf-invoice-cards tbody td,
+    #root .lf-matter-detail-workspace .lf-matter-notes-cards tbody td { max-width: 100% !important; box-sizing: border-box !important; min-width: 0 !important; overflow-wrap: anywhere; }
+    #root .lf-matter-detail-workspace .lf-task-cards table,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards table,
+    #root .lf-matter-detail-workspace .lf-appearance-cards table,
+    #root .lf-matter-detail-workspace .lf-invoice-cards table,
+    #root .lf-matter-detail-workspace .lf-matter-notes-cards table { min-width: 0 !important; max-width: 100% !important; }
+    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(1)::before { content: "Invoice"; }
+    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(2)::before { content: "Amount"; }
+    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(3)::before { content: "Status"; }
+    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(4)::before { content: "PDF"; }
+    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(5)::before { content: "Actions"; }
+  }
+  @media (min-width: 768px) and (max-width: 900px) {
+    /* R15g-6-C: Matter detail tablet cards only */
+    #root .lf-matter-grid:has(.lf-matter-detail-workspace) { grid-template-columns: minmax(0,1fr) !important; width: 100% !important; max-width: 100% !important; }
+    #root .lf-matter-detail-workspace .lf-task-cards,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards-no-rate,
+    #root .lf-matter-detail-workspace .lf-appearance-cards,
+    #root .lf-matter-detail-workspace .lf-invoice-cards,
+    #root .lf-matter-detail-workspace .lf-matter-notes-cards,
+    #root .lf-matter-detail-workspace .lf-task-cards *,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards *,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards-no-rate *,
+    #root .lf-matter-detail-workspace .lf-appearance-cards *,
+    #root .lf-matter-detail-workspace .lf-invoice-cards *,
+    #root .lf-matter-detail-workspace .lf-matter-notes-cards * { box-sizing: border-box !important; }
+    #root .lf-matter-detail-workspace .lf-task-cards,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards-no-rate,
+    #root .lf-matter-detail-workspace .lf-appearance-cards,
+    #root .lf-matter-detail-workspace .lf-invoice-cards,
+    #root .lf-matter-detail-workspace .lf-matter-notes-cards { width: 100% !important; max-width: 100% !important; overflow: visible !important; border: none !important; border-radius: 0 !important; }
+    #root .lf-matter-detail-workspace .lf-task-cards > div,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards > div,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards-no-rate > div,
+    #root .lf-matter-detail-workspace .lf-appearance-cards > div,
+    #root .lf-matter-detail-workspace .lf-invoice-cards > div,
+    #root .lf-matter-detail-workspace .lf-matter-notes-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; width: 100% !important; max-width: 100% !important; }
+    #root .lf-matter-detail-workspace .lf-task-cards table,
+    #root .lf-matter-detail-workspace .lf-task-cards tbody,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards table,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards tbody,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards-no-rate table,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards-no-rate tbody,
+    #root .lf-matter-detail-workspace .lf-appearance-cards table,
+    #root .lf-matter-detail-workspace .lf-appearance-cards tbody,
+    #root .lf-matter-detail-workspace .lf-invoice-cards table,
+    #root .lf-matter-detail-workspace .lf-invoice-cards tbody,
+    #root .lf-matter-detail-workspace .lf-matter-notes-cards table,
+    #root .lf-matter-detail-workspace .lf-matter-notes-cards tbody { display: block !important; width: 100% !important; min-width: 0 !important; max-width: 100% !important; }
+    #root .lf-matter-detail-workspace .lf-task-cards thead,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards thead,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards-no-rate thead,
+    #root .lf-matter-detail-workspace .lf-appearance-cards thead,
+    #root .lf-matter-detail-workspace .lf-invoice-cards thead,
+    #root .lf-matter-detail-workspace .lf-matter-notes-cards thead { display: none !important; }
+    #root .lf-matter-detail-workspace .lf-task-cards tbody tr,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards tbody tr,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards-no-rate tbody tr,
+    #root .lf-matter-detail-workspace .lf-appearance-cards tbody tr,
+    #root .lf-matter-detail-workspace .lf-invoice-cards tbody tr,
+    #root .lf-matter-detail-workspace .lf-matter-notes-cards tbody tr { display: block; width: 100%; min-width: 0; max-width: 100%; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    #root .lf-matter-detail-workspace .lf-task-cards tbody td,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards tbody td,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards-no-rate tbody td,
+    #root .lf-matter-detail-workspace .lf-appearance-cards tbody td,
+    #root .lf-matter-detail-workspace .lf-invoice-cards tbody td,
+    #root .lf-matter-detail-workspace .lf-matter-notes-cards tbody td { display: grid; grid-template-columns: minmax(0,1fr); align-items: start; gap: 4px; width: 100%; max-width: 100%; min-width: 0; padding: 6px 0; border-top: none; background: transparent !important; white-space: normal !important; overflow-wrap: anywhere; word-break: break-word; }
+    #root .lf-matter-detail-workspace .lf-task-cards tbody td > *,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards tbody td > *,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards-no-rate tbody td > *,
+    #root .lf-matter-detail-workspace .lf-appearance-cards tbody td > *,
+    #root .lf-matter-detail-workspace .lf-invoice-cards tbody td > *,
+    #root .lf-matter-detail-workspace .lf-matter-notes-cards tbody td > * { min-width: 0 !important; max-width: 100% !important; overflow-wrap: anywhere; }
+    #root .lf-matter-detail-workspace .lf-task-cards tbody td input,
+    #root .lf-matter-detail-workspace .lf-task-cards tbody td select,
+    #root .lf-matter-detail-workspace .lf-task-cards tbody td textarea,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards tbody td input,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards tbody td select,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards tbody td textarea,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards-no-rate tbody td input,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards-no-rate tbody td select,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards-no-rate tbody td textarea { width: 100% !important; max-width: 100% !important; min-width: 0 !important; }
+    #root .lf-matter-detail-workspace .lf-task-cards tbody td button,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards tbody td button,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards-no-rate tbody td button,
+    #root .lf-matter-detail-workspace .lf-appearance-cards tbody td button,
+    #root .lf-matter-detail-workspace .lf-invoice-cards tbody td button,
+    #root .lf-matter-detail-workspace .lf-matter-notes-cards tbody td button { white-space: normal !important; max-width: 100% !important; }
+    #root .lf-matter-detail-workspace .lf-task-cards tbody td span,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards tbody td span,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards-no-rate tbody td span,
+    #root .lf-matter-detail-workspace .lf-appearance-cards tbody td span,
+    #root .lf-matter-detail-workspace .lf-invoice-cards tbody td span,
+    #root .lf-matter-detail-workspace .lf-matter-notes-cards tbody td span { white-space: normal !important; max-width: 100% !important; }
+    #root .lf-matter-detail-workspace .lf-task-cards tbody td::before,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards tbody td::before,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards-no-rate tbody td::before,
+    #root .lf-matter-detail-workspace .lf-appearance-cards tbody td::before,
+    #root .lf-matter-detail-workspace .lf-invoice-cards tbody td::before,
+    #root .lf-matter-detail-workspace .lf-matter-notes-cards tbody td::before { min-width: 0 !important; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; overflow-wrap: normal; word-break: normal; }
+    #root .lf-matter-detail-workspace .lf-task-cards tbody tr:hover td,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards tbody tr:hover td,
+    #root .lf-matter-detail-workspace .lf-time-entry-cards-no-rate tbody tr:hover td,
+    #root .lf-matter-detail-workspace .lf-appearance-cards tbody tr:hover td,
+    #root .lf-matter-detail-workspace .lf-invoice-cards tbody tr:hover td,
+    #root .lf-matter-detail-workspace .lf-matter-notes-cards tbody tr:hover td { background: transparent !important; }
+    #root .lf-matter-detail-workspace .lf-task-cards td:nth-child(1)::before { content: "Task"; }
+    #root .lf-matter-detail-workspace .lf-task-cards td:nth-child(2)::before { content: "Assignee"; }
+    #root .lf-matter-detail-workspace .lf-task-cards td:nth-child(3)::before { content: "Due"; }
+    #root .lf-matter-detail-workspace .lf-task-cards td:nth-child(4)::before { content: "Status"; }
+    #root .lf-matter-detail-workspace .lf-task-cards td:nth-child(5)::before { content: "Timer"; }
+    #root .lf-matter-detail-workspace .lf-task-cards td:nth-child(6)::before { content: "Actions"; }
+    #root .lf-matter-detail-workspace .lf-time-entry-cards td:nth-child(1)::before { content: "Date"; }
+    #root .lf-matter-detail-workspace .lf-time-entry-cards td:nth-child(2)::before { content: "Description"; }
+    #root .lf-matter-detail-workspace .lf-time-entry-cards td:nth-child(3)::before { content: "Hours"; }
+    #root .lf-matter-detail-workspace .lf-time-entry-cards:not(.lf-time-entry-cards-no-rate) td:nth-child(4)::before { content: "Rate"; }
+    #root .lf-matter-detail-workspace .lf-time-entry-cards:not(.lf-time-entry-cards-no-rate) td:nth-child(5)::before { content: "Billing class"; }
+    #root .lf-matter-detail-workspace .lf-time-entry-cards:not(.lf-time-entry-cards-no-rate) td:nth-child(6)::before { content: "Invoice status"; }
+    #root .lf-matter-detail-workspace .lf-time-entry-cards:not(.lf-time-entry-cards-no-rate) td:nth-child(7)::before { content: "Actions"; }
+    #root .lf-matter-detail-workspace .lf-time-entry-cards.lf-time-entry-cards-no-rate td:nth-child(4)::before { content: "Billing class"; }
+    #root .lf-matter-detail-workspace .lf-time-entry-cards.lf-time-entry-cards-no-rate td:nth-child(5)::before { content: "Invoice status"; }
+    #root .lf-matter-detail-workspace .lf-time-entry-cards.lf-time-entry-cards-no-rate td:nth-child(6)::before { content: "Actions"; }
+    #root .lf-matter-detail-workspace .lf-appearance-cards td:nth-child(1)::before { content: "Title"; }
+    #root .lf-matter-detail-workspace .lf-appearance-cards td:nth-child(2)::before { content: "Date"; }
+    #root .lf-matter-detail-workspace .lf-appearance-cards td:nth-child(3)::before { content: "Time"; }
+    #root .lf-matter-detail-workspace .lf-appearance-cards td:nth-child(4)::before { content: "Type"; }
+    #root .lf-matter-detail-workspace .lf-appearance-cards td:nth-child(5)::before { content: "Location"; }
+    #root .lf-matter-detail-workspace .lf-appearance-cards td:nth-child(6)::before { content: "Virtual Court"; }
+    #root .lf-matter-detail-workspace .lf-appearance-cards td:nth-child(7)::before { content: "Actions"; }
+    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(1)::before { content: "Invoice"; }
+    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(2)::before { content: "Amount"; }
+    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(3)::before { content: "Status"; }
+    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(4)::before { content: "PDF"; }
+    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(5)::before { content: "Actions"; }
+    #root .lf-matter-detail-workspace .lf-matter-notes-cards td:nth-child(1)::before { content: "Note"; }
+    #root .lf-matter-detail-workspace .lf-matter-notes-cards td:nth-child(2)::before { content: "Author"; }
+    #root .lf-matter-detail-workspace .lf-matter-notes-cards td:nth-child(3)::before { content: "Created"; }
   }
   @media (max-width: 480px) {
     #root .lf-court-mode-card { padding: 12px !important; }

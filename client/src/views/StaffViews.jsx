@@ -533,13 +533,13 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
         <Card title={detail?.title || 'Matter detail'} hint={detail?.reference || 'Select a file'} action={detail && canManage ? <ActionGroup actions={[['Edit', startMatterEdit], ['Archive', () => setConfirm({ title: 'Archive matter?', message: 'Archive this matter by setting the stage to Closed?', onConfirm: archiveMatter })], ['Delete', () => setConfirm({ title: 'Delete matter?', message: 'Delete this matter and all associated data?', onConfirm: deleteMatterRecord })], ['Invoice', generateInvoice]]} /> : null}>
           {loading && <Skeleton rows={2} />}
           {!loading && detail && (
-            <div style={{ ...styles.detailStack, minWidth: 0 }}>
+            <div className="lf-matter-detail-workspace" style={{ ...styles.detailStack, minWidth: 0 }}>
               <div style={styles.chips}>
                 <Badge tone="blue">{detail.stage || 'Intake'}</Badge>
                 <span>{detail.clientName || 'No client'}</span>
                 <span>{detail.practiceArea || 'General'}</span>
                 {isAdmin && (
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 8 }}>
+                  <span className="lf-admin-reassign-control" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 8 }}>
                     <Badge tone="navy">Advocate: {detail.assignedTo || 'Unassigned'}</Badge>
                     <select style={{ ...styles.input, width: 160, fontSize: 12, padding: '2px 6px' }} value={reassignTo} onChange={e => setReassignTo(e.target.value)}>
                       <option value="">Select advocate</option>
