@@ -154,7 +154,7 @@ export default function Communications({ clients = [], matters = [], focus, noti
         <div style={styles.heroFigure}>{conversations.length}</div>
       </section>
 
-      <div style={styles.splitGrid}>
+      <div className="lf-split-grid" style={styles.splitGrid}>
         <div style={styles.pageStack}>
           <Card title="Start conversation" hint="Open a general or matter-specific thread">
             <form onSubmit={startThread} style={styles.formGrid}>
