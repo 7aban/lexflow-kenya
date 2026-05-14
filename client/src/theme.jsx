@@ -366,6 +366,8 @@ export function StyleTag() { return <style>{`
     #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(5)::before { content: "Actions"; }
   }
   @media (min-width: 768px) and (max-width: 900px) {
+    /* R15g-8: Client portal My Matters - stack grid at tablet widths */
+    #root .lf-client-matter-grid { grid-template-columns: minmax(0,1fr) !important; width: 100% !important; max-width: 100% !important; }
     /* R15g-6-C: Matter detail tablet cards only */
     #root .lf-matter-grid:has(.lf-matter-detail-workspace) { grid-template-columns: minmax(0,1fr) !important; width: 100% !important; max-width: 100% !important; }
     #root .lf-matter-detail-workspace .lf-task-cards,

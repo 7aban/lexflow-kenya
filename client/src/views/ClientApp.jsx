@@ -257,7 +257,7 @@ function ClientDashboard({ data, stats, selectMatter }) {
 function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, events, proofs, uploadDoc, uploading, payment, setPayment, submitPayment, notify }) {
   if (!selected) return <Empty title="No matter selected" text="Your matter details will appear here once the firm shares a file." />;
   return (
-    <div style={styles.matterGrid}>
+    <div className="lf-matter-grid lf-client-matter-grid" style={styles.matterGrid}>
       <Card title="My matters" hint={`${matters.length} file(s)`}>
         {matters.map(m => <button key={m.id} type="button" onClick={() => setSelectedId(m.id)} style={{ ...styles.matterButton, ...(selected.id === m.id ? styles.matterActive : {}) }}><strong>{m.title}</strong><span>{m.reference || m.id}</span><small>{m.stage || 'Intake'}</small></button>)}
       </Card>
