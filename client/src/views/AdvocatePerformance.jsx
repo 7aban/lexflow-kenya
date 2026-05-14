@@ -134,11 +134,13 @@ export default function AdvocatePerformance({ notify }) {
           </Field>
         </div>
         {loading ? <Skeleton rows={3} /> : (
-          <Table
-            columns={['Name', 'Active Matters', 'Tasks Done / Pending', 'Total Hours This Month', 'Revenue This Month', 'Upcoming Court']}
-            rows={tableRows}
-            empty="No advocate users found."
-          />
+          <div className="lf-advocate-performance-cards">
+            <Table
+              columns={['Name', 'Active Matters', 'Tasks Done / Pending', 'Total Hours This Month', 'Revenue This Month', 'Upcoming Court']}
+              rows={tableRows}
+              empty="No advocate users found."
+            />
+          </div>
         )}
       </Card>
       <PerformanceDrawer advocate={selected} detail={detail} loading={detailLoading} onClose={() => { setSelected(null); setDetail(null); }} />
@@ -216,10 +218,14 @@ function PerformanceDrawer({ advocate, detail, loading, onClose }) {
                 </div>
               </Card>
               <Card title="Active matters" hint="Assigned files still open">
-                <Table columns={['Matter', 'Stage', 'Next Court']} rows={(detail.activeMatterList || []).map(matter => [matter.title, <Badge key={matter.id} tone="blue">{matter.stage || 'Active'}</Badge>, matter.nextCourtDate || '-'])} empty="No active matters assigned." />
+                <div className="lf-advocate-detail-matters-cards">
+                  <Table columns={['Matter', 'Stage', 'Next Court']} rows={(detail.activeMatterList || []).map(matter => [matter.title, <Badge key={matter.id} tone="blue">{matter.stage || 'Active'}</Badge>, matter.nextCourtDate || '-'])} empty="No active matters assigned." />
+                </div>
               </Card>
               <Card title="Recent time entries" hint="Last 10 records">
-                <Table columns={['Date', 'Matter', 'Task', 'Hours', 'Amount']} rows={(detail.recentTimeEntries || []).map(entry => [entry.date || '-', entry.matterTitle || entry.reference || '-', entry.taskTitle || '-', fmtHours(entry.hours), kes(num(entry.hours) * num(entry.rate))])} empty="No time entries recorded." />
+                <div className="lf-advocate-detail-time-cards">
+                  <Table columns={['Date', 'Matter', 'Task', 'Hours', 'Amount']} rows={(detail.recentTimeEntries || []).map(entry => [entry.date || '-', entry.matterTitle || entry.reference || '-', entry.taskTitle || '-', fmtHours(entry.hours), kes(num(entry.hours) * num(entry.rate))])} empty="No time entries recorded." />
+                </div>
               </Card>
             </>
           ) : <Empty title="No detail loaded" text="Select an advocate to view their performance profile." />}

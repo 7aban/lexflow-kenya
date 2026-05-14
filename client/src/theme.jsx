@@ -364,6 +364,41 @@ export function StyleTag() { return <style>{`
     #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(3)::before { content: "Status"; }
     #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(4)::before { content: "PDF"; }
     #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(5)::before { content: "Actions"; }
+    /* R15g-10: AdvocatePerformance main mobile cards */
+    #root .lf-advocate-performance-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
+    #root .lf-advocate-performance-cards table { min-width: 0 !important; }
+    #root .lf-advocate-performance-cards thead { display: none !important; }
+    #root .lf-advocate-performance-cards tbody tr { display: block; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    #root .lf-advocate-performance-cards tbody td { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: none; background: transparent !important; }
+    #root .lf-advocate-performance-cards tbody tr:hover td { background: transparent !important; }
+    #root .lf-advocate-performance-cards td:nth-child(1)::before { content: "Name"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-advocate-performance-cards td:nth-child(2)::before { content: "Active"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-advocate-performance-cards td:nth-child(3)::before { content: "Tasks"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-advocate-performance-cards td:nth-child(4)::before { content: "Hours"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-advocate-performance-cards td:nth-child(5)::before { content: "Revenue"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-advocate-performance-cards td:nth-child(6)::before { content: "Court"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    /* R15g-10: AdvocatePerformance detail matters mobile cards */
+    #root .lf-advocate-detail-matters-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
+    #root .lf-advocate-detail-matters-cards table { min-width: 0 !important; }
+    #root .lf-advocate-detail-matters-cards thead { display: none !important; }
+    #root .lf-advocate-detail-matters-cards tbody tr { display: block; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    #root .lf-advocate-detail-matters-cards tbody td { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: none; background: transparent !important; }
+    #root .lf-advocate-detail-matters-cards tbody tr:hover td { background: transparent !important; }
+    #root .lf-advocate-detail-matters-cards td:nth-child(1)::before { content: "Matter"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-advocate-detail-matters-cards td:nth-child(2)::before { content: "Stage"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-advocate-detail-matters-cards td:nth-child(3)::before { content: "Next Court"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    /* R15g-10: AdvocatePerformance detail time mobile cards */
+    #root .lf-advocate-detail-time-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
+    #root .lf-advocate-detail-time-cards table { min-width: 0 !important; }
+    #root .lf-advocate-detail-time-cards thead { display: none !important; }
+    #root .lf-advocate-detail-time-cards tbody tr { display: block; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    #root .lf-advocate-detail-time-cards tbody td { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: none; background: transparent !important; }
+    #root .lf-advocate-detail-time-cards tbody tr:hover td { background: transparent !important; }
+    #root .lf-advocate-detail-time-cards td:nth-child(1)::before { content: "Date"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-advocate-detail-time-cards td:nth-child(2)::before { content: "Matter"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-advocate-detail-time-cards td:nth-child(3)::before { content: "Task"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-advocate-detail-time-cards td:nth-child(4)::before { content: "Hours"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-advocate-detail-time-cards td:nth-child(5)::before { content: "Amount"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
   }
   @media (min-width: 768px) and (max-width: 900px) {
     /* R15g-8: Client portal My Matters - stack grid at tablet widths */
