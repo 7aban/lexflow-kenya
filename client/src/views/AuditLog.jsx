@@ -149,11 +149,13 @@ export default function AuditLog({ notify, navigate }) {
         {loading ? (
           <Skeleton rows={3} />
         ) : tableRows.length ? (
-          <Table
-            columns={['Date/Time', 'User', 'Role', 'Action', 'Entity Type', 'Entity ID', 'Summary']}
-            rows={tableRows}
-            empty="No audit entries"
-          />
+          <div className="lf-audit-log-cards">
+            <Table
+              columns={['Date/Time', 'User', 'Role', 'Action', 'Entity Type', 'Entity ID', 'Summary']}
+              rows={tableRows}
+              empty="No audit entries"
+            />
+          </div>
         ) : (
           <Empty title="No audit entries found" text="Try changing the filters or create a new record to generate activity." />
         )}

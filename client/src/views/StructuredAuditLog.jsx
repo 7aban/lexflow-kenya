@@ -216,11 +216,13 @@ export default function StructuredAuditLog({ notify }) {
         {loading ? (
           <Skeleton rows={3} />
         ) : tableRows.length ? (
-          <Table
-            columns={['Timestamp', 'Actor', 'Role', 'Action', 'Entity Type', 'Entity ID', 'Matter ID', 'Client ID', 'Metadata']}
-            rows={tableRows}
-            empty="No audit events"
-          />
+          <div className="lf-structured-audit-log-cards">
+            <Table
+              columns={['Timestamp', 'Actor', 'Role', 'Action', 'Entity Type', 'Entity ID', 'Matter ID', 'Client ID', 'Metadata']}
+              rows={tableRows}
+              empty="No audit events"
+            />
+          </div>
         ) : (
           <Empty title="No audit events found" text="Try changing the filters or perform an action that generates audit events." />
         )}

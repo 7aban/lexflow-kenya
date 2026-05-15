@@ -399,6 +399,52 @@ export function StyleTag() { return <style>{`
     #root .lf-advocate-detail-time-cards td:nth-child(3)::before { content: "Task"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
     #root .lf-advocate-detail-time-cards td:nth-child(4)::before { content: "Hours"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
     #root .lf-advocate-detail-time-cards td:nth-child(5)::before { content: "Amount"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    /* R15g-12: Audit log mobile cards */
+    #root .lf-audit-log-cards,
+    #root .lf-structured-audit-log-cards,
+    #root .lf-audit-log-cards *,
+    #root .lf-structured-audit-log-cards * { box-sizing: border-box !important; }
+    #root .lf-audit-log-cards,
+    #root .lf-structured-audit-log-cards { width: 100% !important; max-width: 100% !important; overflow: visible !important; }
+    #root .lf-audit-log-cards > div,
+    #root .lf-structured-audit-log-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; width: 100% !important; max-width: 100% !important; }
+    #root .lf-audit-log-cards table,
+    #root .lf-audit-log-cards tbody,
+    #root .lf-structured-audit-log-cards table,
+    #root .lf-structured-audit-log-cards tbody { display: block !important; width: 100% !important; min-width: 0 !important; max-width: 100% !important; }
+    #root .lf-audit-log-cards thead,
+    #root .lf-structured-audit-log-cards thead { display: none !important; }
+    #root .lf-audit-log-cards tbody tr,
+    #root .lf-structured-audit-log-cards tbody tr { display: block; width: 100%; min-width: 0; max-width: 100%; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    #root .lf-audit-log-cards tbody td,
+    #root .lf-structured-audit-log-cards tbody td { display: grid; grid-template-columns: minmax(0,1fr); align-items: start; gap: 4px; width: 100%; max-width: 100%; min-width: 0; padding: 6px 0; border-top: none; background: transparent !important; white-space: normal !important; overflow-wrap: anywhere; word-break: break-word; }
+    #root .lf-audit-log-cards tbody td > *,
+    #root .lf-structured-audit-log-cards tbody td > * { min-width: 0 !important; max-width: 100% !important; overflow-wrap: anywhere; }
+    #root .lf-audit-log-cards tbody td button,
+    #root .lf-structured-audit-log-cards tbody td button { white-space: normal !important; max-width: 100% !important; }
+    #root .lf-audit-log-cards tbody td span,
+    #root .lf-structured-audit-log-cards tbody td span { white-space: normal !important; max-width: 100% !important; }
+    #root .lf-structured-audit-log-cards tbody td pre { width: 100% !important; max-width: 100% !important; min-width: 0 !important; overflow-x: auto !important; }
+    #root .lf-audit-log-cards tbody td::before,
+    #root .lf-structured-audit-log-cards tbody td::before { min-width: 0 !important; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; overflow-wrap: normal; word-break: normal; }
+    #root .lf-audit-log-cards tbody tr:hover td,
+    #root .lf-structured-audit-log-cards tbody tr:hover td { background: transparent !important; }
+    #root .lf-audit-log-cards td:nth-child(1)::before { content: "Date/Time"; }
+    #root .lf-audit-log-cards td:nth-child(2)::before { content: "User"; }
+    #root .lf-audit-log-cards td:nth-child(3)::before { content: "Role"; }
+    #root .lf-audit-log-cards td:nth-child(4)::before { content: "Action"; }
+    #root .lf-audit-log-cards td:nth-child(5)::before { content: "Entity Type"; }
+    #root .lf-audit-log-cards td:nth-child(6)::before { content: "Entity ID"; }
+    #root .lf-audit-log-cards td:nth-child(7)::before { content: "Summary"; }
+    #root .lf-structured-audit-log-cards td:nth-child(1)::before { content: "Timestamp"; }
+    #root .lf-structured-audit-log-cards td:nth-child(2)::before { content: "Actor"; }
+    #root .lf-structured-audit-log-cards td:nth-child(3)::before { content: "Role"; }
+    #root .lf-structured-audit-log-cards td:nth-child(4)::before { content: "Action"; }
+    #root .lf-structured-audit-log-cards td:nth-child(5)::before { content: "Entity Type"; }
+    #root .lf-structured-audit-log-cards td:nth-child(6)::before { content: "Entity ID"; }
+    #root .lf-structured-audit-log-cards td:nth-child(7)::before { content: "Matter ID"; }
+    #root .lf-structured-audit-log-cards td:nth-child(8)::before { content: "Client ID"; }
+    #root .lf-structured-audit-log-cards td:nth-child(9)::before { content: "Metadata"; }
   }
   @media (min-width: 768px) and (max-width: 900px) {
     /* R15g-8: Client portal My Matters - stack grid at tablet widths */
