@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { createConversation, downloadWithAuth, fileToDataUrl, getConversationMessages, getConversations, sendConversationMessage } from '../lib/apiClient.js';
+import { createConversation, downloadWithAuth, fileToDataUrl, getConversationMessages, getConversations, markConversationRead, sendConversationMessage } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Badge, Empty, Field } from './ui.jsx';
 
@@ -25,11 +25,13 @@ export default function ClientChatWidget({ firm, matters = [], selectedMatterId 
   const [attachment, setAttachment] = useState(null);
   const [loadingThread, setLoadingThread] = useState(false);
   const [sending, setSending] = useState(false);
-  const unread = 0;
+  const unread = conversations.reduce((total, item) => total + Number(item.clientUnreadCount ?? item.unreadCount ?? 0), 0);
 
   useEffect(() => {
     if (selectedMatterId) setMatterId(selectedMatterId);
   }, [selectedMatterId]);
+
+  useEffect(() => { loadConversations(); }, []);
 
   useEffect(() => {
     if (open && tab === 'Message Firm') loadConversations();
@@ -69,6 +71,11 @@ export default function ClientChatWidget({ firm, matters = [], selectedMatterId 
     setLoadingThread(true);
     try {
       setMessages(await getConversationMessages(conversationId));
+      const conversation = conversations.find(item => item.id === conversationId);
+      if (conversation && Number(conversation.clientUnreadCount ?? conversation.unreadCount ?? 0) > 0) {
+        const next = await markConversationRead(conversationId);
+        setConversations(current => current.map(item => item.id === conversationId ? { ...item, ...next } : item));
+      }
     } catch (err) {
       notify?.({ type: 'danger', message: err.message });
     } finally {
@@ -145,7 +152,7 @@ export default function ClientChatWidget({ firm, matters = [], selectedMatterId 
         }}
       >
         💬
-        <span style={{ position: 'absolute', top: -3, right: -3, minWidth: 18, height: 18, borderRadius: 999, display: 'grid', placeItems: 'center', background: theme.green, color: '#fff', fontSize: 10, fontWeight: 900, border: '2px solid #fff' }}>{unread}</span>
+        {unread > 0 && <span style={{ position: 'absolute', top: -3, right: -3, minWidth: 18, height: 18, borderRadius: 999, display: 'grid', placeItems: 'center', background: theme.green, color: '#fff', fontSize: 10, fontWeight: 900, border: '2px solid #fff' }}>{unread}</span>}
       </button>
       <div
         aria-hidden={!open}
@@ -219,7 +226,10 @@ export default function ClientChatWidget({ firm, matters = [], selectedMatterId 
             <form onSubmit={sendMessage} style={{ display: 'grid', gap: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
                 <strong>Send a private message</strong>
-                <Badge tone="blue">Secure</Badge>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  {unread > 0 && <Badge tone="green">{unread} new</Badge>}
+                  <Badge tone="blue">Secure</Badge>
+                </div>
               </div>
               <Field label="Matter">
                 <select style={styles.input} value={matterId || selectedMatterId || matters[0]?.id || ''} onChange={event => setMatterId(event.target.value)}>

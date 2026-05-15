@@ -213,6 +213,8 @@ export const getConversations = (params = {}) => api(queryPath('/conversations',
 export const createConversation = data => api('/conversations', { method: 'POST', body: data });
 export const getConversationMessages = conversationId => api(`/conversations/${conversationId}/messages`);
 export const sendConversationMessage = (conversationId, data) => api(`/conversations/${conversationId}/messages`, { method: 'POST', body: data });
+export const markConversationRead = conversationId => api(`/conversations/${conversationId}/read`, { method: 'POST', body: {} });
+export const updateConversationStatus = (conversationId, status) => api(`/conversations/${conversationId}/status`, { method: 'PATCH', body: { status } });
 export const getAdvocatePerformance = (refresh = false) => api(`/performance/advocates${refresh ? '?refresh=1' : ''}`);
 export const getAdvocatePerformanceDetail = (userId, refresh = false) => api(`/performance/advocates/${userId}${refresh ? '?refresh=1' : ''}`);
 export const getNotices = () => api('/notices');

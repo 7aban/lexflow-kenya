@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { createConversation, downloadWithAuth, fileToDataUrl, getClientActivity, getConversationMessages, getConversations, sendConversationMessage } from '../lib/apiClient.js';
+import { createConversation, downloadWithAuth, fileToDataUrl, getClientActivity, getConversationMessages, getConversations, markConversationRead, sendConversationMessage, updateConversationStatus } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Badge, Card, Empty, Field, Skeleton, Table } from '../components/ui.jsx';
 
@@ -31,6 +31,12 @@ function attachmentList(files = [], notify) {
   );
 }
 
+function statusTone(status) {
+  if (status === 'resolved') return 'green';
+  if (status === 'pending') return 'amber';
+  return 'blue';
+}
+
 export default function Communications({ clients = [], matters = [], focus, notify }) {
   const [conversations, setConversations] = useState([]);
   const [selectedId, setSelectedId] = useState('');
@@ -41,13 +47,17 @@ export default function Communications({ clients = [], matters = [], focus, noti
   const [reply, setReply] = useState({ body: '', file: null });
   const [newThread, setNewThread] = useState({ clientId: '', matterId: '', subject: '' });
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
 
   const selected = conversations.find(item => item.id === selectedId);
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    if (!needle) return conversations;
-    return conversations.filter(item => `${item.subject || ''} ${item.clientName || ''} ${item.matterTitle || ''} ${item.reference || ''}`.toLowerCase().includes(needle));
-  }, [conversations, search]);
+    return conversations.filter(item => {
+      const matchesStatus = statusFilter === 'all' || (item.status || 'open') === statusFilter;
+      const matchesSearch = !needle || `${item.subject || ''} ${item.clientName || ''} ${item.matterTitle || ''} ${item.reference || ''}`.toLowerCase().includes(needle);
+      return matchesStatus && matchesSearch;
+    });
+  }, [conversations, search, statusFilter]);
 
   const matterOptions = useMemo(() => {
     if (!newThread.clientId) return matters;
@@ -105,6 +115,32 @@ export default function Communications({ clients = [], matters = [], focus, noti
       notify?.({ type: 'danger', message: err.message });
     } finally {
       setThreadLoading(false);
+    }
+  }
+
+  function updateConversationRow(next) {
+    setConversations(current => current.map(item => item.id === next.id ? { ...item, ...next } : item));
+  }
+
+  async function markSelectedRead() {
+    if (!selected) return;
+    try {
+      const next = await markConversationRead(selected.id);
+      updateConversationRow(next);
+      notify?.({ type: 'success', message: 'Conversation marked read.' });
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    }
+  }
+
+  async function changeSelectedStatus(status) {
+    if (!selected) return;
+    try {
+      const next = await updateConversationStatus(selected.id, status);
+      updateConversationRow(next);
+      notify?.({ type: 'success', message: `Conversation marked ${status}.` });
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
     }
   }
 
@@ -184,12 +220,26 @@ export default function Communications({ clients = [], matters = [], focus, noti
             <Field label="Search">
               <input style={styles.input} value={search} onChange={event => setSearch(event.target.value)} placeholder="Client, matter, reference..." />
             </Field>
+            <Field label="Status">
+              <select style={styles.input} value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
+                <option value="all">All statuses</option>
+                <option value="open">Open</option>
+                <option value="pending">Pending</option>
+                <option value="resolved">Resolved</option>
+              </select>
+            </Field>
             <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
               {filtered.length ? filtered.map(item => (
-                <button key={item.id} type="button" onClick={() => setSelectedId(item.id)} style={{ ...styles.matterButton, ...(selectedId === item.id ? styles.matterActive : {}) }}>
-                  <strong>{titleFor(item)}</strong>
+                <button key={item.id} type="button" onClick={() => setSelectedId(item.id)} style={{ ...styles.matterButton, ...(selectedId === item.id ? styles.matterActive : {}), ...(item.isUnread ? { borderColor: theme.gold, background: theme.amberBg } : {}) }}>
+                  <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                    <strong>{titleFor(item)}</strong>
+                    <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      {item.isUnread && <Badge tone="red">{item.unreadCount || 1} unread</Badge>}
+                      <Badge tone={statusTone(item.status || 'open')}>{item.status || 'open'}</Badge>
+                    </span>
+                  </span>
                   <span>{item.clientName || 'Client'}{item.matterTitle ? ` / ${item.matterTitle}` : ''}</span>
-                  <small>{item.messageCount || 0} message(s) / {previewTime(item.lastMessageAt || item.createdAt)}</small>
+                  <small>{item.messageCount || 0} message(s) / {item.lastMessageSenderRole || 'no messages'} / {previewTime(item.lastMessageAt || item.createdAt)}</small>
                 </button>
               )) : <Empty title="No conversations" text="Start a conversation or wait for a client message." />}
             </div>
@@ -200,6 +250,20 @@ export default function Communications({ clients = [], matters = [], focus, noti
           <Card title={selected ? titleFor(selected) : 'Conversation'} hint={selected ? `${selected.clientName || 'Client'} ${selected.reference ? `/ ${selected.reference}` : ''}` : 'Select a thread'}>
             {!selected ? <Empty title="No thread selected" text="Choose a conversation from the inbox." /> : threadLoading ? <Skeleton rows={1} /> : (
               <div style={{ display: 'grid', gap: 12 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <Badge tone={statusTone(selected.status || 'open')}>{selected.status || 'open'}</Badge>
+                    {selected.isUnread && <Badge tone="red">{selected.unreadCount || 1} unread</Badge>}
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    <button type="button" style={styles.tinyButton} onClick={markSelectedRead}>Mark read</button>
+                    {['open', 'pending', 'resolved'].map(status => (
+                      <button key={status} type="button" style={{ ...styles.tinyButton, ...(selected.status === status ? { background: theme.navy800, color: '#fff', borderColor: theme.navy800 } : {}) }} onClick={() => changeSelectedStatus(status)}>
+                        {status}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div style={{ display: 'grid', gap: 10, maxHeight: 430, overflowY: 'auto', paddingRight: 4 }}>
                   {messages.length ? messages.map(message => {
                     const firmSide = message.senderRole !== 'client';

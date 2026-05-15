@@ -58,7 +58,7 @@ async function createSchema() {
   await run(`CREATE TABLE reminder_templates (id TEXT PRIMARY KEY, eventType TEXT NOT NULL, channel TEXT NOT NULL, subject TEXT, body TEXT NOT NULL, createdBy TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE reminder_logs (id TEXT PRIMARY KEY, templateId TEXT, clientId TEXT, matterId TEXT, invoiceId TEXT, channel TEXT, recipient TEXT, status TEXT, sentAt TEXT, errorMessage TEXT)`);
   await run(`CREATE TABLE firm_notices (id TEXT PRIMARY KEY, title TEXT, content TEXT, createdAt TEXT, createdBy TEXT, clientId TEXT DEFAULT '')`);
-  await run(`CREATE TABLE conversations (id TEXT PRIMARY KEY, matterId TEXT, clientId TEXT NOT NULL, subject TEXT, createdAt TEXT)`);
+  await run(`CREATE TABLE conversations (id TEXT PRIMARY KEY, matterId TEXT, clientId TEXT NOT NULL, subject TEXT, createdAt TEXT, status TEXT DEFAULT 'open', lastStaffReadAt TEXT, lastClientReadAt TEXT, statusUpdatedAt TEXT)`);
   await run(`CREATE TABLE messages (id TEXT PRIMARY KEY, conversationId TEXT NOT NULL, senderId TEXT, senderRole TEXT, body TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE client_activity (id TEXT PRIMARY KEY, clientId TEXT, matterId TEXT, userId TEXT, action TEXT, summary TEXT, entityType TEXT, entityId TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE deadlines (id TEXT PRIMARY KEY, matterId TEXT, clientId TEXT, title TEXT NOT NULL, type TEXT DEFAULT 'internal', dueDate TEXT NOT NULL, owner TEXT, status TEXT DEFAULT 'Open', notes TEXT, createdBy TEXT, createdAt TEXT)`);
@@ -221,7 +221,8 @@ async function main() {
       const conversationId = id('CONV');
       const clientMessageId = id('MSG');
       const firmMessageId = id('MSG');
-      await run('INSERT INTO conversations (id,matterId,clientId,subject,createdAt) VALUES (?,?,?,?,?)', [conversationId, matters[i].id, client.id, `Update request: ${matters[i].reference}`, nowIso()]);
+      const conversationStatus = i % 6 === 0 ? 'resolved' : i % 4 === 0 ? 'pending' : 'open';
+      await run('INSERT INTO conversations (id,matterId,clientId,subject,createdAt,status,lastStaffReadAt,lastClientReadAt,statusUpdatedAt) VALUES (?,?,?,?,?,?,?,?,?)', [conversationId, matters[i].id, client.id, `Update request: ${matters[i].reference}`, nowIso(), conversationStatus, i % 4 === 0 ? '' : nowIso(), i % 3 === 0 ? '' : nowIso(), nowIso()]);
       await run('INSERT INTO messages (id,conversationId,senderId,senderRole,body,createdAt) VALUES (?,?,?,?,?,?)', [clientMessageId, conversationId, client.userId, 'client', 'Good afternoon, kindly update me on the current status of this matter.', nowIso()]);
       await run('INSERT INTO messages (id,conversationId,senderId,senderRole,body,createdAt) VALUES (?,?,?,?,?,?)', [firmMessageId, conversationId, admin.id, 'admin', 'Thank you. The advocate will post an update after the next court attendance.', nowIso()]);
       await run('INSERT INTO client_activity (id,clientId,matterId,userId,action,summary,entityType,entityId,createdAt) VALUES (?,?,?,?,?,?,?,?,?)', [id('CACT'), client.id, matters[i].id, client.userId, 'sent_message', 'Client asked for an update through the portal.', 'message', clientMessageId, nowIso()]);

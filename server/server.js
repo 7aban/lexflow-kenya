@@ -40,6 +40,7 @@ const { notifyStaff } = createNotifications({ run, all, genId });
 const { appBaseUrl, invitationUrl, checkInvitationRateLimit } = createInvitations();
 const { recordAuditEvent } = createAudit({ run, get });
 const oauth = createOAuth({ run, get, all });
+const CONVERSATION_STATUSES = new Set(['open', 'pending', 'resolved']);
 
 // CORS configuration
 const corsOptions = {
@@ -201,6 +202,13 @@ async function initDb() {
   await ensureColumn('documents', 'displayName', 'TEXT');
   await ensureColumn('documents', 'uploadedBy', 'TEXT');
   await ensureColumn('documents', 'deletedAt', 'TEXT');
+  await ensureColumn('conversations', 'status', "TEXT DEFAULT 'open'");
+  await ensureColumn('conversations', 'lastStaffReadAt', 'TEXT');
+  await ensureColumn('conversations', 'lastClientReadAt', 'TEXT');
+  await ensureColumn('conversations', 'statusUpdatedAt', 'TEXT');
+  await run("UPDATE conversations SET status='open' WHERE status IS NULL OR status=''");
+  await run("UPDATE conversations SET lastStaffReadAt=COALESCE((SELECT MAX(createdAt) FROM messages msg WHERE msg.conversationId=conversations.id),'') WHERE lastStaffReadAt IS NULL");
+  await run("UPDATE conversations SET lastClientReadAt=COALESCE((SELECT MAX(createdAt) FROM messages msg WHERE msg.conversationId=conversations.id),'') WHERE lastClientReadAt IS NULL");
   await ensureColumn('firm_notices', 'clientId', "TEXT DEFAULT ''");
   await run("UPDATE documents SET clientVisible=1 WHERE noticeId IS NOT NULL AND noticeId<>'' AND COALESCE(clientVisible,0)<>1");
   await ensureColumn('clients', 'remindersEnabled', 'INTEGER DEFAULT 1');
@@ -817,6 +825,37 @@ app.post('/api/notifications/read', requireStaff, async (req, res) => {
   res.json({ ok: true });
 });
 
+const conversationSummarySelect = `SELECT conv.*, c.name clientName, m.title matterTitle, m.reference,
+      COALESCE(conv.status,'open') status,
+      (SELECT MAX(createdAt) FROM messages msg WHERE msg.conversationId=conv.id) lastMessageAt,
+      (SELECT senderRole FROM messages msg WHERE msg.conversationId=conv.id ORDER BY msg.createdAt DESC, msg.id DESC LIMIT 1) lastMessageSenderRole,
+      (SELECT COUNT(*) FROM messages msg WHERE msg.conversationId=conv.id) messageCount,
+      (SELECT COUNT(*) FROM messages msg WHERE msg.conversationId=conv.id AND msg.senderRole='client' AND (conv.lastStaffReadAt IS NULL OR conv.lastStaffReadAt='' OR msg.createdAt>conv.lastStaffReadAt)) staffUnreadCount,
+      (SELECT COUNT(*) FROM messages msg WHERE msg.conversationId=conv.id AND msg.senderRole<>'client' AND (conv.lastClientReadAt IS NULL OR conv.lastClientReadAt='' OR msg.createdAt>conv.lastClientReadAt)) clientUnreadCount
+    FROM conversations conv
+    LEFT JOIN clients c ON c.id=conv.clientId
+    LEFT JOIN matters m ON m.id=conv.matterId`;
+
+function publicConversation(row, req) {
+  if (!row) return row;
+  const staffUnreadCount = Number(row.staffUnreadCount || 0);
+  const clientUnreadCount = Number(row.clientUnreadCount || 0);
+  const unreadCount = req.user.role === 'client' ? clientUnreadCount : staffUnreadCount;
+  return {
+    ...row,
+    status: row.status || 'open',
+    staffUnreadCount: req.user.role === 'client' ? undefined : staffUnreadCount,
+    clientUnreadCount: req.user.role === 'client' ? clientUnreadCount : undefined,
+    unreadCount,
+    isUnread: unreadCount > 0,
+  };
+}
+
+async function conversationSummary(conversationId, req) {
+  const row = await get(`${conversationSummarySelect} WHERE conv.id=?`, [conversationId]);
+  return publicConversation(row, req);
+}
+
 app.get('/api/conversations', async (req, res) => {
   const params = [];
   const filters = [];
@@ -832,15 +871,10 @@ app.get('/api/conversations', async (req, res) => {
     params.push(req.query.matterId);
   }
   const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
-  const rows = await all(`SELECT conv.*, c.name clientName, m.title matterTitle, m.reference,
-      (SELECT MAX(createdAt) FROM messages msg WHERE msg.conversationId=conv.id) lastMessageAt,
-      (SELECT COUNT(*) FROM messages msg WHERE msg.conversationId=conv.id) messageCount
-    FROM conversations conv
-    LEFT JOIN clients c ON c.id=conv.clientId
-    LEFT JOIN matters m ON m.id=conv.matterId
+  const rows = await all(`${conversationSummarySelect}
     ${where}
     ORDER BY COALESCE(lastMessageAt, conv.createdAt) DESC`, params);
-  res.json(rows);
+  res.json(rows.map(row => publicConversation(row, req)));
 });
 
 app.post('/api/conversations', async (req, res) => {
@@ -859,13 +893,51 @@ app.post('/api/conversations', async (req, res) => {
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const id = genId('CONV');
   const subject = String(req.body.subject || '').trim() || (matterId ? 'Matter conversation' : 'General enquiry');
-  await run('INSERT INTO conversations (id,matterId,clientId,subject,createdAt) VALUES (?,?,?,?,?)', [id, matterId, clientId, subject, new Date().toISOString()]);
+  const now = new Date().toISOString();
+  await run('INSERT INTO conversations (id,matterId,clientId,subject,createdAt,status,statusUpdatedAt,lastStaffReadAt,lastClientReadAt) VALUES (?,?,?,?,?,?,?,?,?)', [id, matterId, clientId, subject, now, 'open', now, req.user.role === 'client' ? '' : now, req.user.role === 'client' ? now : '']);
   await logAudit(req, 'create', 'conversation', id, `Created conversation ${subject}`);
-  res.json(await get(`SELECT conv.*, c.name clientName, m.title matterTitle, m.reference
-    FROM conversations conv
-    LEFT JOIN clients c ON c.id=conv.clientId
-    LEFT JOIN matters m ON m.id=conv.matterId
-    WHERE conv.id=?`, [id]));
+  res.json(await conversationSummary(id, req));
+});
+
+app.post('/api/conversations/:id/read', async (req, res) => {
+  if (!(await canAccessConversation(req, req.params.id))) return res.status(403).json({ error: 'Conversation access denied' });
+  const conversation = await get('SELECT id,matterId,clientId FROM conversations WHERE id=?', [req.params.id]);
+  if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
+  const now = new Date().toISOString();
+  if (req.user.role === 'client') {
+    await run('UPDATE conversations SET lastClientReadAt=? WHERE id=?', [now, req.params.id]);
+  } else {
+    await run('UPDATE conversations SET lastStaffReadAt=? WHERE id=?', [now, req.params.id]);
+  }
+  await recordAuditEvent(req, {
+    action: 'conversation_mark_read',
+    entityType: 'conversation',
+    entityId: req.params.id,
+    matterId: conversation.matterId || '',
+    clientId: conversation.clientId || req.user.clientId || '',
+    metadata: { conversationId: req.params.id, side: req.user.role === 'client' ? 'client' : 'staff' },
+  }).catch(() => {});
+  res.json(await conversationSummary(req.params.id, req));
+});
+
+app.patch('/api/conversations/:id/status', requireStaff, async (req, res) => {
+  if (!(await canAccessConversation(req, req.params.id))) return res.status(403).json({ error: 'Conversation access denied' });
+  const status = String(req.body.status || '').trim().toLowerCase();
+  if (!CONVERSATION_STATUSES.has(status)) return res.status(400).json({ error: 'Invalid conversation status' });
+  const conversation = await get('SELECT id,matterId,clientId,status FROM conversations WHERE id=?', [req.params.id]);
+  if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
+  const now = new Date().toISOString();
+  await run('UPDATE conversations SET status=?, statusUpdatedAt=? WHERE id=?', [status, now, req.params.id]);
+  await logAudit(req, 'status', 'conversation', req.params.id, `Set conversation status to ${status}`);
+  await recordAuditEvent(req, {
+    action: 'conversation_status_update',
+    entityType: 'conversation',
+    entityId: req.params.id,
+    matterId: conversation.matterId || '',
+    clientId: conversation.clientId || '',
+    metadata: { conversationId: req.params.id, oldStatus: conversation.status || 'open', newStatus: status },
+  }).catch(() => {});
+  res.json(await conversationSummary(req.params.id, req));
 });
 
 app.get('/api/conversations/:id/messages', async (req, res) => {
@@ -892,7 +964,8 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
   const attachments = Array.isArray(req.body.attachments) ? req.body.attachments : [];
   if (!body && !attachments.length) return res.status(400).json({ error: 'Message body or attachment is required' });
   const id = genId('MSG');
-  await run('INSERT INTO messages (id,conversationId,senderId,senderRole,body,createdAt) VALUES (?,?,?,?,?,?)', [id, req.params.id, req.user.userId || '', req.user.role || '', body, new Date().toISOString()]);
+  const now = new Date().toISOString();
+  await run('INSERT INTO messages (id,conversationId,senderId,senderRole,body,createdAt) VALUES (?,?,?,?,?,?)', [id, req.params.id, req.user.userId || '', req.user.role || '', body, now]);
   for (const attachment of attachments) {
     if (!attachment?.name || !attachment?.data) continue;
     const buffer = Buffer.from(String(attachment.data).split(',').pop(), 'base64');
@@ -904,9 +977,11 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [docId, conversation.matterId || '', cleanName, attachment.displayName || cleanName, type, mimeType, today(), `${Math.max(1, Math.round(buffer.length / 1024))} KB`, buffer, req.user.role === 'client' ? 'client' : 'firm', null, id, null, 1, req.user.userId || '']);
   }
   if (req.user.role === 'client') {
+    await run("UPDATE conversations SET status='open', statusUpdatedAt=?, lastClientReadAt=? WHERE id=?", [now, now, req.params.id]);
     await notifyStaff('client_message', conversation.matterId || '', 'Client sent a message', `${conversation.clientName || req.user.fullName || 'Client'}: ${body.slice(0, 160)}`, conversation.clientId || req.user.clientId || '');
     await logClientActivity({ clientId: conversation.clientId || req.user.clientId || '', matterId: conversation.matterId || '', userId: req.user.userId || '', action: 'sent_message', summary: body.slice(0, 220) || 'Sent an attachment', entityType: 'message', entityId: id });
   } else {
+    await run('UPDATE conversations SET lastStaffReadAt=? WHERE id=?', [now, req.params.id]);
     await logClientActivity({ clientId: conversation.clientId || '', matterId: conversation.matterId || '', userId: req.user.userId || '', action: 'firm_sent_message', summary: body.slice(0, 220) || 'Sent an attachment', entityType: 'message', entityId: id });
   }
   await logAudit(req, 'create', 'message', id, `Added message to conversation ${conversation.subject || req.params.id}`);
