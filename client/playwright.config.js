@@ -6,6 +6,12 @@ export default defineConfig({
   expect: {
     timeout: 10000,
   },
+  webServer: {
+    command: 'npm run dev -- --host 127.0.0.1',
+    url: 'http://localhost:5173',
+    reuseExistingServer: true,
+    timeout: 120000,
+  },
   use: {
     baseURL: 'http://localhost:5173',
     screenshot: 'only-on-failure',

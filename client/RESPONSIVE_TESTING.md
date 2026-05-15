@@ -9,34 +9,41 @@ Playwright-based automated check for page-level horizontal overflow across staff
 
 ## How to run
 
+`npm run test:responsive` starts or reuses the Vite frontend automatically through Playwright. The backend must still be running and seeded unless a later phase adds backend webServer automation.
+
 ### 1. Start backend
 
 ```powershell
-cd server
+$nodeDir = "C:\Users\user 1\Documents\Codex\tools\node-v22.22.2-win-x64"
+cd "C:\Users\user 1\Documents\Codex\2026-05-03\we-have-lexflow-a-kenyan-law\server"
+$env:Path = "$nodeDir;$nodeDir\node_modules\npm\bin;$env:Path"
 npm run seed:demo
 npm start
 ```
 
-### 2. Start frontend
+### 2. Run responsive overflow checks
 
 ```powershell
-cd client
-npm run dev
-```
-
-### 3. Run responsive overflow checks
-
-```powershell
-cd client
+$nodeDir = "C:\Users\user 1\Documents\Codex\tools\node-v22.22.2-win-x64"
+cd "C:\Users\user 1\Documents\Codex\2026-05-03\we-have-lexflow-a-kenyan-law\client"
+$env:Path = "$nodeDir;$nodeDir\node_modules\npm\bin;$env:Path"
 npm run test:responsive
 ```
 
-### 4. Run with visible browser (headed mode)
+If a frontend dev server is already running at port 5173, Playwright reuses it.
+
+### 3. Run with visible browser (headed mode)
 
 ```powershell
-cd client
+$nodeDir = "C:\Users\user 1\Documents\Codex\tools\node-v22.22.2-win-x64"
+cd "C:\Users\user 1\Documents\Codex\2026-05-03\we-have-lexflow-a-kenyan-law\client"
+$env:Path = "$nodeDir;$nodeDir\node_modules\npm\bin;$env:Path"
 npm run test:responsive:headed
 ```
+
+## What the test checks
+
+The test checks page-level horizontal overflow at 360, 390, 768, and 1280 px widths.
 
 ## Expected pass criteria
 
