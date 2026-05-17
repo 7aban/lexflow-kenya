@@ -228,6 +228,11 @@ async function initDb() {
   await ensureColumn('payments', 'createdBy', 'TEXT');
   await ensureColumn('payments', 'createdAt', 'TEXT');
   await run("UPDATE payments SET createdAt=COALESCE(NULLIF(createdAt,''), COALESCE(NULLIF(date,''), CURRENT_TIMESTAMP)) WHERE createdAt IS NULL OR createdAt=''");
+  await ensureColumn('payments', 'receiptNumber', 'TEXT');
+  await ensureColumn('payments', 'receiptIssuedAt', 'TEXT');
+  await run(`CREATE TABLE IF NOT EXISTS receipt_sequences (year TEXT PRIMARY KEY, lastSeq INTEGER NOT NULL DEFAULT 0)`);
+  await run('CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_receiptNumber ON payments(receiptNumber) WHERE receiptNumber IS NOT NULL AND receiptNumber<>""');
+  await backfillSeededReceiptNumbers();
   await seedReminderTemplates();
 
   const userCount = await get('SELECT COUNT(*) AS count FROM users');
@@ -1791,6 +1796,35 @@ async function invoicePaymentSummary(invoiceId, invoiceAmount = 0) {
   };
 }
 
+async function nextReceiptNumber(year) {
+  const yearKey = String(year || new Date().getFullYear());
+  await run('INSERT OR IGNORE INTO receipt_sequences (year, lastSeq) VALUES (?, 0)', [yearKey]);
+  await run('UPDATE receipt_sequences SET lastSeq=lastSeq+1 WHERE year=?', [yearKey]);
+  const row = await get('SELECT lastSeq FROM receipt_sequences WHERE year=?', [yearKey]);
+  const seq = Number(row?.lastSeq || 1);
+  return `RCPT-${yearKey}-${String(seq).padStart(6, '0')}`;
+}
+
+async function backfillSeededReceiptNumbers() {
+  const rows = await all('SELECT id, date, createdAt FROM payments WHERE receiptNumber IS NULL OR receiptNumber=""');
+  if (!rows.length) return;
+  const yearOf = row => {
+    const source = row.date || row.createdAt || '';
+    const match = /^(\d{4})/.exec(String(source));
+    return match ? match[1] : String(new Date().getFullYear());
+  };
+  const ordered = rows.slice().sort((a, b) => {
+    const ay = yearOf(a);
+    const by = yearOf(b);
+    if (ay !== by) return ay.localeCompare(by);
+    return String(a.createdAt || a.date || '').localeCompare(String(b.createdAt || b.date || ''));
+  });
+  for (const row of ordered) {
+    const number = await nextReceiptNumber(yearOf(row));
+    await run('UPDATE payments SET receiptNumber=?, receiptIssuedAt=COALESCE(NULLIF(receiptIssuedAt,""), ?) WHERE id=?', [number, row.createdAt || row.date || new Date().toISOString(), row.id]);
+  }
+}
+
 async function attachInvoiceSummary(invoice) {
   if (!invoice) return invoice;
   Object.assign(invoice, await invoicePaymentSummary(invoice.id, invoice.amount));
@@ -1824,6 +1858,8 @@ function publicPayment(row, { client = false } = {}) {
     note: client ? '' : row.note || '',
     proofId: row.proofId || '',
     createdAt: row.createdAt || '',
+    receiptNumber: row.receiptNumber || '',
+    receiptIssuedAt: row.receiptIssuedAt || '',
   };
 }
 
@@ -1913,7 +1949,7 @@ app.get('/api/invoices/:id/payments', async (req, res) => {
     await recordAuditEvent(req, { action: 'forbidden_invoice_payments', entityType: 'invoice', entityId: req.params.id, metadata: { reason: 'billing_visibility_disabled' } }).catch(() => {});
     return res.status(403).json({ error: 'Billing access restricted' });
   }
-  const payments = await all('SELECT id,invoiceId,matterId,clientId,amount,method,reference,date,note,proofId,createdAt FROM payments WHERE invoiceId=? ORDER BY date DESC, createdAt DESC', [req.params.id]);
+  const payments = await all('SELECT id,invoiceId,matterId,clientId,amount,method,reference,date,note,proofId,createdAt,receiptNumber,receiptIssuedAt FROM payments WHERE invoiceId=? ORDER BY date DESC, createdAt DESC', [req.params.id]);
   res.json({ invoice, payments: payments.map(row => publicPayment(row, { client: req.user.role === 'client' })) });
 });
 app.post('/api/invoices/:id/payments', async (req, res) => {
@@ -1937,7 +1973,10 @@ app.post('/api/invoices/:id/payments', async (req, res) => {
   }
   const id = genId('PAY');
   const createdAt = new Date().toISOString();
-  await run('INSERT INTO payments (id,invoiceId,matterId,clientId,amount,method,reference,date,note,proofId,createdBy,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', [
+  const receiptYear = /^(\d{4})/.exec(date)?.[1] || String(new Date().getFullYear());
+  const receiptNumber = await nextReceiptNumber(receiptYear);
+  const receiptIssuedAt = createdAt;
+  await run('INSERT INTO payments (id,invoiceId,matterId,clientId,amount,method,reference,date,note,proofId,createdBy,createdAt,receiptNumber,receiptIssuedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [
     id,
     invoice.id,
     invoice.matterId,
@@ -1950,6 +1989,8 @@ app.post('/api/invoices/:id/payments', async (req, res) => {
     proofId,
     req.user.userId || '',
     createdAt,
+    receiptNumber,
+    receiptIssuedAt,
   ]);
   const updatedSummary = await invoicePaymentSummary(invoice.id, invoice.amount);
   const oldStatus = invoice.status || 'Outstanding';
@@ -1975,9 +2016,9 @@ app.post('/api/invoices/:id/payments', async (req, res) => {
     entityId: invoice.id,
     matterId: invoice.matterId || '',
     clientId: invoice.clientId || '',
-    metadata: { invoiceId: invoice.id, paymentId: id, amount, method, date, proofLinked: Boolean(proofId), amountPaid: updatedSummary.amountPaid, balance: updatedSummary.balance },
+    metadata: { invoiceId: invoice.id, paymentId: id, amount, method, date, proofLinked: Boolean(proofId), amountPaid: updatedSummary.amountPaid, balance: updatedSummary.balance, receiptNumber },
   }).catch(() => {});
-  res.json({ invoice: await invoiceWithDetails(invoice.id), payment: publicPayment(await get('SELECT id,invoiceId,matterId,clientId,amount,method,reference,date,note,proofId,createdAt FROM payments WHERE id=?', [id])) });
+  res.json({ invoice: await invoiceWithDetails(invoice.id), payment: publicPayment(await get('SELECT id,invoiceId,matterId,clientId,amount,method,reference,date,note,proofId,createdAt,receiptNumber,receiptIssuedAt FROM payments WHERE id=?', [id])) });
 });
 app.patch('/api/invoices/:id/status', requireAdmin, async (req, res) => {
   if (!['Paid', 'Outstanding', 'Overdue'].includes(req.body.status)) return res.status(400).json({ error: 'Invalid invoice status' });
@@ -2059,11 +2100,83 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
   doc.end();
 });
 
+app.get('/api/invoices/:invoiceId/payments/:paymentId/receipt.pdf', async (req, res) => {
+  const { invoiceId, paymentId } = req.params;
+  if (!(await canAccessInvoice(req, invoiceId))) {
+    await recordAuditEvent(req, { action: 'forbidden_invoice_access', entityType: 'invoice', entityId: invoiceId, metadata: { reason: 'insufficient permissions', route: 'payment_receipt_pdf' } }).catch(() => {});
+    return res.status(403).json({ error: 'Invoice access denied' });
+  }
+  if (req.user.role === 'advocate' && !(await isBillingVisibleFor(req))) {
+    await recordAuditEvent(req, { action: 'forbidden_payment_receipt', entityType: 'payment', entityId: paymentId, metadata: { invoiceId, reason: 'billing_visibility_disabled' } }).catch(() => {});
+    return res.status(403).json({ error: 'Billing access restricted' });
+  }
+  const invoice = await invoiceWithDetails(invoiceId);
+  if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+  const payment = await get('SELECT id,invoiceId,matterId,clientId,amount,method,reference,date,note,proofId,createdBy,createdAt,receiptNumber,receiptIssuedAt FROM payments WHERE id=? AND invoiceId=?', [paymentId, invoiceId]);
+  if (!payment) return res.status(404).json({ error: 'Payment not found' });
+  if (!payment.receiptNumber) return res.status(404).json({ error: 'Receipt not available for this payment' });
+  const receivedBy = payment.createdBy ? await get('SELECT fullName FROM users WHERE id=?', [payment.createdBy]) : null;
+  await recordAuditEvent(req, {
+    action: 'payment_receipt_downloaded',
+    entityType: 'payment',
+    entityId: payment.id,
+    matterId: invoice.matterId || '',
+    clientId: invoice.clientId || '',
+    metadata: {
+      paymentId: payment.id,
+      invoiceId,
+      matterId: invoice.matterId || '',
+      clientId: invoice.clientId || '',
+      receiptNumber: payment.receiptNumber,
+      amount: Number(payment.amount || 0),
+      route: 'payment_receipt_pdf',
+    },
+  }).catch(() => {});
+  const firm = await getFirmSettings();
+  const doc = new PDFDocument({ size: 'A4', margin: 48 });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${payment.receiptNumber}.pdf"`);
+  doc.pipe(res);
+  doc.rect(48, 42, 52, 52).fill(firm.primaryColor || '#1B3A5C');
+  if (firm.logo && String(firm.logo).startsWith('data:image')) {
+    try { doc.image(Buffer.from(String(firm.logo).split(',').pop(), 'base64'), 52, 46, { fit: [44, 44] }); } catch { doc.fillColor('#fff').fontSize(18).font('Helvetica-Bold').text('LF', 64, 60); }
+  } else {
+    doc.fillColor('#fff').fontSize(18).font('Helvetica-Bold').text('LF', 64, 60);
+  }
+  doc.fillColor('#111827').fontSize(22).text(firm.name || 'LexFlow Kenya', 112, 46);
+  doc.fontSize(10).fillColor('#6B7280').font('Helvetica').text(firm.address || 'Kenyan Law Practice Management', 112, 74);
+  doc.fillColor('#1B3A5C').fontSize(24).font('Helvetica-Bold').text('PAYMENT RECEIPT', 320, 48, { align: 'right', width: 227 });
+  doc.moveTo(48, 112).lineTo(547, 112).strokeColor('#E5E7EB').stroke();
+  doc.fillColor('#111827').fontSize(10).font('Helvetica-Bold').text('Received From', 48, 132);
+  doc.font('Helvetica').fillColor('#374151').text(invoice.clientName || 'Client', 48, 150).text(invoice.clientAddress || invoice.clientEmail || invoice.clientPhone || 'Address on file', 48, 166, { width: 230 });
+  [['Receipt #', payment.receiptNumber], ['Payment Date', payment.date || ''], ['Issued', (payment.receiptIssuedAt || '').slice(0, 10)], ['Method', payment.method || '-']].forEach(([label, value], i) => {
+    const y = 132 + i * 18;
+    doc.font('Helvetica-Bold').fillColor('#6B7280').text(label, 350, y);
+    doc.font('Helvetica').fillColor('#111827').text(String(value || ''), 440, y, { width: 105, align: 'right' });
+  });
+  doc.font('Helvetica-Bold').fillColor('#111827').fontSize(11).text('Matter', 48, 220);
+  doc.font('Helvetica').fontSize(10).text(`${invoice.reference || ''} ${invoice.matterTitle || ''}`.trim() || '-', 48, 238, { width: 460 });
+  doc.font('Helvetica-Bold').fillColor('#111827').fontSize(11).text('Invoice', 48, 266);
+  doc.font('Helvetica').fontSize(10).text(`${invoice.number || invoice.id} (Total ${money(Number(invoice.amount || 0))})`, 48, 284, { width: 460 });
+  doc.font('Helvetica-Bold').fillColor('#111827').fontSize(11).text('Reference', 48, 312);
+  doc.font('Helvetica').fontSize(10).text(payment.reference || '-', 48, 330, { width: 460 });
+  doc.font('Helvetica-Bold').fillColor('#111827').fontSize(11).text('Received By', 48, 358);
+  doc.font('Helvetica').fontSize(10).text(receivedBy?.fullName || 'Firm', 48, 376, { width: 460 });
+  const summaryTop = 420;
+  doc.rect(48, summaryTop, 499, 24).fill('#F3F4F6');
+  doc.fillColor('#374151').font('Helvetica-Bold').fontSize(9).text('Description', 56, summaryTop + 8).text('Amount Received', 380, summaryTop + 8, { width: 160, align: 'right' });
+  doc.font('Helvetica').fontSize(10).fillColor('#111827').text(`Payment against invoice ${invoice.number || invoice.id}`, 56, summaryTop + 36, { width: 320 });
+  doc.font('Helvetica-Bold').fontSize(12).fillColor('#1B3A5C').text(money(Number(payment.amount || 0)), 380, summaryTop + 36, { width: 160, align: 'right' });
+  doc.font('Helvetica').fontSize(10).fillColor('#374151').text('This is a payment receipt issued against the invoice referenced above. It does not replace or alter the invoice tax treatment.', 48, summaryTop + 90, { width: 499 });
+  doc.font('Helvetica').fontSize(9).fillColor('#6B7280').text(`${firm.name || 'LexFlow Kenya'} | ${firm.address || 'Nairobi, Kenya'} | ${firm.email || 'accounts@lexflow.co.ke'} | ${firm.phone || '+254 700 123456'}`, 48, 760, { align: 'center', width: 499 });
+  doc.end();
+});
+
 app.get('/api/client/dashboard', async (req, res) => {
   if (req.user.role !== 'client') return res.status(403).json({ error: 'Client access required' });
   const data = await getClientDashboardData(req.user.clientId || '', req);
   await attachInvoiceSummaries(data.invoices || []);
-  data.invoicePayments = (await all('SELECT id,invoiceId,matterId,clientId,amount,method,reference,date,note,proofId,createdAt FROM payments WHERE clientId=? ORDER BY date DESC, createdAt DESC', [req.user.clientId || ''])).map(row => publicPayment(row, { client: true }));
+  data.invoicePayments = (await all('SELECT id,invoiceId,matterId,clientId,amount,method,reference,date,note,proofId,createdAt,receiptNumber,receiptIssuedAt FROM payments WHERE clientId=? ORDER BY date DESC, createdAt DESC', [req.user.clientId || ''])).map(row => publicPayment(row, { client: true }));
   res.json(data);
 });
 

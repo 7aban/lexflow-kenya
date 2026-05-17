@@ -223,6 +223,9 @@ export const deleteNotice = id => api(`/notices/${id}`, { method: 'DELETE' });
 export const uploadPaymentProof = data => api('/payment-proofs', { method: 'POST', body: data });
 export const listInvoicePayments = invoiceId => api(`/invoices/${invoiceId}/payments`);
 export const recordInvoicePayment = (invoiceId, payload) => api(`/invoices/${invoiceId}/payments`, { method: 'POST', body: payload });
+export const paymentReceiptUrl = (invoiceId, paymentId) => `/api/invoices/${invoiceId}/payments/${paymentId}/receipt.pdf`;
+export const downloadPaymentReceipt = (invoiceId, paymentId, receiptNumber) =>
+  downloadWithAuth(paymentReceiptUrl(invoiceId, paymentId), `${receiptNumber || paymentId}.pdf`);
 export const getInvitations = () => api('/invitations');
 export const createInvitation = data => api('/invitations', { method: 'POST', body: data });
 export const verifyInvitation = token => api(`/invitations/${token}`);

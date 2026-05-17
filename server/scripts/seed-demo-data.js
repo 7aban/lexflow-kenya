@@ -30,7 +30,7 @@ const defaultReminderTemplates = [
 
 async function createSchema() {
   const tables = [
-    'audit_logs', 'notifications', 'payment_proofs', 'payments', 'expenses', 'disbursements', 'invoice_items', 'invoices',
+    'audit_logs', 'notifications', 'payment_proofs', 'payments', 'receipt_sequences', 'expenses', 'disbursements', 'invoice_items', 'invoices',
     'messages', 'conversations', 'client_activity', 'case_notes', 'documents', 'folders', 'appearances', 'time_entries', 'tasks', 'deadlines', 'matters', 'clients',
     'users', 'integrations_log', 'firm_settings', 'reminder_settings', 'reminder_templates', 'reminder_logs',
     'firm_notices', 'invitations',
@@ -49,7 +49,8 @@ async function createSchema() {
   await run(`CREATE TABLE case_notes (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, content TEXT NOT NULL, author TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE invoices (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, clientId TEXT, number TEXT, date TEXT, amount REAL DEFAULT 0, status TEXT DEFAULT 'Outstanding', dueDate TEXT, description TEXT, source TEXT DEFAULT 'time')`);
   await run(`CREATE TABLE invoice_items (id TEXT PRIMARY KEY, invoiceId TEXT NOT NULL, timeEntryId TEXT, date TEXT, description TEXT, hours REAL DEFAULT 0, rate REAL DEFAULT 0, amount REAL DEFAULT 0)`);
-  await run(`CREATE TABLE payments (id TEXT PRIMARY KEY, invoiceId TEXT NOT NULL, matterId TEXT NOT NULL, clientId TEXT NOT NULL, amount REAL NOT NULL, method TEXT, reference TEXT, date TEXT NOT NULL, note TEXT, proofId TEXT, createdBy TEXT, createdAt TEXT NOT NULL)`);
+  await run(`CREATE TABLE payments (id TEXT PRIMARY KEY, invoiceId TEXT NOT NULL, matterId TEXT NOT NULL, clientId TEXT NOT NULL, amount REAL NOT NULL, method TEXT, reference TEXT, date TEXT NOT NULL, note TEXT, proofId TEXT, createdBy TEXT, createdAt TEXT NOT NULL, receiptNumber TEXT, receiptIssuedAt TEXT)`);
+  await run(`CREATE TABLE receipt_sequences (year TEXT PRIMARY KEY, lastSeq INTEGER NOT NULL DEFAULT 0)`);
   await run(`CREATE TABLE disbursements (id TEXT PRIMARY KEY, matterId TEXT, invoiceId TEXT, description TEXT, amount REAL DEFAULT 0, date TEXT, billed INTEGER DEFAULT 0)`);
   await run(`CREATE TABLE expenses (id TEXT PRIMARY KEY, matterId TEXT, category TEXT, description TEXT, amount REAL DEFAULT 0, date TEXT, vendor TEXT)`);
   await run(`CREATE TABLE integrations_log (id TEXT PRIMARY KEY, type TEXT NOT NULL, matterId TEXT, clientId TEXT, recipient TEXT, message TEXT, status TEXT, createdAt TEXT)`);
@@ -165,6 +166,7 @@ async function main() {
   }
 
   const invoices = [];
+  let seededReceiptSeq = 0;
   for (let i = 0; i < 12; i += 1) {
     const matter = matters[i];
     const invId = id('INV');
@@ -179,10 +181,14 @@ async function main() {
     }
     if (status === 'Paid' || i % 5 === 1) {
       const paidAmount = status === 'Paid' ? amount : Math.round(amount * 0.4);
-      await run('INSERT INTO payments (id,invoiceId,matterId,clientId,amount,method,reference,date,note,proofId,createdBy,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', [id('PAY'), invId, matter.id, matter.clientId, paidAmount, pick(['M-PESA', 'Bank Transfer', 'Cash'], i), moneyRef(i), daysAgo(20 - i), status === 'Paid' ? 'Full settlement' : 'Partial payment', '', admin.id, nowIso()]);
+      seededReceiptSeq += 1;
+      const receiptNumber = `RCPT-2026-${String(seededReceiptSeq).padStart(6, '0')}`;
+      const receiptIssuedAt = nowIso();
+      await run('INSERT INTO payments (id,invoiceId,matterId,clientId,amount,method,reference,date,note,proofId,createdBy,createdAt,receiptNumber,receiptIssuedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [id('PAY'), invId, matter.id, matter.clientId, paidAmount, pick(['M-PESA', 'Bank Transfer', 'Cash'], i), moneyRef(i), daysAgo(20 - i), status === 'Paid' ? 'Full settlement' : 'Partial payment', '', admin.id, nowIso(), receiptNumber, receiptIssuedAt]);
       await run('INSERT INTO payment_proofs (id,invoiceId,matterId,clientId,method,reference,amount,note,fileName,mimeType,size,content,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', [id('PP'), invId, matter.id, matter.clientId, 'M-PESA', moneyRef(i), paidAmount, 'Demo payment proof', `payment-${i + 1}.png`, 'image/png', '14 KB', Buffer.from('demo payment proof'), nowIso()]);
     }
   }
+  await run('INSERT INTO receipt_sequences (year, lastSeq) VALUES (?, ?)', ['2026', seededReceiptSeq]);
 
   for (let i = 0; i < 18; i += 1) {
     const matter = matters[i % matters.length];
