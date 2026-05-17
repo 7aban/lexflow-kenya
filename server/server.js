@@ -174,6 +174,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS case_notes (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, content TEXT NOT NULL, author TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS invoices (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, clientId TEXT, number TEXT, date TEXT, amount REAL DEFAULT 0, status TEXT DEFAULT 'Outstanding', dueDate TEXT, description TEXT, source TEXT DEFAULT 'time')`);
   await run(`CREATE TABLE IF NOT EXISTS invoice_items (id TEXT PRIMARY KEY, invoiceId TEXT NOT NULL, timeEntryId TEXT, date TEXT, description TEXT, hours REAL DEFAULT 0, rate REAL DEFAULT 0, amount REAL DEFAULT 0)`);
+  await run(`CREATE TABLE IF NOT EXISTS payments (id TEXT PRIMARY KEY, invoiceId TEXT NOT NULL, matterId TEXT NOT NULL, clientId TEXT NOT NULL, amount REAL NOT NULL, method TEXT, reference TEXT, date TEXT NOT NULL, note TEXT, proofId TEXT, createdBy TEXT, createdAt TEXT NOT NULL)`);
   await run(`CREATE TABLE IF NOT EXISTS integrations_log (id TEXT PRIMARY KEY, type TEXT NOT NULL, matterId TEXT, clientId TEXT, recipient TEXT, message TEXT, status TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS firm_settings (id TEXT PRIMARY KEY, name TEXT, logo TEXT, primaryColor TEXT, accentColor TEXT, websiteURL TEXT, email TEXT, phone TEXT, address TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS reminder_settings (id TEXT PRIMARY KEY, remindersEnabled INTEGER DEFAULT 1, whatsappEnabled INTEGER DEFAULT 0, emailEnabled INTEGER DEFAULT 0, twilioSid TEXT, twilioToken TEXT, twilioFromNumber TEXT, smtpHost TEXT, smtpPort TEXT, smtpUser TEXT, smtpPass TEXT)`);
@@ -223,6 +224,10 @@ async function initDb() {
   await ensureColumn('users', 'isActive', 'INTEGER DEFAULT 1');
   await ensureColumn('firm_settings', 'themeJson', 'TEXT');
   await ensureColumn('firm_settings', 'advocateBillingVisibility', 'INTEGER DEFAULT 1');
+  await ensureColumn('payments', 'proofId', 'TEXT');
+  await ensureColumn('payments', 'createdBy', 'TEXT');
+  await ensureColumn('payments', 'createdAt', 'TEXT');
+  await run("UPDATE payments SET createdAt=COALESCE(NULLIF(createdAt,''), COALESCE(NULLIF(date,''), CURRENT_TIMESTAMP)) WHERE createdAt IS NULL OR createdAt=''");
   await seedReminderTemplates();
 
   const userCount = await get('SELECT COUNT(*) AS count FROM users');
@@ -1218,11 +1223,12 @@ app.get('/api/matters/:id', async (req, res) => {
     all('SELECT * FROM invoices WHERE matterId=? ORDER BY date DESC', [req.params.id]),
     all('SELECT * FROM appearances WHERE matterId=? ORDER BY date', [req.params.id])
   ]);
+  await attachInvoiceSummaries(invoices);
   if (req.user.role === 'advocate' && !(await isBillingVisibleFor(req))) {
     matter.totalBilled = null;
     matter.fixedFee = null;
     for (const te of timeEntries) te.rate = null;
-    for (const inv of invoices) inv.amount = null;
+    for (const inv of invoices) maskInvoiceBilling(inv);
   }
   res.json({ ...matter, tasks, timeEntries, documents: documents.map(publicDocument), notes, invoices, appearances });
 });
@@ -1772,6 +1778,55 @@ app.post('/api/matters/:id/notes', async (req, res) => {
   res.json(note);
 });
 
+async function invoicePaymentSummary(invoiceId, invoiceAmount = 0) {
+  const row = await get('SELECT COALESCE(SUM(amount),0) amountPaid, COUNT(*) paymentCount, MAX(date) lastPaymentAt FROM payments WHERE invoiceId=?', [invoiceId]);
+  const amountPaid = Number(row?.amountPaid || 0);
+  const amount = Number(invoiceAmount || 0);
+  return {
+    amountPaid,
+    balance: Math.max(amount - amountPaid, 0),
+    paymentCount: Number(row?.paymentCount || 0),
+    lastPaymentAt: row?.lastPaymentAt || '',
+    isPaid: amount > 0 && amountPaid >= amount,
+  };
+}
+
+async function attachInvoiceSummary(invoice) {
+  if (!invoice) return invoice;
+  Object.assign(invoice, await invoicePaymentSummary(invoice.id, invoice.amount));
+  return invoice;
+}
+
+async function attachInvoiceSummaries(invoices = []) {
+  for (const invoice of invoices) await attachInvoiceSummary(invoice);
+  return invoices;
+}
+
+function maskInvoiceBilling(invoice) {
+  invoice.amount = null;
+  invoice.amountPaid = null;
+  invoice.balance = null;
+  invoice.paymentCount = null;
+  invoice.lastPaymentAt = null;
+  invoice.isPaid = null;
+}
+
+function publicPayment(row, { client = false } = {}) {
+  return {
+    id: row.id,
+    invoiceId: row.invoiceId,
+    matterId: row.matterId,
+    clientId: row.clientId,
+    amount: Number(row.amount || 0),
+    method: row.method || '',
+    reference: row.reference || '',
+    date: row.date || '',
+    note: client ? '' : row.note || '',
+    proofId: row.proofId || '',
+    createdAt: row.createdAt || '',
+  };
+}
+
 app.get('/api/invoices', async (req, res) => {
   let invoices;
   if (req.user.role === 'client') {
@@ -1781,8 +1836,9 @@ app.get('/api/invoices', async (req, res) => {
   } else {
     invoices = await all(`SELECT i.*, m.title matterTitle, m.reference, c.name clientName FROM invoices i LEFT JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId ORDER BY i.date DESC, i.number DESC`);
   }
+  await attachInvoiceSummaries(invoices);
   if (req.user.role === 'advocate' && !(await isBillingVisibleFor(req))) {
-    for (const inv of invoices) inv.amount = null;
+    for (const inv of invoices) maskInvoiceBilling(inv);
   }
   res.json(invoices);
 });
@@ -1795,7 +1851,7 @@ app.get('/api/invoices/:id', async (req, res) => {
     return res.status(403).json({ error: 'Invoice access denied' });
   }
   if (req.user.role === 'advocate' && !(await isBillingVisibleFor(req))) {
-    invoice.amount = null;
+    maskInvoiceBilling(invoice);
     if (invoice.items) {
       for (const item of invoice.items) { item.rate = null; item.amount = null; }
     }
@@ -1843,9 +1899,86 @@ async function invoiceWithDetails(id) {
   const invoice = await get(`SELECT i.*, m.title matterTitle, m.reference, c.name clientName, c.email clientEmail, c.phone clientPhone, c.contact clientAddress FROM invoices i LEFT JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId WHERE i.id=?`, [id]);
   if (!invoice) return null;
   invoice.items = await all('SELECT * FROM invoice_items WHERE invoiceId=? ORDER BY date', [id]);
-  return invoice;
+  return attachInvoiceSummary(invoice);
 }
 app.get('/api/invoices/:id', async (req, res) => { const invoice = await invoiceWithDetails(req.params.id); if (!invoice) return res.status(404).json({ error: 'Invoice not found' }); if (!(await canAccessInvoice(req, req.params.id))) return res.status(403).json({ error: 'Invoice access denied' }); res.json(invoice); });
+app.get('/api/invoices/:id/payments', async (req, res) => {
+  const invoice = await invoiceWithDetails(req.params.id);
+  if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+  if (!(await canAccessInvoice(req, req.params.id))) {
+    await recordAuditEvent(req, { action: 'forbidden_invoice_access', entityType: 'invoice', entityId: req.params.id, metadata: { reason: 'insufficient permissions', route: 'invoice_payments_read' } }).catch(() => {});
+    return res.status(403).json({ error: 'Invoice access denied' });
+  }
+  if (req.user.role === 'advocate' && !(await isBillingVisibleFor(req))) {
+    await recordAuditEvent(req, { action: 'forbidden_invoice_payments', entityType: 'invoice', entityId: req.params.id, metadata: { reason: 'billing_visibility_disabled' } }).catch(() => {});
+    return res.status(403).json({ error: 'Billing access restricted' });
+  }
+  const payments = await all('SELECT id,invoiceId,matterId,clientId,amount,method,reference,date,note,proofId,createdAt FROM payments WHERE invoiceId=? ORDER BY date DESC, createdAt DESC', [req.params.id]);
+  res.json({ invoice, payments: payments.map(row => publicPayment(row, { client: req.user.role === 'client' })) });
+});
+app.post('/api/invoices/:id/payments', async (req, res) => {
+  if (!['admin', 'assistant'].includes(req.user.role)) return res.status(403).json({ error: 'Admin or assistant access required' });
+  const invoice = await invoiceWithDetails(req.params.id);
+  if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+  if (!(await canAccessInvoice(req, req.params.id))) return res.status(403).json({ error: 'Invoice access denied' });
+  const amount = Number(req.body.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: 'Payment amount must be greater than zero' });
+  const summary = await invoicePaymentSummary(invoice.id, invoice.amount);
+  if (amount - summary.balance > 0.0001) return res.status(400).json({ error: 'Payment exceeds invoice balance' });
+  const date = String(req.body.date || today()).trim();
+  if (!date) return res.status(400).json({ error: 'Payment date is required' });
+  const method = String(req.body.method || '').trim().slice(0, 80);
+  const reference = String(req.body.reference || '').trim().slice(0, 120);
+  const note = String(req.body.note || '').trim().slice(0, 500);
+  const proofId = String(req.body.proofId || '').trim();
+  if (proofId) {
+    const proof = await get('SELECT id,invoiceId,matterId,clientId FROM payment_proofs WHERE id=?', [proofId]);
+    if (!proof || proof.invoiceId !== invoice.id || proof.matterId !== invoice.matterId || proof.clientId !== invoice.clientId) return res.status(400).json({ error: 'Payment proof does not match this invoice' });
+  }
+  const id = genId('PAY');
+  const createdAt = new Date().toISOString();
+  await run('INSERT INTO payments (id,invoiceId,matterId,clientId,amount,method,reference,date,note,proofId,createdBy,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', [
+    id,
+    invoice.id,
+    invoice.matterId,
+    invoice.clientId || '',
+    amount,
+    method,
+    reference,
+    date,
+    note,
+    proofId,
+    req.user.userId || '',
+    createdAt,
+  ]);
+  const updatedSummary = await invoicePaymentSummary(invoice.id, invoice.amount);
+  const oldStatus = invoice.status || 'Outstanding';
+  let newStatus = oldStatus;
+  if (updatedSummary.isPaid && oldStatus !== 'Paid') newStatus = 'Paid';
+  if (!updatedSummary.isPaid && oldStatus === 'Paid') newStatus = 'Outstanding';
+  if (newStatus !== oldStatus) {
+    await run('UPDATE invoices SET status=? WHERE id=?', [newStatus, invoice.id]);
+    await logAudit(req, 'status', 'invoice', invoice.id, `Set invoice ${invoice.number || invoice.id} status to ${newStatus}`);
+    await recordAuditEvent(req, {
+      action: 'invoice_status_updated',
+      entityType: 'invoice',
+      entityId: invoice.id,
+      matterId: invoice.matterId || '',
+      clientId: invoice.clientId || '',
+      metadata: { invoiceId: invoice.id, number: invoice.number || '', oldStatus, newStatus, reason: 'payment_recorded', paymentId: id, amountPaid: updatedSummary.amountPaid, balance: updatedSummary.balance },
+    }).catch(() => {});
+  }
+  await logAudit(req, 'record_payment', 'invoice', invoice.id, `Recorded payment for invoice ${invoice.number || invoice.id}`);
+  await recordAuditEvent(req, {
+    action: 'invoice_payment_recorded',
+    entityType: 'invoice',
+    entityId: invoice.id,
+    matterId: invoice.matterId || '',
+    clientId: invoice.clientId || '',
+    metadata: { invoiceId: invoice.id, paymentId: id, amount, method, date, proofLinked: Boolean(proofId), amountPaid: updatedSummary.amountPaid, balance: updatedSummary.balance },
+  }).catch(() => {});
+  res.json({ invoice: await invoiceWithDetails(invoice.id), payment: publicPayment(await get('SELECT id,invoiceId,matterId,clientId,amount,method,reference,date,note,proofId,createdAt FROM payments WHERE id=?', [id])) });
+});
 app.patch('/api/invoices/:id/status', requireAdmin, async (req, res) => {
   if (!['Paid', 'Outstanding', 'Overdue'].includes(req.body.status)) return res.status(400).json({ error: 'Invalid invoice status' });
   const oldInvoice = await get('SELECT number,status,matterId,clientId FROM invoices WHERE id=?', [req.params.id]);
@@ -1929,6 +2062,8 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
 app.get('/api/client/dashboard', async (req, res) => {
   if (req.user.role !== 'client') return res.status(403).json({ error: 'Client access required' });
   const data = await getClientDashboardData(req.user.clientId || '', req);
+  await attachInvoiceSummaries(data.invoices || []);
+  data.invoicePayments = (await all('SELECT id,invoiceId,matterId,clientId,amount,method,reference,date,note,proofId,createdAt FROM payments WHERE clientId=? ORDER BY date DESC, createdAt DESC', [req.user.clientId || ''])).map(row => publicPayment(row, { client: true }));
   res.json(data);
 });
 

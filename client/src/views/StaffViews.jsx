@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { IconBriefcase, IconClock, IconCoin, IconAlertTriangle } from '@tabler/icons-react';
-import { api, downloadWithAuth, fileToDataUrl, readSession } from '../lib/apiClient.js';
+import { api, downloadWithAuth, fileToDataUrl, listInvoicePayments, readSession, recordInvoicePayment } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, Skeleton, Stat, statusTone, Sub, Table } from '../components/ui.jsx';
@@ -576,7 +576,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
                   <Sub title="Court appearances">{canManage && <form onSubmit={createEvent} style={{ ...styles.formGrid, marginBottom: 12 }}><Field label="Title"><input required style={styles.input} value={eventForm.title} onChange={e => setEventForm({ ...eventForm, title: e.target.value })} /></Field><Field label="Date"><input required type="date" style={styles.input} value={eventForm.date} onChange={e => setEventForm({ ...eventForm, date: e.target.value })} /></Field><Field label="Time"><input style={styles.input} value={eventForm.time} onChange={e => setEventForm({ ...eventForm, time: e.target.value })} /></Field><Field label="Type"><input style={styles.input} value={eventForm.type} onChange={e => setEventForm({ ...eventForm, type: e.target.value })} /></Field><Field label="Location"><input style={styles.input} value={eventForm.location} onChange={e => setEventForm({ ...eventForm, location: e.target.value })} /></Field><Field label="Meeting Link"><input type="url" placeholder="https://..." style={styles.input} value={eventForm.meetingLink} onChange={e => setEventForm({ ...eventForm, meetingLink: e.target.value })} /></Field><button style={styles.ghostButton}>Schedule event</button></form>}<AppearanceEditorList events={detail.appearances || []} canManage={canManage} editingEvent={editingEvent} setEditingEvent={setEditingEvent} saveEvent={saveEvent} confirmDelete={event => setConfirm({ title: 'Delete appearance?', message: 'Delete this court appearance?', onConfirm: () => deleteEventRecord(event) })} /></Sub>
                   <Sub title="Documents"><MatterDocuments matterId={detail.id} canManage={canManage} notify={notify} /></Sub>
                   <Sub title="Case notes"><form onSubmit={addNote} style={styles.noteForm}><input style={styles.input} value={note} onChange={e => setNote(e.target.value)} placeholder="Add a note" /><button style={styles.ghostButton}>Save note</button></form><div className="lf-matter-notes-cards"><Table columns={['Note', 'Author', 'Created']} rows={(detail.notes || []).map(n => [n.content, n.author || '-', n.createdAt ? new Date(n.createdAt).toLocaleString() : '-'])} empty="No notes yet." /></div></Sub>
-                  <Sub title="Invoices"><div className="lf-invoice-cards"><Table columns={['Invoice', 'Amount', 'Status', 'PDF', 'Actions']} rows={(detail.invoices || []).map(i => [i.number || i.id, kes(i.amount), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <DownloadButton key={`${i.id}-pdf`} label="PDF" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />, canManage && i.status !== 'Paid' ? <ActionGroup key={`${i.id}-actions`} actions={[['Delete', () => setConfirm({ title: 'Delete invoice?', message: 'Delete this invoice?', onConfirm: () => deleteInvoiceRecord(i) })]]} /> : '-'])} empty="No invoices yet." /></div></Sub>
+                  <Sub title="Invoices"><div className="lf-invoice-cards"><Table columns={['Invoice', 'Amount', 'Paid', 'Balance', 'Status', 'PDF', 'Actions']} rows={(detail.invoices || []).map(i => [i.number || i.id, kes(i.amount), kes(i.amountPaid), kes(i.balance), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <DownloadButton key={`${i.id}-pdf`} label="PDF" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />, canManage && i.status !== 'Paid' ? <ActionGroup key={`${i.id}-actions`} actions={[['Delete', () => setConfirm({ title: 'Delete invoice?', message: 'Delete this invoice?', onConfirm: () => deleteInvoiceRecord(i) })]]} /> : '-'])} empty="No invoices yet." /></div></Sub>
                 </>
               )}
             </div>
@@ -614,9 +614,60 @@ export function Tasks({ data, canManage, reload, notify, focus }) {
 
 export function Invoices({ invoices, isAdmin, canManage, reload, notify }) {
   const [confirm, setConfirm] = useState(null);
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState('');
+  const [payments, setPayments] = useState([]);
+  const [paymentForm, setPaymentForm] = useState({ amount: '', method: 'Bank Transfer', reference: '', date: new Date().toISOString().slice(0, 10), note: '' });
+  const session = readSession();
+  const canRecordPayment = ['admin', 'assistant'].includes(session?.user?.role);
+  const selectedInvoice = invoices.find(invoice => invoice.id === selectedInvoiceId);
   async function setStatus(id, status) { try { await api(`/invoices/${id}/status`, { method: 'PATCH', body: { status } }); notify({ type: 'success', message: 'Invoice updated.' }); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteInvoiceRecord(invoice) { try { await api(`/invoices/${invoice.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Invoice deleted.' }); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
-  return <><Card title="Invoice register" hint="Receivables"><div className="lf-invoice-cards"><Table columns={['Invoice', 'Client', 'Matter', 'Amount', 'Status', 'PDF', 'Actions']} rows={invoices.map(i => [i.number || i.id, i.clientName || '-', i.matterTitle || '-', kes(i.amount), isAdmin ? <select key={i.id} style={styles.tableSelect} value={i.status} onChange={e => setStatus(i.id, e.target.value)}><option>Outstanding</option><option>Paid</option><option>Overdue</option></select> : <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <DownloadButton key={`${i.id}-pdf`} label="Download" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />, canManage && i.status !== 'Paid' ? <ActionGroup key={`${i.id}-actions`} actions={[['Delete', () => setConfirm({ title: 'Delete invoice?', message: 'Delete this invoice?', onConfirm: () => deleteInvoiceRecord(i) })]]} /> : '-'])} empty="No invoices yet." /></div></Card><ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} /></>;
+  async function openPayments(invoice) {
+    try {
+      setSelectedInvoiceId(invoice.id);
+      const data = await listInvoicePayments(invoice.id);
+      setPayments(data.payments || []);
+      setPaymentForm(form => ({ ...form, amount: invoice.balance ? String(invoice.balance) : '', date: new Date().toISOString().slice(0, 10) }));
+    } catch (err) {
+      notify({ type: 'danger', message: err.message });
+    }
+  }
+  async function submitPayment(event) {
+    event.preventDefault();
+    if (!selectedInvoice) return;
+    try {
+      const data = await recordInvoicePayment(selectedInvoice.id, paymentForm);
+      notify({ type: 'success', message: 'Payment recorded.' });
+      setPayments(current => [data.payment, ...current]);
+      setPaymentForm({ amount: '', method: 'Bank Transfer', reference: '', date: new Date().toISOString().slice(0, 10), note: '' });
+      await reload();
+    } catch (err) {
+      notify({ type: 'danger', message: err.message });
+    }
+  }
+  return <>
+    <Card title="Invoice register" hint="Receivables">
+      <div className="lf-invoice-cards"><Table columns={['Invoice', 'Client', 'Matter', 'Amount', 'Paid', 'Balance', 'Status', 'PDF', 'Actions']} rows={invoices.map(i => [i.number || i.id, i.clientName || '-', i.matterTitle || '-', kes(i.amount), kes(i.amountPaid), kes(i.balance), isAdmin ? <select key={i.id} style={styles.tableSelect} value={i.status} onChange={e => setStatus(i.id, e.target.value)}><option>Outstanding</option><option>Paid</option><option>Overdue</option></select> : <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <DownloadButton key={`${i.id}-pdf`} label="Download" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />, <ActionGroup key={`${i.id}-actions`} actions={[['Payments', () => openPayments(i)], ...(canManage && i.status !== 'Paid' ? [['Delete', () => setConfirm({ title: 'Delete invoice?', message: 'Delete this invoice?', onConfirm: () => deleteInvoiceRecord(i) })]] : [])]} />])} empty="No invoices yet." /></div>
+      {selectedInvoice && (
+        <div style={{ ...styles.pageStack, marginTop: 16 }}>
+          <Sub title={`Payments - ${selectedInvoice.number || selectedInvoice.id}`}>
+            <div className="lf-invoice-cards"><Table columns={['Date', 'Method', 'Reference', 'Amount']} rows={payments.map(payment => [payment.date || '-', payment.method || '-', payment.reference || '-', kes(payment.amount)])} empty="No payments recorded yet." /></div>
+            {canRecordPayment && Number(selectedInvoice.balance || 0) > 0 && (
+              <form onSubmit={submitPayment} style={{ ...styles.formGrid, marginTop: 12 }}>
+                <Field label="Amount"><input required type="number" min="0.01" step="0.01" style={styles.input} value={paymentForm.amount} onChange={e => setPaymentForm({ ...paymentForm, amount: e.target.value })} /></Field>
+                <Field label="Method"><select style={styles.input} value={paymentForm.method} onChange={e => setPaymentForm({ ...paymentForm, method: e.target.value })}><option>Bank Transfer</option><option>M-PESA</option><option>Cash Deposit</option><option>Cheque</option></select></Field>
+                <Field label="Reference"><input style={styles.input} value={paymentForm.reference} onChange={e => setPaymentForm({ ...paymentForm, reference: e.target.value })} /></Field>
+                <Field label="Date"><input required type="date" style={styles.input} value={paymentForm.date} onChange={e => setPaymentForm({ ...paymentForm, date: e.target.value })} /></Field>
+                <Field label="Note"><input style={styles.input} value={paymentForm.note} onChange={e => setPaymentForm({ ...paymentForm, note: e.target.value })} /></Field>
+                <button style={styles.primaryButton}>Record payment</button>
+              </form>
+            )}
+          </Sub>
+        </div>
+      )}
+    </Card>
+    <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
+  </>;
 }
 
 async function downloadWithNotify(path, filename, notify) {

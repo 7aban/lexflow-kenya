@@ -49,7 +49,7 @@ async function createSchema() {
   await run(`CREATE TABLE case_notes (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, content TEXT NOT NULL, author TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE invoices (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, clientId TEXT, number TEXT, date TEXT, amount REAL DEFAULT 0, status TEXT DEFAULT 'Outstanding', dueDate TEXT, description TEXT, source TEXT DEFAULT 'time')`);
   await run(`CREATE TABLE invoice_items (id TEXT PRIMARY KEY, invoiceId TEXT NOT NULL, timeEntryId TEXT, date TEXT, description TEXT, hours REAL DEFAULT 0, rate REAL DEFAULT 0, amount REAL DEFAULT 0)`);
-  await run(`CREATE TABLE payments (id TEXT PRIMARY KEY, invoiceId TEXT, matterId TEXT, clientId TEXT, method TEXT, reference TEXT, amount REAL DEFAULT 0, date TEXT, note TEXT)`);
+  await run(`CREATE TABLE payments (id TEXT PRIMARY KEY, invoiceId TEXT NOT NULL, matterId TEXT NOT NULL, clientId TEXT NOT NULL, amount REAL NOT NULL, method TEXT, reference TEXT, date TEXT NOT NULL, note TEXT, proofId TEXT, createdBy TEXT, createdAt TEXT NOT NULL)`);
   await run(`CREATE TABLE disbursements (id TEXT PRIMARY KEY, matterId TEXT, invoiceId TEXT, description TEXT, amount REAL DEFAULT 0, date TEXT, billed INTEGER DEFAULT 0)`);
   await run(`CREATE TABLE expenses (id TEXT PRIMARY KEY, matterId TEXT, category TEXT, description TEXT, amount REAL DEFAULT 0, date TEXT, vendor TEXT)`);
   await run(`CREATE TABLE integrations_log (id TEXT PRIMARY KEY, type TEXT NOT NULL, matterId TEXT, clientId TEXT, recipient TEXT, message TEXT, status TEXT, createdAt TEXT)`);
@@ -179,7 +179,7 @@ async function main() {
     }
     if (status === 'Paid' || i % 5 === 1) {
       const paidAmount = status === 'Paid' ? amount : Math.round(amount * 0.4);
-      await run('INSERT INTO payments (id,invoiceId,matterId,clientId,method,reference,amount,date,note) VALUES (?,?,?,?,?,?,?,?,?)', [id('PAY'), invId, matter.id, matter.clientId, pick(['M-PESA', 'Bank Transfer', 'Cash'], i), moneyRef(i), paidAmount, daysAgo(20 - i), status === 'Paid' ? 'Full settlement' : 'Partial payment']);
+      await run('INSERT INTO payments (id,invoiceId,matterId,clientId,amount,method,reference,date,note,proofId,createdBy,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', [id('PAY'), invId, matter.id, matter.clientId, paidAmount, pick(['M-PESA', 'Bank Transfer', 'Cash'], i), moneyRef(i), daysAgo(20 - i), status === 'Paid' ? 'Full settlement' : 'Partial payment', '', admin.id, nowIso()]);
       await run('INSERT INTO payment_proofs (id,invoiceId,matterId,clientId,method,reference,amount,note,fileName,mimeType,size,content,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', [id('PP'), invId, matter.id, matter.clientId, 'M-PESA', moneyRef(i), paidAmount, 'Demo payment proof', `payment-${i + 1}.png`, 'image/png', '14 KB', Buffer.from('demo payment proof'), nowIso()]);
     }
   }

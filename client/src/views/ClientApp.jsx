@@ -45,7 +45,7 @@ function nextEventFor(matter, appearances) {
 
 export default function ClientApp({ user, firm, logout, notify, toast, setToast }) {
   const [view, setView] = useState('Dashboard');
-  const [dashboard, setDashboard] = useState({ client: null, matters: [], documents: [], invoices: [], appearances: [], notices: [], paymentProofs: [] });
+  const [dashboard, setDashboard] = useState({ client: null, matters: [], documents: [], invoices: [], appearances: [], notices: [], paymentProofs: [], invoicePayments: [] });
   const [selectedId, setSelectedId] = useState('');
   const [uploading, setUploading] = useState(false);
   const [payment, setPayment] = useState({ invoiceId: '', method: 'M-PESA', reference: '', amount: '', note: '', file: null });
@@ -208,6 +208,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
             invoices={matterInvoices}
             events={matterEvents}
             proofs={dashboard.paymentProofs.filter(p => p.matterId === selected?.id)}
+            invoicePayments={(dashboard.invoicePayments || []).filter(p => p.matterId === selected?.id)}
             uploadDoc={uploadDoc}
             uploading={uploading}
             payment={payment}
@@ -254,8 +255,12 @@ function ClientDashboard({ data, stats, selectMatter }) {
   );
 }
 
-function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, events, proofs, uploadDoc, uploading, payment, setPayment, submitPayment, notify }) {
+function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, events, proofs, invoicePayments, uploadDoc, uploading, payment, setPayment, submitPayment, notify }) {
   if (!selected) return <Empty title="No matter selected" text="Your matter details will appear here once the firm shares a file." />;
+  const paymentRows = invoicePayments.map(payment => {
+    const invoice = invoices.find(item => item.id === payment.invoiceId);
+    return [invoice?.number || payment.invoiceId || '-', payment.date || '-', payment.method || '-', payment.reference || '-', kes(payment.amount)];
+  });
   return (
     <div className="lf-matter-grid lf-client-matter-grid" style={styles.matterGrid}>
       <Card title="My matters" hint={`${matters.length} file(s)`}>
@@ -271,7 +276,8 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
         </Card>
         <MatterDocuments matterId={selected.id} clientMode notify={notify} />
         <Card title="Invoices and payment proof" hint="Upload M-PESA or bank transfer confirmation">
-          <div className="lf-client-invoices-cards"><Table columns={['Invoice', 'Amount', 'Status', 'PDF']} rows={invoices.map(i => [i.number || i.id, kes(i.amount), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <DownloadButton key={`${i.id}-pdf`} label="PDF" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />])} empty="No invoices shared yet." /></div>
+          <div className="lf-client-invoices-cards"><Table columns={['Invoice', 'Amount', 'Paid', 'Balance', 'Status', 'PDF']} rows={invoices.map(i => [i.number || i.id, kes(i.amount), kes(i.amountPaid), kes(i.balance), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <DownloadButton key={`${i.id}-pdf`} label="PDF" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />])} empty="No invoices shared yet." /></div>
+          <div className="lf-client-proofs-cards"><Table columns={['Invoice', 'Date', 'Method', 'Reference', 'Amount']} rows={paymentRows} empty="No payments recorded yet." /></div>
           <form onSubmit={submitPayment} style={{ ...styles.formGrid, marginTop: 14 }}>
             <Field label="Invoice"><select style={styles.input} value={payment.invoiceId} onChange={e => setPayment({ ...payment, invoiceId: e.target.value })}><option value="">General payment</option>{invoices.map(i => <option key={i.id} value={i.id}>{i.number || i.id}</option>)}</select></Field>
             <Field label="Method"><select style={styles.input} value={payment.method} onChange={e => setPayment({ ...payment, method: e.target.value })}><option>M-PESA</option><option>Bank Transfer</option><option>Cash Deposit</option></select></Field>
