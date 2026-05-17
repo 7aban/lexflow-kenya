@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { IconBriefcase, IconClock, IconCoin, IconAlertTriangle } from '@tabler/icons-react';
-import { api, createMatterChecklistItem, deleteMatterChecklistItem, downloadWithAuth, fileToDataUrl, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, updateMatterChecklistItem } from '../lib/apiClient.js';
+import { api, applyChecklistTemplate, createChecklistTemplate, createMatterChecklistItem, deleteChecklistTemplate, deleteMatterChecklistItem, downloadWithAuth, fileToDataUrl, listChecklistTemplates, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, updateChecklistTemplate, updateMatterChecklistItem } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, Skeleton, Stat, statusTone, Sub, Table } from '../components/ui.jsx';
@@ -17,6 +17,14 @@ function isBillableValue(value) {
 function BillableBadge({ value }) {
   const billable = isBillableValue(value);
   return <span style={{ ...styles.badge, background: billable ? theme.blueBg : '#F3F4F6', color: billable ? theme.blue : theme.muted }}>{billable ? 'Billable' : 'Non-billable'}</span>;
+}
+
+function blankChecklistTemplateItem(position = 0) {
+  return { title: '', notes: '', position };
+}
+
+function emptyChecklistTemplateForm() {
+  return { name: '', description: '', practiceArea: '', items: [blankChecklistTemplateItem(0)] };
 }
 
 function formatFileSize(bytes = 0) {
@@ -452,17 +460,26 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   const emptyChecklistForm = { title: '', notes: '', position: '' };
   const [checklistForm, setChecklistForm] = useState(emptyChecklistForm);
   const [editingChecklistItem, setEditingChecklistItem] = useState(null);
+  const [checklistTemplates, setChecklistTemplates] = useState([]);
+  const [templateForm, setTemplateForm] = useState(() => emptyChecklistTemplateForm());
+  const [editingTemplateId, setEditingTemplateId] = useState('');
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [templateSaving, setTemplateSaving] = useState(false);
+  const [applyingTemplate, setApplyingTemplate] = useState(false);
   const session = readSession();
   const isAdmin = session?.user?.role === 'admin';
   const userRole = session?.user?.role || '';
   const canManageChecklist = userRole === 'admin' || userRole === 'advocate';
   const canToggleChecklist = ['admin', 'advocate', 'assistant'].includes(userRole);
+  const canApplyChecklistTemplate = userRole === 'admin' || userRole === 'advocate';
+  const activeChecklistTemplates = checklistTemplates.filter(template => Number(template.active || 0) === 1);
   const canViewBilling = isAdmin || session?.user?.role !== 'advocate' || Number(data.firmSettings?.advocateBillingVisibility ?? 1) !== 0;
   const selected = data.matters.find(m => m.id === selectedId) || data.matters[0];
   const nextActionHints = useMemo(() => buildMatterNextActionHints(detail), [detail]);
 
   useEffect(() => { if (selected?.id) { setSelectedId(selected.id); loadDetail(selected.id); } else { setDetail(null); setSuggestions([]); } }, [selected?.id]);
   useEffect(() => { if (detail && isAdmin) getUsers(true).then(users => { setAdvocates((users || []).filter(u => u.role === 'advocate' && u.isActive)); setReassignTo(detail.assignedTo || ''); }).catch(() => {}); }, [detail?.id]);
+  useEffect(() => { if (['admin', 'advocate', 'assistant'].includes(userRole)) loadChecklistTemplates(); }, [userRole]);
   useEffect(() => {
     if (!focus?.matterId) return;
     setSelectedId(focus.matterId);
@@ -483,6 +500,80 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
       notify({ type: 'danger', message: err.message });
     } finally {
       setLoading(false);
+    }
+  }
+  async function loadChecklistTemplates() {
+    try {
+      const templates = await listChecklistTemplates();
+      setChecklistTemplates(Array.isArray(templates) ? templates : []);
+    } catch (err) {
+      notify({ type: 'danger', message: err.message });
+    }
+  }
+  function resetTemplateEditor() {
+    setEditingTemplateId('');
+    setTemplateForm(emptyChecklistTemplateForm());
+  }
+  function startTemplateEdit(template) {
+    setEditingTemplateId(template.id);
+    setTemplateForm({
+      name: template.name || '',
+      description: template.description || '',
+      practiceArea: template.practiceArea || '',
+      items: template.items?.length ? template.items.map((item, index) => ({ title: item.title || '', notes: item.notes || '', position: item.position ?? index })) : [blankChecklistTemplateItem(0)],
+    });
+  }
+  function addTemplateFormItem() {
+    setTemplateForm(current => ({ ...current, items: [...current.items, blankChecklistTemplateItem(current.items.length)] }));
+  }
+  function updateTemplateFormItem(index, field, value) {
+    setTemplateForm(current => ({ ...current, items: current.items.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: value } : item) }));
+  }
+  function removeTemplateFormItem(index) {
+    setTemplateForm(current => {
+      const nextItems = current.items.filter((_, itemIndex) => itemIndex !== index);
+      return { ...current, items: nextItems.length ? nextItems : [blankChecklistTemplateItem(0)] };
+    });
+  }
+  async function saveChecklistTemplate(event) {
+    event.preventDefault();
+    if (!isAdmin || !templateForm.name.trim()) return;
+    const items = templateForm.items.map((item, index) => ({
+      title: item.title || '',
+      notes: item.notes || '',
+      position: Number.isFinite(Number(item.position)) ? Number(item.position) : index,
+    }));
+    if (!items.length || items.some(item => !item.title.trim())) {
+      notify({ type: 'danger', message: 'Template items need titles.' });
+      return;
+    }
+    setTemplateSaving(true);
+    try {
+      const payload = { ...templateForm, items };
+      if (editingTemplateId) {
+        await updateChecklistTemplate(editingTemplateId, payload);
+        notify({ type: 'success', message: 'Checklist template updated.' });
+      } else {
+        await createChecklistTemplate(payload);
+        notify({ type: 'success', message: 'Checklist template created.' });
+      }
+      resetTemplateEditor();
+      await loadChecklistTemplates();
+    } catch (err) {
+      notify({ type: 'danger', message: err.message });
+    } finally {
+      setTemplateSaving(false);
+    }
+  }
+  async function deactivateChecklistTemplate(template) {
+    try {
+      await deleteChecklistTemplate(template.id);
+      notify({ type: 'success', message: 'Checklist template deactivated.' });
+      if (selectedTemplateId === template.id) setSelectedTemplateId('');
+      if (editingTemplateId === template.id) resetTemplateEditor();
+      await loadChecklistTemplates();
+    } catch (err) {
+      notify({ type: 'danger', message: err.message });
     }
   }
   async function createMatter(event) { event.preventDefault(); try { if (editingMatter && detail) { await api(`/matters/${detail.id}`, { method: 'PATCH', body: form }); setEditingMatter(false); notify({ type: 'success', message: 'Matter updated.' }); await loadDetail(detail.id); } else { await api('/matters', { method: 'POST', body: form }); notify({ type: 'success', message: 'Matter created.' }); } setForm(emptyMatterForm); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
@@ -518,6 +609,21 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
     } catch (err) { notify({ type: 'danger', message: err.message }); }
   }
   async function deleteChecklistItemRecord(item) { if (!detail) return; try { await deleteMatterChecklistItem(detail.id, item.id); notify({ type: 'success', message: 'Checklist item deleted.' }); await refreshChecklist(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
+  async function applySelectedChecklistTemplate(event) {
+    event.preventDefault();
+    if (!detail || !selectedTemplateId || !canApplyChecklistTemplate) return;
+    setApplyingTemplate(true);
+    try {
+      const createdItems = await applyChecklistTemplate(detail.id, selectedTemplateId);
+      notify({ type: 'success', message: `${Array.isArray(createdItems) ? createdItems.length : 0} checklist item(s) applied.` });
+      setSelectedTemplateId('');
+      await refreshChecklist(detail.id);
+    } catch (err) {
+      notify({ type: 'danger', message: err.message });
+    } finally {
+      setApplyingTemplate(false);
+    }
+  }
   async function saveTask(task, values) { try { await api(`/tasks/${task.id}`, { method: 'PATCH', body: values }); setEditingTask(null); notify({ type: 'success', message: 'Task updated.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteTaskRecord(task) { try { await api(`/tasks/${task.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Task deleted.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteDocumentRecord(doc) { try { await api(`/documents/${doc.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Document deleted.' }); await loadDetail(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
@@ -559,6 +665,22 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
               {editingMatter && <button type="button" style={styles.ghostButton} onClick={() => { setEditingMatter(false); setForm(emptyMatterForm); }}>Cancel</button>}
             </form>
           </Card>
+        )}
+        {isAdmin && (
+          <ChecklistTemplateLibrary
+            templates={activeChecklistTemplates}
+            form={templateForm}
+            setForm={setTemplateForm}
+            editingTemplateId={editingTemplateId}
+            saving={templateSaving}
+            onSubmit={saveChecklistTemplate}
+            onEdit={startTemplateEdit}
+            onCancel={resetTemplateEditor}
+            onAddItem={addTemplateFormItem}
+            onUpdateItem={updateTemplateFormItem}
+            onRemoveItem={removeTemplateFormItem}
+            confirmDelete={template => setConfirm({ title: 'Deactivate checklist template?', message: 'Deactivate this template? Already-applied matter checklist items will remain unchanged.', onConfirm: () => deactivateChecklistTemplate(template) })}
+          />
         )}
         <Card title={detail?.title || 'Matter detail'} hint={detail?.reference || 'Select a file'} action={detail && canManage ? <ActionGroup actions={[['Edit', startMatterEdit], ['Archive', () => setConfirm({ title: 'Archive matter?', message: 'Archive this matter by setting the stage to Closed?', onConfirm: archiveMatter })], ['Delete', () => setConfirm({ title: 'Delete matter?', message: 'Delete this matter and all associated data?', onConfirm: deleteMatterRecord })], ['Invoice', generateInvoice]]} /> : null}>
           {loading && <Skeleton rows={2} />}
@@ -602,7 +724,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
                     <button style={styles.primaryButton}>Log time</button>
                   </form>
                   <Sub title="Time entries"><TimeEntryEditorList entries={detail.timeEntries || []} canManage={canManage} canViewBilling={canViewBilling} editingTime={editingTime} setEditingTime={setEditingTime} saveTimeEntry={saveTimeEntry} confirmDelete={entry => setConfirm({ title: 'Delete time entry?', message: 'Delete this time entry?', onConfirm: () => deleteTimeEntryRecord(entry) })} /></Sub>
-                  <Sub title="Checklist"><MatterChecklistPanel items={detail.checklistItems || []} canManage={canManageChecklist} canToggle={canToggleChecklist} form={checklistForm} setForm={setChecklistForm} onAdd={addChecklistItem} editingItem={editingChecklistItem} setEditingItem={setEditingChecklistItem} onToggle={toggleChecklistItem} onSave={saveChecklistItem} confirmDelete={item => setConfirm({ title: 'Delete checklist item?', message: 'Delete this checklist item?', onConfirm: () => deleteChecklistItemRecord(item) })} /></Sub>
+                  <Sub title="Checklist"><MatterChecklistPanel items={detail.checklistItems || []} templates={activeChecklistTemplates} canManage={canManageChecklist} canToggle={canToggleChecklist} canApplyTemplate={canApplyChecklistTemplate} selectedTemplateId={selectedTemplateId} setSelectedTemplateId={setSelectedTemplateId} onApplyTemplate={applySelectedChecklistTemplate} applyingTemplate={applyingTemplate} form={checklistForm} setForm={setChecklistForm} onAdd={addChecklistItem} editingItem={editingChecklistItem} setEditingItem={setEditingChecklistItem} onToggle={toggleChecklistItem} onSave={saveChecklistItem} confirmDelete={item => setConfirm({ title: 'Delete checklist item?', message: 'Delete this checklist item?', onConfirm: () => deleteChecklistItemRecord(item) })} /></Sub>
                   <Sub title="Tasks"><TaskEditorList tasks={detail.tasks || []} entries={detail.timeEntries || []} matter={detail} canManage={canManage} canViewBilling={canViewBilling} editingTask={editingTask} setEditingTask={setEditingTask} saveTask={saveTask} taskTimer={taskTimer} setTaskTimer={setTaskTimer} notify={notify} onTimerSaved={async () => { await loadDetail(detail.id); await reload(); }} confirmDelete={task => setConfirm({ title: 'Delete task?', message: 'Delete this task?', onConfirm: () => deleteTaskRecord(task) })} /></Sub>
                   <Sub title="Court appearances">{canManage && <form onSubmit={createEvent} style={{ ...styles.formGrid, marginBottom: 12 }}><Field label="Title"><input required style={styles.input} value={eventForm.title} onChange={e => setEventForm({ ...eventForm, title: e.target.value })} /></Field><Field label="Date"><input required type="date" style={styles.input} value={eventForm.date} onChange={e => setEventForm({ ...eventForm, date: e.target.value })} /></Field><Field label="Time"><input style={styles.input} value={eventForm.time} onChange={e => setEventForm({ ...eventForm, time: e.target.value })} /></Field><Field label="Type"><input style={styles.input} value={eventForm.type} onChange={e => setEventForm({ ...eventForm, type: e.target.value })} /></Field><Field label="Location"><input style={styles.input} value={eventForm.location} onChange={e => setEventForm({ ...eventForm, location: e.target.value })} /></Field><Field label="Meeting Link"><input type="url" placeholder="https://..." style={styles.input} value={eventForm.meetingLink} onChange={e => setEventForm({ ...eventForm, meetingLink: e.target.value })} /></Field><button style={styles.ghostButton}>Schedule event</button></form>}<AppearanceEditorList events={detail.appearances || []} canManage={canManage} editingEvent={editingEvent} setEditingEvent={setEditingEvent} saveEvent={saveEvent} confirmDelete={event => setConfirm({ title: 'Delete appearance?', message: 'Delete this court appearance?', onConfirm: () => deleteEventRecord(event) })} /></Sub>
                   <Sub title="Documents"><MatterDocuments matterId={detail.id} canManage={canManage} notify={notify} /></Sub>
@@ -1063,7 +1185,53 @@ export function Users({ clients = [], notify }) {
   </div>;
 }
 
-function MatterChecklistPanel({ items = [], canManage, canToggle, form, setForm, onAdd, editingItem, setEditingItem, onToggle, onSave, confirmDelete }) {
+function ChecklistTemplateLibrary({ templates = [], form, setForm, editingTemplateId, saving, onSubmit, onEdit, onCancel, onAddItem, onUpdateItem, onRemoveItem, confirmDelete }) {
+  return (
+    <Card title="Checklist Template Library" hint="Reusable matter workflow presets">
+      <form onSubmit={onSubmit} style={{ ...styles.formGrid, alignItems: 'end', marginBottom: 14 }}>
+        <Field label="Template Name"><input required style={styles.input} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
+        <Field label="Practice"><input style={styles.input} value={form.practiceArea} onChange={e => setForm({ ...form, practiceArea: e.target.value })} /></Field>
+        <Field label="Description"><input style={styles.input} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></Field>
+        <div style={{ gridColumn: '1 / -1', display: 'grid', gap: 8 }}>
+          {form.items.map((item, index) => (
+            <div key={index} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, alignItems: 'end' }}>
+              <Field label={`Item ${index + 1}`}><input required style={styles.input} value={item.title} onChange={e => onUpdateItem(index, 'title', e.target.value)} /></Field>
+              <Field label="Notes"><input style={styles.input} value={item.notes} onChange={e => onUpdateItem(index, 'notes', e.target.value)} /></Field>
+              <Field label="Position"><input type="number" min="0" style={styles.input} value={item.position} onChange={e => onUpdateItem(index, 'position', e.target.value)} /></Field>
+              <button type="button" style={styles.dangerTinyButton} onClick={() => onRemoveItem(index)}>Remove</button>
+            </div>
+          ))}
+          <button type="button" style={styles.ghostButton} onClick={onAddItem}>Add template item</button>
+        </div>
+        <button style={styles.primaryButton} disabled={saving || !form.name.trim()}>{saving ? 'Saving...' : editingTemplateId ? 'Save template' : 'Create template'}</button>
+        {editingTemplateId && <button type="button" style={styles.ghostButton} onClick={onCancel}>Cancel</button>}
+      </form>
+      {templates.length ? (
+        <div style={{ display: 'grid', gap: 8 }}>
+          {templates.map(template => (
+            <div key={template.id} style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 10, display: 'grid', gap: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
+                  <strong>{template.name}</strong>
+                  <span style={{ color: theme.muted, fontSize: 12 }}>{template.practiceArea || 'General'} / {(template.items || []).length} item(s)</span>
+                  {template.description ? <span style={{ color: theme.muted, fontSize: 12 }}>{template.description}</span> : null}
+                </div>
+                <ActionGroup actions={[['Edit', () => onEdit(template)], ['Deactivate', () => confirmDelete(template)]]} />
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {(template.items || []).map(item => <span key={item.id} style={{ border: `1px solid ${theme.line}`, borderRadius: 999, padding: '3px 8px', fontSize: 11 }}>{item.position ?? 0}. {item.title}</span>)}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <Empty title="No checklist templates." text="Create a reusable template before applying one to a matter." />
+      )}
+    </Card>
+  );
+}
+
+function MatterChecklistPanel({ items = [], templates = [], canManage, canToggle, canApplyTemplate, selectedTemplateId, setSelectedTemplateId, onApplyTemplate, applyingTemplate, form, setForm, onAdd, editingItem, setEditingItem, onToggle, onSave, confirmDelete }) {
   const completedCount = items.filter(item => Number(item.completed || 0) === 1).length;
   return (
     <div style={{ display: 'grid', gap: 12 }}>
@@ -1071,6 +1239,17 @@ function MatterChecklistPanel({ items = [], canManage, canToggle, form, setForm,
         <span style={{ color: theme.muted, fontSize: 12 }}>{completedCount} of {items.length} complete</span>
         {items.length > 0 && <Badge tone={completedCount === items.length ? 'green' : 'amber'}>{completedCount === items.length ? 'Done' : 'Open'}</Badge>}
       </div>
+      {canApplyTemplate && (
+        <form onSubmit={onApplyTemplate} style={{ ...styles.formGrid, alignItems: 'end' }}>
+          <Field label="Apply Template">
+            <select style={styles.input} value={selectedTemplateId} onChange={e => setSelectedTemplateId(e.target.value)}>
+              <option value="">Select active template</option>
+              {templates.map(template => <option key={template.id} value={template.id}>{template.name}</option>)}
+            </select>
+          </Field>
+          <button type="submit" style={styles.ghostButton} disabled={!selectedTemplateId || applyingTemplate}>{applyingTemplate ? 'Applying...' : 'Apply template'}</button>
+        </form>
+      )}
       {canManage && (
         <form onSubmit={onAdd} style={{ ...styles.formGrid, alignItems: 'end' }}>
           <Field label="Item"><input required style={styles.input} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></Field>

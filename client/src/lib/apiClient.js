@@ -234,6 +234,11 @@ export const listMatterChecklistItems = matterId => api(`/matters/${matterId}/ch
 export const createMatterChecklistItem = (matterId, payload) => api(`/matters/${matterId}/checklist-items`, { method: 'POST', body: payload });
 export const updateMatterChecklistItem = (matterId, itemId, payload) => api(`/matters/${matterId}/checklist-items/${itemId}`, { method: 'PATCH', body: payload });
 export const deleteMatterChecklistItem = (matterId, itemId) => api(`/matters/${matterId}/checklist-items/${itemId}`, { method: 'DELETE' });
+export const listChecklistTemplates = () => api('/checklist-templates');
+export const createChecklistTemplate = payload => api('/checklist-templates', { method: 'POST', body: payload });
+export const updateChecklistTemplate = (templateId, payload) => api(`/checklist-templates/${templateId}`, { method: 'PATCH', body: payload });
+export const deleteChecklistTemplate = templateId => api(`/checklist-templates/${templateId}`, { method: 'DELETE' });
+export const applyChecklistTemplate = (matterId, templateId) => api(`/matters/${matterId}/checklist-template-applications`, { method: 'POST', body: { templateId } });
 export const getMatterFolders = matterId => api(`/matters/${matterId}/folders`);
 export const createFolder = (matterId, data) => api(`/matters/${matterId}/folders`, { method: 'POST', body: data });
 export const updateFolder = (folderId, data) => api(`/folders/${folderId}`, { method: 'PATCH', body: data });

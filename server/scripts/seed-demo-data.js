@@ -31,7 +31,7 @@ const defaultReminderTemplates = [
 async function createSchema() {
   const tables = [
     'audit_logs', 'notifications', 'payment_proofs', 'payments', 'receipt_sequences', 'expenses', 'disbursements', 'invoice_items', 'invoices',
-    'messages', 'conversations', 'client_activity', 'case_notes', 'documents', 'folders', 'appearances', 'time_entries', 'tasks', 'deadlines', 'matter_checklist_items', 'matters', 'clients',
+    'messages', 'conversations', 'client_activity', 'case_notes', 'documents', 'folders', 'appearances', 'time_entries', 'tasks', 'deadlines', 'checklist_template_items', 'checklist_templates', 'matter_checklist_items', 'matters', 'clients',
     'users', 'integrations_log', 'firm_settings', 'reminder_settings', 'reminder_templates', 'reminder_logs',
     'firm_notices', 'invitations',
   ];
@@ -42,6 +42,8 @@ async function createSchema() {
   await run(`CREATE TABLE clients (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT DEFAULT 'Individual', contact TEXT, email TEXT, phone TEXT, status TEXT DEFAULT 'Active', joinDate TEXT, conflictCleared INTEGER DEFAULT 0, retainer REAL DEFAULT 0, remindersEnabled INTEGER DEFAULT 1, preferredChannel TEXT DEFAULT 'firm_default')`);
   await run(`CREATE TABLE matters (id TEXT PRIMARY KEY, reference TEXT UNIQUE, clientId TEXT NOT NULL, title TEXT NOT NULL, practiceArea TEXT, stage TEXT DEFAULT 'Intake', assignedTo TEXT, paralegal TEXT, openDate TEXT, description TEXT, court TEXT, judge TEXT, caseNo TEXT, opposingCounsel TEXT, billingRate REAL DEFAULT 0, retainerBalance REAL DEFAULT 0, totalBilled REAL DEFAULT 0, priority TEXT DEFAULT 'Medium', solDate TEXT, billingType TEXT DEFAULT 'hourly', fixedFee REAL DEFAULT 0, remindersEnabled TEXT DEFAULT 'firm_default', courtRemindersEnabled TEXT DEFAULT 'firm_default', invoiceRemindersEnabled TEXT DEFAULT 'firm_default')`);
   await run(`CREATE TABLE matter_checklist_items (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT NOT NULL, completed INTEGER DEFAULT 0, position INTEGER DEFAULT 0, notes TEXT, createdBy TEXT, createdAt TEXT NOT NULL, completedAt TEXT, completedBy TEXT)`);
+  await run(`CREATE TABLE checklist_templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, practiceArea TEXT, active INTEGER DEFAULT 1, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
+  await run(`CREATE TABLE checklist_template_items (id TEXT PRIMARY KEY, templateId TEXT NOT NULL, title TEXT NOT NULL, notes TEXT, position INTEGER DEFAULT 0, createdAt TEXT NOT NULL)`);
   await run(`CREATE TABLE tasks (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT NOT NULL, completed INTEGER DEFAULT 0, assignee TEXT, dueDate TEXT, auto_generated INTEGER DEFAULT 0)`);
   await run(`CREATE TABLE time_entries (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, taskId TEXT, attorney TEXT, date TEXT, hours REAL DEFAULT 0, activity TEXT, description TEXT, rate REAL DEFAULT 0, billed INTEGER DEFAULT 0)`);
   await run(`CREATE TABLE appearances (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT, date TEXT, time TEXT, type TEXT, location TEXT, meetingLink TEXT, attorney TEXT, prepNote TEXT)`);
@@ -173,6 +175,54 @@ async function main() {
       'INSERT INTO matter_checklist_items (id,matterId,title,completed,position,notes,createdBy,createdAt,completedAt,completedBy) VALUES (?,?,?,?,?,?,?,?,?,?)',
       [id('CHK'), matter.id, pick(checklistTitles, i + 2), 0, 1, '', admin.id, nowIso(), '', ''],
     );
+  }
+
+  const checklistTemplates = [
+    {
+      name: 'Litigation Intake',
+      description: 'Standard opening checks before pleadings and court tracking.',
+      practiceArea: 'Litigation',
+      items: [
+        ['Confirm instructions and engagement terms', 'Capture scope, retainer position, and responsible advocate.'],
+        ['Run conflict and limitation checks', 'Record conflict clearance and diarise any limitation risk.'],
+        ['Collect pleadings and authority documents', 'Upload initial bundle before drafting.'],
+      ],
+    },
+    {
+      name: 'Court Hearing Preparation',
+      description: 'Reusable pre-hearing file review checklist.',
+      practiceArea: 'Court',
+      items: [
+        ['Confirm hearing date and virtual court link', 'Verify listing, time, and access details.'],
+        ['Prepare indexed hearing bundle', 'Check pleadings, authorities, and affidavits.'],
+        ['Send client hearing update', 'Share attendance expectations and next steps.'],
+      ],
+    },
+    {
+      name: 'Conveyancing File Opening',
+      description: 'Opening checks for land and property transactions.',
+      practiceArea: 'Conveyancing',
+      items: [
+        ['Collect title and identity documents', 'Confirm client, vendor, and property documents.'],
+        ['Review rates, rent, and consent requirements', 'Note any statutory or county clearances needed.'],
+        ['Prepare completion checklist', 'List searches, consents, payments, and registration steps.'],
+      ],
+    },
+  ];
+  for (const template of checklistTemplates) {
+    const templateId = id('CTPL');
+    const createdAt = nowIso();
+    await run(
+      'INSERT INTO checklist_templates (id,name,description,practiceArea,active,createdBy,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?)',
+      [templateId, template.name, template.description, template.practiceArea, 1, admin.id, createdAt, createdAt],
+    );
+    for (let position = 0; position < template.items.length; position += 1) {
+      const [title, notes] = template.items[position];
+      await run(
+        'INSERT INTO checklist_template_items (id,templateId,title,notes,position,createdAt) VALUES (?,?,?,?,?,?)',
+        [id('CTI'), templateId, title, notes, position, createdAt],
+      );
+    }
   }
 
   const activities = ['Research', 'Drafting', 'Court Appearance', 'Client Call', 'Document Review', 'Filing', 'Preparation', 'Negotiation'];
