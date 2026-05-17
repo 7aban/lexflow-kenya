@@ -82,6 +82,7 @@ function buildMatterNextActionHints(detail) {
   const notes = Array.isArray(detail.notes) ? detail.notes : [];
   const timeEntries = Array.isArray(detail.timeEntries) ? detail.timeEntries : [];
   const invoices = Array.isArray(detail.invoices) ? detail.invoices : [];
+  const checklistItems = Array.isArray(detail.checklistItems) ? detail.checklistItems : [];
   const hints = [];
   const severityRank = { critical: 0, high: 1, medium: 2, low: 3 };
   const categoryRank = { urgent: 0, upcoming: 1, risk: 2, 'missing-information': 3, billing: 4, workflow: 5, informational: 6 };
@@ -272,6 +273,50 @@ function buildMatterNextActionHints(detail) {
       ],
       rank: 14,
     });
+  }
+
+  if (checklistItems.length) {
+    const isItemComplete = (item) => Number(item?.completed || 0) === 1;
+    const openChecklistItems = checklistItems
+      .filter(item => !isItemComplete(item))
+      .map((item, index) => ({ ...item, _fallbackOrder: index }))
+      .sort((a, b) => {
+        const posDelta = Number(a.position ?? 0) - Number(b.position ?? 0);
+        if (posDelta) return posDelta;
+        const createdDelta = String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
+        if (createdDelta) return createdDelta;
+        return a._fallbackOrder - b._fallbackOrder;
+      });
+    const completedCount = checklistItems.length - openChecklistItems.length;
+
+    if (openChecklistItems.length) {
+      const firstOpen = openChecklistItems[0];
+      addHint({
+        title: `${openChecklistItems.length} open checklist item${openChecklistItems.length === 1 ? '' : 's'}`,
+        category: 'workflow',
+        severity: 'medium',
+        why: 'Open checklist items remain on this matter; review them in the Checklist section.',
+        evidence: [
+          firstOpen.title || 'Open checklist item',
+          `${openChecklistItems.length} open of ${checklistItems.length}`,
+          completedCount ? `${completedCount} complete` : null,
+        ],
+        rank: 16,
+      });
+    } else {
+      addHint({
+        title: 'Checklist complete',
+        category: 'informational',
+        severity: 'low',
+        why: 'All checklist items on this matter are marked complete in the current matter detail.',
+        evidence: [
+          `${checklistItems.length} of ${checklistItems.length} complete`,
+          detail.stage ? `Stage: ${detail.stage}` : null,
+          detail.assignedTo ? `Assigned: ${detail.assignedTo}` : null,
+        ],
+        rank: 25,
+      });
+    }
   }
 
   if (!hints.length) {
