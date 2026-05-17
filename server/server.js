@@ -191,6 +191,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS audit_events (id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, actor_user_id TEXT, actor_role TEXT, actor_email TEXT, action TEXT NOT NULL, entity_type TEXT, entity_id TEXT, matter_id TEXT, client_id TEXT, ip_address TEXT, user_agent TEXT, metadata_json TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)`);
   await run(`CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, userId TEXT NOT NULL, type TEXT, matterId TEXT, clientId TEXT, title TEXT, body TEXT, createdAt TEXT, readAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS oauth_accounts (id TEXT PRIMARY KEY, userId TEXT NOT NULL, provider TEXT CHECK(provider IN ('google','microsoft')) NOT NULL, providerSubject TEXT NOT NULL, email TEXT NOT NULL, emailVerified INTEGER DEFAULT 0, revokedAt TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, lastLoginAt TEXT, UNIQUE(provider, providerSubject))`);
+  await run(`CREATE TABLE IF NOT EXISTS matter_checklist_items (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT NOT NULL, completed INTEGER DEFAULT 0, position INTEGER DEFAULT 0, notes TEXT, createdBy TEXT, createdAt TEXT NOT NULL, completedAt TEXT, completedBy TEXT)`);
 
   await ensureClientUserSupport();
   await ensureColumn('users', 'tokenVersion', 'INTEGER DEFAULT 1');
@@ -1220,13 +1221,14 @@ app.get('/api/matters/:id', async (req, res) => {
     documentWhere += ` AND ${clientDocumentVisibilitySql('d')}`;
     documentParams.push(req.user.clientId || '');
   }
-  const [tasks, timeEntries, documents, notes, invoices, appearances] = await Promise.all([
+  const [tasks, timeEntries, documents, notes, invoices, appearances, checklistItems] = await Promise.all([
     req.user.role === 'client' ? Promise.resolve([]) : all('SELECT * FROM tasks WHERE matterId=? ORDER BY dueDate', [req.params.id]),
     req.user.role === 'client' ? Promise.resolve([]) : all('SELECT * FROM time_entries WHERE matterId=? ORDER BY date DESC', [req.params.id]),
     all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE ${documentWhere} ORDER BY d.date DESC`, documentParams),
     req.user.role === 'client' ? Promise.resolve([]) : all('SELECT * FROM case_notes WHERE matterId=? ORDER BY createdAt DESC', [req.params.id]),
     all('SELECT * FROM invoices WHERE matterId=? ORDER BY date DESC', [req.params.id]),
-    all('SELECT * FROM appearances WHERE matterId=? ORDER BY date', [req.params.id])
+    all('SELECT * FROM appearances WHERE matterId=? ORDER BY date', [req.params.id]),
+    req.user.role === 'client' ? Promise.resolve([]) : all('SELECT * FROM matter_checklist_items WHERE matterId=? ORDER BY position ASC, createdAt ASC', [req.params.id])
   ]);
   await attachInvoiceSummaries(invoices);
   if (req.user.role === 'advocate' && !(await isBillingVisibleFor(req))) {
@@ -1235,7 +1237,9 @@ app.get('/api/matters/:id', async (req, res) => {
     for (const te of timeEntries) te.rate = null;
     for (const inv of invoices) maskInvoiceBilling(inv);
   }
-  res.json({ ...matter, tasks, timeEntries, documents: documents.map(publicDocument), notes, invoices, appearances });
+  const payload = { ...matter, tasks, timeEntries, documents: documents.map(publicDocument), notes, invoices, appearances };
+  if (req.user.role !== 'client') payload.checklistItems = checklistItems;
+  res.json(payload);
 });
 app.get('/api/matters/:id/suggestions', async (req, res) => {
   if (req.user.role === 'client') return res.status(403).json({ error: 'Staff access required' });
@@ -1345,6 +1349,7 @@ async function deleteMatterCascade(matterId) {
   await run('DELETE FROM deadlines WHERE matterId=?', [matterId]);
   await run('DELETE FROM notifications WHERE matterId=?', [matterId]);
   await run('DELETE FROM client_activity WHERE matterId=?', [matterId]);
+  await run('DELETE FROM matter_checklist_items WHERE matterId=?', [matterId]);
   await run('DELETE FROM matters WHERE id=?', [matterId]);
 }
 app.delete('/api/matters/:id', requireAdvocateOrAdmin, async (req, res) => {
@@ -1385,6 +1390,113 @@ app.patch('/api/matters/:id/reassign', authenticate, requireAdmin, async (req, r
   await logAudit(req, 'reassign', 'matter', req.params.id, `Reassigned matter ${matter.title} from "${oldAssignedTo}" to "${trimmed}"`);
   await recordAuditEvent(req, { action: 'matter_reassigned', entityType: 'matter', entityId: req.params.id, metadata: { oldAssignedTo, newAssignedTo: trimmed, matterTitle: matter.title || '', matterReference: matter.reference || '' } }).catch(() => {});
   res.json(updated);
+});
+
+app.get('/api/matters/:id/checklist-items', requireStaff, async (req, res) => {
+  if (!(await canAccessMatter(req, req.params.id))) {
+    await recordAuditEvent(req, { action: 'forbidden_matter_checklist_item_access', entityType: 'matter', entityId: req.params.id, metadata: { reason: 'insufficient permissions', route: 'checklist_list' } }).catch(() => {});
+    return res.status(403).json({ error: 'Matter access denied' });
+  }
+  const items = await all('SELECT * FROM matter_checklist_items WHERE matterId=? ORDER BY position ASC, createdAt ASC', [req.params.id]);
+  res.json(items);
+});
+app.post('/api/matters/:id/checklist-items', requireAdvocateOrAdmin, async (req, res) => {
+  if (!(await canAccessMatter(req, req.params.id))) {
+    await recordAuditEvent(req, { action: 'forbidden_matter_checklist_item_access', entityType: 'matter', entityId: req.params.id, metadata: { reason: 'insufficient permissions', route: 'checklist_create' } }).catch(() => {});
+    return res.status(403).json({ error: 'Matter access denied' });
+  }
+  const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+  if (!title) return res.status(400).json({ error: 'Title is required' });
+  if (title.length > 240) return res.status(400).json({ error: 'Title must not exceed 240 characters' });
+  const notes = typeof req.body?.notes === 'string' ? req.body.notes : '';
+  let position = Number.isFinite(Number(req.body?.position)) ? Number(req.body.position) : null;
+  if (position === null || position < 0) {
+    const last = await get('SELECT COALESCE(MAX(position), -1) maxPos FROM matter_checklist_items WHERE matterId=?', [req.params.id]);
+    position = Number(last?.maxPos ?? -1) + 1;
+  }
+  const id = genId('CHK');
+  const createdAt = new Date().toISOString();
+  await run('INSERT INTO matter_checklist_items (id,matterId,title,completed,position,notes,createdBy,createdAt,completedAt,completedBy) VALUES (?,?,?,?,?,?,?,?,?,?)', [id, req.params.id, title, 0, position, notes, req.user.fullName || req.user.email || req.user.userId || '', createdAt, '', '']);
+  const item = await get('SELECT * FROM matter_checklist_items WHERE id=?', [id]);
+  await recordAuditEvent(req, { action: 'matter_checklist_item_created', entityType: 'matter_checklist_item', entityId: id, matterId: req.params.id, metadata: { matterId: req.params.id, title, position } }).catch(() => {});
+  res.json(item);
+});
+app.patch('/api/matters/:matterId/checklist-items/:id', requireStaff, async (req, res) => {
+  if (!(await canAccessMatter(req, req.params.matterId))) {
+    await recordAuditEvent(req, { action: 'forbidden_matter_checklist_item_access', entityType: 'matter', entityId: req.params.matterId, metadata: { reason: 'insufficient permissions', route: 'checklist_update' } }).catch(() => {});
+    return res.status(403).json({ error: 'Matter access denied' });
+  }
+  const existing = await get('SELECT * FROM matter_checklist_items WHERE id=? AND matterId=?', [req.params.id, req.params.matterId]);
+  if (!existing) return res.status(404).json({ error: 'Checklist item not found' });
+  const role = req.user?.role;
+  const wantsCompletionChange = req.body?.completed !== undefined;
+  const wantsContentChange = ['title', 'notes', 'position'].some(field => req.body?.[field] !== undefined);
+  if (role === 'assistant' && wantsContentChange) {
+    await recordAuditEvent(req, { action: 'forbidden_matter_checklist_item_access', entityType: 'matter_checklist_item', entityId: req.params.id, matterId: req.params.matterId, metadata: { reason: 'assistant cannot modify content', route: 'checklist_update' } }).catch(() => {});
+    return res.status(403).json({ error: 'Assistants may only toggle completion' });
+  }
+  const updates = [];
+  const params = [];
+  if (wantsContentChange) {
+    if (req.body.title !== undefined) {
+      const title = typeof req.body.title === 'string' ? req.body.title.trim() : '';
+      if (!title) return res.status(400).json({ error: 'Title must not be empty' });
+      if (title.length > 240) return res.status(400).json({ error: 'Title must not exceed 240 characters' });
+      updates.push('title=?');
+      params.push(title);
+    }
+    if (req.body.notes !== undefined) {
+      updates.push('notes=?');
+      params.push(typeof req.body.notes === 'string' ? req.body.notes : '');
+    }
+    if (req.body.position !== undefined) {
+      const pos = Number(req.body.position);
+      if (!Number.isFinite(pos) || pos < 0) return res.status(400).json({ error: 'Invalid position' });
+      updates.push('position=?');
+      params.push(pos);
+    }
+  }
+  let completionTransition = null;
+  if (wantsCompletionChange) {
+    const nextCompleted = req.body.completed ? 1 : 0;
+    if (Number(existing.completed) !== nextCompleted) {
+      completionTransition = nextCompleted === 1 ? 'completed' : 'reopened';
+      updates.push('completed=?');
+      params.push(nextCompleted);
+      if (nextCompleted === 1) {
+        updates.push('completedAt=?', 'completedBy=?');
+        params.push(new Date().toISOString(), req.user.fullName || req.user.email || req.user.userId || '');
+      } else {
+        updates.push('completedAt=?', 'completedBy=?');
+        params.push('', '');
+      }
+    }
+  }
+  if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
+  params.push(req.params.id);
+  await run(`UPDATE matter_checklist_items SET ${updates.join(',')} WHERE id=?`, params);
+  const item = await get('SELECT * FROM matter_checklist_items WHERE id=?', [req.params.id]);
+  if (completionTransition === 'completed') {
+    await recordAuditEvent(req, { action: 'matter_checklist_item_completed', entityType: 'matter_checklist_item', entityId: req.params.id, matterId: req.params.matterId, metadata: { matterId: req.params.matterId, title: item?.title || '' } }).catch(() => {});
+  } else if (completionTransition === 'reopened') {
+    await recordAuditEvent(req, { action: 'matter_checklist_item_reopened', entityType: 'matter_checklist_item', entityId: req.params.id, matterId: req.params.matterId, metadata: { matterId: req.params.matterId, title: item?.title || '' } }).catch(() => {});
+  }
+  if (wantsContentChange) {
+    const updatedFields = ['title', 'notes', 'position'].filter(f => req.body[f] !== undefined);
+    await recordAuditEvent(req, { action: 'matter_checklist_item_updated', entityType: 'matter_checklist_item', entityId: req.params.id, matterId: req.params.matterId, metadata: { matterId: req.params.matterId, updatedFields: updatedFields.join(',') } }).catch(() => {});
+  }
+  res.json(item);
+});
+app.delete('/api/matters/:matterId/checklist-items/:id', requireAdvocateOrAdmin, async (req, res) => {
+  if (!(await canAccessMatter(req, req.params.matterId))) {
+    await recordAuditEvent(req, { action: 'forbidden_matter_checklist_item_access', entityType: 'matter', entityId: req.params.matterId, metadata: { reason: 'insufficient permissions', route: 'checklist_delete' } }).catch(() => {});
+    return res.status(403).json({ error: 'Matter access denied' });
+  }
+  const existing = await get('SELECT id, title FROM matter_checklist_items WHERE id=? AND matterId=?', [req.params.id, req.params.matterId]);
+  if (!existing) return res.status(404).json({ error: 'Checklist item not found' });
+  await run('DELETE FROM matter_checklist_items WHERE id=?', [req.params.id]);
+  await recordAuditEvent(req, { action: 'matter_checklist_item_deleted', entityType: 'matter_checklist_item', entityId: req.params.id, matterId: req.params.matterId, metadata: { matterId: req.params.matterId, title: existing.title || '' } }).catch(() => {});
+  res.json({ id: req.params.id, deleted: true });
 });
 
 app.get('/api/tasks', requireStaff, async (req, res) => {

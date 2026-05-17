@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { IconBriefcase, IconClock, IconCoin, IconAlertTriangle } from '@tabler/icons-react';
-import { api, downloadWithAuth, fileToDataUrl, listInvoicePayments, readSession, recordInvoicePayment } from '../lib/apiClient.js';
+import { api, createMatterChecklistItem, deleteMatterChecklistItem, downloadWithAuth, fileToDataUrl, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, updateMatterChecklistItem } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, Skeleton, Stat, statusTone, Sub, Table } from '../components/ui.jsx';
@@ -449,8 +449,14 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   const [advocates, setAdvocates] = useState([]);
   const [reassignTo, setReassignTo] = useState('');
   const [reassigning, setReassigning] = useState(false);
+  const emptyChecklistForm = { title: '', notes: '', position: '' };
+  const [checklistForm, setChecklistForm] = useState(emptyChecklistForm);
+  const [editingChecklistItem, setEditingChecklistItem] = useState(null);
   const session = readSession();
   const isAdmin = session?.user?.role === 'admin';
+  const userRole = session?.user?.role || '';
+  const canManageChecklist = userRole === 'admin' || userRole === 'advocate';
+  const canToggleChecklist = ['admin', 'advocate', 'assistant'].includes(userRole);
   const canViewBilling = isAdmin || session?.user?.role !== 'advocate' || Number(data.firmSettings?.advocateBillingVisibility ?? 1) !== 0;
   const selected = data.matters.find(m => m.id === selectedId) || data.matters[0];
   const nextActionHints = useMemo(() => buildMatterNextActionHints(detail), [detail]);
@@ -488,6 +494,30 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   function startMatterEdit() { if (!detail) return; setEditingMatter(true); setForm({ ...emptyMatterForm, ...detail }); }
   async function archiveMatter() { if (!detail) return; try { await api(`/matters/${detail.id}/status`, { method: 'PATCH', body: { stage: 'Closed' } }); notify({ type: 'success', message: 'Matter archived.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteMatterRecord() { if (!detail) return; try { const id = detail.id; await api(`/matters/${id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Matter deleted.' }); setDetail(null); setSelectedId(''); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
+  async function refreshChecklist(matterId) { const checklistItems = await listMatterChecklistItems(matterId); setDetail(current => current?.id === matterId ? { ...current, checklistItems } : current); }
+  async function addChecklistItem(event) {
+    event.preventDefault();
+    if (!detail || !checklistForm.title.trim()) return;
+    const payload = { title: checklistForm.title, notes: checklistForm.notes };
+    if (checklistForm.position !== '') payload.position = Number(checklistForm.position);
+    try {
+      await createMatterChecklistItem(detail.id, payload);
+      setChecklistForm(emptyChecklistForm);
+      notify({ type: 'success', message: 'Checklist item added.' });
+      await refreshChecklist(detail.id);
+    } catch (err) { notify({ type: 'danger', message: err.message }); }
+  }
+  async function toggleChecklistItem(item) { if (!detail) return; try { await updateMatterChecklistItem(detail.id, item.id, { completed: !item.completed }); await refreshChecklist(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
+  async function saveChecklistItem(item, values) {
+    if (!detail) return;
+    try {
+      await updateMatterChecklistItem(detail.id, item.id, { title: values.title || '', notes: values.notes || '', position: Number(values.position || 0) });
+      setEditingChecklistItem(null);
+      notify({ type: 'success', message: 'Checklist item updated.' });
+      await refreshChecklist(detail.id);
+    } catch (err) { notify({ type: 'danger', message: err.message }); }
+  }
+  async function deleteChecklistItemRecord(item) { if (!detail) return; try { await deleteMatterChecklistItem(detail.id, item.id); notify({ type: 'success', message: 'Checklist item deleted.' }); await refreshChecklist(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function saveTask(task, values) { try { await api(`/tasks/${task.id}`, { method: 'PATCH', body: values }); setEditingTask(null); notify({ type: 'success', message: 'Task updated.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteTaskRecord(task) { try { await api(`/tasks/${task.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Task deleted.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteDocumentRecord(doc) { try { await api(`/documents/${doc.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Document deleted.' }); await loadDetail(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
@@ -572,6 +602,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
                     <button style={styles.primaryButton}>Log time</button>
                   </form>
                   <Sub title="Time entries"><TimeEntryEditorList entries={detail.timeEntries || []} canManage={canManage} canViewBilling={canViewBilling} editingTime={editingTime} setEditingTime={setEditingTime} saveTimeEntry={saveTimeEntry} confirmDelete={entry => setConfirm({ title: 'Delete time entry?', message: 'Delete this time entry?', onConfirm: () => deleteTimeEntryRecord(entry) })} /></Sub>
+                  <Sub title="Checklist"><MatterChecklistPanel items={detail.checklistItems || []} canManage={canManageChecklist} canToggle={canToggleChecklist} form={checklistForm} setForm={setChecklistForm} onAdd={addChecklistItem} editingItem={editingChecklistItem} setEditingItem={setEditingChecklistItem} onToggle={toggleChecklistItem} onSave={saveChecklistItem} confirmDelete={item => setConfirm({ title: 'Delete checklist item?', message: 'Delete this checklist item?', onConfirm: () => deleteChecklistItemRecord(item) })} /></Sub>
                   <Sub title="Tasks"><TaskEditorList tasks={detail.tasks || []} entries={detail.timeEntries || []} matter={detail} canManage={canManage} canViewBilling={canViewBilling} editingTask={editingTask} setEditingTask={setEditingTask} saveTask={saveTask} taskTimer={taskTimer} setTaskTimer={setTaskTimer} notify={notify} onTimerSaved={async () => { await loadDetail(detail.id); await reload(); }} confirmDelete={task => setConfirm({ title: 'Delete task?', message: 'Delete this task?', onConfirm: () => deleteTaskRecord(task) })} /></Sub>
                   <Sub title="Court appearances">{canManage && <form onSubmit={createEvent} style={{ ...styles.formGrid, marginBottom: 12 }}><Field label="Title"><input required style={styles.input} value={eventForm.title} onChange={e => setEventForm({ ...eventForm, title: e.target.value })} /></Field><Field label="Date"><input required type="date" style={styles.input} value={eventForm.date} onChange={e => setEventForm({ ...eventForm, date: e.target.value })} /></Field><Field label="Time"><input style={styles.input} value={eventForm.time} onChange={e => setEventForm({ ...eventForm, time: e.target.value })} /></Field><Field label="Type"><input style={styles.input} value={eventForm.type} onChange={e => setEventForm({ ...eventForm, type: e.target.value })} /></Field><Field label="Location"><input style={styles.input} value={eventForm.location} onChange={e => setEventForm({ ...eventForm, location: e.target.value })} /></Field><Field label="Meeting Link"><input type="url" placeholder="https://..." style={styles.input} value={eventForm.meetingLink} onChange={e => setEventForm({ ...eventForm, meetingLink: e.target.value })} /></Field><button style={styles.ghostButton}>Schedule event</button></form>}<AppearanceEditorList events={detail.appearances || []} canManage={canManage} editingEvent={editingEvent} setEditingEvent={setEditingEvent} saveEvent={saveEvent} confirmDelete={event => setConfirm({ title: 'Delete appearance?', message: 'Delete this court appearance?', onConfirm: () => deleteEventRecord(event) })} /></Sub>
                   <Sub title="Documents"><MatterDocuments matterId={detail.id} canManage={canManage} notify={notify} /></Sub>
@@ -1030,6 +1061,68 @@ export function Users({ clients = [], notify }) {
       </div>
     </Card>
   </div>;
+}
+
+function MatterChecklistPanel({ items = [], canManage, canToggle, form, setForm, onAdd, editingItem, setEditingItem, onToggle, onSave, confirmDelete }) {
+  const completedCount = items.filter(item => Number(item.completed || 0) === 1).length;
+  return (
+    <div style={{ display: 'grid', gap: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span style={{ color: theme.muted, fontSize: 12 }}>{completedCount} of {items.length} complete</span>
+        {items.length > 0 && <Badge tone={completedCount === items.length ? 'green' : 'amber'}>{completedCount === items.length ? 'Done' : 'Open'}</Badge>}
+      </div>
+      {canManage && (
+        <form onSubmit={onAdd} style={{ ...styles.formGrid, alignItems: 'end' }}>
+          <Field label="Item"><input required style={styles.input} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></Field>
+          <Field label="Notes"><input style={styles.input} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></Field>
+          <Field label="Position"><input type="number" min="0" style={styles.input} value={form.position} onChange={e => setForm({ ...form, position: e.target.value })} /></Field>
+          <button type="submit" style={styles.ghostButton} disabled={!form.title.trim()}>Add item</button>
+        </form>
+      )}
+      {!items.length ? (
+        <Empty title="No checklist items." text="Once records exist, they will appear here." />
+      ) : (
+        <div style={{ display: 'grid', gap: 8 }}>
+          {items.map(item => {
+            const completed = Number(item.completed || 0) === 1;
+            const editing = editingItem?.id === item.id;
+            return (
+              <div key={item.id} style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 10, display: 'grid', gap: 8 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 10, alignItems: 'start' }}>
+                  <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', minWidth: 0 }}>
+                    <input type="checkbox" checked={completed} disabled={!canToggle} onChange={() => onToggle(item)} style={{ marginTop: 2 }} />
+                    <span style={{ display: 'grid', gap: 5, minWidth: 0 }}>
+                      {editing ? (
+                        <>
+                          <input required style={styles.input} value={editingItem.title || ''} onChange={e => setEditingItem({ ...editingItem, title: e.target.value })} />
+                          <textarea rows={2} style={{ ...styles.input, resize: 'vertical' }} value={editingItem.notes || ''} onChange={e => setEditingItem({ ...editingItem, notes: e.target.value })} />
+                          <input type="number" min="0" style={{ ...styles.input, maxWidth: 140 }} value={editingItem.position ?? 0} onChange={e => setEditingItem({ ...editingItem, position: e.target.value })} />
+                        </>
+                      ) : (
+                        <>
+                          <strong style={{ color: completed ? theme.muted : theme.ink, textDecoration: completed ? 'line-through' : 'none' }}>{item.title}</strong>
+                          {item.notes ? <span style={{ color: theme.muted, fontSize: 12 }}>{item.notes}</span> : null}
+                          <span style={{ color: theme.muted, fontSize: 12 }}>Position {item.position ?? 0}{completed && item.completedBy ? ` / Completed by ${item.completedBy}` : ''}</span>
+                        </>
+                      )}
+                    </span>
+                  </label>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <Badge tone={completed ? 'green' : 'amber'}>{completed ? 'Done' : 'Open'}</Badge>
+                    {canManage && (editing ? (
+                      <ActionGroup actions={[['Save', () => onSave(item, editingItem)], ['Cancel', () => setEditingItem(null)]]} />
+                    ) : (
+                      <ActionGroup actions={[['Edit', () => setEditingItem({ ...item, position: item.position ?? 0 })], ['Delete', () => confirmDelete(item)]]} />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function TaskEditorList({ tasks, entries = [], matter, canManage, canViewBilling = true, editingTask, setEditingTask, saveTask, toggle, confirmDelete, taskTimer, setTaskTimer, notify, onTimerSaved }) {
