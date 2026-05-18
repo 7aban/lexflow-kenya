@@ -194,6 +194,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS matter_checklist_items (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT NOT NULL, completed INTEGER DEFAULT 0, position INTEGER DEFAULT 0, notes TEXT, dueDate TEXT, assignee TEXT, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, completedAt TEXT, completedBy TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS checklist_templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, practiceArea TEXT, active INTEGER DEFAULT 1, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS checklist_template_items (id TEXT PRIMARY KEY, templateId TEXT NOT NULL, title TEXT NOT NULL, notes TEXT, position INTEGER DEFAULT 0, createdAt TEXT NOT NULL)`);
+  await run(`CREATE TABLE IF NOT EXISTS document_templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, practiceArea TEXT, category TEXT, bodyMarkup TEXT, active INTEGER DEFAULT 1, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
 
   await ensureClientUserSupport();
   await ensureColumn('matter_checklist_items', 'dueDate', 'TEXT');
@@ -1582,6 +1583,101 @@ app.post('/api/matters/:matterId/checklist-template-applications', requireAdvoca
   const createdItems = await all(`SELECT * FROM matter_checklist_items WHERE id IN (${placeholders}) ORDER BY position ASC, createdAt ASC`, createdIds);
   await recordAuditEvent(req, { action: 'matter_checklist_template_applied', entityType: 'checklist_template', entityId: templateId, matterId: req.params.matterId, metadata: { templateId, matterId: req.params.matterId, itemCount: createdItems.length } }).catch(() => {});
   res.json(createdItems);
+});
+
+function normalizeDocumentTemplateOptionalText(value) {
+  return typeof value === 'string' ? value : '';
+}
+
+app.get('/api/document-templates', requireStaff, async (req, res) => {
+  const includeInactive = req.query?.includeInactive === '1' || req.query?.includeInactive === 'true';
+  const sql = includeInactive
+    ? 'SELECT * FROM document_templates ORDER BY practiceArea COLLATE NOCASE ASC, category COLLATE NOCASE ASC, name COLLATE NOCASE ASC, createdAt ASC'
+    : 'SELECT * FROM document_templates WHERE active=1 ORDER BY practiceArea COLLATE NOCASE ASC, category COLLATE NOCASE ASC, name COLLATE NOCASE ASC, createdAt ASC';
+  const templates = await all(sql);
+  res.json(templates);
+});
+app.get('/api/document-templates/:id', requireStaff, async (req, res) => {
+  const template = await get('SELECT * FROM document_templates WHERE id=? AND active=1', [req.params.id]);
+  if (!template) return res.status(404).json({ error: 'Document template not found' });
+  res.json(template);
+});
+app.post('/api/document-templates', requireAdmin, async (req, res) => {
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+  if (!name) return res.status(400).json({ error: 'Document template name is required' });
+  if (name.length > 160) return res.status(400).json({ error: 'Document template name must not exceed 160 characters' });
+  const description = normalizeDocumentTemplateOptionalText(req.body?.description);
+  const practiceArea = normalizeDocumentTemplateOptionalText(req.body?.practiceArea);
+  const category = normalizeDocumentTemplateOptionalText(req.body?.category);
+  const bodyMarkup = normalizeDocumentTemplateOptionalText(req.body?.bodyMarkup);
+  const id = genId('DTPL');
+  const createdAt = new Date().toISOString();
+  await run('INSERT INTO document_templates (id,name,description,practiceArea,category,bodyMarkup,active,createdBy,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?)', [id, name, description, practiceArea, category, bodyMarkup, 1, actorLabel(req), createdAt, createdAt]);
+  const template = await get('SELECT * FROM document_templates WHERE id=?', [id]);
+  await logAudit(req, 'create', 'document_template', id, `Created document template ${name}`);
+  await recordAuditEvent(req, { action: 'document_template_created', entityType: 'document_template', entityId: id, metadata: { templateId: id, name, practiceArea, category, hasBody: Boolean(bodyMarkup), bodyLength: bodyMarkup.length, active: 1 } }).catch(() => {});
+  res.json(template);
+});
+app.patch('/api/document-templates/:id', requireAdmin, async (req, res) => {
+  const existing = await get('SELECT * FROM document_templates WHERE id=?', [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Document template not found' });
+  const updates = [];
+  const params = [];
+  const updatedFields = [];
+  if (req.body?.name !== undefined) {
+    const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
+    if (!name) return res.status(400).json({ error: 'Document template name must not be empty' });
+    if (name.length > 160) return res.status(400).json({ error: 'Document template name must not exceed 160 characters' });
+    updates.push('name=?');
+    params.push(name);
+    updatedFields.push('name');
+  }
+  if (req.body?.description !== undefined) {
+    updates.push('description=?');
+    params.push(normalizeDocumentTemplateOptionalText(req.body.description));
+    updatedFields.push('description');
+  }
+  if (req.body?.practiceArea !== undefined) {
+    updates.push('practiceArea=?');
+    params.push(normalizeDocumentTemplateOptionalText(req.body.practiceArea));
+    updatedFields.push('practiceArea');
+  }
+  if (req.body?.category !== undefined) {
+    updates.push('category=?');
+    params.push(normalizeDocumentTemplateOptionalText(req.body.category));
+    updatedFields.push('category');
+  }
+  if (req.body?.bodyMarkup !== undefined) {
+    updates.push('bodyMarkup=?');
+    params.push(normalizeDocumentTemplateOptionalText(req.body.bodyMarkup));
+    updatedFields.push('bodyMarkup');
+  }
+  if (req.body?.active !== undefined) {
+    const active = normalizeTemplateActive(req.body.active);
+    if (active === null) return res.status(400).json({ error: 'Invalid document template active status' });
+    updates.push('active=?');
+    params.push(active);
+    updatedFields.push('active');
+  }
+  if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
+  const updatedAt = new Date().toISOString();
+  updates.push('updatedAt=?');
+  params.push(updatedAt);
+  params.push(req.params.id);
+  await run(`UPDATE document_templates SET ${updates.join(',')} WHERE id=?`, params);
+  const template = await get('SELECT * FROM document_templates WHERE id=?', [req.params.id]);
+  await logAudit(req, 'update', 'document_template', req.params.id, `Updated document template ${template?.name || req.params.id}`);
+  await recordAuditEvent(req, { action: 'document_template_updated', entityType: 'document_template', entityId: req.params.id, metadata: { templateId: req.params.id, name: template?.name || '', updatedFields: updatedFields.join(','), active: Number(template?.active || 0), bodyLength: String(template?.bodyMarkup || '').length } }).catch(() => {});
+  res.json(template);
+});
+app.delete('/api/document-templates/:id', requireAdmin, async (req, res) => {
+  const existing = await get('SELECT * FROM document_templates WHERE id=?', [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Document template not found' });
+  const updatedAt = new Date().toISOString();
+  await run('UPDATE document_templates SET active=0, updatedAt=? WHERE id=?', [updatedAt, req.params.id]);
+  await logAudit(req, 'delete', 'document_template', req.params.id, `Soft-deleted document template ${existing.name || req.params.id}`);
+  await recordAuditEvent(req, { action: 'document_template_deleted', entityType: 'document_template', entityId: req.params.id, metadata: { templateId: req.params.id, name: existing.name || '', active: 0 } }).catch(() => {});
+  res.json({ id: req.params.id, deleted: true, active: 0 });
 });
 
 app.get('/api/matters/:id/checklist-items', requireStaff, async (req, res) => {
