@@ -502,7 +502,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   const [advocates, setAdvocates] = useState([]);
   const [reassignTo, setReassignTo] = useState('');
   const [reassigning, setReassigning] = useState(false);
-  const emptyChecklistForm = { title: '', notes: '', position: '' };
+  const emptyChecklistForm = { title: '', notes: '', position: '', dueDate: '', assignee: '' };
   const [checklistForm, setChecklistForm] = useState(emptyChecklistForm);
   const [editingChecklistItem, setEditingChecklistItem] = useState(null);
   const [checklistTemplates, setChecklistTemplates] = useState([]);
@@ -634,7 +634,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   async function addChecklistItem(event) {
     event.preventDefault();
     if (!detail || !checklistForm.title.trim()) return;
-    const payload = { title: checklistForm.title, notes: checklistForm.notes };
+    const payload = { title: checklistForm.title, notes: checklistForm.notes, dueDate: checklistForm.dueDate, assignee: checklistForm.assignee };
     if (checklistForm.position !== '') payload.position = Number(checklistForm.position);
     try {
       await createMatterChecklistItem(detail.id, payload);
@@ -647,7 +647,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   async function saveChecklistItem(item, values) {
     if (!detail) return;
     try {
-      await updateMatterChecklistItem(detail.id, item.id, { title: values.title || '', notes: values.notes || '', position: Number(values.position || 0) });
+      await updateMatterChecklistItem(detail.id, item.id, { title: values.title || '', notes: values.notes || '', position: Number(values.position || 0), dueDate: values.dueDate || '', assignee: values.assignee || '' });
       setEditingChecklistItem(null);
       notify({ type: 'success', message: 'Checklist item updated.' });
       await refreshChecklist(detail.id);
@@ -1284,6 +1284,7 @@ function MatterChecklistPanel({ items = [], templates = [], canManage, canToggle
   const checklistItem = (item) => {
     const completed = Number(item.completed || 0) === 1;
     const editing = editingItem?.id === item.id;
+    const hasChecklistMeta = Boolean(item.dueDate || item.assignee);
     const completedMeta = completed
       ? [
           item.completedBy ? `Completed by ${item.completedBy}` : null,
@@ -1293,31 +1294,47 @@ function MatterChecklistPanel({ items = [], templates = [], canManage, canToggle
     return (
       <div key={item.id} style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: completed ? '#F8FAFC' : '#fff', padding: 10, display: 'grid', gap: 8, minWidth: 0 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 10, alignItems: 'start', minWidth: 0 }}>
-          <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', minWidth: 0 }}>
-            <input type="checkbox" checked={completed} disabled={!canToggle} onChange={() => onToggle(item)} style={{ marginTop: 2, flex: '0 0 auto' }} />
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', minWidth: 0 }}>
+            <input type="checkbox" aria-label={completed ? 'Reopen checklist item' : 'Complete checklist item'} checked={completed} disabled={!canToggle} onChange={() => onToggle(item)} style={{ marginTop: 2, flex: '0 0 auto' }} />
             <span style={{ display: 'grid', gap: 5, minWidth: 0 }}>
               {editing ? (
                 <>
                   <input required style={styles.input} value={editingItem.title || ''} onChange={e => setEditingItem({ ...editingItem, title: e.target.value })} />
                   <textarea rows={2} style={{ ...styles.input, resize: 'vertical' }} value={editingItem.notes || ''} onChange={e => setEditingItem({ ...editingItem, notes: e.target.value })} />
+                  <span style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, minWidth: 0 }}>
+                    <span style={{ display: 'grid', gap: 4, minWidth: 0 }}>
+                      <span style={{ color: theme.muted, fontSize: 11, fontWeight: 700 }}>Checklist due</span>
+                      <input type="date" aria-label="Checklist due" style={styles.input} value={editingItem.dueDate || ''} onChange={e => setEditingItem({ ...editingItem, dueDate: e.target.value })} />
+                    </span>
+                    <span style={{ display: 'grid', gap: 4, minWidth: 0 }}>
+                      <span style={{ color: theme.muted, fontSize: 11, fontWeight: 700 }}>Assignee</span>
+                      <input aria-label="Assignee" style={styles.input} value={editingItem.assignee || ''} onChange={e => setEditingItem({ ...editingItem, assignee: e.target.value })} />
+                    </span>
+                  </span>
                   <input type="number" min="0" style={{ ...styles.input, maxWidth: 140 }} value={editingItem.position ?? 0} onChange={e => setEditingItem({ ...editingItem, position: e.target.value })} />
                 </>
               ) : (
                 <>
                   <strong style={{ color: completed ? theme.muted : theme.ink, textDecoration: completed ? 'line-through' : 'none', overflowWrap: 'anywhere' }}>{item.title}</strong>
                   {item.notes ? <span style={{ color: theme.muted, fontSize: 12, overflowWrap: 'anywhere' }}>{item.notes}</span> : null}
+                  {hasChecklistMeta ? (
+                    <span style={{ display: 'flex', flexWrap: 'wrap', gap: 8, minWidth: 0, color: theme.muted, fontSize: 12 }}>
+                      {item.dueDate ? <span style={{ overflowWrap: 'anywhere' }}><strong>Checklist due:</strong> {formatTimelineDate(item.dueDate)}</span> : null}
+                      {item.assignee ? <span style={{ overflowWrap: 'anywhere' }}><strong>Assignee:</strong> {item.assignee}</span> : null}
+                    </span>
+                  ) : null}
                   <span style={{ color: theme.muted, fontSize: 12, overflowWrap: 'anywhere' }}>Position {item.position ?? 0}</span>
                   {completedMeta ? <span style={{ color: theme.muted, fontSize: 12, overflowWrap: 'anywhere' }}>{completedMeta}</span> : null}
                 </>
               )}
             </span>
-          </label>
+          </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', minWidth: 0 }}>
             <Badge tone={completed ? 'green' : 'amber'}>{completed ? 'Done' : 'Open'}</Badge>
             {canManage && (editing ? (
               <ActionGroup actions={[['Save', () => onSave(item, editingItem)], ['Cancel', () => setEditingItem(null)]]} />
             ) : (
-              <ActionGroup actions={[['Edit', () => setEditingItem({ ...item, position: item.position ?? 0 })], ['Delete', () => confirmDelete(item)]]} />
+              <ActionGroup actions={[['Edit', () => setEditingItem({ ...item, position: item.position ?? 0, dueDate: String(item.dueDate || '').slice(0, 10), assignee: item.assignee || '' })], ['Delete', () => confirmDelete(item)]]} />
             ))}
           </div>
         </div>
@@ -1361,6 +1378,8 @@ function MatterChecklistPanel({ items = [], templates = [], canManage, canToggle
         <form onSubmit={onAdd} style={{ ...styles.formGrid, alignItems: 'end' }}>
           <Field label="Item"><input required style={styles.input} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></Field>
           <Field label="Notes"><input style={styles.input} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></Field>
+          <Field label="Checklist due"><input type="date" style={styles.input} value={form.dueDate} onChange={e => setForm({ ...form, dueDate: e.target.value })} /></Field>
+          <Field label="Assignee"><input style={styles.input} value={form.assignee} onChange={e => setForm({ ...form, assignee: e.target.value })} /></Field>
           <Field label="Position"><input type="number" min="0" style={styles.input} value={form.position} onChange={e => setForm({ ...form, position: e.target.value })} /></Field>
           <button type="submit" style={styles.ghostButton} disabled={!form.title.trim()}>Add item</button>
         </form>

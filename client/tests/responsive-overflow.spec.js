@@ -70,6 +70,28 @@ async function openStaffMatterDetail(page) {
   return checklistPanel;
 }
 
+async function addChecklistItemWithInternalMeta(checklistPanel) {
+  const addForm = checklistPanel.locator('form').filter({ hasText: 'Add item' }).first();
+  await expect(addForm).toBeVisible({ timeout: 15000 });
+  await expect(addForm).toContainText('Checklist due');
+  await expect(addForm).toContainText('Assignee');
+
+  const itemTitle = `Responsive checklist internal due ${Date.now()}`;
+  const textInputs = addForm.locator('input:not([type]), input[type="text"]');
+  await textInputs.first().fill(itemTitle);
+  const dueDateInput = addForm.locator('input[type="date"]');
+  const assigneeInput = textInputs.nth(2);
+  await dueDateInput.fill('2026-05-29');
+  await assigneeInput.fill('Responsive QA');
+  await expect(dueDateInput).toHaveValue('2026-05-29');
+  await expect(assigneeInput).toHaveValue('Responsive QA');
+  await addForm.getByRole('button', { name: 'Add item' }).click();
+
+  await expect(checklistPanel).toContainText(itemTitle, { timeout: 15000 });
+  await expect(checklistPanel).toContainText('Checklist due:');
+  await expect(checklistPanel).toContainText('Assignee: Responsive QA');
+}
+
 async function measureOverflow(page, vw) {
   await page.setViewportSize({ width: vw, height: 900 });
   await page.waitForTimeout(400);
@@ -175,6 +197,7 @@ test.describe('Responsive Overflow Verification', () => {
     await staffLogin(page);
     const checklistPanel = await openStaffMatterDetail(page);
     await expect(checklistPanel).toContainText(/\d+ of \d+ complete/);
+    await addChecklistItemWithInternalMeta(checklistPanel);
 
     const results = { 'Matter checklist': [] };
     for (const vw of VIEWPORTS) {
