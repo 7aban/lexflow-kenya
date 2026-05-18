@@ -85,12 +85,37 @@ Backups are written to `backups/` and ignored by Git.
 
 ## Environment
 
-Use `.env.example` as a checklist for production environment variables. The current server reads environment variables from the process environment, so set them in your shell, hosting platform, or service manager.
+Use `.env.example` for local development and `server/.env.production.example` as the production checklist. The current server reads environment variables from the process environment in production, so set them through the shell, hosting platform, PM2 config, or systemd `EnvironmentFile`.
 
 Important variables:
 
 - `JWT_SECRET`: required for production; use a long random value.
 - `PORT`: backend port, default `5000`.
+- `DATABASE_PATH`: SQLite database path. The database stores document BLOBs.
+- `BASE_URL` and `CORS_ORIGINS`: public app/API origins used by browser clients and OAuth callbacks.
+- `LEXFLOW_BACKUP_KEY`: 64-hex-character key required for encrypted backups.
+- `BACKUP_DIR`, `BACKUP_LOG`, and `LEXFLOW_BACKUP_RETENTION_COUNT`: backup output, logging, and retention settings.
+- `SEED_ADMIN_PASSWORD`: used only when the database has no users for first-admin bootstrap.
+
+## Pilot Deployment
+
+The backend starts from `server/` with:
+
+```powershell
+npm start
+```
+
+The frontend production bundle is built from `client/` with:
+
+```powershell
+npm run build
+```
+
+The Express backend does not currently serve `client/dist` by itself. For a pilot deployment, run the backend as a Node service on `PORT` and host the frontend build with a static host or reverse proxy that forwards API traffic to the backend. Use `/health` as the backend healthcheck.
+
+See `docs/pilot-deployment-runbook.md` for the production env matrix, startup sequence, smoke tests, backup notes, and rollback guidance.
+
+Do not run `npm run seed:demo` against production or pilot data. It rebuilds the demo database and is for local development and test fixtures only.
 
 ## Troubleshooting
 
