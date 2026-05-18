@@ -55,6 +55,21 @@ async function clientNavigate(page, view) {
   await page.waitForTimeout(600);
 }
 
+async function openStaffMatterDetail(page) {
+  await staffNavigate(page, 'Matters');
+  const matterButton = page.locator('button').filter({ has: page.locator('small') }).first();
+  await expect(matterButton).toBeVisible({ timeout: 15000 });
+  await matterButton.click();
+  await page.locator('.lf-matter-detail-workspace').waitFor({ state: 'visible', timeout: 15000 });
+  const workspaceTab = page.locator('button', { hasText: /^Workspace$/ });
+  if (await workspaceTab.isVisible().catch(() => false)) {
+    await workspaceTab.click();
+  }
+  const checklistPanel = page.locator('section[aria-label="Matter checklist"]');
+  await expect(checklistPanel).toBeVisible({ timeout: 15000 });
+  return checklistPanel;
+}
+
 async function measureOverflow(page, vw) {
   await page.setViewportSize({ width: vw, height: 900 });
   await page.waitForTimeout(400);
@@ -153,6 +168,31 @@ test.describe('Responsive Overflow Verification', () => {
       for (let i = 0; i < VIEWPORTS.length; i++) {
         expect.soft(results[view][i].hasHScroll, `${view} @ ${VIEWPORTS[i]}px`).toBe(false);
       }
+    }
+  });
+
+  test('Staff matter detail checklist - no horizontal overflow at 360, 390, 768, 1280', async ({ page }) => {
+    await staffLogin(page);
+    const checklistPanel = await openStaffMatterDetail(page);
+    await expect(checklistPanel).toContainText(/\d+ of \d+ complete/);
+
+    const results = { 'Matter checklist': [] };
+    for (const vw of VIEWPORTS) {
+      const m = await measureOverflow(page, vw);
+      results['Matter checklist'].push(m);
+      await expect(checklistPanel).toBeVisible();
+    }
+    logMatrix('STAFF MATTER CHECKLIST RESPONSIVE OVERFLOW', results);
+    for (let i = 0; i < VIEWPORTS.length; i++) {
+      expect.soft(results['Matter checklist'][i].hasHScroll, `Matter checklist @ ${VIEWPORTS[i]}px`).toBe(false);
+    }
+
+    const firstChecklistToggle = checklistPanel.locator('input[type="checkbox"]').first();
+    if (await firstChecklistToggle.isVisible().catch(() => false) && await firstChecklistToggle.isEnabled().catch(() => false)) {
+      await firstChecklistToggle.click();
+      await expect(checklistPanel).toBeVisible();
+      const afterToggle = await measureOverflow(page, 360);
+      expect.soft(afterToggle.hasHScroll, 'Matter checklist after toggle @ 360px').toBe(false);
     }
   });
 

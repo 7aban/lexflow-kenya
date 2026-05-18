@@ -1278,12 +1278,74 @@ function ChecklistTemplateLibrary({ templates = [], form, setForm, editingTempla
 
 function MatterChecklistPanel({ items = [], templates = [], canManage, canToggle, canApplyTemplate, selectedTemplateId, setSelectedTemplateId, onApplyTemplate, applyingTemplate, form, setForm, onAdd, editingItem, setEditingItem, onToggle, onSave, confirmDelete }) {
   const completedCount = items.filter(item => Number(item.completed || 0) === 1).length;
+  const completionPercent = items.length ? Math.round((completedCount / items.length) * 100) : 0;
+  const openItems = items.filter(item => Number(item.completed || 0) !== 1);
+  const completedItems = items.filter(item => Number(item.completed || 0) === 1);
+  const checklistItem = (item) => {
+    const completed = Number(item.completed || 0) === 1;
+    const editing = editingItem?.id === item.id;
+    const completedMeta = completed
+      ? [
+          item.completedBy ? `Completed by ${item.completedBy}` : null,
+          item.completedAt ? formatTimelineDate(item.completedAt) : null,
+        ].filter(Boolean).join(' - ')
+      : '';
+    return (
+      <div key={item.id} style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: completed ? '#F8FAFC' : '#fff', padding: 10, display: 'grid', gap: 8, minWidth: 0 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 10, alignItems: 'start', minWidth: 0 }}>
+          <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', minWidth: 0 }}>
+            <input type="checkbox" checked={completed} disabled={!canToggle} onChange={() => onToggle(item)} style={{ marginTop: 2, flex: '0 0 auto' }} />
+            <span style={{ display: 'grid', gap: 5, minWidth: 0 }}>
+              {editing ? (
+                <>
+                  <input required style={styles.input} value={editingItem.title || ''} onChange={e => setEditingItem({ ...editingItem, title: e.target.value })} />
+                  <textarea rows={2} style={{ ...styles.input, resize: 'vertical' }} value={editingItem.notes || ''} onChange={e => setEditingItem({ ...editingItem, notes: e.target.value })} />
+                  <input type="number" min="0" style={{ ...styles.input, maxWidth: 140 }} value={editingItem.position ?? 0} onChange={e => setEditingItem({ ...editingItem, position: e.target.value })} />
+                </>
+              ) : (
+                <>
+                  <strong style={{ color: completed ? theme.muted : theme.ink, textDecoration: completed ? 'line-through' : 'none', overflowWrap: 'anywhere' }}>{item.title}</strong>
+                  {item.notes ? <span style={{ color: theme.muted, fontSize: 12, overflowWrap: 'anywhere' }}>{item.notes}</span> : null}
+                  <span style={{ color: theme.muted, fontSize: 12, overflowWrap: 'anywhere' }}>Position {item.position ?? 0}</span>
+                  {completedMeta ? <span style={{ color: theme.muted, fontSize: 12, overflowWrap: 'anywhere' }}>{completedMeta}</span> : null}
+                </>
+              )}
+            </span>
+          </label>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', minWidth: 0 }}>
+            <Badge tone={completed ? 'green' : 'amber'}>{completed ? 'Done' : 'Open'}</Badge>
+            {canManage && (editing ? (
+              <ActionGroup actions={[['Save', () => onSave(item, editingItem)], ['Cancel', () => setEditingItem(null)]]} />
+            ) : (
+              <ActionGroup actions={[['Edit', () => setEditingItem({ ...item, position: item.position ?? 0 })], ['Delete', () => confirmDelete(item)]]} />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+  const checklistSection = (title, sectionItems) => sectionItems.length ? (
+    <section aria-label={title} style={{ display: 'grid', gap: 8, minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: theme.muted, fontSize: 11, fontWeight: 700, letterSpacing: 0, textTransform: 'uppercase' }}>
+        <span>{title}</span>
+        <span style={{ height: 1, flex: '1 1 auto', background: theme.line }} />
+      </div>
+      <div style={{ display: 'grid', gap: 8, minWidth: 0 }}>
+        {sectionItems.map(checklistItem)}
+      </div>
+    </section>
+  ) : null;
   return (
-    <div style={{ display: 'grid', gap: 12 }}>
+    <section aria-label="Matter checklist" style={{ display: 'grid', gap: 12, minWidth: 0 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <span style={{ color: theme.muted, fontSize: 12 }}>{completedCount} of {items.length} complete</span>
         {items.length > 0 && <Badge tone={completedCount === items.length ? 'green' : 'amber'}>{completedCount === items.length ? 'Done' : 'Open'}</Badge>}
       </div>
+      {items.length > 0 && (
+        <div role="progressbar" aria-label="Checklist progress" aria-valuemin={0} aria-valuemax={items.length} aria-valuenow={completedCount} style={{ height: 6, borderRadius: 999, background: '#E5E7EB', overflow: 'hidden', minWidth: 0 }}>
+          <div style={{ width: `${completionPercent}%`, height: '100%', borderRadius: 999, background: completedCount === items.length ? theme.green : theme.blue }} />
+        </div>
+      )}
       {canApplyTemplate && (
         <form onSubmit={onApplyTemplate} style={{ ...styles.formGrid, alignItems: 'end' }}>
           <Field label="Apply Template">
@@ -1306,46 +1368,12 @@ function MatterChecklistPanel({ items = [], templates = [], canManage, canToggle
       {!items.length ? (
         <Empty title="No checklist items." text="Once records exist, they will appear here." />
       ) : (
-        <div style={{ display: 'grid', gap: 8 }}>
-          {items.map(item => {
-            const completed = Number(item.completed || 0) === 1;
-            const editing = editingItem?.id === item.id;
-            return (
-              <div key={item.id} style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 10, display: 'grid', gap: 8 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 10, alignItems: 'start' }}>
-                  <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', minWidth: 0 }}>
-                    <input type="checkbox" checked={completed} disabled={!canToggle} onChange={() => onToggle(item)} style={{ marginTop: 2 }} />
-                    <span style={{ display: 'grid', gap: 5, minWidth: 0 }}>
-                      {editing ? (
-                        <>
-                          <input required style={styles.input} value={editingItem.title || ''} onChange={e => setEditingItem({ ...editingItem, title: e.target.value })} />
-                          <textarea rows={2} style={{ ...styles.input, resize: 'vertical' }} value={editingItem.notes || ''} onChange={e => setEditingItem({ ...editingItem, notes: e.target.value })} />
-                          <input type="number" min="0" style={{ ...styles.input, maxWidth: 140 }} value={editingItem.position ?? 0} onChange={e => setEditingItem({ ...editingItem, position: e.target.value })} />
-                        </>
-                      ) : (
-                        <>
-                          <strong style={{ color: completed ? theme.muted : theme.ink, textDecoration: completed ? 'line-through' : 'none' }}>{item.title}</strong>
-                          {item.notes ? <span style={{ color: theme.muted, fontSize: 12 }}>{item.notes}</span> : null}
-                          <span style={{ color: theme.muted, fontSize: 12 }}>Position {item.position ?? 0}{completed && item.completedBy ? ` / Completed by ${item.completedBy}` : ''}</span>
-                        </>
-                      )}
-                    </span>
-                  </label>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <Badge tone={completed ? 'green' : 'amber'}>{completed ? 'Done' : 'Open'}</Badge>
-                    {canManage && (editing ? (
-                      <ActionGroup actions={[['Save', () => onSave(item, editingItem)], ['Cancel', () => setEditingItem(null)]]} />
-                    ) : (
-                      <ActionGroup actions={[['Edit', () => setEditingItem({ ...item, position: item.position ?? 0 })], ['Delete', () => confirmDelete(item)]]} />
-                    ))}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+        <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
+          {checklistSection('Open items', openItems)}
+          {checklistSection('Completed items', completedItems)}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
