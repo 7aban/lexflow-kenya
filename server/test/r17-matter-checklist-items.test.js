@@ -55,6 +55,16 @@ function parseSafeMetadata(event) {
   return metadata;
 }
 
+function expectIsoTimestamp(value) {
+  expect(typeof value).toBe('string');
+  expect(value).toBeTruthy();
+  expect(Number.isNaN(Date.parse(value))).toBe(false);
+}
+
+function waitForNextTimestamp() {
+  return new Promise(resolve => setTimeout(resolve, 10));
+}
+
 describe('R17-2 matter checklist items', () => {
   const runId = Date.now();
   const password = 'Str0ng!Passw0rd2026!';
@@ -177,6 +187,52 @@ describe('R17-2 matter checklist items', () => {
     expect(metadata.title).toBe(`R17 Safe Checklist ${runId}`);
   });
 
+  test('admin can create and assigned advocate can patch checklist due date and assignee metadata', async () => {
+    const metadataMatterId = await createInvariantMatter(`R17 Metadata Matter ${runId}`);
+    const dueDate = '2026-06-15';
+    const assignee = advocateName;
+
+    const createRes = await request(app)
+      .post(`/api/matters/${metadataMatterId}/checklist-items`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        title: `R17 Metadata Item ${runId}`,
+        notes: 'Metadata create.',
+        position: 1,
+        dueDate,
+        assignee,
+      });
+    expect(createRes.statusCode).toBe(200);
+    expect(createRes.body.dueDate).toBe(dueDate);
+    expect(createRes.body.assignee).toBe(assignee);
+    expect(createRes.body.updatedAt).toBe(createRes.body.createdAt);
+    expectIsoTimestamp(createRes.body.updatedAt);
+    const createdUpdatedAt = createRes.body.updatedAt;
+
+    const listRes = await request(app)
+      .get(`/api/matters/${metadataMatterId}/checklist-items`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(listRes.statusCode).toBe(200);
+    const listed = listRes.body.find(item => item.id === createRes.body.id);
+    expect(listed).toBeDefined();
+    expect(listed.dueDate).toBe(dueDate);
+    expect(listed.assignee).toBe(assignee);
+    expect(listed.updatedAt).toBe(createdUpdatedAt);
+
+    await waitForNextTimestamp();
+    const nextDueDate = '2026-07-01';
+    const nextAssignee = `R17 Checklist Owner ${runId}`;
+    const updateRes = await request(app)
+      .patch(`/api/matters/${metadataMatterId}/checklist-items/${createRes.body.id}`)
+      .set('Authorization', `Bearer ${advocateToken}`)
+      .send({ dueDate: nextDueDate, assignee: nextAssignee });
+    expect(updateRes.statusCode).toBe(200);
+    expect(updateRes.body.dueDate).toBe(nextDueDate);
+    expect(updateRes.body.assignee).toBe(nextAssignee);
+    expectIsoTimestamp(updateRes.body.updatedAt);
+    expect(new Date(updateRes.body.updatedAt).getTime()).toBeGreaterThan(new Date(createdUpdatedAt).getTime());
+  });
+
   test('manual checklist item create does not create task, deadline, notification, or reminder rows', async () => {
     const invariantMatterId = await createInvariantMatter(`R17 No Side Effect Create Matter ${runId}`);
 
@@ -185,7 +241,13 @@ describe('R17-2 matter checklist items', () => {
     const res = await request(app)
       .post(`/api/matters/${invariantMatterId}/checklist-items`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ title: `R17 No Side Effect Create Item ${runId}`, notes: 'Create invariant.', position: 1 });
+      .send({
+        title: `R17 No Side Effect Create Item ${runId}`,
+        notes: 'Create invariant.',
+        position: 1,
+        dueDate: '2026-06-20',
+        assignee: advocateName,
+      });
     expect(res.statusCode).toBe(200);
 
     await expectNoChecklistSideEffects(invariantMatterId);
@@ -204,10 +266,18 @@ describe('R17-2 matter checklist items', () => {
     const updateRes = await request(app)
       .patch(`/api/matters/${invariantMatterId}/checklist-items/${createRes.body.id}`)
       .set('Authorization', `Bearer ${advocateToken}`)
-      .send({ title: `R17 No Side Effect Updated Item ${runId}`, notes: 'After update.', position: 3 });
+      .send({
+        title: `R17 No Side Effect Updated Item ${runId}`,
+        notes: 'After update.',
+        position: 3,
+        dueDate: '2026-07-05',
+        assignee: `R17 Updated Owner ${runId}`,
+      });
     expect(updateRes.statusCode).toBe(200);
     expect(updateRes.body.title).toBe(`R17 No Side Effect Updated Item ${runId}`);
     expect(updateRes.body.position).toBe(3);
+    expect(updateRes.body.dueDate).toBe('2026-07-05');
+    expect(updateRes.body.assignee).toBe(`R17 Updated Owner ${runId}`);
 
     await expectNoChecklistSideEffects(invariantMatterId);
   });
@@ -220,22 +290,30 @@ describe('R17-2 matter checklist items', () => {
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ title: `R17 No Side Effect Toggle Item ${runId}`, position: 4 });
     expect(createRes.statusCode).toBe(200);
+    const createdUpdatedAt = createRes.body.updatedAt;
+    expectIsoTimestamp(createdUpdatedAt);
     await expectNoChecklistSideEffects(invariantMatterId);
 
+    await waitForNextTimestamp();
     const completeRes = await request(app)
       .patch(`/api/matters/${invariantMatterId}/checklist-items/${createRes.body.id}`)
       .set('Authorization', `Bearer ${assistantToken}`)
       .send({ completed: true });
     expect(completeRes.statusCode).toBe(200);
     expect(completeRes.body.completed).toBe(1);
+    expectIsoTimestamp(completeRes.body.updatedAt);
+    expect(new Date(completeRes.body.updatedAt).getTime()).toBeGreaterThan(new Date(createdUpdatedAt).getTime());
     await expectNoChecklistSideEffects(invariantMatterId);
 
+    await waitForNextTimestamp();
     const reopenRes = await request(app)
       .patch(`/api/matters/${invariantMatterId}/checklist-items/${createRes.body.id}`)
       .set('Authorization', `Bearer ${assistantToken}`)
       .send({ completed: false });
     expect(reopenRes.statusCode).toBe(200);
     expect(reopenRes.body.completed).toBe(0);
+    expectIsoTimestamp(reopenRes.body.updatedAt);
+    expect(new Date(reopenRes.body.updatedAt).getTime()).toBeGreaterThan(new Date(completeRes.body.updatedAt).getTime());
     await expectNoChecklistSideEffects(invariantMatterId);
   });
 
@@ -318,7 +396,7 @@ describe('R17-2 matter checklist items', () => {
     expect(res.statusCode).toBe(403);
   });
 
-  test('assistant cannot rename, reorder, or delete checklist items', async () => {
+  test('assistant cannot rename, reorder, edit metadata, or delete checklist items', async () => {
     const renameRes = await request(app)
       .patch(`/api/matters/${matterId}/checklist-items/${assistantItemId}`)
       .set('Authorization', `Bearer ${assistantToken}`)
@@ -330,6 +408,18 @@ describe('R17-2 matter checklist items', () => {
       .set('Authorization', `Bearer ${assistantToken}`)
       .send({ position: 9 });
     expect(reorderRes.statusCode).toBe(403);
+
+    const dueDateRes = await request(app)
+      .patch(`/api/matters/${matterId}/checklist-items/${assistantItemId}`)
+      .set('Authorization', `Bearer ${assistantToken}`)
+      .send({ dueDate: '2026-08-01' });
+    expect(dueDateRes.statusCode).toBe(403);
+
+    const assigneeRes = await request(app)
+      .patch(`/api/matters/${matterId}/checklist-items/${assistantItemId}`)
+      .set('Authorization', `Bearer ${assistantToken}`)
+      .send({ assignee: `R17 Assistant Forbidden Owner ${runId}` });
+    expect(assigneeRes.statusCode).toBe(403);
 
     const deleteRes = await request(app)
       .delete(`/api/matters/${matterId}/checklist-items/${assistantItemId}`)

@@ -55,6 +55,12 @@ function parseSafeMetadata(event) {
   return metadata;
 }
 
+function expectIsoTimestamp(value) {
+  expect(typeof value).toBe('string');
+  expect(value).toBeTruthy();
+  expect(Number.isNaN(Date.parse(value))).toBe(false);
+}
+
 describe('R17-3 checklist templates', () => {
   const runId = Date.now();
   const password = 'Str0ng!Passw0rd2026!';
@@ -355,6 +361,12 @@ describe('R17-3 checklist templates', () => {
     ]);
     expect(applyRes.body.map(item => item.position)).toEqual([8, 9]);
     expect(applyRes.body.every(item => Number(item.completed) === 0)).toBe(true);
+    for (const item of applyRes.body) {
+      expect(item.updatedAt).toBe(item.createdAt);
+      expectIsoTimestamp(item.updatedAt);
+      expect(item.dueDate || '').toBe('');
+      expect(item.assignee || '').toBe('');
+    }
   });
 
   test('applying inactive template is rejected', async () => {
@@ -381,6 +393,8 @@ describe('R17-3 checklist templates', () => {
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ templateId: activeTemplateId });
     expect(applyRes.statusCode).toBe(200);
+    expect(applyRes.body.every(item => item.updatedAt === item.createdAt)).toBe(true);
+    expect(applyRes.body.every(item => !item.dueDate && !item.assignee)).toBe(true);
 
     await expectNoChecklistSideEffects(checkMatterId);
   });

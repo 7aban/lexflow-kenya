@@ -191,11 +191,14 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS audit_events (id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, actor_user_id TEXT, actor_role TEXT, actor_email TEXT, action TEXT NOT NULL, entity_type TEXT, entity_id TEXT, matter_id TEXT, client_id TEXT, ip_address TEXT, user_agent TEXT, metadata_json TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)`);
   await run(`CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, userId TEXT NOT NULL, type TEXT, matterId TEXT, clientId TEXT, title TEXT, body TEXT, createdAt TEXT, readAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS oauth_accounts (id TEXT PRIMARY KEY, userId TEXT NOT NULL, provider TEXT CHECK(provider IN ('google','microsoft')) NOT NULL, providerSubject TEXT NOT NULL, email TEXT NOT NULL, emailVerified INTEGER DEFAULT 0, revokedAt TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, lastLoginAt TEXT, UNIQUE(provider, providerSubject))`);
-  await run(`CREATE TABLE IF NOT EXISTS matter_checklist_items (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT NOT NULL, completed INTEGER DEFAULT 0, position INTEGER DEFAULT 0, notes TEXT, createdBy TEXT, createdAt TEXT NOT NULL, completedAt TEXT, completedBy TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS matter_checklist_items (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT NOT NULL, completed INTEGER DEFAULT 0, position INTEGER DEFAULT 0, notes TEXT, dueDate TEXT, assignee TEXT, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, completedAt TEXT, completedBy TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS checklist_templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, practiceArea TEXT, active INTEGER DEFAULT 1, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS checklist_template_items (id TEXT PRIMARY KEY, templateId TEXT NOT NULL, title TEXT NOT NULL, notes TEXT, position INTEGER DEFAULT 0, createdAt TEXT NOT NULL)`);
 
   await ensureClientUserSupport();
+  await ensureColumn('matter_checklist_items', 'dueDate', 'TEXT');
+  await ensureColumn('matter_checklist_items', 'assignee', 'TEXT');
+  await ensureColumn('matter_checklist_items', 'updatedAt', 'TEXT');
   await ensureColumn('users', 'tokenVersion', 'INTEGER DEFAULT 1');
   await ensureColumn('appearances', 'meetingLink', 'TEXT');
   await ensureColumn('documents', 'source', "TEXT DEFAULT 'firm'");
@@ -281,6 +284,10 @@ async function clientUploadsFolder(matterId, userId = '') {
 
 function actorLabel(req) {
   return req.user?.fullName || req.user?.email || req.user?.userId || '';
+}
+
+function normalizeChecklistOptionalText(value) {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function normalizeTemplateActive(value) {
@@ -1562,8 +1569,8 @@ app.post('/api/matters/:matterId/checklist-template-applications', requireAdvoca
       const id = genId('CHK');
       createdIds.push(id);
       await run(
-        'INSERT INTO matter_checklist_items (id,matterId,title,completed,position,notes,createdBy,createdAt,completedAt,completedBy) VALUES (?,?,?,?,?,?,?,?,?,?)',
-        [id, req.params.matterId, item.title, 0, startPosition + index, item.notes || '', createdBy, createdAt, '', ''],
+        'INSERT INTO matter_checklist_items (id,matterId,title,completed,position,notes,dueDate,assignee,createdBy,createdAt,updatedAt,completedAt,completedBy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        [id, req.params.matterId, item.title, 0, startPosition + index, item.notes || '', '', '', createdBy, createdAt, createdAt, '', ''],
       );
     }
     await run('COMMIT');
@@ -1594,6 +1601,8 @@ app.post('/api/matters/:id/checklist-items', requireAdvocateOrAdmin, async (req,
   if (!title) return res.status(400).json({ error: 'Title is required' });
   if (title.length > 240) return res.status(400).json({ error: 'Title must not exceed 240 characters' });
   const notes = typeof req.body?.notes === 'string' ? req.body.notes : '';
+  const dueDate = normalizeChecklistOptionalText(req.body?.dueDate);
+  const assignee = normalizeChecklistOptionalText(req.body?.assignee);
   let position = Number.isFinite(Number(req.body?.position)) ? Number(req.body.position) : null;
   if (position === null || position < 0) {
     const last = await get('SELECT COALESCE(MAX(position), -1) maxPos FROM matter_checklist_items WHERE matterId=?', [req.params.id]);
@@ -1601,7 +1610,7 @@ app.post('/api/matters/:id/checklist-items', requireAdvocateOrAdmin, async (req,
   }
   const id = genId('CHK');
   const createdAt = new Date().toISOString();
-  await run('INSERT INTO matter_checklist_items (id,matterId,title,completed,position,notes,createdBy,createdAt,completedAt,completedBy) VALUES (?,?,?,?,?,?,?,?,?,?)', [id, req.params.id, title, 0, position, notes, req.user.fullName || req.user.email || req.user.userId || '', createdAt, '', '']);
+  await run('INSERT INTO matter_checklist_items (id,matterId,title,completed,position,notes,dueDate,assignee,createdBy,createdAt,updatedAt,completedAt,completedBy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', [id, req.params.id, title, 0, position, notes, dueDate, assignee, req.user.fullName || req.user.email || req.user.userId || '', createdAt, createdAt, '', '']);
   const item = await get('SELECT * FROM matter_checklist_items WHERE id=?', [id]);
   await recordAuditEvent(req, { action: 'matter_checklist_item_created', entityType: 'matter_checklist_item', entityId: id, matterId: req.params.id, metadata: { matterId: req.params.id, title, position } }).catch(() => {});
   res.json(item);
@@ -1615,11 +1624,13 @@ app.patch('/api/matters/:matterId/checklist-items/:id', requireStaff, async (req
   if (!existing) return res.status(404).json({ error: 'Checklist item not found' });
   const role = req.user?.role;
   const wantsCompletionChange = req.body?.completed !== undefined;
-  const wantsContentChange = ['title', 'notes', 'position'].some(field => req.body?.[field] !== undefined);
+  const contentFields = ['title', 'notes', 'position', 'dueDate', 'assignee'];
+  const wantsContentChange = contentFields.some(field => req.body?.[field] !== undefined);
   if (role === 'assistant' && wantsContentChange) {
     await recordAuditEvent(req, { action: 'forbidden_matter_checklist_item_access', entityType: 'matter_checklist_item', entityId: req.params.id, matterId: req.params.matterId, metadata: { reason: 'assistant cannot modify content', route: 'checklist_update' } }).catch(() => {});
     return res.status(403).json({ error: 'Assistants may only toggle completion' });
   }
+  if (!wantsContentChange && !wantsCompletionChange) return res.status(400).json({ error: 'No supported fields supplied' });
   const updates = [];
   const params = [];
   if (wantsContentChange) {
@@ -1640,6 +1651,14 @@ app.patch('/api/matters/:matterId/checklist-items/:id', requireStaff, async (req
       updates.push('position=?');
       params.push(pos);
     }
+    if (req.body.dueDate !== undefined) {
+      updates.push('dueDate=?');
+      params.push(normalizeChecklistOptionalText(req.body.dueDate));
+    }
+    if (req.body.assignee !== undefined) {
+      updates.push('assignee=?');
+      params.push(normalizeChecklistOptionalText(req.body.assignee));
+    }
   }
   let completionTransition = null;
   if (wantsCompletionChange) {
@@ -1657,7 +1676,9 @@ app.patch('/api/matters/:matterId/checklist-items/:id', requireStaff, async (req
       }
     }
   }
-  if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
+  const updatedAt = new Date().toISOString();
+  updates.push('updatedAt=?');
+  params.push(updatedAt);
   params.push(req.params.id);
   await run(`UPDATE matter_checklist_items SET ${updates.join(',')} WHERE id=?`, params);
   const item = await get('SELECT * FROM matter_checklist_items WHERE id=?', [req.params.id]);
@@ -1667,7 +1688,7 @@ app.patch('/api/matters/:matterId/checklist-items/:id', requireStaff, async (req
     await recordAuditEvent(req, { action: 'matter_checklist_item_reopened', entityType: 'matter_checklist_item', entityId: req.params.id, matterId: req.params.matterId, metadata: { matterId: req.params.matterId, title: item?.title || '' } }).catch(() => {});
   }
   if (wantsContentChange) {
-    const updatedFields = ['title', 'notes', 'position'].filter(f => req.body[f] !== undefined);
+    const updatedFields = contentFields.filter(f => req.body[f] !== undefined);
     await recordAuditEvent(req, { action: 'matter_checklist_item_updated', entityType: 'matter_checklist_item', entityId: req.params.id, matterId: req.params.matterId, metadata: { matterId: req.params.matterId, updatedFields: updatedFields.join(',') } }).catch(() => {});
   }
   res.json(item);
