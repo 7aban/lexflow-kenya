@@ -171,7 +171,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS time_entries (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, attorney TEXT, date TEXT, hours REAL DEFAULT 0, activity TEXT, description TEXT, rate REAL DEFAULT 0, billed INTEGER DEFAULT 0, billable INTEGER DEFAULT 1)`);
   await run(`CREATE TABLE IF NOT EXISTS appearances (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT, date TEXT, time TEXT, type TEXT, location TEXT, meetingLink TEXT, attorney TEXT, prepNote TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS folders (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT NOT NULL, createdBy TEXT, createdAt TEXT)`);
-  await run(`CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT, displayName TEXT, type TEXT, mimeType TEXT, date TEXT, size TEXT, content BLOB, source TEXT DEFAULT 'firm', folderId TEXT, messageId TEXT, noticeId TEXT, clientVisible INTEGER DEFAULT 0, uploadedBy TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT, displayName TEXT, type TEXT, mimeType TEXT, date TEXT, size TEXT, content BLOB, source TEXT DEFAULT 'firm', folderId TEXT, messageId TEXT, noticeId TEXT, clientVisible INTEGER DEFAULT 0, uploadedBy TEXT, templateId TEXT, templateName TEXT, generatedBy TEXT, generatedAt TEXT, version INTEGER DEFAULT 1)`);
   await run(`CREATE TABLE IF NOT EXISTS case_notes (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, content TEXT NOT NULL, author TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS invoices (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, clientId TEXT, number TEXT, date TEXT, amount REAL DEFAULT 0, status TEXT DEFAULT 'Outstanding', dueDate TEXT, description TEXT, source TEXT DEFAULT 'time')`);
   await run(`CREATE TABLE IF NOT EXISTS invoice_items (id TEXT PRIMARY KEY, invoiceId TEXT NOT NULL, timeEntryId TEXT, date TEXT, description TEXT, hours REAL DEFAULT 0, rate REAL DEFAULT 0, amount REAL DEFAULT 0)`);
@@ -211,6 +211,11 @@ async function initDb() {
   await ensureColumn('documents', 'displayName', 'TEXT');
   await ensureColumn('documents', 'uploadedBy', 'TEXT');
   await ensureColumn('documents', 'deletedAt', 'TEXT');
+  await ensureColumn('documents', 'templateId', 'TEXT');
+  await ensureColumn('documents', 'templateName', 'TEXT');
+  await ensureColumn('documents', 'generatedBy', 'TEXT');
+  await ensureColumn('documents', 'generatedAt', 'TEXT');
+  await ensureColumn('documents', 'version', 'INTEGER DEFAULT 1');
   await ensureColumn('conversations', 'status', "TEXT DEFAULT 'open'");
   await ensureColumn('conversations', 'lastStaffReadAt', 'TEXT');
   await ensureColumn('conversations', 'lastClientReadAt', 'TEXT');
@@ -1629,6 +1634,104 @@ app.post('/api/matters/:matterId/document-templates/:templateId/preview', requir
     matterId: matter.id,
     preview: merged.preview,
     tokens: merged.tokens,
+    unresolvedTokens: merged.unresolvedTokens,
+  });
+});
+app.post('/api/matters/:matterId/document-templates/:templateId/generate', requireStaff, async (req, res) => {
+  const matter = await get('SELECT * FROM matters WHERE id=?', [req.params.matterId]);
+  if (!matter) return res.status(404).json({ error: 'Matter not found' });
+
+  const canGenerate = req.user?.role === 'admin' || (req.user?.role === 'advocate' && await canAccessMatter(req, req.params.matterId));
+  if (!canGenerate) {
+    await recordAuditEvent(req, {
+      action: 'forbidden_document_generation',
+      entityType: 'matter',
+      entityId: req.params.matterId,
+      matterId: req.params.matterId,
+      clientId: matter.clientId || '',
+      metadata: {
+        reason: 'insufficient permissions',
+        route: 'document_template_generate',
+        matterId: req.params.matterId,
+        templateId: req.params.templateId,
+      },
+    }).catch(() => {});
+    return res.status(403).json({ error: 'Document generation access denied' });
+  }
+
+  const template = await get('SELECT * FROM document_templates WHERE id=? AND active=1', [req.params.templateId]);
+  if (!template) return res.status(404).json({ error: 'Active document template not found' });
+
+  const [client, firm] = await Promise.all([
+    get('SELECT * FROM clients WHERE id=?', [matter.clientId || '']),
+    get('SELECT * FROM firm_settings WHERE id=?', ['default']),
+  ]);
+  const generatedAt = new Date().toISOString();
+  const context = buildTemplateMergeContext({
+    firm: firm || {},
+    matter,
+    client: client || {},
+    user: req.user || {},
+    today: today(),
+  });
+  const merged = mergeTemplateMarkup(template.bodyMarkup || '', context);
+  const content = Buffer.from(merged.preview, 'utf8');
+  const documentId = genId('DOC');
+  const generatedDate = today();
+  const displayName = cleanDocumentName(`${template.name || 'Generated draft'} draft ${generatedDate}.txt`);
+  const name = cleanDocumentName(displayName);
+  const actor = actorLabel(req);
+  const size = `${Math.max(1, Math.round(content.length / 1024))} KB`;
+
+  await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy,templateId,templateName,generatedBy,generatedAt,version)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+    documentId,
+    req.params.matterId,
+    name,
+    displayName,
+    'Text',
+    'text/plain',
+    generatedDate,
+    size,
+    content,
+    'generated',
+    null,
+    null,
+    null,
+    0,
+    actor,
+    template.id,
+    template.name || '',
+    actor,
+    generatedAt,
+    1,
+  ]);
+
+  const doc = await get(`SELECT d.id,d.matterId,d.name,d.displayName,d.type,d.mimeType,d.date,d.size,d.source,d.folderId,d.messageId,d.noticeId,d.clientVisible,d.uploadedBy,d.templateId,d.templateName,d.generatedBy,d.generatedAt,d.version,f.name folderName
+    FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=?`, [documentId]);
+  await logAudit(req, 'generate', 'document', documentId, `Generated draft document ${doc.displayName || doc.name}`);
+  await recordAuditEvent(req, {
+    action: 'document_generated',
+    entityType: 'document',
+    entityId: documentId,
+    matterId: req.params.matterId,
+    clientId: matter.clientId || '',
+    metadata: {
+      matterId: req.params.matterId,
+      templateId: template.id,
+      templateName: template.name || '',
+      documentId,
+      outputFormat: 'text/plain',
+      bodyLength: merged.preview.length,
+      contentLength: content.length,
+      unresolvedTokenCount: merged.unresolvedTokens.length,
+      clientVisible: 0,
+      source: 'generated',
+    },
+  }).catch(() => {});
+
+  res.json({
+    ...publicDocument(doc),
     unresolvedTokens: merged.unresolvedTokens,
   });
 });
