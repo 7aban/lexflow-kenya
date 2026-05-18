@@ -98,6 +98,7 @@ describe('R18-3 document template preview endpoint', () => {
   let activeTemplateId;
   let inactiveTemplateId;
   let matterId;
+  let firmName;
   let preCounts;
   let preTemplateRow;
 
@@ -208,6 +209,10 @@ describe('R18-3 document template preview endpoint', () => {
       .set('Authorization', `Bearer ${adminToken}`);
     expect(deleteInactive.statusCode).toBe(200);
 
+    const firmSettings = await dbGet('SELECT name FROM firm_settings WHERE id=?', ['default']);
+    firmName = firmSettings?.name || '';
+    expect(firmName).toBeTruthy();
+
     preCounts = await getGlobalSideEffectCounts();
     preTemplateRow = await dbGet('SELECT * FROM document_templates WHERE id=?', [activeTemplateId]);
   });
@@ -226,7 +231,7 @@ describe('R18-3 document template preview endpoint', () => {
     expect(res.body.templateId).toBe(activeTemplateId);
     expect(res.body.matterId).toBe(matterId);
     expect(res.body.preview).toContain(`Dear R18 Merge Client ${runId},`);
-    expect(res.body.preview).toContain(`Achoki & Co. Advocates acts in R18 Merge Matter ${runId}.`);
+    expect(res.body.preview).toContain(`${firmName} acts in R18 Merge Matter ${runId}.`);
     expect(res.body.preview).toContain(`Reference: R18-MERGE-${runId}`);
     expect(res.body.preview).toContain('Court: Milimani Commercial Courts');
     expect(res.body.preview).toContain(`Case: COMM-${runId}`);
