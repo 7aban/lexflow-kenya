@@ -174,24 +174,21 @@ function logMatrix(title, results) {
 }
 
 test.describe('Responsive Overflow Verification', () => {
-  test('Staff portal — no horizontal overflow at 360, 390, 768, 1280', async ({ page }) => {
-    await staffLogin(page);
-    const results = {};
-    for (const view of STAFF_VIEWS) {
+  for (const view of STAFF_VIEWS) {
+    test(`Staff portal ${view} — no horizontal overflow at 360, 390, 768, 1280`, async ({ page }) => {
+      await staffLogin(page);
       await staffNavigate(page, view);
-      results[view] = [];
+      const results = { [view]: [] };
       for (const vw of VIEWPORTS) {
         const m = await measureOverflow(page, vw);
         results[view].push(m);
       }
-    }
-    logMatrix('STAFF RESPONSIVE OVERFLOW', results);
-    for (const view of STAFF_VIEWS) {
+      logMatrix(`STAFF RESPONSIVE OVERFLOW — ${view}`, results);
       for (let i = 0; i < VIEWPORTS.length; i++) {
         expect.soft(results[view][i].hasHScroll, `${view} @ ${VIEWPORTS[i]}px`).toBe(false);
       }
-    }
-  });
+    });
+  }
 
   test('Staff matter detail checklist - no horizontal overflow at 360, 390, 768, 1280', async ({ page }) => {
     await staffLogin(page);
