@@ -244,6 +244,12 @@ export const createFolder = (matterId, data) => api(`/matters/${matterId}/folder
 export const updateFolder = (folderId, data) => api(`/folders/${folderId}`, { method: 'PATCH', body: data });
 export const deleteFolder = folderId => api(`/folders/${folderId}`, { method: 'DELETE' });
 export const getMatterDocuments = (matterId, folderId = 'all') => api(`/matters/${matterId}/documents${folderId && folderId !== 'all' ? `?folderId=${encodeURIComponent(folderId)}` : ''}`);
+export const listDocumentTemplates = () => api('/document-templates');
+export const generateDocumentFromTemplate = (matterId, templateId) =>
+  api(`/matters/${matterId}/document-templates/${templateId}/generate`, {
+    method: 'POST',
+    body: {},
+  });
 export const moveDocument = (docId, folderId) => api(`/documents/${docId}`, { method: 'PATCH', body: { folderId } });
 export const updateDocument = (docId, data) => api(`/documents/${docId}`, { method: 'PATCH', body: data });
 export const getClientActivity = (clientId, limit = 100) => api(`/clients/${clientId}/activity?limit=${encodeURIComponent(limit)}`);

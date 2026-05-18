@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, createFolder, deleteFolder, downloadWithAuth, fileToDataUrl, getMatterDocuments, getMatterFolders, moveDocument, updateDocument, updateFolder } from '../lib/apiClient.js';
+import { api, createFolder, deleteFolder, downloadWithAuth, fileToDataUrl, generateDocumentFromTemplate, getMatterDocuments, getMatterFolders, listDocumentTemplates, moveDocument, updateDocument, updateFolder } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, Table } from './ui.jsx';
 
@@ -38,10 +38,32 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const [uploadFolderId, setUploadFolderId] = useState('uncategorised');
   const [confirm, setConfirm] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [templates, setTemplates] = useState([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templateError, setTemplateError] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const [generationMessage, setGenerationMessage] = useState('');
+  const [generationWarning, setGenerationWarning] = useState('');
+
+  const showGenerateControls = canManage === true && clientMode === false && Boolean(matterId);
 
   useEffect(() => {
     if (matterId) load();
   }, [matterId, selectedFolder]);
+
+  useEffect(() => {
+    if (!showGenerateControls) {
+      setTemplates([]);
+      setSelectedTemplateId('');
+      setTemplatesLoading(false);
+      setTemplateError('');
+      setGenerationMessage('');
+      setGenerationWarning('');
+      return;
+    }
+    loadTemplates();
+  }, [showGenerateControls]);
 
   useEffect(() => {
     if (!clientMode && selectedFolder && selectedFolder !== 'all') setUploadFolderId(selectedFolder);
@@ -58,6 +80,45 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       setDocuments(docs);
     } catch (err) { notify?.({ type: 'danger', message: err.message }); }
     finally { setLoading(false); }
+  }
+
+  async function loadTemplates() {
+    setTemplatesLoading(true);
+    setTemplateError('');
+    try {
+      const nextTemplates = await listDocumentTemplates();
+      const templateList = Array.isArray(nextTemplates) ? nextTemplates : [];
+      const activeTemplates = templateList.filter(template => template.active !== false && template.isActive !== false && template.status !== 'inactive');
+      setTemplates(activeTemplates);
+      setSelectedTemplateId(current => activeTemplates.some(template => String(template.id) === String(current)) ? current : (activeTemplates[0]?.id || ''));
+    } catch (err) {
+      setTemplateError(err.message);
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setTemplatesLoading(false);
+    }
+  }
+
+  async function generateDraft(event) {
+    event.preventDefault();
+    if (!selectedTemplateId || generating) return;
+    setGenerating(true);
+    setGenerationMessage('');
+    setGenerationWarning('');
+    try {
+      const result = await generateDocumentFromTemplate(matterId, selectedTemplateId);
+      const unresolvedTokens = Array.isArray(result?.unresolvedTokens) ? result.unresolvedTokens.map(token => String(token)) : [];
+      setGenerationMessage('Draft generated.');
+      if (unresolvedTokens.length) {
+        setGenerationWarning(`Draft generated with unresolved fields: ${unresolvedTokens.join(', ')}`);
+      }
+      notify?.({ type: 'success', message: 'Draft generated.' });
+      await load();
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setGenerating(false);
+    }
   }
 
   async function addFolder(event) {
@@ -204,6 +265,25 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
               <input style={styles.input} type="file" accept=".pdf,.doc,.docx,image/*" onChange={uploadDoc} />
             </Field>
           </div>
+        )}
+        {showGenerateControls && (
+          <form onSubmit={generateDraft} style={{ display: 'grid', gap: 8, marginBottom: 14 }}>
+            <div style={{ ...styles.formGrid, alignItems: 'end' }}>
+              <Field label="Generate Draft">
+                <select style={styles.input} value={selectedTemplateId} onChange={e => setSelectedTemplateId(e.target.value)} disabled={templatesLoading || generating || !templates.length}>
+                  {templates.length ? templates.map(template => (
+                    <option key={template.id} value={template.id}>{template.name || template.title || 'Document template'}</option>
+                  )) : <option value="">{templatesLoading ? 'Loading templates...' : 'No active templates'}</option>}
+                </select>
+              </Field>
+              <button type="submit" style={styles.primaryButton} disabled={!selectedTemplateId || generating || templatesLoading}>
+                {generating ? 'Generating...' : 'Generate draft'}
+              </button>
+            </div>
+            {templateError && <div style={styles.alert}>Templates unavailable: {templateError}</div>}
+            {generationMessage && <small style={{ color: theme.green }}>{generationMessage}</small>}
+            {generationWarning && <small style={{ color: theme.amber }}>{generationWarning}</small>}
+          </form>
         )}
         {loading ? <div style={styles.alert}>Loading documents...</div> : documents.length ? (
           <div className={canManage ? "lf-doc-cards-staff" : "lf-doc-cards-client"}>
