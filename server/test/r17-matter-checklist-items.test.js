@@ -21,6 +21,30 @@ async function latestAudit(action, entityId) {
   return rows[0];
 }
 
+async function getChecklistSideEffectCounts(matterId) {
+  const [tasks, deadlines, notifications, reminderLogs] = await Promise.all([
+    dbAll('SELECT COUNT(*) AS count FROM tasks WHERE matterId=?', [matterId]),
+    dbAll('SELECT COUNT(*) AS count FROM deadlines WHERE matterId=?', [matterId]),
+    dbAll('SELECT COUNT(*) AS count FROM notifications WHERE matterId=?', [matterId]),
+    dbAll('SELECT COUNT(*) AS count FROM reminder_logs WHERE matterId=?', [matterId]),
+  ]);
+  return {
+    tasks: tasks[0].count,
+    deadlines: deadlines[0].count,
+    notifications: notifications[0].count,
+    reminderLogs: reminderLogs[0].count,
+  };
+}
+
+async function expectNoChecklistSideEffects(matterId) {
+  await expect(getChecklistSideEffectCounts(matterId)).resolves.toEqual({
+    tasks: 0,
+    deadlines: 0,
+    notifications: 0,
+    reminderLogs: 0,
+  });
+}
+
 function parseSafeMetadata(event) {
   expect(event).toBeDefined();
   const metadata = JSON.parse(event.metadata_json || '{}');
@@ -125,6 +149,15 @@ describe('R17-2 matter checklist items', () => {
     assistantItemId = assistantItemRes.body.id;
   });
 
+  async function createInvariantMatter(title) {
+    const matterRes = await request(app)
+      .post('/api/matters')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ clientId, title, assignedTo: advocateName, practiceArea: 'Commercial Law' });
+    expect(matterRes.statusCode).toBe(200);
+    return matterRes.body.id;
+  }
+
   test('admin can create checklist item and structured audit event is safe', async () => {
     const res = await request(app)
       .post(`/api/matters/${matterId}/checklist-items`)
@@ -142,6 +175,68 @@ describe('R17-2 matter checklist items', () => {
     const metadata = parseSafeMetadata(event);
     expect(metadata.matterId).toBe(matterId);
     expect(metadata.title).toBe(`R17 Safe Checklist ${runId}`);
+  });
+
+  test('manual checklist item create does not create task, deadline, notification, or reminder rows', async () => {
+    const invariantMatterId = await createInvariantMatter(`R17 No Side Effect Create Matter ${runId}`);
+
+    await expectNoChecklistSideEffects(invariantMatterId);
+
+    const res = await request(app)
+      .post(`/api/matters/${invariantMatterId}/checklist-items`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ title: `R17 No Side Effect Create Item ${runId}`, notes: 'Create invariant.', position: 1 });
+    expect(res.statusCode).toBe(200);
+
+    await expectNoChecklistSideEffects(invariantMatterId);
+  });
+
+  test('manual checklist item content update does not create task, deadline, notification, or reminder rows', async () => {
+    const invariantMatterId = await createInvariantMatter(`R17 No Side Effect Update Matter ${runId}`);
+
+    const createRes = await request(app)
+      .post(`/api/matters/${invariantMatterId}/checklist-items`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ title: `R17 No Side Effect Update Item ${runId}`, notes: 'Before update.', position: 2 });
+    expect(createRes.statusCode).toBe(200);
+    await expectNoChecklistSideEffects(invariantMatterId);
+
+    const updateRes = await request(app)
+      .patch(`/api/matters/${invariantMatterId}/checklist-items/${createRes.body.id}`)
+      .set('Authorization', `Bearer ${advocateToken}`)
+      .send({ title: `R17 No Side Effect Updated Item ${runId}`, notes: 'After update.', position: 3 });
+    expect(updateRes.statusCode).toBe(200);
+    expect(updateRes.body.title).toBe(`R17 No Side Effect Updated Item ${runId}`);
+    expect(updateRes.body.position).toBe(3);
+
+    await expectNoChecklistSideEffects(invariantMatterId);
+  });
+
+  test('manual checklist item toggles do not create task, deadline, notification, or reminder rows', async () => {
+    const invariantMatterId = await createInvariantMatter(`R17 No Side Effect Toggle Matter ${runId}`);
+
+    const createRes = await request(app)
+      .post(`/api/matters/${invariantMatterId}/checklist-items`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ title: `R17 No Side Effect Toggle Item ${runId}`, position: 4 });
+    expect(createRes.statusCode).toBe(200);
+    await expectNoChecklistSideEffects(invariantMatterId);
+
+    const completeRes = await request(app)
+      .patch(`/api/matters/${invariantMatterId}/checklist-items/${createRes.body.id}`)
+      .set('Authorization', `Bearer ${assistantToken}`)
+      .send({ completed: true });
+    expect(completeRes.statusCode).toBe(200);
+    expect(completeRes.body.completed).toBe(1);
+    await expectNoChecklistSideEffects(invariantMatterId);
+
+    const reopenRes = await request(app)
+      .patch(`/api/matters/${invariantMatterId}/checklist-items/${createRes.body.id}`)
+      .set('Authorization', `Bearer ${assistantToken}`)
+      .send({ completed: false });
+    expect(reopenRes.statusCode).toBe(200);
+    expect(reopenRes.body.completed).toBe(0);
+    await expectNoChecklistSideEffects(invariantMatterId);
   });
 
   test('admin can list checklist items', async () => {

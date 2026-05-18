@@ -21,6 +21,30 @@ async function latestAudit(action, entityId) {
   return rows[0];
 }
 
+async function getChecklistSideEffectCounts(matterId) {
+  const [tasks, deadlines, notifications, reminderLogs] = await Promise.all([
+    dbAll('SELECT COUNT(*) AS count FROM tasks WHERE matterId=?', [matterId]),
+    dbAll('SELECT COUNT(*) AS count FROM deadlines WHERE matterId=?', [matterId]),
+    dbAll('SELECT COUNT(*) AS count FROM notifications WHERE matterId=?', [matterId]),
+    dbAll('SELECT COUNT(*) AS count FROM reminder_logs WHERE matterId=?', [matterId]),
+  ]);
+  return {
+    tasks: tasks[0].count,
+    deadlines: deadlines[0].count,
+    notifications: notifications[0].count,
+    reminderLogs: reminderLogs[0].count,
+  };
+}
+
+async function expectNoChecklistSideEffects(matterId) {
+  await expect(getChecklistSideEffectCounts(matterId)).resolves.toEqual({
+    tasks: 0,
+    deadlines: 0,
+    notifications: 0,
+    reminderLogs: 0,
+  });
+}
+
 function parseSafeMetadata(event) {
   expect(event).toBeDefined();
   const metadata = JSON.parse(event.metadata_json || '{}');
@@ -342,7 +366,7 @@ describe('R17-3 checklist templates', () => {
     expect(res.statusCode).toBe(404);
   });
 
-  test('applying template does not create tasks or deadlines', async () => {
+  test('applying template does not create task, deadline, notification, or reminder rows', async () => {
     const matterRes = await request(app)
       .post('/api/matters')
       .set('Authorization', `Bearer ${adminToken}`)
@@ -350,10 +374,7 @@ describe('R17-3 checklist templates', () => {
     expect(matterRes.statusCode).toBe(200);
     const checkMatterId = matterRes.body.id;
 
-    const beforeTasks = await dbAll('SELECT * FROM tasks WHERE matterId=?', [checkMatterId]);
-    const beforeDeadlines = await dbAll('SELECT * FROM deadlines WHERE matterId=?', [checkMatterId]);
-    expect(beforeTasks).toHaveLength(0);
-    expect(beforeDeadlines).toHaveLength(0);
+    await expectNoChecklistSideEffects(checkMatterId);
 
     const applyRes = await request(app)
       .post(`/api/matters/${checkMatterId}/checklist-template-applications`)
@@ -361,10 +382,7 @@ describe('R17-3 checklist templates', () => {
       .send({ templateId: activeTemplateId });
     expect(applyRes.statusCode).toBe(200);
 
-    const afterTasks = await dbAll('SELECT * FROM tasks WHERE matterId=?', [checkMatterId]);
-    const afterDeadlines = await dbAll('SELECT * FROM deadlines WHERE matterId=?', [checkMatterId]);
-    expect(afterTasks).toHaveLength(0);
-    expect(afterDeadlines).toHaveLength(0);
+    await expectNoChecklistSideEffects(checkMatterId);
   });
 
   test('client matter detail still does not expose checklist items', async () => {
