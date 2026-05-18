@@ -146,7 +146,7 @@ npm run backup
 
 The backup script uses:
 
-- `DATABASE_PATH` as the SQLite source database.
+- `server/lawfirm.db` as the SQLite source database. The source path is fixed relative to the `server/` directory. In default production deployments `DATABASE_PATH` resolves to this same path, but overriding `DATABASE_PATH` does not redirect the backup source — only the restore target and audit-log target follow `DATABASE_PATH`.
 - `BACKUP_DIR` for encrypted backup output.
 - `BACKUP_LOG` for backup logs.
 - `LEXFLOW_BACKUP_KEY` for encryption.
@@ -172,9 +172,129 @@ For database rollback, restore a matching encrypted SQLite backup using the same
 npm run restore:backup -- /path/to/lexflow-backup.db.enc --force
 ```
 
-The Git bundle or tag alone is not enough to restore pilot data. A complete recovery requires both the approved code version and a valid encrypted database backup. A timed restore drill with evidence should be handled in the next hardening phase.
+The Git bundle or tag alone is not enough to restore pilot data. A complete recovery requires both the approved code version and a valid encrypted database backup. See Section 8 for a controlled restore drill procedure that operators should run periodically to validate recovery without touching production data.
 
-## 8. Pilot Limitations
+## 8. Backup Restore Drill
+
+Run this drill periodically to prove the encrypted backup/restore path works end-to-end. The drill uses a throwaway database path outside the repository so it never touches the live `server/lawfirm.db` as a write target. Treat the drill as a documented, evidence-producing operation: record the backup file path, SHA256, operator, and date in your operational log when running it in real pilot operations.
+
+### 8.1 Safety Rules
+
+- Never restore over the production database without a verified, recent encrypted backup and a planned downtime window.
+- The Git bundle/tag restores code only. Database recovery requires a valid `.db.enc` backup decrypted with the matching `LEXFLOW_BACKUP_KEY`.
+- The restore script refuses to overwrite an existing target database unless `--force` is supplied. Do not pass `--force` until you are certain the target path is correct and the backup file is the intended one.
+- Restore with `--force` replaces the target database file and clears stale SQLite WAL/SHM sidecar files (`-wal`, `-shm`, `-wal.db`, `-shm.db`).
+- `LEXFLOW_BACKUP_KEY` is required for any encrypted backup restore. Do not commit it to the repository, log it, or share it with the backup itself; the audit log emitted by the script does not print the key.
+- The drill key documented in any example is a non-production placeholder. Generate a real 64-hex-character key with `openssl rand -hex 32` (or equivalent) for production.
+
+### 8.2 What the Drill Validates
+
+- Encrypted backup creation succeeds and verifies (`PRAGMA integrity_check` passes on the decrypted copy).
+- Restore refuses to overwrite an existing target database without `--force`.
+- Restore with `--force` replaces the target with the decrypted backup and clears stale WAL/SHM files.
+- Retention rotation honours `LEXFLOW_BACKUP_RETENTION_COUNT`.
+- The restored database has the expected business tables and row counts.
+
+### 8.3 Prerequisites
+
+- A clean working tree on the approved pilot tag or `main`.
+- The pinned Node runtime (`v22.22.2` / npm `10.9.x`).
+- A throwaway directory outside the repository for drill artifacts (database, encrypted backups, log).
+- A 64-hex-character drill backup key (separate from any real production key).
+
+### 8.4 Procedure
+
+1. Choose a throwaway drill root outside the repository. Example on Windows:
+
+   ```powershell
+   $drillRoot = "C:\path\outside\repo\lexflow-restore-drill"
+   $drillDb = "$drillRoot\restore-drill.db"
+   $drillBackupDir = "$drillRoot\backups"
+   $drillLog = "$drillRoot\restore-drill-backup.log"
+   New-Item -ItemType Directory -Force -Path $drillRoot, $drillBackupDir | Out-Null
+   ```
+
+2. Export drill environment variables in the same shell session, including a non-production backup key. Required env for the scripts to load:
+
+   ```powershell
+   $env:NODE_ENV = "test"
+   $env:DATABASE_PATH = $drillDb
+   $env:BACKUP_DIR = $drillBackupDir
+   $env:BACKUP_LOG = $drillLog
+   $env:LEXFLOW_BACKUP_KEY = "<64-hex-character drill key>"
+   $env:LEXFLOW_BACKUP_RETENTION_COUNT = "3"
+   # Plus JWT_SECRET, OAUTH_STATE_SECRET, OAUTH_* and provider test creds as required by config.js
+   ```
+
+   Note: the drill `DATABASE_PATH` controls the restore target and the audit-log target. The backup source itself is always `server/lawfirm.db` (see Section 6). Do not run `npm run seed:demo` inside the drill — it writes to `server/lawfirm.db` and would touch the live development database.
+
+3. Capture pre-backup evidence from the source database. Open `server/lawfirm.db` read-only with `sqlite3` and record row counts for at least `users` and `matters`, plus `PRAGMA integrity_check`.
+
+4. Create the encrypted backup:
+
+   ```powershell
+   cd server
+   npm run backup
+   ```
+
+   This writes a `lawfirm-<timestamp>.db.enc` file into `$drillBackupDir`, runs a verification pass that decrypts to a temp file and runs `PRAGMA integrity_check`, rotates retained backups, and emits a `backup_created` audit event. The audit event insert creates `$drillDb` as a side effect (the audit row is the only content at this point).
+
+5. Record the backup file path and SHA256:
+
+   ```powershell
+   $backup = Get-ChildItem $drillBackupDir -Filter "*.db.enc" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+   Get-FileHash $backup.FullName -Algorithm SHA256
+   ```
+
+6. Prove the restore refuses to overwrite without `--force`:
+
+   ```powershell
+   npm run restore:backup -- $backup.FullName
+   ```
+
+   Expected output includes `Error: Target database already exists` and `Use --force to overwrite`. `$drillDb` size and contents remain unchanged.
+
+7. Modify `$drillDb` to simulate post-incident drift, for example by adding a `restore_drill_marker` table with a single row.
+
+8. Restore with `--force`:
+
+   ```powershell
+   npm run restore:backup -- $backup.FullName --force
+   ```
+
+   Expected output: `Overwriting existing database`, `Decrypting backup`, `Writing to target database`, `Restore completed successfully`, `Audit event backup_restored recorded in restored database`. No backup key should appear in the output.
+
+9. Verify the restored database. The row counts for `users` and `matters` must match the pre-backup evidence, and the marker table you added in step 7 must be absent. Also confirm `PRAGMA integrity_check` returns `ok` and that a `backup_restored` row exists in `audit_events`.
+
+10. Validate retention. Run `npm run backup` enough times to exceed `LEXFLOW_BACKUP_RETENTION_COUNT` (default for the drill: 3, so run 4 backups in close succession with brief sleeps to keep filenames unique). After the runs, count `.db.enc` files in `$drillBackupDir` and confirm it is no more than `LEXFLOW_BACKUP_RETENTION_COUNT`.
+
+11. After the drill, remove `$drillRoot` if you do not need to retain the artifacts. Confirm the repository working tree is still clean (`git status --short` empty) and that no drill files were written under `server/` or `backups/` inside the repository.
+
+### 8.5 Post-Restore Smoke Checks
+
+After a real restore (not just the drill), run these against the restored deployment:
+
+- `GET /health` returns `status: ok`.
+- Staff login succeeds.
+- Matter list loads.
+- Document list loads and a document can be downloaded.
+- `npm run backup` from `server/` succeeds with production env and produces a fresh `.db.enc` file.
+
+### 8.6 Operational Logging
+
+When running this drill or a real restore in pilot operations, record:
+
+- Date and time.
+- Operator name.
+- Backup file path and SHA256.
+- Source environment (e.g. nightly cron, manual ad-hoc).
+- Restore target path (must be the production `DATABASE_PATH` for a real restore, a throwaway path for the drill).
+- Outcome (success/failure and any deviations from expected output).
+- Smoke check results.
+
+Store these records outside the repository, alongside operational change logs.
+
+## 9. Pilot Limitations
 
 - Generated documents are text drafts only.
 - PDF, docx, pleading formatting, pagination, court formatting, and line numbering are not implemented yet.
@@ -183,7 +303,7 @@ The Git bundle or tag alone is not enough to restore pilot data. A complete reco
 - Generated drafts remain internal until staff explicitly share them.
 - Template management UI may be limited; use only the current approved admin/template paths.
 
-## 9. Smoke Tests
+## 10. Smoke Tests
 
 Run these checks after deployment and after any rollback:
 
