@@ -113,7 +113,7 @@ npm run build
 
 The Express backend does not currently serve `client/dist` by itself. For a pilot deployment, run the backend as a Node service on `PORT` and host the frontend build with a static host or reverse proxy that forwards API traffic to the backend. Use `/health` as the backend healthcheck.
 
-See `docs/pilot-deployment-runbook.md` for the production env matrix, startup sequence, smoke tests, backup notes, and rollback guidance.
+See `docs/pilot-deployment-runbook.md` for the production env matrix, startup sequence, smoke tests, backup notes, and rollback guidance. For template setup instructions and the Day-1 pilot acceptance checklist, see `docs/TEMPLATE_SETUP.md` and `docs/PILOT_OPERATIONS.md`.
 
 Do not run `npm run seed:demo` against production or pilot data. It rebuilds the demo database and is for local development and test fixtures only.
 

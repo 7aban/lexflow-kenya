@@ -311,7 +311,7 @@ Store these records outside the repository, alongside operational change logs.
 - No automatic court filing is performed.
 - No generated draft is automatically released to clients.
 - Generated drafts remain internal until staff explicitly share them.
-- Template management UI may be limited; use only the current approved admin/template paths.
+- Template management is API-based; there is no frontend template-management UI (see `docs/TEMPLATE_SETUP.md` for the full template setup guide).
 
 ## 10. Smoke Tests
 
@@ -324,3 +324,8 @@ Run these checks after deployment and after any rollback:
 5. Generate a draft from an active template as managing staff.
 6. Confirm the generated draft is labelled as generated and remains Internal until explicitly shared.
 7. Run `npm run backup` with production backup env loaded and verify a recent encrypted backup exists.
+
+## 11. Related Documentation
+
+- `docs/TEMPLATE_SETUP.md` — Full guide for creating, managing, previewing, and generating document templates.
+- `docs/PILOT_OPERATIONS.md` — Day-1 pilot acceptance checklist covering deployment, roles, workflows, and audit verification.
