@@ -10,9 +10,20 @@ function folderIcon(folder) {
   return 'DIR';
 }
 
+function isGeneratedDocument(doc) {
+  return doc.source === 'generated';
+}
+
+function documentSourceLabel(doc, clientMode) {
+  if (isGeneratedDocument(doc)) return clientMode ? 'Firm' : 'Generated Draft';
+  if (doc.source === 'client') return clientMode ? 'Shared by you' : 'Client';
+  return 'Firm';
+}
+
 function sourceBadge(doc, clientMode) {
   const client = doc.source === 'client';
-  return <Badge tone={client ? 'amber' : 'blue'}>{clientMode && client ? 'Shared by you' : client ? 'Client' : 'Firm'}</Badge>;
+  const generated = isGeneratedDocument(doc);
+  return <Badge tone={client || generated ? 'amber' : 'blue'}>{documentSourceLabel(doc, clientMode)}</Badge>;
 }
 
 function documentLabel(doc) {
@@ -107,12 +118,25 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     } catch (err) { notify?.({ type: 'danger', message: err.message }); }
   }
 
-  async function toggleClientVisible(doc) {
+  async function updateClientVisible(doc, clientVisible) {
     try {
-      await updateDocument(doc.id, { clientVisible: !doc.clientVisible });
+      await updateDocument(doc.id, { clientVisible });
       notify?.({ type: 'success', message: doc.clientVisible ? 'Document hidden from client.' : 'Document shared with client.' });
       await load();
     } catch (err) { notify?.({ type: 'danger', message: err.message }); }
+  }
+
+  async function toggleClientVisible(doc) {
+    const nextVisible = !doc.clientVisible;
+    if (isGeneratedDocument(doc) && nextVisible) {
+      setConfirm({
+        title: 'Share generated draft with client?',
+        message: 'This document was generated as a draft. Confirm it has been reviewed before making it visible to the client.',
+        onConfirm: () => updateClientVisible(doc, nextVisible),
+      });
+      return;
+    }
+    await updateClientVisible(doc, nextVisible);
   }
 
   async function deleteDoc(doc) {
@@ -134,6 +158,10 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const realFolders = folders.filter(folder => !folder.virtual);
   const folderOptions = useMemo(() => [{ id: 'uncategorised', name: 'Uncategorised' }, ...realFolders], [realFolders]);
   const selectedName = folders.find(folder => folder.id === selectedFolder)?.name || 'All Documents';
+  const showUploadControls = clientMode || canManage;
+  const documentCardHint = clientMode
+    ? 'Client uploads are placed in Client Uploads automatically.'
+    : canManage ? 'Upload, move and manage matter documents.' : 'View matter documents.';
 
   return (
     <div className="lf-doc-grid" style={{ display: 'grid', gridTemplateColumns: '220px minmax(0,1fr)', gap: 16 }}>
@@ -162,19 +190,21 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
         )}
       </Card>
 
-      <Card title={selectedName} hint={clientMode ? 'Client uploads are placed in Client Uploads automatically.' : 'Upload, move and manage matter documents.'}>
-        <div style={{ ...styles.formGrid, marginBottom: 14 }}>
-          {!clientMode && (
-            <Field label="Upload Folder">
-              <select style={styles.input} value={uploadFolderId} onChange={e => setUploadFolderId(e.target.value)}>
-                {folderOptions.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
-              </select>
+      <Card title={selectedName} hint={documentCardHint}>
+        {showUploadControls && (
+          <div style={{ ...styles.formGrid, marginBottom: 14 }}>
+            {!clientMode && (
+              <Field label="Upload Folder">
+                <select style={styles.input} value={uploadFolderId} onChange={e => setUploadFolderId(e.target.value)}>
+                  {folderOptions.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+                </select>
+              </Field>
+            )}
+            <Field label={clientMode ? 'Upload to Client Uploads' : 'Upload Document'}>
+              <input style={styles.input} type="file" accept=".pdf,.doc,.docx,image/*" onChange={uploadDoc} />
             </Field>
-          )}
-          <Field label={clientMode ? 'Upload to Client Uploads' : 'Upload Document'}>
-            <input style={styles.input} type="file" accept=".pdf,.doc,.docx,image/*" onChange={uploadDoc} />
-          </Field>
-        </div>
+          </div>
+        )}
         {loading ? <div style={styles.alert}>Loading documents...</div> : documents.length ? (
           <div className={canManage ? "lf-doc-cards-staff" : "lf-doc-cards-client"}>
           <Table
