@@ -5,6 +5,7 @@ const config = require('../lib/config');
 const { createBackup, rotateBackups, verifyBackup, getBackupList } = require('../lib/backup')({
   serverDir: path.join(__dirname, '..'),
   backupDir: config.BACKUP_DIR,
+  databasePath: config.DATABASE_PATH,
   config,
 });
 
@@ -72,6 +73,7 @@ async function log(message) {
 
 async function main() {
   try {
+    await log(`Source database: ${config.DATABASE_PATH}`);
     await log('Creating backup...');
     const result = await createBackup();
     await log(`Backup created: ${result.filename}`);

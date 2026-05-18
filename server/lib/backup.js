@@ -54,14 +54,19 @@ async function checkpointWal(dbPath) {
   });
 }
 
-module.exports = ({ serverDir, backupDir, config }) => {
+module.exports = ({ serverDir, backupDir, config, databasePath }) => {
+  // Resolve the backup source: prefer the explicitly configured databasePath
+  // (config.DATABASE_PATH at runtime) and fall back to the legacy server/lawfirm.db
+  // location only when no databasePath is provided (test helpers that pass serverDir).
+  const resolvedDatabasePath = databasePath || path.join(serverDir, 'lawfirm.db');
+
   function ensureBackupDir() {
     return fs.mkdir(backupDir, { recursive: true });
   }
 
   async function createBackup() {
     await ensureBackupDir();
-    const source = path.join(serverDir, 'lawfirm.db');
+    const source = resolvedDatabasePath;
     const now = new Date();
     const ts = now.toISOString();
     const datePart = ts.slice(0, 10).replace(/-/g, '');
@@ -97,6 +102,7 @@ module.exports = ({ serverDir, backupDir, config }) => {
       timestamp,
       size: stats.size,
       encrypted: !!key,
+      source,
     };
   }
 
@@ -182,5 +188,14 @@ module.exports = ({ serverDir, backupDir, config }) => {
     return results;
   }
 
-  return { ensureBackupDir, createBackup, rotateBackups, verifyBackup, getBackupList, checkpointWal, decryptBuffer };
+  return {
+    ensureBackupDir,
+    createBackup,
+    rotateBackups,
+    verifyBackup,
+    getBackupList,
+    checkpointWal,
+    decryptBuffer,
+    databasePath: resolvedDatabasePath,
+  };
 };

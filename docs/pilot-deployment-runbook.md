@@ -146,15 +146,17 @@ npm run backup
 
 The backup script uses:
 
-- `server/lawfirm.db` as the SQLite source database. The source path is fixed relative to the `server/` directory. In default production deployments `DATABASE_PATH` resolves to this same path, but overriding `DATABASE_PATH` does not redirect the backup source — only the restore target and audit-log target follow `DATABASE_PATH`.
+- `DATABASE_PATH` as the SQLite source database. The backup helper checkpoints WAL against this same path before reading it, and the resolved source path is logged at the start of the run. Restore and the backup audit-event sink also follow `DATABASE_PATH`, so runtime, backup, and restore agree on a single source of truth.
 - `BACKUP_DIR` for encrypted backup output.
 - `BACKUP_LOG` for backup logs.
 - `LEXFLOW_BACKUP_KEY` for encryption.
 - `LEXFLOW_BACKUP_RETENTION_COUNT` for rotation.
 
-A successful run logs backup creation, verification, retention rotation, and a non-fatal audit event attempt. Verify backup success by checking the process exit code, backup log, and presence of a recent `.db.enc` file in `BACKUP_DIR`.
+A successful run logs the source database path, backup creation, verification, retention rotation, and a non-fatal audit event attempt. Verify backup success by checking the process exit code, backup log, and presence of a recent `.db.enc` file in `BACKUP_DIR`.
 
 Keep `BACKUP_DIR` and `BACKUP_LOG` outside the repository or in ignored operational paths.
+
+`npm run seed:demo` is unaffected by this change: it remains a destructive demo/local fixture that rebuilds the default `server/lawfirm.db`. Do not run it against production or pilot data.
 
 ## 7. Restore and Rollback
 
@@ -214,7 +216,15 @@ Run this drill periodically to prove the encrypted backup/restore path works end
    New-Item -ItemType Directory -Force -Path $drillRoot, $drillBackupDir | Out-Null
    ```
 
-2. Export drill environment variables in the same shell session, including a non-production backup key. Required env for the scripts to load:
+2. Seed the throwaway drill database by copying a representative source DB (for example, the live development DB) to `$drillDb`. After PILOT-HARDENING-4 the backup helper reads from `DATABASE_PATH`, so `$drillDb` must exist before `npm run backup` runs:
+
+   ```powershell
+   Copy-Item ".\server\lawfirm.db" $drillDb
+   ```
+
+   The drill never writes back to the original — restore points at `$drillDb`, which is overwritten.
+
+3. Export drill environment variables in the same shell session, including a non-production backup key. Required env for the scripts to load:
 
    ```powershell
    $env:NODE_ENV = "test"
@@ -226,27 +236,27 @@ Run this drill periodically to prove the encrypted backup/restore path works end
    # Plus JWT_SECRET, OAUTH_STATE_SECRET, OAUTH_* and provider test creds as required by config.js
    ```
 
-   Note: the drill `DATABASE_PATH` controls the restore target and the audit-log target. The backup source itself is always `server/lawfirm.db` (see Section 6). Do not run `npm run seed:demo` inside the drill — it writes to `server/lawfirm.db` and would touch the live development database.
+   Note: the drill `DATABASE_PATH` now controls the backup source, the restore target, and the audit-log target (see Section 6). Pointing `DATABASE_PATH` at the throwaway file means the drill backs up that throwaway file end-to-end, never touching the original. Do not run `npm run seed:demo` inside the drill — it still writes to the default `server/lawfirm.db` and would touch the live development database regardless of `DATABASE_PATH`.
 
-3. Capture pre-backup evidence from the source database. Open `server/lawfirm.db` read-only with `sqlite3` and record row counts for at least `users` and `matters`, plus `PRAGMA integrity_check`.
+4. Capture pre-backup evidence from the throwaway source database. Open `$drillDb` read-only with `sqlite3` and record row counts for at least `users` and `matters`, plus `PRAGMA integrity_check`.
 
-4. Create the encrypted backup:
+5. Create the encrypted backup:
 
    ```powershell
    cd server
    npm run backup
    ```
 
-   This writes a `lawfirm-<timestamp>.db.enc` file into `$drillBackupDir`, runs a verification pass that decrypts to a temp file and runs `PRAGMA integrity_check`, rotates retained backups, and emits a `backup_created` audit event. The audit event insert creates `$drillDb` as a side effect (the audit row is the only content at this point).
+   This writes a `lawfirm-<timestamp>.db.enc` file into `$drillBackupDir`, runs a verification pass that decrypts to a temp file and runs `PRAGMA integrity_check`, rotates retained backups, and emits a `backup_created` audit event. The audit event is inserted into `$drillDb` itself, which is the same file that was just backed up.
 
-5. Record the backup file path and SHA256:
+6. Record the backup file path and SHA256:
 
    ```powershell
    $backup = Get-ChildItem $drillBackupDir -Filter "*.db.enc" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
    Get-FileHash $backup.FullName -Algorithm SHA256
    ```
 
-6. Prove the restore refuses to overwrite without `--force`:
+7. Prove the restore refuses to overwrite without `--force`:
 
    ```powershell
    npm run restore:backup -- $backup.FullName
@@ -254,9 +264,9 @@ Run this drill periodically to prove the encrypted backup/restore path works end
 
    Expected output includes `Error: Target database already exists` and `Use --force to overwrite`. `$drillDb` size and contents remain unchanged.
 
-7. Modify `$drillDb` to simulate post-incident drift, for example by adding a `restore_drill_marker` table with a single row.
+8. Modify `$drillDb` to simulate post-incident drift, for example by adding a `restore_drill_marker` table with a single row.
 
-8. Restore with `--force`:
+9. Restore with `--force`:
 
    ```powershell
    npm run restore:backup -- $backup.FullName --force
@@ -264,11 +274,11 @@ Run this drill periodically to prove the encrypted backup/restore path works end
 
    Expected output: `Overwriting existing database`, `Decrypting backup`, `Writing to target database`, `Restore completed successfully`, `Audit event backup_restored recorded in restored database`. No backup key should appear in the output.
 
-9. Verify the restored database. The row counts for `users` and `matters` must match the pre-backup evidence, and the marker table you added in step 7 must be absent. Also confirm `PRAGMA integrity_check` returns `ok` and that a `backup_restored` row exists in `audit_events`.
+10. Verify the restored database. The row counts for `users` and `matters` must match the pre-backup evidence, and the marker table you added in step 8 must be absent. Also confirm `PRAGMA integrity_check` returns `ok` and that a `backup_restored` row exists in `audit_events`.
 
-10. Validate retention. Run `npm run backup` enough times to exceed `LEXFLOW_BACKUP_RETENTION_COUNT` (default for the drill: 3, so run 4 backups in close succession with brief sleeps to keep filenames unique). After the runs, count `.db.enc` files in `$drillBackupDir` and confirm it is no more than `LEXFLOW_BACKUP_RETENTION_COUNT`.
+11. Validate retention. Run `npm run backup` enough times to exceed `LEXFLOW_BACKUP_RETENTION_COUNT` (default for the drill: 3, so run 4 backups in close succession with brief sleeps to keep filenames unique). After the runs, count `.db.enc` files in `$drillBackupDir` and confirm it is no more than `LEXFLOW_BACKUP_RETENTION_COUNT`.
 
-11. After the drill, remove `$drillRoot` if you do not need to retain the artifacts. Confirm the repository working tree is still clean (`git status --short` empty) and that no drill files were written under `server/` or `backups/` inside the repository.
+12. After the drill, remove `$drillRoot` if you do not need to retain the artifacts. Confirm the repository working tree is still clean (`git status --short` empty) and that no drill files were written under `server/` or `backups/` inside the repository.
 
 ### 8.5 Post-Restore Smoke Checks
 

@@ -81,7 +81,7 @@ Create a timestamped SQLite backup:
 .\backup-db.ps1
 ```
 
-Backups are written to `backups/` and ignored by Git.
+Backups are written to `backups/` and ignored by Git. `npm run backup` (in `server/`) reads the database at `DATABASE_PATH` as the source, encrypts it with `LEXFLOW_BACKUP_KEY` when set, and writes the result into `BACKUP_DIR`. Restore via `npm run restore:backup -- <file>` writes back to the same `DATABASE_PATH`.
 
 ## Environment
 

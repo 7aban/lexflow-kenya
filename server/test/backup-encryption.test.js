@@ -161,3 +161,94 @@ describe('R3b Error Safety', () => {
     }).not.toThrow();
   });
 });
+
+describe('PILOT-HARDENING-4 Backup Source Follows DATABASE_PATH', () => {
+  const ph4Root = path.join(os.tmpdir(), `lexflow-ph4-source-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const ph4ServerDir = path.join(ph4Root, 'server');
+  const ph4BackupDir = path.join(ph4Root, 'backups');
+  const wrongSourceDb = path.join(ph4ServerDir, 'lawfirm.db');
+  const correctSourceDb = path.join(ph4Root, 'configured-database.db');
+
+  async function seedSourceDb(dbPath, marker) {
+    await new Promise((resolve, reject) => {
+      const db = new sqlite3.Database(dbPath);
+      db.serialize(() => {
+        db.run('CREATE TABLE source_marker (id TEXT PRIMARY KEY, marker TEXT)', (err) => {
+          if (err) return reject(err);
+          db.run('INSERT INTO source_marker (id, marker) VALUES (?, ?)', ['m', marker], (err2) => {
+            if (err2) return reject(err2);
+            db.close((err3) => err3 ? reject(err3) : resolve());
+          });
+        });
+      });
+    });
+  }
+
+  function readMarker(dbPath) {
+    return new Promise((resolve, reject) => {
+      const db = new sqlite3.Database(dbPath, sqlite3.OPEN_READONLY, (err) => {
+        if (err) return reject(err);
+        db.get('SELECT marker FROM source_marker WHERE id = ?', ['m'], (err2, row) => {
+          db.close(() => err2 ? reject(err2) : resolve(row));
+        });
+      });
+    });
+  }
+
+  beforeAll(async () => {
+    await fs.mkdir(ph4ServerDir, { recursive: true });
+    await fs.mkdir(ph4BackupDir, { recursive: true });
+    await seedSourceDb(wrongSourceDb, 'wrong_source');
+    await seedSourceDb(correctSourceDb, 'correct_source');
+  });
+
+  afterAll(async () => {
+    try { await fs.rm(ph4Root, { recursive: true, force: true }); } catch (e) {}
+  });
+
+  test('createBackup reads from configured databasePath, not serverDir/lawfirm.db', async () => {
+    const helperConfig = {
+      BACKUP_DIR: ph4BackupDir,
+      BACKUP_RETENTION_COUNT: 7,
+      BACKUP_KEY: Buffer.from(TEST_KEY, 'hex'),
+      DATABASE_PATH: correctSourceDb,
+    };
+    const helper = require('../lib/backup')({
+      serverDir: ph4ServerDir,
+      backupDir: ph4BackupDir,
+      databasePath: correctSourceDb,
+      config: helperConfig,
+    });
+
+    expect(helper.databasePath).toBe(correctSourceDb);
+
+    const result = await helper.createBackup();
+    expect(result.success).toBe(true);
+    expect(result.encrypted).toBe(true);
+    expect(result.source).toBe(correctSourceDb);
+    expect(result.filename).toMatch(/^lawfirm-\d{8}-\d{9}\.db\.enc$/);
+
+    const verification = await helper.verifyBackup(result.backupPath);
+    expect(verification.valid).toBe(true);
+    expect(verification.result).toBe('ok');
+
+    const encryptedData = await fs.readFile(result.backupPath);
+    const plaintext = helper.decryptBuffer(encryptedData, Buffer.from(TEST_KEY, 'hex'));
+    const decodedPath = path.join(ph4Root, `decoded-${Date.now()}.db`);
+    await fs.writeFile(decodedPath, plaintext);
+
+    let marker;
+    try {
+      marker = await readMarker(decodedPath);
+    } finally {
+      await fs.unlink(decodedPath).catch(() => {});
+    }
+
+    expect(marker).toBeDefined();
+    expect(marker.marker).toBe('correct_source');
+    expect(marker.marker).not.toBe('wrong_source');
+
+    const wrongMarker = await readMarker(wrongSourceDb);
+    expect(wrongMarker.marker).toBe('wrong_source');
+  });
+});

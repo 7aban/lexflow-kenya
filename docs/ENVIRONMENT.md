@@ -50,7 +50,7 @@ LexFlow uses environment variables for configuration. This document describes th
 | `JWT_ISSUER` | (none) | JWT issuer for extra validation |
 | `JWT_AUDIENCE` | (none) | JWT audience for extra validation |
 | `PORT` | `5000` | Server port |
-| `DATABASE_PATH` | `lawfirm.db` | Path to SQLite database |
+| `DATABASE_PATH` | `server/lawfirm.db` | Path to SQLite database — source of truth for runtime, backup (`npm run backup`), and restore (`npm run restore:backup`). `npm run seed:demo` is a destructive local/demo fixture and still targets the default `server/lawfirm.db` regardless of `DATABASE_PATH`. |
 | `BACKUP_DIR` | `../backups` | Backup storage directory |
 | `BACKUP_LOG` | `../logs/backup.log` | Backup log file path |
 | `BASE_URL` | `http://localhost:5000` (dev) | Base URL for invitations/reminders |

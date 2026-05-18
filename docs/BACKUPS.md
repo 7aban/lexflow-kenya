@@ -2,16 +2,18 @@
 
 ## Overview
 
-LexFlow uses a local SQLite database stored at `server/lawfirm.db`. This document describes how to set up automated daily backups using Windows Task Scheduler.
+LexFlow uses a local SQLite database resolved at runtime from the `DATABASE_PATH` environment variable (default: `server/lawfirm.db`). This document describes how to set up automated daily backups using Windows Task Scheduler.
 
 ## What the Backup System Does
 
-- **Source**: `server/lawfirm.db` (SQLite database)
-- **Backup location**: `backups/` folder at project root
-- **Filename format**: `lawfirm-YYYYMMDD-HHmmss.db` (e.g., `lawfirm-20260505-063339.db`)
-- **Verification**: Each backup is verified using SQLite `PRAGMA integrity_check`
-- **Rotation**: Keeps the last 7 backups by default (removes older ones)
-- **Logging**: All backup operations are logged to `logs/backup.log`
+- **Source**: the SQLite database at `DATABASE_PATH`. After PILOT-HARDENING-4 the backup script reads the same path the server runs against; in default deployments that is `server/lawfirm.db`.
+- **Backup location**: `BACKUP_DIR` (defaults to `backups/` at the project root).
+- **Filename format**: `lawfirm-YYYYMMDD-HHmmssSSS.db.enc` when `LEXFLOW_BACKUP_KEY` is set (e.g., `lawfirm-20260519-063339123.db.enc`), or `.db` when unencrypted.
+- **Encryption**: AES-256-GCM, keyed by `LEXFLOW_BACKUP_KEY` (64 hex characters / 32 bytes). Required for production; required for encrypted restore.
+- **Verification**: each backup is decrypted to a temp file and verified using SQLite `PRAGMA integrity_check`.
+- **Rotation**: keeps `LEXFLOW_BACKUP_RETENTION_COUNT` backups (default 7), rotating older `lawfirm-*.db.enc`/`.db` files.
+- **Restore**: `npm run restore:backup -- <file>` writes the decrypted backup to `DATABASE_PATH`. Requires the same `LEXFLOW_BACKUP_KEY` used at backup time.
+- **Logging**: all backup operations are logged to `BACKUP_LOG` (default `logs/backup.log`). The resolved source path is logged at the start of each run.
 
 ## Manual Backup
 
@@ -141,7 +143,7 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 
 **Solution**:
 1. Check disk space
-2. Verify `server/lawfirm.db` is not corrupted
+2. Verify the database file at `DATABASE_PATH` (default `server/lawfirm.db`) is not corrupted
 3. Run manual backup: `cd server && npm run backup`
 
 ### Log File Not Created
@@ -165,4 +167,4 @@ For production use, consider:
 - Replication to offsite location
 - Database migration to managed service (e.g., PostgreSQL on cloud)
 
-⚠️ **No Encryption**: Backup files are not encrypted at rest. Ensure proper file system permissions on the `backups/` folder.
+⚠️ **Encryption Key Required**: When `LEXFLOW_BACKUP_KEY` is set (required in production), backups are encrypted with AES-256-GCM at rest and the same key is required to restore. Store the key separately from the backup files and never commit it to the repository. If the key is unset in development, backups are written as plaintext `.db` files — do not run production this way.
