@@ -30,6 +30,7 @@ const { signState, verifyState } = require('./lib/oauthState');
 const googleOAuth = require('./lib/oauthGoogle');
 const microsoftOAuth = require('./lib/oauthMicrosoft');
 const themeValidation = require('./lib/themeValidation');
+const { buildTemplateMergeContext, mergeTemplateMarkup } = require('./lib/templateMerge');
 
 const app = express();
 const db = new sqlite3.Database(config.DATABASE_PATH);
@@ -1601,6 +1602,35 @@ app.get('/api/document-templates/:id', requireStaff, async (req, res) => {
   const template = await get('SELECT * FROM document_templates WHERE id=? AND active=1', [req.params.id]);
   if (!template) return res.status(404).json({ error: 'Document template not found' });
   res.json(template);
+});
+app.post('/api/matters/:matterId/document-templates/:templateId/preview', requireStaff, async (req, res) => {
+  const matter = await get('SELECT * FROM matters WHERE id=?', [req.params.matterId]);
+  if (!matter) return res.status(404).json({ error: 'Matter not found' });
+  if (!(await canAccessMatter(req, req.params.matterId))) {
+    await recordAuditEvent(req, { action: 'forbidden_document_template_preview', entityType: 'matter', entityId: req.params.matterId, matterId: req.params.matterId, metadata: { reason: 'insufficient permissions', templateId: req.params.templateId } }).catch(() => {});
+    return res.status(403).json({ error: 'Matter access denied' });
+  }
+  const template = await get('SELECT * FROM document_templates WHERE id=? AND active=1', [req.params.templateId]);
+  if (!template) return res.status(404).json({ error: 'Active document template not found' });
+  const [client, firm] = await Promise.all([
+    get('SELECT * FROM clients WHERE id=?', [matter.clientId || '']),
+    get('SELECT * FROM firm_settings WHERE id=?', ['default']),
+  ]);
+  const context = buildTemplateMergeContext({
+    firm: firm || {},
+    matter,
+    client: client || {},
+    user: req.user || {},
+    today: today(),
+  });
+  const merged = mergeTemplateMarkup(template.bodyMarkup || '', context);
+  res.json({
+    templateId: template.id,
+    matterId: matter.id,
+    preview: merged.preview,
+    tokens: merged.tokens,
+    unresolvedTokens: merged.unresolvedTokens,
+  });
 });
 app.post('/api/document-templates', requireAdmin, async (req, res) => {
   const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
