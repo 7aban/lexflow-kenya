@@ -9,6 +9,12 @@ import TaskTimer, { taskTimerActive } from '../components/TaskTimer.jsx';
 
 const BILLABLE_TIME_GUIDANCE = 'Billable time may be included in hourly invoices. Non-billable time is tracked for workload and productivity but excluded from hourly invoice generation.';
 
+function listFromResponse(response, key) {
+  if (Array.isArray(response)) return response;
+  if (response && Array.isArray(response[key])) return response[key];
+  return [];
+}
+
 function isBillableValue(value) {
   if (value === undefined || value === null) return true;
   return value === true || value === 1 || value === '1' || value === 'true';
@@ -890,7 +896,7 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
   const [notices, setNotices] = useState([]);
   const [noticeForm, setNoticeForm] = useState(emptyNoticeForm);
   const [publishingNotice, setPublishingNotice] = useState(false);
-  const [theme, setTheme] = useState(null);
+  const [firmTheme, setFirmTheme] = useState(null);
   const [presets, setPresets] = useState([]);
   const [themeLoading, setThemeLoading] = useState(false);
   const [themePreview, setThemePreview] = useState(null);
@@ -900,7 +906,7 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
   useEffect(() => { loadNotices(); }, []);
 
   async function loadNotices() {
-    try { setNotices(await api('/notices')); }
+    try { setNotices(listFromResponse(await api('/notices'), 'notices')); }
     catch (err) { notify({ type: 'danger', message: err.message }); }
   }
 
@@ -939,18 +945,18 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
   async function loadTheme() {
     try {
       const data = await getFirmTheme();
-      setTheme(data?.theme || null);
+      setFirmTheme(data?.theme || null);
       if (data?.theme) applyFirmTheme(data.theme);
     } catch (err) { setThemeError(err.message); }
   }
 
   async function loadPresets() {
-    try { setPresets(await getThemePresets()); }
+    try { setPresets(listFromResponse(await getThemePresets(), 'presets')); }
     catch { setPresets([]); }
   }
 
   async function handlePreview(presetId) {
-    const sourceTheme = presetId ? presets.find(p => p.id === presetId) : theme;
+    const sourceTheme = presetId ? presets.find(p => p.id === presetId) : firmTheme;
     if (!sourceTheme) return;
     setThemeLoading(true);
     setThemeError('');
@@ -966,14 +972,14 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
   }
 
   async function handleSave() {
-    if (!themePreview && !theme) return;
+    if (!themePreview && !firmTheme) return;
     setThemeLoading(true);
     setThemeError('');
     try {
-      const payload = themePreview || theme;
+      const payload = themePreview || firmTheme;
       const data = await updateFirmTheme(payload);
       if (data?.theme) {
-        setTheme(data.theme);
+        setFirmTheme(data.theme);
         setThemePreview(null);
         applyFirmTheme(data.theme);
         notify({ type: 'success', message: 'Theme saved.' });
@@ -988,11 +994,11 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
     setThemeError('');
     try {
       const data = await resetFirmTheme();
-      setTheme(null);
+      setFirmTheme(null);
       setThemePreview(null);
       clearFirmTheme();
       if (data?.theme) {
-        setTheme(data.theme);
+        setFirmTheme(data.theme);
         applyFirmTheme(data.theme);
       }
       notify({ type: 'success', message: data?.message || 'Theme reset to default.' });
@@ -1046,6 +1052,8 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
   }
 
   const reminder = form.reminderSettings || {};
+  const clientOptions = Array.isArray(clients) ? clients : [];
+  const effectiveTheme = themePreview || firmTheme || {};
 
   return (
     <div style={styles.pageStack}>
@@ -1087,16 +1095,16 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
               <button type="button" onClick={() => handlePreview(null)} style={styles.ghostButton} disabled={themeLoading}>Custom (current)</button>
             </div>
           </div>
-          <Field label="Primary Color"><input type="color" style={styles.colorInput} value={(themePreview || theme)?.primaryColor || '#0F1B33'} onChange={e => { setThemePreview(prev => ({ ...(prev || theme || {}), primaryColor: e.target.value, source: 'manual' })); }} /></Field>
-          <Field label="Accent Color"><input type="color" style={styles.colorInput} value={(themePreview || theme)?.accentColor || '#D4A34A'} onChange={e => { setThemePreview(prev => ({ ...(prev || theme || {}), accentColor: e.target.value, source: 'manual' })); }} /></Field>
-          <Field label="Background"><input type="color" style={styles.colorInput} value={(themePreview || theme)?.backgroundColor || '#0A0F1A'} onChange={e => { setThemePreview(prev => ({ ...(prev || theme || {}), backgroundColor: e.target.value, source: 'manual' })); }} /></Field>
-          <Field label="Surface"><input type="color" style={styles.colorInput} value={(themePreview || theme)?.surfaceColor || '#111827'} onChange={e => { setThemePreview(prev => ({ ...(prev || theme || {}), surfaceColor: e.target.value, source: 'manual' })); }} /></Field>
-          <Field label="Text"><input type="color" style={styles.colorInput} value={(themePreview || theme)?.textColor || '#E5E7EB'} onChange={e => { setThemePreview(prev => ({ ...(prev || theme || {}), textColor: e.target.value, source: 'manual' })); }} /></Field>
-          <Field label="Text Muted"><input type="color" style={styles.colorInput} value={(themePreview || theme)?.textSecondaryColor || '#9CA3AF'} onChange={e => { setThemePreview(prev => ({ ...(prev || theme || {}), textSecondaryColor: e.target.value, source: 'manual' })); }} /></Field>
+          <Field label="Primary Color"><input type="color" style={styles.colorInput} value={effectiveTheme.primaryColor || '#0F1B33'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), primaryColor: e.target.value, source: 'manual' })); }} /></Field>
+          <Field label="Accent Color"><input type="color" style={styles.colorInput} value={effectiveTheme.accentColor || '#D4A34A'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), accentColor: e.target.value, source: 'manual' })); }} /></Field>
+          <Field label="Background"><input type="color" style={styles.colorInput} value={effectiveTheme.backgroundColor || '#0A0F1A'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), backgroundColor: e.target.value, source: 'manual' })); }} /></Field>
+          <Field label="Surface"><input type="color" style={styles.colorInput} value={effectiveTheme.surfaceColor || '#111827'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), surfaceColor: e.target.value, source: 'manual' })); }} /></Field>
+          <Field label="Text"><input type="color" style={styles.colorInput} value={effectiveTheme.textColor || '#E5E7EB'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), textColor: e.target.value, source: 'manual' })); }} /></Field>
+          <Field label="Text Muted"><input type="color" style={styles.colorInput} value={effectiveTheme.textSecondaryColor || '#9CA3AF'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), textSecondaryColor: e.target.value, source: 'manual' })); }} /></Field>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
           <button style={styles.primaryButton} onClick={handleSave} disabled={themeLoading}>{themeLoading ? 'Saving...' : 'Save Theme'}</button>
-          <button style={styles.ghostButton} onClick={() => { applyFirmTheme(themePreview || theme || {}); setThemePreview(null); setThemeError(''); }} disabled={!themePreview || themeLoading}>Apply Preview</button>
+          <button style={styles.ghostButton} onClick={() => { applyFirmTheme(themePreview || firmTheme || {}); setThemePreview(null); setThemeError(''); }} disabled={!themePreview || themeLoading}>Apply Preview</button>
           <button style={styles.dangerButton} onClick={handleReset} disabled={themeLoading}>{themeLoading ? 'Resetting...' : 'Reset to Default'}</button>
         </div>
         {themeError && <div style={{ ...styles.alert, ...(themeError.startsWith('Preview warnings') ? {} : styles.alertDanger), padding: 10, borderRadius: 6 }}>{themeError}</div>}
@@ -1136,7 +1144,7 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
           <Field label="Audience">
             <select style={styles.input} value={noticeForm.clientId} onChange={e => setNoticeForm({ ...noticeForm, clientId: e.target.value })}>
               <option value="">All clients</option>
-              {clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
+              {clientOptions.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
             </select>
           </Field>
           <Field label="Title"><input required style={styles.input} value={noticeForm.title} onChange={e => setNoticeForm({ ...noticeForm, title: e.target.value })} /></Field>
@@ -1177,10 +1185,22 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
 }
 export function Users({ clients = [], notify }) {
   const [users, setUsers] = useState([]);
+  const [userLoadError, setUserLoadError] = useState('');
   const [form, setForm] = useState({ email: '', password: '', fullName: '', role: 'assistant', clientId: '' });
   const [includeInactive, setIncludeInactive] = useState(false);
   useEffect(() => { load(); }, [includeInactive]);
-  async function load() { try { setUsers(await api(`/auth/users${includeInactive ? '?include_inactive=true' : ''}`)); } catch (err) { notify({ type: 'danger', message: err.message }); } }
+  async function load() {
+    try {
+      const response = await api(`/auth/users${includeInactive ? '?include_inactive=true' : ''}`);
+      const normalizedUsers = listFromResponse(response, 'users');
+      setUsers(normalizedUsers);
+      setUserLoadError(Array.isArray(response) || Array.isArray(response?.users) ? '' : 'The users endpoint returned an unexpected response. Showing an empty team list.');
+    } catch (err) {
+      setUsers([]);
+      setUserLoadError(err.message);
+      notify({ type: 'danger', message: err.message });
+    }
+  }
   async function submit(event) { event.preventDefault(); try { await api('/auth/register', { method: 'POST', body: form }); setForm({ email: '', password: '', fullName: '', role: 'assistant', clientId: '' }); notify({ type: 'success', message: 'User created.' }); await load(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function updateRole(userId, newRole, fullName) {
     try {
@@ -1196,22 +1216,25 @@ export function Users({ clients = [], notify }) {
       await load();
     } catch (err) { notify({ type: 'danger', message: err.message }); }
   }
+  const clientOptions = Array.isArray(clients) ? clients : [];
+  const visibleUsers = Array.isArray(users) ? users : [];
   return <div className="lf-split-grid" style={styles.splitGrid}>
     <Card title="Create user" hint="Role-based access"><form onSubmit={submit} style={styles.formGrid}>
       <Field label="Full name"><input required style={styles.input} value={form.fullName} onChange={e => setForm({ ...form, fullName: e.target.value })} /></Field>
       <Field label="Email"><input required style={styles.input} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field>
       <Field label="Password"><input required type="password" style={styles.input} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} /></Field>
       <Field label="Role"><select style={styles.input} value={form.role} onChange={e => setForm({ ...form, role: e.target.value, clientId: e.target.value === 'client' ? form.clientId : '' })}><option value="assistant">Assistant</option><option value="advocate">Advocate</option><option value="admin">Admin</option><option value="client">Client</option></select></Field>
-      {form.role === 'client' && <><Field label="Linked Client"><select required style={styles.input} value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })}><option value="">Select client</option>{clients.map(c => <option key={c.id}>{c.name}</option>)}</select></Field><div style={styles.formHelper}>Client users can view only the linked client's matters, documents, invoices, and messages. Share credentials manually after creating the account.</div></>}
+      {form.role === 'client' && <><Field label="Linked Client"><select required style={styles.input} value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })}><option value="">Select client</option>{clientOptions.map(c => <option key={c.id}>{c.name}</option>)}</select></Field><div style={styles.formHelper}>Client users can view only the linked client's matters, documents, invoices, and messages. Share credentials manually after creating the account.</div></>}
       <button style={styles.primaryButton}>Create user</button>
     </form></Card>
-    <Card title="Team" hint={`${users.length} users`}>
+    <Card title="Team" hint={`${visibleUsers.length} users`}>
+      {userLoadError && <div style={{ ...styles.alert, ...styles.alertDanger, marginBottom: 12 }}>{userLoadError}</div>}
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}>
         <input type="checkbox" checked={includeInactive} onChange={e => setIncludeInactive(e.target.checked)} />
         Show inactive users
       </label>
       <div className="lf-user-cards">
-        <Table columns={['Name', 'Email', 'Role', 'Status', 'Client', 'Actions']} rows={users.map(u => [
+        <Table columns={['Name', 'Email', 'Role', 'Status', 'Client', 'Actions']} rows={visibleUsers.map(u => [
           u.fullName,
           u.email,
           <select key={`role-${u.id}`} style={{ ...styles.input, width: 140 }} value={u.role} disabled={u.role === 'client'} onChange={e => updateRole(u.id, e.target.value, u.fullName)}>
@@ -1220,7 +1243,7 @@ export function Users({ clients = [], notify }) {
             <option value="admin">Admin</option>
           </select>,
           <Badge key={`status-${u.id}`} tone={u.isActive ? 'green' : 'red'}>{u.isActive ? 'Active' : 'Inactive'}</Badge>,
-          u.clientId ? clients.find(c => c.id === u.clientId)?.name || u.clientId : '-',
+          u.clientId ? clientOptions.find(c => c.id === u.clientId)?.name || u.clientId : '-',
           <div key={`actions-${u.id}`} style={{ display: 'flex', gap: 6 }}>
             <button style={styles.tinyButton} onClick={() => toggleActive(u.id, !u.isActive, u.fullName)}>{u.isActive ? 'Deactivate' : 'Activate'}</button>
           </div>,

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Component, useEffect, useRef, useState } from 'react';
 import { IconLayoutDashboard, IconChartLine, IconUsers, IconUserPlus, IconBriefcase, IconCheckbox, IconCalendarDue, IconFileInvoice, IconMessages, IconUsersGroup, IconSettings, IconListSearch, IconExternalLink, IconChevronDown, IconShield } from '@tabler/icons-react';
 import { api, API_BASE, AUTH_FAILURE_MESSAGE, clearSession, clearAllLexFlowStorage, getNotifications, markNotificationsRead, readSession, saveSession } from './lib/apiClient.js';
 import { globalSearch } from './api.js';
@@ -123,6 +123,41 @@ function StaffNavigation({ visibleGroups, openNavGroups, setOpenNavGroups, view,
       })}
     </nav>
   );
+}
+
+class ViewErrorBoundary extends Component {
+  state = { error: null };
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error('LexFlow view render error', error, info);
+  }
+
+  componentDidUpdate(prevProps) {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.error) {
+      this.setState({ error: null });
+    }
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+
+    return (
+      <section role="alert" style={{ background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, boxShadow: theme.shadow, padding: 24, display: 'grid', gap: 12 }}>
+        <div>
+          <h2 style={{ margin: '0 0 6px', fontSize: 18, color: theme.ink }}>Something went wrong in this view</h2>
+          <p style={{ margin: 0, color: theme.muted }}>The rest of LexFlow is still available. Return to Dashboard or reload the app.</p>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button type="button" style={styles.primaryButton} onClick={() => { this.setState({ error: null }); this.props.onDashboard?.(); }}>Return to Dashboard</button>
+          <button type="button" style={styles.ghostButton} onClick={() => window.location.reload()}>Reload app</button>
+        </div>
+      </section>
+    );
+  }
 }
 
 export default function App() {
@@ -563,20 +598,22 @@ export default function App() {
           </div>
         </header>
 
-        {loading && <Skeleton />}
-        {!loading && view === 'Dashboard' && <Dashboard data={data} user={user} onNavigate={setView} />}
-        {!loading && view === 'Clients' && <Clients clients={data.clients} matters={data.matters} canManage={canManage} isAdmin={isAdmin} reload={refresh} notify={setToast} focus={clientFocus} />}
-        {!loading && view === 'Matters' && <Matters data={data} canManage={canManage} reload={refresh} notify={setToast} focus={matterFocus} onMatterOpened={async matterId => { setNotifications(current => current.filter(item => item.matterId !== matterId)); try { await markNotificationsRead({ matterId }); } catch {} }} />}
-        {!loading && view === 'Tasks' && <Tasks data={data} canManage={canManage} reload={refresh} notify={setToast} focus={taskFocus} />}
-        {!loading && view === 'Deadlines' && <DeadlineCenter data={data} canManage={canManage} notify={setToast} focus={appearanceFocus} />}
-        {!loading && view === 'Communications' && <Communications clients={data.clients} matters={data.matters} focus={communicationFocus} notify={setToast} />}
-        {!loading && view === 'Invoices' && <Invoices invoices={data.invoices} isAdmin={isAdmin} canManage={canManage} reload={refresh} notify={setToast} />}
-        {!loading && view === 'Performance' && isAdmin && <AdvocatePerformance notify={setToast} />}
-        {!loading && view === 'Firm Settings' && isAdmin && <FirmSettings settings={firm} clients={data.clients} reload={refresh} notify={setToast} />}
-        {!loading && view === 'Users' && isAdmin && <Users clients={data.clients} notify={setToast} />}
-        {!loading && view === 'Invitations' && isAdmin && <Invitations clients={data.clients} notify={setToast} />}
-        {!loading && view === 'Audit Log' && isAdmin && <AuditLog notify={setToast} navigate={setView} />}
-        {!loading && view === 'Structured Audit' && isAdmin && <StructuredAuditLog notify={setToast} />}
+        <ViewErrorBoundary resetKey={view} onDashboard={() => setView('Dashboard')}>
+          {loading && <Skeleton />}
+          {!loading && view === 'Dashboard' && <Dashboard data={data} user={user} onNavigate={setView} />}
+          {!loading && view === 'Clients' && <Clients clients={data.clients} matters={data.matters} canManage={canManage} isAdmin={isAdmin} reload={refresh} notify={setToast} focus={clientFocus} />}
+          {!loading && view === 'Matters' && <Matters data={data} canManage={canManage} reload={refresh} notify={setToast} focus={matterFocus} onMatterOpened={async matterId => { setNotifications(current => current.filter(item => item.matterId !== matterId)); try { await markNotificationsRead({ matterId }); } catch {} }} />}
+          {!loading && view === 'Tasks' && <Tasks data={data} canManage={canManage} reload={refresh} notify={setToast} focus={taskFocus} />}
+          {!loading && view === 'Deadlines' && <DeadlineCenter data={data} canManage={canManage} notify={setToast} focus={appearanceFocus} />}
+          {!loading && view === 'Communications' && <Communications clients={data.clients} matters={data.matters} focus={communicationFocus} notify={setToast} />}
+          {!loading && view === 'Invoices' && <Invoices invoices={data.invoices} isAdmin={isAdmin} canManage={canManage} reload={refresh} notify={setToast} />}
+          {!loading && view === 'Performance' && isAdmin && <AdvocatePerformance notify={setToast} />}
+          {!loading && view === 'Firm Settings' && isAdmin && <FirmSettings settings={firm} clients={data.clients} reload={refresh} notify={setToast} />}
+          {!loading && view === 'Users' && isAdmin && <Users clients={data.clients} notify={setToast} />}
+          {!loading && view === 'Invitations' && isAdmin && <Invitations clients={data.clients} notify={setToast} />}
+          {!loading && view === 'Audit Log' && isAdmin && <AuditLog notify={setToast} navigate={setView} />}
+          {!loading && view === 'Structured Audit' && isAdmin && <StructuredAuditLog notify={setToast} />}
+        </ViewErrorBoundary>
       </main>
       <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
