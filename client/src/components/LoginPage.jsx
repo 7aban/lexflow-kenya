@@ -1,39 +1,56 @@
 import { useEffect, useState } from 'react';
-import { IconScale } from '@tabler/icons-react';
+import { IconScale, IconLock, IconShieldCheck, IconServer } from '@tabler/icons-react';
 import { API_BASE } from '../lib/apiClient.js';
 import { styles, StyleTag, theme } from '../theme.jsx';
-import { Alert, Field } from './ui.jsx';
+import { Alert } from './ui.jsx';
+
+function GoogleLogo() {
+  return (
+    <svg viewBox="0 0 18 18" width="16" height="16" aria-hidden="true" style={styles.loginOauthIcon}>
+      <path fill="#4285F4" d="M17.64 9.205c0-.638-.057-1.252-.164-1.841H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/>
+      <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.583-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/>
+      <path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/>
+      <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.346l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>
+    </svg>
+  );
+}
+
+function MicrosoftLogo() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" style={styles.loginOauthIcon}>
+      <rect x="0" y="0" width="7.2" height="7.2" fill="#F25022"/>
+      <rect x="8.8" y="0" width="7.2" height="7.2" fill="#7FBA00"/>
+      <rect x="0" y="8.8" width="7.2" height="7.2" fill="#00A4EF"/>
+      <rect x="8.8" y="8.8" width="7.2" height="7.2" fill="#FFB900"/>
+    </svg>
+  );
+}
 
 function OAuthDivider() {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '14px 0 8px' }}>
-      <div style={{ flex: 1, height: 1, background: theme.line }} />
-      <span style={{ fontSize: 12, color: theme.muted }}>or continue with</span>
-      <div style={{ flex: 1, height: 1, background: theme.line }} />
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '16px 0 10px' }}>
+      <div style={{ flex: 1, height: 1, background: '#E8E2D6' }} />
+      <span style={{ fontSize: 11, color: '#9C9384', textTransform: 'uppercase', letterSpacing: 1 }}>or continue with</span>
+      <div style={{ flex: 1, height: 1, background: '#E8E2D6' }} />
     </div>
   );
 }
 
 function OAuthButton({ provider, onClick }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        ...styles.ghostButton,
-        width: '100%',
-        padding: '9px 14px',
-        fontSize: 13,
-        border: `1px solid ${theme.line}`,
-        borderRadius: 8,
-        cursor: 'pointer',
-        background: '#fff',
-        color: theme.ink,
-        fontWeight: 500,
-      }}
-    >
-      {provider === 'google' ? 'Continue with Google' : 'Continue with Microsoft'}
+    <button type="button" onClick={onClick} className="lf-login-oauth" style={styles.loginOauthButton}>
+      {provider === 'google' ? <GoogleLogo /> : <MicrosoftLogo />}
+      <span>{provider === 'google' ? 'Continue with Google' : 'Continue with Microsoft'}</span>
     </button>
+  );
+}
+
+function LoginField({ label, children }) {
+  return (
+    <label style={styles.loginField}>
+      <span style={styles.loginLabel}>{label}</span>
+      {children}
+    </label>
   );
 }
 
@@ -46,6 +63,7 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
   const [oauthBusy, setOauthBusy] = useState(false);
   const [oauthEnabled, setOauthEnabled] = useState(false);
   const firmName = firm?.name || 'LexFlow Kenya';
+  const isDev = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV;
 
   useEffect(() => {
     async function checkOAuth() {
@@ -111,50 +129,57 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
     ? { title: 'Client Portal', hint: 'Access your case files, notices, invoices and shared documents.', placeholder: 'client@example.com', button: 'Enter client portal' }
     : { title: 'Welcome back', hint: 'Enter your advocate credentials to manage the firm workspace.', placeholder: 'admin@lexflow.co.ke', button: 'Sign in securely' };
 
-  const primaryColor = firm?.primaryColor || theme.navy800;
+  const primaryColor = firm?.primaryColor || '#112219';
   const accentColor = firm?.accentColor || theme.gold;
+  const staffAuxHidden = mode !== 'staff';
 
   return (
     <div className="lf-login-root" style={{ '--lf-primary': primaryColor, '--lf-accent': accentColor }}>
       <StyleTag />
       <div className="lf-login-split" style={styles.loginSplit}>
         <div className="lf-login-brand" style={styles.loginBrand}>
-          <div style={{ maxWidth: 360, display: 'grid', gap: 28 }}>
-            <div style={{ display: 'grid', gap: 20, textAlign: 'center' }}>
-              <div style={styles.loginBrandLogo}>
-                {firm?.logo ? <img src={firm.logo} alt={`${firmName} logo`} style={styles.logoImage} /> : <IconScale size={36} />}
-              </div>
-              <div>
-                <h1 style={styles.loginBrandName}>{firmName}</h1>
-                <p style={styles.loginBrandTagline}>Kenyan legal practice command centre</p>
-              </div>
-            </div>
-            <div className="lf-login-brand-features" style={styles.loginBrandFeatures}>
-              <div style={styles.loginFeatureItem}>Matter management</div>
-              <div style={styles.loginFeatureItem}>Client portal</div>
-              <div style={styles.loginFeatureItem}>Court deadlines</div>
-              <div style={styles.loginFeatureItem}>Invoice & billing</div>
+          <div style={{ maxWidth: 460, display: 'grid', gap: 28, justifyItems: 'center', textAlign: 'center' }}>
+            <div style={styles.loginBrandLogo}>
+              {firm?.logo ? <img src={firm.logo} alt={`${firmName} logo`} style={styles.logoImage} /> : <IconScale size={28} stroke={1.8} color="#fff" />}
             </div>
             <div>
-              <div style={styles.loginBrandDivider} />
-              <p style={styles.loginBrandFooter}>Secure access for authorised firm users and clients</p>
+              <h1 style={styles.loginBrandName}>{firmName}</h1>
+              <div style={styles.loginBrandType}>Practice suite · LexFlow</div>
+              <div style={styles.loginBrandRule} />
+              <p style={styles.loginBrandTagline}>
+                A secure workspace for managing client matters, court appearances, billing and the complete legal lifecycle of every file at the firm.
+              </p>
+            </div>
+            <div className="lf-login-brand-trust lf-login-trust-row" style={styles.loginTrustRow}>
+              <div style={styles.loginTrustItem}>
+                <span style={styles.loginTrustIcon}><IconLock size={15} stroke={1.8} /></span>
+                <span>End-to-end encrypted</span>
+              </div>
+              <div style={styles.loginTrustItem}>
+                <span style={styles.loginTrustIcon}><IconShieldCheck size={15} stroke={1.8} /></span>
+                <span>Role-based access</span>
+              </div>
+              <div style={styles.loginTrustItem}>
+                <span style={styles.loginTrustIcon}><IconServer size={15} stroke={1.8} /></span>
+                <span>Resilient deployment</span>
+              </div>
             </div>
           </div>
         </div>
         <div className="lf-login-card-wrap" style={styles.loginCardWrap}>
-          <form onSubmit={submit} style={styles.loginCardForm}>
-            <div style={{ display: 'grid', gap: 16, marginBottom: 24 }}>
-              <div style={styles.loginModeSwitch} role="tablist" aria-label="Login type">
-                <button type="button" onClick={() => setMode('staff')} style={{ ...styles.loginModeButton, ...(mode === 'staff' ? styles.loginModeActive : {}) }}>Staff Login</button>
-                <button type="button" onClick={() => setMode('client')} style={{ ...styles.loginModeButton, ...(mode === 'client' ? styles.loginModeActive : {}) }}>Client Portal</button>
+          <form onSubmit={submit} className="lf-login-card-form" style={styles.loginCardForm}>
+            <div style={{ display: 'grid', gap: 14, marginBottom: 22 }}>
+              <div style={styles.portalTabs} role="tablist" aria-label="Login type">
+                <button type="button" role="tab" aria-selected={mode === 'staff'} onClick={() => setMode('staff')} className="lf-login-portal-tab" style={{ ...styles.portalTab, ...(mode === 'staff' ? styles.portalTabActive : {}) }}>Staff Login</button>
+                <button type="button" role="tab" aria-selected={mode === 'client'} onClick={() => setMode('client')} className="lf-login-portal-tab" style={{ ...styles.portalTab, ...(mode === 'client' ? styles.portalTabActive : {}) }}>Client Portal</button>
               </div>
               <h2 style={styles.loginCardTitle}>{modeCopy.title}</h2>
-              <p style={{ margin: 0, color: theme.muted, fontSize: 13 }}>{modeCopy.hint}</p>
+              <p style={{ margin: 0, color: '#7A715F', fontSize: 13, lineHeight: 1.5 }}>{modeCopy.hint}</p>
             </div>
             {error && <Alert tone="danger">{error}</Alert>}
             {oauthBusy && <Alert tone="info">Redirecting to provider...</Alert>}
             {!isInstalled && !installDismissed && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, border: '1px solid #E5E7EB', background: '#F9FAFB', fontSize: 12, color: '#4B5563' }}>
+              <div style={{ ...styles.loginInstallNote, marginBottom: 14 }}>
                 <span style={{ flex: 1 }}>
                   {deferredPrompt
                     ? 'Install LexFlow for offline access and quick launch.'
@@ -163,29 +188,42 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
                       : 'Install LexFlow for quick access.')}
                 </span>
                 {deferredPrompt && (
-                  <button type="button" onClick={onInstall} style={{ padding: '4px 10px', borderRadius: 6, border: 'none', background: '#0F1B33', color: '#fff', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>Install</button>
+                  <button type="button" onClick={onInstall} style={styles.loginInstallActionButton}>Install</button>
                 )}
-                <button type="button" onClick={() => setInstallDismissed(true)} style={{ padding: '4px 6px', borderRadius: 4, border: 'none', background: 'transparent', color: '#9CA3AF', fontSize: 14, cursor: 'pointer', lineHeight: 1 }} title="Dismiss">&times;</button>
+                <button type="button" onClick={() => setInstallDismissed(true)} style={styles.loginInstallDismiss} title="Dismiss" aria-label="Dismiss install prompt">&times;</button>
               </div>
             )}
-            <Field label="Email">
-              <input style={styles.input} value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" placeholder={modeCopy.placeholder} />
-            </Field>
-            <Field label="Password">
-              <input style={styles.input} type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" placeholder={mode === 'client' ? 'Portal password' : 'Workspace password'} />
-            </Field>
-            <button disabled={busy} style={{ ...styles.primaryButton, width: '100%', marginTop: 16, padding: '10px 16px', fontSize: 14 }}>{busy ? 'Signing in...' : modeCopy.button}</button>
-            {mode === 'staff' && oauthEnabled && (
-              <>
-                <OAuthDivider />
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}>
-                  <OAuthButton provider="google" onClick={() => handleOAuth('google')} />
-                  <OAuthButton provider="microsoft" onClick={() => handleOAuth('microsoft')} />
-                </div>
-                <div style={{ fontSize: 11, color: theme.muted, textAlign: 'center', marginTop: 4 }}>For authorised firm users only.</div>
-              </>
-            )}
-            {mode === 'staff' && <div style={styles.loginHint}>admin@lexflow.co.ke / password123</div>}
+            <div style={{ display: 'grid', gap: 14 }}>
+              <LoginField label="Email">
+                <input className="lf-login-input" style={styles.loginInput} value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" placeholder={modeCopy.placeholder} />
+              </LoginField>
+              <LoginField label="Password">
+                <input className="lf-login-input" style={styles.loginInput} type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" placeholder={mode === 'client' ? 'Portal password' : 'Workspace password'} />
+              </LoginField>
+            </div>
+            <button disabled={busy} className="lf-login-submit" style={{ ...styles.loginPrimaryButton, width: '100%', marginTop: 18 }}>{busy ? 'Signing in...' : modeCopy.button}</button>
+            <div
+              aria-hidden={staffAuxHidden ? 'true' : 'false'}
+              style={{
+                visibility: staffAuxHidden ? 'hidden' : 'visible',
+                pointerEvents: staffAuxHidden ? 'none' : 'auto',
+                userSelect: staffAuxHidden ? 'none' : 'auto',
+              }}
+            >
+              {oauthEnabled ? (
+                <>
+                  <OAuthDivider />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <OAuthButton provider="google" onClick={() => handleOAuth('google')} />
+                    <OAuthButton provider="microsoft" onClick={() => handleOAuth('microsoft')} />
+                  </div>
+                  <div style={{ fontSize: 11, color: '#9C9384', textAlign: 'center', marginTop: 8 }}>For authorised firm users only.</div>
+                </>
+              ) : (
+                <div style={{ height: 1 }} />
+              )}
+              {isDev && <div style={styles.loginDemoHint}>admin@lexflow.co.ke / password123</div>}
+            </div>
           </form>
         </div>
       </div>

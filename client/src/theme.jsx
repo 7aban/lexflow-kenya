@@ -580,6 +580,36 @@ export function StyleTag() { return <style>{`
     #root .lf-court-mode-card { padding: 12px !important; }
     #root .lf-court-mode-stack { gap: 8px !important; }
   }
+  /* UI-1: login-only polish — scoped to .lf-login-root */
+  .lf-login-root { min-height: 100vh; background: #F5F2EB; }
+  .lf-login-root .lf-login-brand { position: relative; isolation: isolate; }
+  .lf-login-root .lf-login-brand::before {
+    content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    background-image: linear-gradient(rgba(212,163,74,.06) 1px, transparent 1px), linear-gradient(90deg, rgba(212,163,74,.06) 1px, transparent 1px);
+    background-size: 48px 48px; opacity: .55;
+  }
+  .lf-login-root .lf-login-brand::after {
+    content: ""; position: absolute; z-index: 0; pointer-events: none;
+    top: -120px; right: -120px; width: 360px; height: 360px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(212,163,74,.22) 0%, rgba(212,163,74,0) 65%);
+  }
+  .lf-login-root .lf-login-brand > * { position: relative; z-index: 1; }
+  .lf-login-root .lf-login-portal-tab:focus-visible { outline: 2px solid rgba(212,163,74,.5); outline-offset: 2px; }
+  .lf-login-root .lf-login-input:focus { outline: none; border-color: #112219 !important; box-shadow: 0 0 0 3px rgba(17,34,25,.12); }
+  .lf-login-root .lf-login-submit:not(:disabled):hover { background: #0a1611; }
+  .lf-login-root .lf-login-oauth:not(:disabled):hover { background: #FAF8F4; border-color: #112219; }
+  .lf-login-root .lf-login-trust-row { display: flex; flex-wrap: wrap; gap: 14px 18px; justify-content: center; }
+  @media (max-width: 900px) {
+    .lf-login-root .lf-login-split { grid-template-columns: 1fr !important; }
+    .lf-login-root .lf-login-brand { padding: 36px 24px !important; min-height: auto !important; }
+    .lf-login-root .lf-login-brand-trust { display: none !important; }
+    .lf-login-root .lf-login-card-wrap { padding-top: clamp(28px, 6vh, 56px) !important; }
+  }
+  @media (max-width: 480px) {
+    .lf-login-root .lf-login-brand { padding: 28px 18px !important; }
+    .lf-login-root .lf-login-card-wrap { padding: 16px !important; padding-top: clamp(20px, 4vh, 36px) !important; }
+    .lf-login-root .lf-login-card-form { padding: 22px 18px !important; }
+  }
   @keyframes lfPulse { 0% { opacity: .55; } 50% { opacity: 1; } 100% { opacity: .55; } }
   @keyframes lfSlideIn { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
   @keyframes lfDropIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
@@ -620,18 +650,36 @@ export const styles = {
   empty: { minHeight: 136, display: 'grid', placeItems: 'center', textAlign: 'center', color: theme.muted, gap: 6, padding: 18 }, emptyIcon: { width: 42, height: 42, borderRadius: 10, display: 'grid', placeItems: 'center', background: '#F3F4F6', color: theme.navy600, fontWeight: 800 }, skeletonGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 12 }, skeleton: { height: 120, borderRadius: 10, background: '#fff', border: `1px solid ${theme.line}`, boxShadow: theme.shadow, padding: 16, display: 'grid', gap: 10, alignContent: 'start' }, skeletonLineLarge: { height: 18, width: '55%', borderRadius: 6, background: '#E5E7EB', animation: 'lfPulse 1.4s ease-in-out infinite' }, skeletonLine: { height: 12, width: '80%', borderRadius: 6, background: '#EEF2F7', animation: 'lfPulse 1.4s ease-in-out infinite' }, skeletonLineShort: { height: 12, width: '42%', borderRadius: 6, background: '#EEF2F7', animation: 'lfPulse 1.4s ease-in-out infinite' },
   toast: { position: 'fixed', top: 22, right: 22, zIndex: 2000, display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'space-between', minWidth: 300, maxWidth: 420, padding: '12px 14px', borderRadius: 10, boxShadow: theme.shadowLift, border: '1px solid', animation: 'lfSlideIn .18s ease-out' }, toastClose: { border: 0, background: 'transparent', color: 'inherit', fontWeight: 900, cursor: 'pointer', fontSize: 16 }, mobileDrawerLayer: { position: 'fixed', inset: 0, zIndex: 2800 }, mobileBackdrop: { position: 'absolute', inset: 0, border: 0, padding: 0, background: 'rgba(8,18,37,.48)', cursor: 'pointer' }, mobileDrawer: { position: 'absolute', top: 0, left: 0, bottom: 0, width: 304, maxWidth: 'calc(100vw - 44px)', background: 'var(--lf-sidebar, var(--lf-primary, #0F1B33))', color: 'var(--lf-sidebar-text, #fff)', padding: 16, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto', boxShadow: '18px 0 42px rgba(8,18,37,.32)' }, mobileDrawerHead: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingBottom: 12, borderBottom: '1px solid rgba(255,255,255,.10)' }, mobileCloseButton: { minWidth: 38, minHeight: 38, border: '1px solid rgba(255,255,255,.18)', borderRadius: 8, background: 'transparent', color: '#fff', cursor: 'pointer', fontWeight: 900 }, modalBackdrop: { position: 'fixed', inset: 0, zIndex: 3000, display: 'grid', placeItems: 'center', padding: 24, background: 'rgba(15,27,51,.28)', backdropFilter: 'blur(4px)' }, modalCard: { width: 420, maxWidth: '100%', background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, boxShadow: theme.shadowLift, padding: 18 }, modalHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 10 }, modalActions: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }, alert: { borderRadius: 8, padding: 12, background: theme.blueBg, color: theme.blue, fontWeight: 700 }, alertDanger: { background: theme.redBg, color: theme.red },
   loginShell: { minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24, background: 'linear-gradient(135deg, #F5F7FA, #EEF2F7)', color: '#fff' }, loginEditorial: { display: 'none' }, loginBadge: { display: 'none' }, loginMetricRow: { display: 'none' }, loginCard: { width: 410, maxWidth: 'calc(100vw - 32px)', color: theme.ink, background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 28, boxShadow: theme.shadowLift }, loginLogo: { width: 48, height: 48, borderRadius: 10, background: 'var(--lf-accent, #D4A34A)', display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 900, marginBottom: 12, overflow: 'hidden', fontSize: 22 }, loginModeSwitch: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, padding: 4, background: '#F3F4F6', borderRadius: 8, margin: '14px 0' }, loginModeButton: { border: 0, borderRadius: 6, padding: '7px 10px', background: 'transparent', color: theme.muted, fontWeight: 800, cursor: 'pointer', fontSize: 12 }, loginModeActive: { background: '#fff', color: 'var(--lf-primary, #1B3A5C)', boxShadow: theme.shadow }, loginHint: { marginTop: 12, color: theme.muted, fontSize: 12 },
-loginSplit: { minHeight: '100vh', display: 'grid', gridTemplateColumns: '1fr 1fr', fontFamily: 'Segoe UI, Roboto, -apple-system, BlinkMacSystemFont, sans-serif', fontSize: 13 },
-loginBrand: { background: 'linear-gradient(135deg, var(--lf-primary, #0F1B33) 0%, #0a1220 100%)', color: '#fff', display: 'grid', placeItems: 'center', padding: 48, position: 'relative', overflow: 'hidden' },
-loginBrandLogo: { width: 72, height: 72, borderRadius: 16, background: 'var(--lf-accent, #D4A34A)', display: 'grid', placeItems: 'center', margin: '0 auto', color: '#fff', overflow: 'hidden', boxShadow: '0 12px 28px rgba(0,0,0,.25)' },
-loginBrandName: { margin: 0, fontSize: 28, fontWeight: 800, letterSpacing: -.5 },
-loginBrandTagline: { margin: '6px 0 0', fontSize: 14, color: 'rgba(255,255,255,.6)', lineHeight: 1.5 },
+loginSplit: { minHeight: '100vh', display: 'grid', gridTemplateColumns: '54fr 46fr', fontFamily: 'Segoe UI, Roboto, -apple-system, BlinkMacSystemFont, sans-serif', fontSize: 13 },
+loginBrand: { background: 'var(--lf-primary, #112219)', color: '#fff', display: 'grid', placeItems: 'center', padding: 'clamp(40px, 6vw, 72px)', position: 'relative', overflow: 'hidden' },
+loginBrandLogo: { width: 60, height: 60, borderRadius: 14, background: 'linear-gradient(135deg, #E2BB67 0%, var(--lf-accent, #D4A34A) 55%, #B98B35 100%)', display: 'grid', placeItems: 'center', margin: '0 auto', color: '#fff', overflow: 'hidden', boxShadow: '0 10px 26px rgba(0,0,0,.32), inset 0 1px 0 rgba(255,255,255,.18)' },
+loginBrandName: { margin: 0, fontSize: 34, fontWeight: 600, letterSpacing: -.2, fontFamily: "'Playfair Display', Georgia, 'Times New Roman', serif", color: '#fff' },
+loginBrandType: { margin: '8px 0 0', fontSize: 12, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', color: 'rgba(212,163,74,.85)' },
+loginBrandRule: { width: 56, height: 2, background: 'var(--lf-accent, #D4A34A)', borderRadius: 2, margin: '14px auto 0' },
+loginBrandTagline: { margin: '18px 0 0', fontSize: 14, color: 'rgba(255,255,255,.72)', lineHeight: 1.65, maxWidth: 440 },
 loginBrandFeatures: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 },
 loginFeatureItem: { padding: '10px 14px', borderRadius: 8, background: 'rgba(255,255,255,.08)', color: 'rgba(255,255,255,.85)', fontSize: 13, fontWeight: 600, textAlign: 'center' },
+loginTrustRow: { display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '14px 22px' },
+loginTrustItem: { display: 'inline-flex', alignItems: 'center', gap: 8, color: 'rgba(255,255,255,.8)', fontSize: 12, fontWeight: 600, letterSpacing: .2 },
+loginTrustIcon: { width: 28, height: 28, borderRadius: 8, display: 'inline-grid', placeItems: 'center', background: 'rgba(212,163,74,.12)', color: 'var(--lf-accent, #D4A34A)', border: '1px solid rgba(212,163,74,.28)' },
 loginBrandDivider: { height: 1, background: 'rgba(255,255,255,.1)', marginBottom: 16 },
 loginBrandFooter: { margin: 0, fontSize: 12, color: 'rgba(255,255,255,.45)', textAlign: 'center', lineHeight: 1.5 },
-loginCardWrap: { display: 'grid', placeItems: 'center', padding: 32, background: '#F8F6F3' },
-loginCardForm: { width: '100%', maxWidth: 420, color: theme.ink, background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 12, padding: 32, boxShadow: theme.shadowLift },
-loginCardTitle: { margin: 0, fontSize: 18, fontWeight: 700, color: theme.ink },
+loginCardWrap: { display: 'grid', alignItems: 'start', justifyItems: 'center', padding: 'clamp(24px, 5vw, 56px)', paddingTop: 'clamp(56px, 12vh, 120px)', background: '#F5F2EB' },
+loginCardForm: { width: '100%', maxWidth: 360, color: theme.ink, background: '#fff', border: '1px solid #E8E2D6', borderRadius: 14, padding: '32px 30px', boxShadow: '0 1px 2px rgba(17,34,25,.04), 0 18px 40px rgba(17,34,25,.06)' },
+loginCardTitle: { margin: 0, fontSize: 27, fontWeight: 600, color: theme.ink, fontFamily: "'Playfair Display', Georgia, 'Times New Roman', serif", letterSpacing: -.2, lineHeight: 1.15 },
+portalTabs: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, padding: 4, background: '#F1ECDF', border: '1px solid #E8E2D6', borderRadius: 10 },
+portalTab: { border: 0, borderRadius: 7, padding: '9px 12px', background: 'transparent', color: '#5B5346', fontWeight: 700, cursor: 'pointer', fontSize: 12.5, letterSpacing: .2, transition: 'background .16s ease, color .16s ease, box-shadow .16s ease' },
+portalTabActive: { background: '#fff', color: '#112219', boxShadow: '0 1px 2px rgba(17,34,25,.06), 0 4px 12px rgba(17,34,25,.06)' },
+loginField: { display: 'grid', gap: 6 },
+loginLabel: { color: '#5B5346', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1.2 },
+loginInput: { width: '100%', border: '1px solid #E8E2D6', borderRadius: 8, padding: '10px 12px', background: '#fff', fontSize: 13.5, color: theme.ink },
+loginPrimaryButton: { border: 0, borderRadius: 9, padding: '12px 16px', background: '#112219', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13.5, letterSpacing: .3, boxShadow: '0 8px 18px rgba(17,34,25,.18)' },
+loginOauthButton: { width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '9px 14px', fontSize: 13, border: '1px solid #E8E2D6', borderRadius: 8, cursor: 'pointer', background: '#fff', color: theme.ink, fontWeight: 600, transition: 'background .16s ease, border-color .16s ease' },
+loginOauthIcon: { width: 16, height: 16, display: 'inline-flex' },
+loginInstallNote: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, border: '1px dashed #E8E2D6', background: '#FAF8F4', fontSize: 12, color: '#5B5346' },
+loginInstallActionButton: { padding: '4px 10px', borderRadius: 6, border: '1px solid #112219', background: 'transparent', color: '#112219', fontSize: 12, cursor: 'pointer', fontWeight: 700 },
+loginInstallDismiss: { padding: '4px 6px', borderRadius: 4, border: 'none', background: 'transparent', color: '#A8A091', fontSize: 14, cursor: 'pointer', lineHeight: 1 },
+loginDemoHint: { marginTop: 12, color: '#9C9384', fontSize: 11.5, textAlign: 'center', letterSpacing: .2 },
   logoPreview: { display: 'flex', alignItems: 'center', gap: 10, minHeight: 36 }, formHelper: { color: theme.muted, fontSize: 12, lineHeight: 1.4, alignSelf: 'center' }, clientShell: { minHeight: '100vh', background: '#F5F7FA' }, clientHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, padding: '16px 24px', background: '#fff', borderBottom: `1px solid ${theme.line}`, boxShadow: theme.shadow }, clientBrand: { display: 'flex', alignItems: 'center', gap: 10 }, clientActions: { display: 'flex', alignItems: 'center', gap: 8 }, clientMain: { display: 'grid', gridTemplateColumns: '300px minmax(0,1fr)', gap: 16, padding: 24 }, clientMatterList: { minWidth: 0 }, clientStatusGrid: { display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }, clientDescription: { color: theme.muted, marginTop: 12 }, profileTooltip: { position: 'fixed', zIndex: 5000, pointerEvents: 'none', width: 260, display: 'grid', gridTemplateColumns: '42px 1fr', gap: 10, background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 12, boxShadow: theme.shadowLift }, tooltipAvatar: { width: 42, height: 42, borderRadius: 10, background: 'var(--lf-primary, #1B3A5C)', color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 900 },
   noticeAttachmentPreview: { gridColumn: '1 / -1', display: 'grid', gap: 8, padding: 10, border: `1px solid ${theme.line}`, borderRadius: 8, background: '#F8FAFC' }, noticeAttachmentPreviewItem: { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 10, alignItems: 'center', padding: '8px 10px', border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff' }, noticeAttachmentSummary: { display: 'flex', flexWrap: 'wrap', gap: 6 }, noticeList: { display: 'grid', gap: 12 }, noticeItem: { display: 'grid', gap: 10, padding: 14, border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff' }, noticeItemHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }, noticeTitle: { margin: 0, fontSize: 15, color: theme.ink, lineHeight: 1.25 }, noticeBody: { margin: 0, color: theme.ink, lineHeight: 1.55, whiteSpace: 'pre-wrap' }, noticeFileGrid: { display: 'grid', gap: 8 }, noticeFileLink: { display: 'grid', gridTemplateColumns: '42px minmax(0,1fr) auto', gap: 10, alignItems: 'center', padding: '9px 10px', border: `1px solid ${theme.line}`, borderRadius: 8, background: '#F8FAFC', color: theme.navy600, textDecoration: 'none', fontWeight: 700 }, noticeFileIcon: { width: 42, minHeight: 28, borderRadius: 6, display: 'grid', placeItems: 'center', background: theme.blueBg, color: theme.blue, fontSize: 10, fontWeight: 900 },
 };
