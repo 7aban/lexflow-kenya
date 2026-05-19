@@ -34,7 +34,7 @@ function attachmentList(files = [], notify) {
 function statusTone(status) {
   if (status === 'resolved') return 'green';
   if (status === 'pending') return 'amber';
-  return 'blue';
+  return 'amber';
 }
 
 export default function Communications({ clients = [], matters = [], focus, notify }) {
@@ -269,10 +269,10 @@ export default function Communications({ clients = [], matters = [], focus, noti
                     const firmSide = message.senderRole !== 'client';
                     return (
                       <div key={message.id} style={{ display: 'grid', justifyItems: firmSide ? 'end' : 'start' }}>
-                        <div style={{ maxWidth: '78%', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 12, background: firmSide ? theme.blueBg : '#fff' }}>
+                        <div style={{ maxWidth: '78%', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 12, background: firmSide ? '#FDF8EE' : '#fff' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
                             <strong>{firmSide ? message.senderName || 'Firm team' : message.senderName || selected.clientName || 'Client'}</strong>
-                            <Badge tone={firmSide ? 'blue' : 'amber'}>{message.senderRole}</Badge>
+                            <Badge tone={firmSide ? 'green' : 'amber'}>{message.senderRole}</Badge>
                           </div>
                           {message.body && <p style={{ marginTop: 7, color: theme.ink }}>{message.body}</p>}
                           {attachmentList(message.attachments, notify)}
