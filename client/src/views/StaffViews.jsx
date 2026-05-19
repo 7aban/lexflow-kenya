@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { IconBriefcase, IconClock, IconCoin, IconAlertTriangle } from '@tabler/icons-react';
+import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX } from '@tabler/icons-react';
 import { api, applyChecklistTemplate, createChecklistTemplate, createMatterChecklistItem, deleteChecklistTemplate, deleteMatterChecklistItem, downloadWithAuth, fileToDataUrl, listChecklistTemplates, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, updateChecklistTemplate, updateMatterChecklistItem } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
-import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, Skeleton, Stat, statusTone, Sub, Table } from '../components/ui.jsx';
+import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, Skeleton, statusTone, Sub, Table } from '../components/ui.jsx';
 import MatterDocuments from '../components/MatterDocuments.jsx';
 import TaskTimer, { taskTimerActive } from '../components/TaskTimer.jsx';
 
@@ -351,76 +351,256 @@ function buildMatterNextActionHints(detail) {
     .map(({ rank, ...hint }) => hint);
 }
 
+function DashboardStatCard({ accent, iconBg, iconColor, icon: Icon, label, value, note, valueSm = false, onClick, ariaLabel }) {
+  const content = (
+    <>
+      <span className="lf-dash-stat-top" style={{ ...styles.dashStatTopBar, background: accent }} aria-hidden="true" />
+      <div style={styles.dashStatHead}>
+        <span style={styles.dashStatLabel}>{label}</span>
+        <span style={{ ...styles.dashStatIcon, background: iconBg, color: iconColor }} aria-hidden="true">
+          {Icon ? <Icon size={16} stroke={1.75} /> : null}
+        </span>
+      </div>
+      <div className="lf-dash-stat-value" style={{ ...styles.dashStatValue, ...(valueSm ? styles.dashStatValueSm : null) }}>{value}</div>
+      {note ? <div style={styles.dashStatNote}>{note}</div> : null}
+    </>
+  );
+  if (onClick) {
+    return (
+      <button type="button" className="lf-dash-stat-card" onClick={onClick} aria-label={ariaLabel || label} style={{ ...styles.dashStatCard, cursor: 'pointer' }}>
+        {content}
+      </button>
+    );
+  }
+  return <div className="lf-dash-stat-card" style={styles.dashStatCard}>{content}</div>;
+}
+
+function DashboardPanel({ title, subtitle, linkLabel, onLink, children, fullWidth = false }) {
+  return (
+    <section className={`lf-dash-panel${fullWidth ? ' lf-dash-panel-fw' : ''}`}>
+      <div className="lf-dash-panel-head">
+        <div style={{ minWidth: 0 }}>
+          <h2 style={styles.dashPanelHeadTitle}>{title}</h2>
+          {subtitle ? <p style={styles.dashPanelHeadSub}>{subtitle}</p> : null}
+        </div>
+        {linkLabel && onLink ? (
+          <button type="button" className="lf-dash-panel-link" onClick={onLink}>{linkLabel} →</button>
+        ) : null}
+      </div>
+      {children}
+    </section>
+  );
+}
+
 export function Dashboard({ data, user, onNavigate }) {
   const isAdvocate = user?.role === 'advocate';
+  const isAdmin = user?.role === 'admin';
   const outstanding = data.invoices.filter(i => i.status === 'Outstanding').reduce((sum, i) => sum + Number(i.amount || 0), 0);
   const paid = data.invoices.filter(i => i.status === 'Paid').reduce((sum, i) => sum + Number(i.amount || 0), 0);
   const overdueTasks = data.tasks.filter(t => !t.completed && t.dueDate && t.dueDate < new Date().toISOString().slice(0, 10)).length;
   const stages = data.matters.reduce((acc, matter) => ({ ...acc, [matter.stage || 'Intake']: (acc[matter.stage || 'Intake'] || 0) + 1 }), {});
   const maxStage = Math.max(1, ...Object.values(stages));
   const upcomingEvents = data.dashboard.upcomingEvents || [];
+  const todayIsoStr = new Date().toISOString().slice(0, 10);
+
+  const overdueCount = isAdvocate ? (data.dashboard.overdueTaskCount || 0) : overdueTasks;
+  const activeMattersValue = data.dashboard.activeMattersCount ?? data.matters.length;
+  const inProgressTasks = data.tasks.filter(t => !t.completed).length;
+  const totalBilled = paid + outstanding;
+
+  const [alertDismissed, setAlertDismissed] = useState(false);
+  const showAlert = overdueCount > 0 && !alertDismissed;
+
+  const bannerLabelDate = new Date().toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' });
+  const bannerLabel = `${isAdvocate ? 'Your position' : 'Firm position'} — ${bannerLabelDate}`;
 
   return (
-    <div style={styles.pageStack}>
-      <section style={styles.heroCard}>
-        <div>
-          <div style={styles.heroKicker}>{isAdvocate ? 'Your workload' : 'Firm position'}</div>
-          <h2>{isAdvocate ? 'Your assigned matters' : 'Firm matters overview'}</h2>
-          {isAdvocate ? (
-            <p>{data.matters.length} matters assigned, {data.dashboard.overdueTaskCount || 0} overdue task{data.dashboard.overdueTaskCount === 1 ? '' : 's'}. Outstanding: {kes(outstanding)}.</p>
-          ) : (
-            <p>{data.matters.length} matters, {data.tasks.length} tasks, and {kes(outstanding)} outstanding across active files.</p>
-          )}
+    <div className="lf-dashboard" style={styles.pageStack}>
+      <section className="lf-dash-banner" style={styles.dashBanner}>
+        <div className="lf-dash-banner-icon" style={styles.dashBannerIcon}>
+          <IconBuilding size={20} stroke={1.75} aria-hidden="true" />
         </div>
-        <div style={styles.heroFigure}>{kes(paid + outstanding)}</div>
+        <div style={styles.dashBannerText}>
+          <div style={styles.dashBannerLabel}>{bannerLabel}</div>
+          <div style={styles.dashBannerSum}>
+            <span style={styles.dashBannerSumStrong}>{activeMattersValue} matter{activeMattersValue === 1 ? '' : 's'}</span> active
+            <span aria-hidden="true"> · </span>
+            <span style={styles.dashBannerSumStrong}>{inProgressTasks} task{inProgressTasks === 1 ? '' : 's'}</span> in progress
+            <span aria-hidden="true"> · </span>
+            <span style={styles.dashBannerSumStrong}>{overdueCount} overdue</span> requiring attention
+          </div>
+        </div>
+        <div className="lf-dash-banner-amount" style={styles.dashBannerAmount}>{kes(totalBilled)}</div>
       </section>
 
-      {isAdvocate ? data.dashboard.overdueTaskCount : overdueTasks > 0 && (
-        <div style={styles.warningPanel}>
-          <div style={styles.warningIcon}>!</div>
-          <div>
-            <strong>{isAdvocate ? data.dashboard.overdueTaskCount : overdueTasks} overdue task{(isAdvocate ? data.dashboard.overdueTaskCount : overdueTasks) === 1 ? '' : 's'} need attention.</strong>
-            <span>Review {isAdvocate ? 'your' : 'the'} task board and clear critical deadlines before the close of day.</span>
+      {showAlert && (
+        <div className="lf-dash-alert" style={styles.dashAlert} role="status">
+          <span style={styles.dashAlertIcon} aria-hidden="true"><IconAlertTriangle size={16} stroke={1.75} /></span>
+          <div style={styles.dashAlertText}>
+            <strong>{overdueCount} overdue task{overdueCount === 1 ? '' : 's'}</strong> — review {isAdvocate ? 'your' : 'the'} task board and clear critical deadlines before the close of day.
           </div>
+          <button type="button" aria-label="Dismiss alert" title="Dismiss" onClick={() => setAlertDismissed(true)} style={styles.dashAlertClose}>
+            <IconX size={14} stroke={1.75} />
+          </button>
         </div>
       )}
 
-      <div style={styles.statsGrid}>
-        <Stat icon={IconBriefcase} label="Active matters" value={data.dashboard.activeMattersCount ?? data.matters.length} tone="navy" onClick={() => onNavigate?.('Matters')} ariaLabel="View active matters" />
-        <Stat icon={IconClock} label="Billable hours this month" value={Number(data.dashboard.monthHours || 0).toFixed(1)} tone="gold" onClick={() => onNavigate?.('Tasks')} ariaLabel="View billable hours this month" />
-        {user?.role === 'admin' ? (
-          <Stat icon={IconCoin} label={isAdvocate ? 'My billed revenue' : 'Revenue month'} value={kes(data.dashboard.monthRevenue)} tone="green" onClick={() => onNavigate?.('Invoices')} ariaLabel="View revenue" />
-        ) : (
-          <Stat icon={IconCoin} label={isAdvocate ? 'My billed revenue' : 'Revenue month'} value={kes(data.dashboard.monthRevenue)} tone="green" />
-        )}
-        <Stat icon={IconAlertTriangle} label="Overdue tasks" value={isAdvocate ? data.dashboard.overdueTaskCount : overdueTasks} tone="red" onClick={() => onNavigate?.('Tasks')} ariaLabel="View overdue tasks" />
+      <div className="lf-dashboard-stats" style={styles.dashStatsGrid}>
+        <DashboardStatCard
+          accent="#1A3628"
+          iconBg="rgba(26,54,40,0.08)"
+          iconColor="#1A3628"
+          icon={IconBriefcase}
+          label="Active matters"
+          value={activeMattersValue}
+          note={data.dashboard.newMattersThisMonth ? `${data.dashboard.newMattersThisMonth} opened this month` : 'Across active files'}
+          onClick={() => onNavigate?.('Matters')}
+          ariaLabel="View active matters"
+        />
+        <DashboardStatCard
+          accent="#2C5F8A"
+          iconBg="#EAF2FA"
+          iconColor="#2C5F8A"
+          icon={IconClockHour4}
+          label="Hours this month"
+          value={Number(data.dashboard.monthHours || 0).toFixed(1)}
+          note="Billable time logged"
+          onClick={() => onNavigate?.('Tasks')}
+          ariaLabel="View billable hours this month"
+        />
+        <DashboardStatCard
+          accent="#1A5C36"
+          iconBg="#EBF5EE"
+          iconColor="#1A5C36"
+          icon={IconCash}
+          label={isAdvocate ? 'My billed revenue' : 'Revenue this month'}
+          value={kes(data.dashboard.monthRevenue)}
+          valueSm
+          note="Invoices settled"
+          onClick={isAdmin ? () => onNavigate?.('Invoices') : undefined}
+          ariaLabel={isAdvocate ? 'View billed revenue' : 'View revenue this month'}
+        />
+        <DashboardStatCard
+          accent="#8B2020"
+          iconBg="#FCEAEA"
+          iconColor="#8B2020"
+          icon={IconAlertCircle}
+          label="Overdue tasks"
+          value={overdueCount}
+          note={overdueCount > 0 ? 'Needs immediate review' : 'Nothing overdue'}
+          onClick={() => onNavigate?.('Tasks')}
+          ariaLabel="View overdue tasks"
+        />
       </div>
 
       <div className="lf-dashboard-grid" style={styles.dashboardGrid}>
-        <Card title={isAdvocate ? 'My matters' : 'Matter pipeline'} hint={isAdvocate ? 'Assigned files' : 'Stage distribution'}>
-          {Object.keys(stages).length ? Object.entries(stages).map(([stage, count]) => (
-            <div key={stage} style={styles.pipelineRow}>
-              <span>{stage}</span>
-              <div style={styles.pipelineTrack}><div style={{ ...styles.pipelineFill, width: `${(count / maxStage) * 100}%` }} /></div>
-              <strong>{count}</strong>
+        <DashboardPanel
+          title={isAdvocate ? 'My matters' : 'Matter pipeline'}
+          subtitle={isAdvocate ? 'Assigned files by stage' : 'Stage distribution across all files'}
+          linkLabel="View all"
+          onLink={() => onNavigate?.('Matters')}
+        >
+          {Object.keys(stages).length ? (
+            <div style={styles.dashPanelBody}>
+              {Object.entries(stages).map(([stage, count]) => (
+                <button
+                  key={stage}
+                  type="button"
+                  className="lf-dash-pipeline-row"
+                  onClick={() => onNavigate?.('Matters')}
+                  aria-label={`View ${stage} matters`}
+                >
+                  <span style={styles.dashPipelineLabel}>{stage}</span>
+                  <span style={styles.dashPipelineTrack} aria-hidden="true">
+                    <span style={{ ...styles.dashPipelineFill, width: `${(count / maxStage) * 100}%` }} />
+                  </span>
+                  <span style={styles.dashPipelineCount}>{count}</span>
+                </button>
+              ))}
             </div>
-          )) : <Empty title={isAdvocate ? 'No assigned matters' : 'No matters yet'} text={isAdvocate ? 'Your assigned matters will appear here.' : 'Create a client and matter to populate the board.'} />}
-        </Card>
-        <Card title="Receivables" hint="Latest invoice status">
-          <div className="lf-receivables-cards"><Table columns={['Invoice', 'Client', 'Amount', 'Status']} rows={data.invoices.slice(0, 6).map(i => [i.number || i.id, i.clientName || '-', kes(i.amount), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>])} empty="No invoices yet." /></div>
-        </Card>
+          ) : (
+            <div style={styles.dashPanelEmpty}>
+              {isAdvocate ? 'No assigned matters yet. Your assigned files will appear here.' : 'No matters yet. Create a client and matter to populate the board.'}
+            </div>
+          )}
+        </DashboardPanel>
+
+        <DashboardPanel
+          title="Receivables"
+          subtitle="Latest invoice status"
+          linkLabel={isAdmin ? 'View all' : null}
+          onLink={isAdmin ? () => onNavigate?.('Invoices') : null}
+        >
+          <div className="lf-receivables-cards">
+            {data.invoices.length ? (
+              <table className="lf-dash-table">
+                <thead>
+                  <tr>
+                    <th>Invoice</th>
+                    <th>Client</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.invoices.slice(0, 6).map(i => (
+                    <tr key={i.id}>
+                      <td>{i.number || i.id}</td>
+                      <td>{i.clientName || '-'}</td>
+                      <td>{kes(i.amount)}</td>
+                      <td><Badge tone={statusTone(i.status)}>{i.status}</Badge></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div style={styles.dashPanelEmpty}>No invoices yet.</div>
+            )}
+          </div>
+        </DashboardPanel>
       </div>
 
-      <Card title="Upcoming court dates" hint="Appearances and virtual court links">
-        <div className="lf-court-dates-cards"><Table columns={['Appearance', 'Matter', 'Date', 'Time', 'Location', 'Virtual Court']} rows={upcomingEvents.map(event => [
-          event.title || event.type || 'Court appearance',
-          event.matterTitle || event.reference || '-',
-          event.date || '-',
-          event.time || '-',
-          event.location || '-',
-          <MeetingLink key={event.id || `${event.date}-${event.title}`} event={event} dashboard />,
-        ])} empty="No upcoming court dates." /></div>
-      </Card>
+      <DashboardPanel
+        title="Upcoming court dates"
+        subtitle="Appearances and virtual court links"
+        linkLabel="Court diary"
+        onLink={() => onNavigate?.('Deadlines')}
+        fullWidth
+      >
+        <div className="lf-court-dates-cards">
+          {upcomingEvents.length ? (
+            <table className="lf-dash-table">
+              <thead>
+                <tr>
+                  <th>Appearance</th>
+                  <th>Matter</th>
+                  <th>Date</th>
+                  <th>Time</th>
+                  <th>Location</th>
+                  <th>Virtual Court</th>
+                </tr>
+              </thead>
+              <tbody>
+                {upcomingEvents.map(event => {
+                  const isTodayRow = Boolean(event.date) && event.date === todayIsoStr;
+                  return (
+                    <tr key={event.id || `${event.date}-${event.title}`} className={isTodayRow ? 'lf-dash-today-row' : ''}>
+                      <td>{event.title || event.type || 'Court appearance'}</td>
+                      <td>{event.matterTitle || event.reference || '-'}</td>
+                      <td>{isTodayRow ? <><strong>Today</strong> · {event.date}</> : (event.date || '-')}</td>
+                      <td>{event.time || '-'}</td>
+                      <td>{event.location || '-'}</td>
+                      <td><MeetingLink event={event} dashboard /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          ) : (
+            <div style={styles.dashPanelEmpty}>No upcoming court dates.</div>
+          )}
+        </div>
+      </DashboardPanel>
     </div>
   );
 }

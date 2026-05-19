@@ -26,7 +26,7 @@ export const defaultFirmSettings = { name: 'LexFlow Kenya', logo: '', primaryCol
 
 export function StyleTag() { return <style>{`
   * { box-sizing: border-box; }
-  body { margin: 0; background: #F5F7FA; font: 400 13px/1.45 Segoe UI, Roboto, -apple-system, BlinkMacSystemFont, sans-serif; color: #101827; }
+  body { margin: 0; background: #F5F2EB; font: 400 13px/1.45 Segoe UI, Roboto, -apple-system, BlinkMacSystemFont, sans-serif; color: #101827; }
   button, input, select, textarea { font: inherit; }
   button { transition: background .16s ease, border-color .16s ease, color .16s ease, box-shadow .16s ease, transform .16s ease; }
   button:not(:disabled):hover { transform: translateY(-1px); }
@@ -37,21 +37,22 @@ export function StyleTag() { return <style>{`
   .lf-resource-link:hover { background: rgba(255,255,255,.08) !important; color: #fff !important; }
   #root .lf-mobile-only, #root .lf-mobile-drawer-layer { display: none !important; }
   @media (max-width: 980px) {
-    #root main { padding: 16px; }
-    #root header { align-items: stretch; flex-direction: column; }
-    #root .lf-top-actions { flex-wrap: wrap; }
-    #root header input { width: 100% !important; }
+    #root .lf-page-inner { padding: 20px 18px 60px !important; }
+    #root header.lf-topbar { padding: 0 18px !important; }
+    #root .lf-top-actions { flex-wrap: nowrap; }
   }
   @media (max-width: 767px) {
     #root .lf-app-shell { grid-template-columns: 1fr; }
     #root .lf-desktop-sidebar { display: none !important; }
     #root .lf-mobile-only { display: inline-flex !important; }
     #root .lf-mobile-drawer-layer { display: block !important; }
-    #root .lf-topbar-title { align-items: flex-start; }
-    #root .lf-top-actions { width: 100%; align-items: stretch; }
-    #root .lf-top-actions > * { max-width: 100%; }
-    #root .lf-mobile-search { flex: 1 1 100%; min-width: 0; }
+    #root header.lf-topbar { height: auto !important; min-height: 54px; padding: 8px 14px !important; gap: 8px !important; }
+    #root header.lf-topbar input { min-height: 0 !important; padding-top: 0 !important; padding-bottom: 0 !important; }
+    #root .lf-page-inner { padding: 16px 14px 60px !important; }
+    #root .lf-topbar-search { flex: 1 1 auto; min-width: 0; max-width: none !important; }
+    #root .lf-topbar-search-kbd { display: none !important; }
     #root .lf-mobile-search input { width: 100% !important; }
+    #root .lf-dashboard-stats { grid-template-columns: minmax(0,1fr) !important; }
     .lf-login-root .lf-login-split { grid-template-columns: 1fr !important; }
     .lf-login-root .lf-login-brand { padding: 32px 24px !important; }
     .lf-login-root .lf-login-brand-features { display: none !important; }
@@ -630,10 +631,52 @@ export function StyleTag() { return <style>{`
   #root .lf-desktop-sidebar::-webkit-scrollbar { width: 0; height: 0; display: none; }
   .lf-nav.is-active::before { content: ''; position: absolute; left: 0; top: 5px; bottom: 5px; width: 3px; background: var(--lf-accent, #D4A34A); border-radius: 0 2px 2px 0; }
   .lf-nav.is-active { color: #fff !important; }
+  /* UI-3: topbar + dashboard polish (scoped) */
+  #root .lf-topbar { background: #fff; }
+  #root .lf-topbar-icon-btn:hover { background: #F5F2EB; color: #1A1A18; }
+  #root .lf-topbar-icon-btn:focus-visible { outline: 2px solid rgba(26,54,40,.25); outline-offset: 1px; }
+  #root .lf-topbar-search:focus-within { border-color: #1A3628; box-shadow: 0 0 0 3px rgba(26,54,40,.09); }
+  #root .lf-page-title { font-family: 'Playfair Display', Georgia, 'Times New Roman', serif; }
+  #root .lf-dash-banner { position: relative; overflow: hidden; }
+  #root .lf-dash-banner::after { content: ''; position: absolute; right: -30px; top: -30px; width: 200px; height: 200px; border-radius: 50%; background: rgba(197,151,60,.07); pointer-events: none; }
+  #root .lf-dash-banner-amount { font-family: 'Playfair Display', Georgia, 'Times New Roman', serif; }
+  #root .lf-dash-stat-card { transition: box-shadow .18s ease, transform .18s ease; }
+  #root .lf-dash-stat-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.07); }
+  #root button.lf-dash-stat-card:not(:disabled):hover { transform: translateY(-1px); }
+  #root .lf-dash-stat-value { font-family: 'Playfair Display', Georgia, 'Times New Roman', serif; }
+  #root .lf-dash-panel { background: #fff; border: 1px solid #DDD8CE; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+  #root .lf-dash-panel-head { padding: 14px 18px; border-bottom: 1px solid #DDD8CE; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  #root .lf-dash-panel-link { background: transparent; border: 0; color: #1A3628; font-size: 12px; font-weight: 600; cursor: pointer; padding: 0; opacity: .85; }
+  #root .lf-dash-panel-link:hover { opacity: 1; text-decoration: underline; }
+  #root .lf-dash-pipeline-row { display: flex; align-items: center; gap: 13px; padding: 9px 18px; border-bottom: 1px solid #DDD8CE; cursor: pointer; transition: background .15s; background: transparent; border-left: 0; border-right: 0; border-top: 0; width: 100%; text-align: left; }
+  #root .lf-dash-pipeline-row:last-of-type { border-bottom: none; }
+  #root .lf-dash-pipeline-row:hover { background: #FDF8EE; }
+  #root .lf-dash-pipeline-track { background: #EAE5D9; }
+  #root .lf-dash-table { width: 100%; border-collapse: collapse; min-width: 0; }
+  @media (min-width: 768px) {
+    #root .lf-dash-table th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; color: #6B7280; padding: 9px 18px; background: #F5F2EB; border-bottom: 1px solid #DDD8CE; border-top: 0; }
+    #root .lf-dash-table td { padding: 11px 18px; font-size: 13px; color: #3D3D3A; border-bottom: 1px solid #DDD8CE; border-top: 0; background: #fff; vertical-align: middle; }
+    #root .lf-dash-table tr:last-child td { border-bottom: none; }
+    #root .lf-dash-table tr:nth-child(even) td { background: #fff; }
+    #root .lf-dash-table tbody tr:hover td { background: #FDF8EE; cursor: default; }
+    #root .lf-dash-table tr.lf-dash-today-row td { background: rgba(197,151,60,0.06); }
+    #root .lf-dash-table tr.lf-dash-today-row td:first-child { border-left: 3px solid #C5973C; padding-left: 15px; }
+  }
+  @media (max-width: 980px) {
+    #root .lf-dash-banner { flex-direction: column !important; align-items: flex-start !important; }
+    #root .lf-dash-banner-amount { font-size: 24px !important; align-self: flex-start; }
+    #root .lf-dashboard-stats { grid-template-columns: repeat(2, minmax(0,1fr)) !important; }
+  }
+  @media (max-width: 767px) {
+    #root .lf-dash-banner { padding: 16px !important; }
+    #root .lf-dash-table th, #root .lf-dash-table td { padding-left: 14px; padding-right: 14px; }
+    #root .lf-dash-panel-head { padding: 12px 14px; }
+    #root .lf-dash-pipeline-row { padding: 9px 14px; }
+  }
 `}</style>; }
 
 export const styles = {
-  shell: { minHeight: '100vh', display: 'grid', gridTemplateColumns: '224px minmax(0,1fr)', background: '#F5F7FA', color: theme.ink, fontFamily: 'Segoe UI, Roboto, -apple-system, BlinkMacSystemFont, sans-serif', fontSize: 13 },
+  shell: { minHeight: '100vh', display: 'grid', gridTemplateColumns: '224px minmax(0,1fr)', background: '#F5F2EB', color: theme.ink, fontFamily: 'Segoe UI, Roboto, -apple-system, BlinkMacSystemFont, sans-serif', fontSize: 13 },
   sidebar: { position: 'sticky', top: 0, minHeight: '100vh', maxHeight: '100vh', background: 'var(--lf-sidebar, #112219)', color: 'var(--lf-sidebar-text, #fff)', padding: 0, display: 'flex', flexDirection: 'column', overflowY: 'auto', boxShadow: '1px 0 0 rgba(255,255,255,.05)' },
   brandPanel: { display: 'flex', alignItems: 'center', gap: 10, padding: '16px 16px 14px', borderBottom: '1px solid rgba(255,255,255,.08)' },
   logo: { width: 34, height: 34, borderRadius: 8, display: 'grid', placeItems: 'center', background: 'var(--lf-accent, var(--lf-button, #D4A34A))', color: 'var(--lf-button-text, #fff)', fontWeight: 900, fontSize: 15, boxShadow: '0 8px 18px rgba(212,163,74,.20)', overflow: 'hidden', flexShrink: 0 }, logoImage: { width: '100%', height: '100%', objectFit: 'cover' },
@@ -642,7 +685,13 @@ export const styles = {
 
   timerCard: { marginTop: 'auto', marginInline: 12, marginBottom: 10, padding: '11px 13px', borderRadius: 8, background: 'rgba(255,255,255,.04)', border: '1px solid rgba(255,255,255,.08)', display: 'grid', gap: 3 }, timerTop: { color: 'rgba(255,255,255,.7)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }, liveDot: { width: 7, height: 7, borderRadius: 999, background: '#22C55E', boxShadow: '0 0 0 3px rgba(34,197,94,.13)' },
   userCard: { display: 'grid', gridTemplateColumns: '30px 1fr auto', gap: 10, alignItems: 'center', padding: '12px 16px 16px', borderTop: '1px solid rgba(255,255,255,.08)' }, avatar: { width: 30, height: 30, borderRadius: 999, background: 'var(--lf-accent, var(--lf-button, #D4A34A))', color: 'var(--lf-button-text, #fff)', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 12, flexShrink: 0 }, userName: { fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12.5, color: '#fff' }, userRole: { color: 'rgba(255,255,255,.42)', fontSize: 9, textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: 700, marginTop: 2 }, logout: { border: '1px solid rgba(255,255,255,.16)', color: '#fff', background: 'transparent', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', fontSize: 12 },
-  main: { padding: 24, minWidth: 0 }, topbar: { display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', marginBottom: 20 }, topbarTitle: { display: 'flex', gap: 10, alignItems: 'flex-start', minWidth: 0 }, mobileMenuButton: { display: 'none', minWidth: 42, minHeight: 38, border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', color: 'var(--lf-primary, #1B3A5C)', fontWeight: 800, cursor: 'pointer', alignItems: 'center', justifyContent: 'center', padding: '8px 10px' }, eyebrow: { color: theme.goldDark, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0 }, title: { margin: '2px 0 0', fontSize: 20, fontWeight: 700, lineHeight: 1.2 }, subtitle: { margin: '5px 0 0', color: theme.muted, maxWidth: 680 }, topActions: { display: 'flex', gap: 8, alignItems: 'center' }, search: { width: 260, border: `1px solid ${theme.line}`, borderRadius: 6, padding: '7px 11px', background: '#fff', fontSize: 13 },
+  main: { minWidth: 0, display: 'flex', flexDirection: 'column' }, topbar: { display: 'flex', alignItems: 'center', gap: 12, height: 54, padding: '0 28px', background: '#fff', borderBottom: '1px solid #DDD8CE', position: 'sticky', top: 0, zIndex: 100, flexShrink: 0 }, topbarTitle: { display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }, mobileMenuButton: { display: 'none', minWidth: 42, minHeight: 38, border: '1px solid #DDD8CE', borderRadius: 8, background: '#fff', color: '#1A3628', fontWeight: 700, cursor: 'pointer', alignItems: 'center', justifyContent: 'center', padding: '8px 10px', flexShrink: 0 }, eyebrow: { color: theme.goldDark, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0 }, title: { margin: '2px 0 0', fontSize: 20, fontWeight: 700, lineHeight: 1.2 }, subtitle: { margin: '5px 0 0', color: theme.muted, maxWidth: 680 }, topActions: { display: 'flex', gap: 6, alignItems: 'center', marginLeft: 'auto' }, search: { width: 260, border: `1px solid ${theme.line}`, borderRadius: 6, padding: '7px 11px', background: '#fff', fontSize: 13 },
+  topbarSearch: { flex: '1 1 auto', maxWidth: 400, minWidth: 0, position: 'relative', display: 'flex', alignItems: 'center', gap: 9, background: '#F5F2EB', border: '1px solid #DDD8CE', borderRadius: 7, padding: '7px 13px', cursor: 'text', transition: 'border-color .15s ease, box-shadow .15s ease' }, topbarSearchIcon: { color: '#6B7280', flexShrink: 0, display: 'inline-flex' }, topbarSearchInput: { flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: 13, color: theme.ink, minWidth: 0, padding: 0, fontFamily: 'inherit' }, topbarKbd: { fontSize: 10, color: '#6B7280', border: '1px solid #DDD8CE', borderRadius: 4, padding: '1px 5px', fontFamily: 'monospace', whiteSpace: 'nowrap', flexShrink: 0 }, iconButton: { width: 34, height: 34, minWidth: 34, minHeight: 34, border: '1px solid transparent', borderRadius: 7, background: 'transparent', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#6B7280', position: 'relative', padding: 0, flexShrink: 0 }, iconBadgeDot: { position: 'absolute', top: 6, right: 7, width: 7, height: 7, borderRadius: '50%', background: theme.red, border: '1.5px solid #fff', pointerEvents: 'none' },
+  pageInner: { padding: '24px 28px 80px', display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0, flex: 1 }, pageHeader: { display: 'grid', gap: 3, marginBottom: 4 }, pageCrumb: { fontSize: 10, color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: 600 }, pageTitle: { margin: 0, fontSize: 24, fontWeight: 600, color: theme.ink, lineHeight: 1.2, letterSpacing: -.2 }, pageSub: { margin: '2px 0 0', fontSize: 13, color: '#6B7280', maxWidth: 720, lineHeight: 1.5 },
+  dashBanner: { background: '#1A3628', borderRadius: 10, padding: '18px 22px', display: 'flex', alignItems: 'center', gap: 14, color: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,.06)' }, dashBannerIcon: { width: 42, height: 42, background: 'rgba(197,151,60,.14)', borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#D9AA55', flexShrink: 0, position: 'relative', zIndex: 1 }, dashBannerText: { flex: 1, minWidth: 0, position: 'relative', zIndex: 1 }, dashBannerLabel: { fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.6, color: 'rgba(255,255,255,.45)', marginBottom: 3, fontWeight: 600 }, dashBannerSum: { fontSize: 14, color: 'rgba(255,255,255,.82)', lineHeight: 1.5 }, dashBannerSumStrong: { color: '#fff', fontWeight: 600 }, dashBannerAmount: { fontSize: 27, fontWeight: 700, color: '#C5973C', whiteSpace: 'nowrap', position: 'relative', zIndex: 1, letterSpacing: -.3 },
+  dashAlert: { display: 'flex', alignItems: 'center', gap: 11, padding: '11px 16px', borderRadius: 7, borderLeft: '3px solid #C5973C', background: '#FEF5E4', color: '#3D3D3A', fontSize: 13 }, dashAlertIcon: { color: '#C5973C', flexShrink: 0, display: 'inline-flex' }, dashAlertText: { flex: 1, minWidth: 0 }, dashAlertClose: { marginLeft: 'auto', background: 'transparent', border: 'none', cursor: 'pointer', color: '#6B7280', padding: 4, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: 4 },
+  dashStatsGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0,1fr))', gap: 12 }, dashStatCard: { position: 'relative', overflow: 'hidden', background: '#fff', border: '1px solid #DDD8CE', borderRadius: 10, padding: '16px 18px', display: 'grid', gap: 0, font: 'inherit', color: 'inherit', textAlign: 'left', width: '100%' }, dashStatTopBar: { position: 'absolute', top: 0, left: 0, right: 0, height: 2.5, borderRadius: '10px 10px 0 0' }, dashStatHead: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }, dashStatLabel: { fontSize: 10.5, textTransform: 'uppercase', letterSpacing: 1, color: '#6B7280', fontWeight: 600 }, dashStatIcon: { width: 30, height: 30, borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center' }, dashStatValue: { fontSize: 29, fontWeight: 600, color: theme.ink, lineHeight: 1, letterSpacing: -.5 }, dashStatValueSm: { fontSize: 20 }, dashStatNote: { fontSize: 11, color: '#6B7280', marginTop: 4 },
+  dashPanelHeadTitle: { fontSize: 13, fontWeight: 600, color: theme.ink, margin: 0 }, dashPanelHeadSub: { fontSize: 11.5, color: '#6B7280', margin: '1px 0 0' }, dashPipelineLabel: { width: 96, fontSize: 12.5, color: '#3D3D3A', flexShrink: 0 }, dashPipelineTrack: { flex: 1, height: 5, borderRadius: 3, overflow: 'hidden', background: '#EAE5D9' }, dashPipelineFill: { height: '100%', background: '#C5973C', borderRadius: 3 }, dashPipelineCount: { width: 24, fontSize: 12, fontWeight: 600, color: theme.ink, textAlign: 'right', flexShrink: 0 }, dashPanelBody: { padding: '8px 0' }, dashPanelEmpty: { padding: 24, color: '#6B7280', textAlign: 'center', fontSize: 13 },
   pageStack: { display: 'grid', gap: 16 },   heroCard: { borderRadius: 10, background: 'linear-gradient(135deg, var(--lf-primary, #0F1B33), var(--lf-sidebar, #1B3A5C))', color: '#fff', padding: 24, display: 'flex', justifyContent: 'space-between', gap: 20, alignItems: 'end', boxShadow: theme.shadow }, heroKicker: { color: 'var(--lf-accent, var(--lf-button, #D4A34A)))', fontSize: 11, fontWeight: 700, textTransform: 'uppercase' }, heroFigure: { fontSize: 24, fontWeight: 700, color: 'var(--lf-accent, var(--lf-button, #D4A34A)))' },
   warningPanel: { display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 10, border: '1px solid #FDE68A', background: theme.amberBg, color: theme.amber, boxShadow: theme.shadow }, warningIcon: { width: 28, height: 28, borderRadius: 999, display: 'grid', placeItems: 'center', background: '#FDE68A', fontWeight: 900 }, 
   statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 12 }, stat: { position: 'relative', overflow: 'hidden', background: '#fff', border: `1px solid ${theme.line}`, borderLeft: '4px solid', borderRadius: 10, padding: 16, boxShadow: theme.shadow, display: 'grid', gap: 6 }, 

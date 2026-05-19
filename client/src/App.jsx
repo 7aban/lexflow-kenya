@@ -1,5 +1,5 @@
 import { Component, useEffect, useRef, useState } from 'react';
-import { IconLayoutDashboard, IconChartLine, IconUsers, IconUserPlus, IconBriefcase, IconCheckbox, IconCalendarDue, IconFileInvoice, IconMessages, IconUsersGroup, IconSettings, IconListSearch, IconExternalLink, IconChevronDown, IconShield } from '@tabler/icons-react';
+import { IconLayoutDashboard, IconChartLine, IconUsers, IconUserPlus, IconBriefcase, IconCheckbox, IconCalendarDue, IconFileInvoice, IconMessages, IconUsersGroup, IconSettings, IconListSearch, IconExternalLink, IconChevronDown, IconShield, IconSearch, IconBell, IconRefresh } from '@tabler/icons-react';
 import { api, API_BASE, AUTH_FAILURE_MESSAGE, clearSession, clearAllLexFlowStorage, getNotifications, markNotificationsRead, readSession, saveSession } from './lib/apiClient.js';
 import { globalSearch } from './api.js';
 import { defaultFirmSettings, styles, StyleTag, theme, loadAndApplyFirmTheme } from './theme.jsx';
@@ -552,66 +552,71 @@ export default function App() {
       )}
 
       <main style={styles.main}>
-        <header style={styles.topbar}>
-          <div className="lf-topbar-title" style={styles.topbarTitle}>
-            <button type="button" className="lf-mobile-only" aria-label="Open navigation menu" title="Open navigation menu" onClick={() => setMobileMenuOpen(true)} style={styles.mobileMenuButton}>Menu</button>
-            <div style={{ minWidth: 0 }}>
-              <div style={styles.eyebrow}>{firm.name || 'LexFlow Kenya'}</div>
-              <h1 style={styles.title}>{view}</h1>
-              <p style={styles.subtitle}>{subtitles[view]}</p>
-            </div>
+        <header className="lf-topbar" style={styles.topbar}>
+          <button type="button" className="lf-mobile-only" aria-label="Open navigation menu" title="Open navigation menu" onClick={() => setMobileMenuOpen(true)} style={styles.mobileMenuButton}>Menu</button>
+          <div ref={searchRef} className="lf-topbar-search lf-mobile-search" style={styles.topbarSearch}>
+            <IconSearch size={15} stroke={1.75} style={styles.topbarSearchIcon} aria-hidden="true" />
+            <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search matters, clients, documents..." aria-label="Search workspace" style={styles.topbarSearchInput} />
+            <span className="lf-topbar-search-kbd" style={styles.topbarKbd} aria-hidden="true">Ctrl K</span>
+            {searchOpen && (
+              <div style={{ position: 'absolute', right: 0, left: 0, top: 'calc(100% + 6px)', maxWidth: '100%', zIndex: 2200, background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, boxShadow: theme.shadowLift, padding: 0, maxHeight: 400, overflowY: 'auto', animation: 'lfDropIn .16s ease-out' }}>
+                {searchLoading ? (
+                  <div style={{ padding: 14, color: theme.muted, textAlign: 'center' }}>Searching...</div>
+                ) : searchResults.length ? (
+                  searchResults.map(item => (
+                    <button key={item.id} type="button" onClick={() => {
+                      if (item.type === 'Matter') { setView('Matters'); setMatterFocus({ matterId: item.matterId, ts: Date.now() }); }
+                      if (item.type === 'Client') { setView('Clients'); setClientFocus({ clientId: item.id, ts: Date.now() }); }
+                      if (item.type === 'Task') { setView('Tasks'); setTaskFocus({ taskId: item.id, ts: Date.now() }); }
+                      if (item.type === 'Invoice') { if (isAdmin) setView('Invoices'); else if (item.matterId) { setView('Matters'); setMatterFocus({ matterId: item.matterId, ts: Date.now() }); } }
+                      if (item.type === 'Appearance') { setView('Deadlines'); setAppearanceFocus({ appearanceId: item.id, ts: Date.now() }); }
+                      if (item.type === 'Document' && item.matterId) { setView('Matters'); setMatterFocus({ matterId: item.matterId, ts: Date.now() }); }
+                      if (item.type === 'Conversation') { setView('Communications'); setCommunicationFocus({ matterId: item.matterId, clientId: '', ts: Date.now() }); }
+                      setSearch(item.title || '');
+                      setSearchOpen(false);
+                    }} style={{ width: '100%', textAlign: 'left', border: 0, borderTop: `1px solid ${theme.line}`, background: '#fff', padding: '10px 12px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <strong style={{ fontSize: 13 }}>{item.type}: {item.title || '-'}</strong>
+                      <span style={{ color: theme.muted, fontSize: 11 }}>{item.subtitle || ''}</span>
+                    </button>
+                  ))
+                ) : (
+                  <div style={{ padding: 14, color: theme.muted, textAlign: 'center' }}>No results found.</div>
+                )}
+              </div>
+            )}
           </div>
           <div className="lf-top-actions" style={styles.topActions}>
-            <div ref={searchRef} className="lf-mobile-search" style={{ position: 'relative' }}>
-              <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search workspace" style={styles.search} />
-              {searchOpen && (
-                <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', width: 320, maxWidth: 'calc(100vw - 32px)', zIndex: 2200, background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, boxShadow: theme.shadowLift, padding: 0, maxHeight: 400, overflowY: 'auto', animation: 'lfDropIn .16s ease-out' }}>
-                  {searchLoading ? (
-                    <div style={{ padding: 14, color: theme.muted, textAlign: 'center' }}>Searching...</div>
-                  ) : searchResults.length ? (
-                    searchResults.map(item => (
-                      <button key={item.id} type="button" onClick={() => {
-                        if (item.type === 'Matter') { setView('Matters'); setMatterFocus({ matterId: item.matterId, ts: Date.now() }); }
-                        if (item.type === 'Client') { setView('Clients'); setClientFocus({ clientId: item.id, ts: Date.now() }); }
-                        if (item.type === 'Task') { setView('Tasks'); setTaskFocus({ taskId: item.id, ts: Date.now() }); }
-                        if (item.type === 'Invoice') { if (isAdmin) setView('Invoices'); else if (item.matterId) { setView('Matters'); setMatterFocus({ matterId: item.matterId, ts: Date.now() }); } }
-                        if (item.type === 'Appearance') { setView('Deadlines'); setAppearanceFocus({ appearanceId: item.id, ts: Date.now() }); }
-                        if (item.type === 'Document' && item.matterId) { setView('Matters'); setMatterFocus({ matterId: item.matterId, ts: Date.now() }); }
-                        if (item.type === 'Conversation') { setView('Communications'); setCommunicationFocus({ matterId: item.matterId, clientId: '', ts: Date.now() }); }
-                        setSearch(item.title || '');
-                        setSearchOpen(false);
-                      }} style={{ width: '100%', textAlign: 'left', border: 0, borderTop: `1px solid ${theme.line}`, background: '#fff', padding: '10px 12px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <strong style={{ fontSize: 13 }}>{item.type}: {item.title || '-'}</strong>
-                        <span style={{ color: theme.muted, fontSize: 11 }}>{item.subtitle || ''}</span>
-                      </button>
-                    ))
-                  ) : (
-                    <div style={{ padding: 14, color: theme.muted, textAlign: 'center' }}>No results found.</div>
-                  )}
-                </div>
-              )}
-            </div>
             <NotificationBell notifications={notifications} open={notificationsOpen} setOpen={setNotificationsOpen} onOpen={openNotification} />
-            <button type="button" onClick={refresh} disabled={loading} style={styles.ghostButton}>{loading ? 'Refreshing...' : 'Refresh'}</button>
+            <button type="button" className="lf-topbar-icon-btn" aria-label={loading ? 'Refreshing data' : 'Refresh data'} title="Refresh data" onClick={refresh} disabled={loading} style={styles.iconButton}>
+              <IconRefresh size={18} stroke={1.75} style={{ animation: loading ? 'lfPulse 1.1s ease-in-out infinite' : 'none' }} />
+            </button>
           </div>
         </header>
 
-        <ViewErrorBoundary resetKey={view} onDashboard={() => setView('Dashboard')}>
-          {loading && <Skeleton />}
-          {!loading && view === 'Dashboard' && <Dashboard data={data} user={user} onNavigate={setView} />}
-          {!loading && view === 'Clients' && <Clients clients={data.clients} matters={data.matters} canManage={canManage} isAdmin={isAdmin} reload={refresh} notify={setToast} focus={clientFocus} />}
-          {!loading && view === 'Matters' && <Matters data={data} canManage={canManage} reload={refresh} notify={setToast} focus={matterFocus} onMatterOpened={async matterId => { setNotifications(current => current.filter(item => item.matterId !== matterId)); try { await markNotificationsRead({ matterId }); } catch {} }} />}
-          {!loading && view === 'Tasks' && <Tasks data={data} canManage={canManage} reload={refresh} notify={setToast} focus={taskFocus} />}
-          {!loading && view === 'Deadlines' && <DeadlineCenter data={data} canManage={canManage} notify={setToast} focus={appearanceFocus} />}
-          {!loading && view === 'Communications' && <Communications clients={data.clients} matters={data.matters} focus={communicationFocus} notify={setToast} />}
-          {!loading && view === 'Invoices' && <Invoices invoices={data.invoices} isAdmin={isAdmin} canManage={canManage} reload={refresh} notify={setToast} />}
-          {!loading && view === 'Performance' && isAdmin && <AdvocatePerformance notify={setToast} />}
-          {!loading && view === 'Firm Settings' && isAdmin && <FirmSettings settings={firm} clients={data.clients} reload={refresh} notify={setToast} />}
-          {!loading && view === 'Users' && isAdmin && <Users clients={data.clients} notify={setToast} />}
-          {!loading && view === 'Invitations' && isAdmin && <Invitations clients={data.clients} notify={setToast} />}
-          {!loading && view === 'Audit Log' && isAdmin && <AuditLog notify={setToast} navigate={setView} />}
-          {!loading && view === 'Structured Audit' && isAdmin && <StructuredAuditLog notify={setToast} />}
-        </ViewErrorBoundary>
+        <div className="lf-page-inner" style={styles.pageInner}>
+          <div className="lf-page-header" style={styles.pageHeader}>
+            <div className="lf-page-crumb" style={styles.pageCrumb}>{firm.name || 'LexFlow Kenya'}</div>
+            <h1 className="lf-page-title" style={styles.pageTitle}>{view}</h1>
+            <p className="lf-page-sub" style={styles.pageSub}>{subtitles[view]}</p>
+          </div>
+
+          <ViewErrorBoundary resetKey={view} onDashboard={() => setView('Dashboard')}>
+            {loading && <Skeleton />}
+            {!loading && view === 'Dashboard' && <Dashboard data={data} user={user} onNavigate={setView} />}
+            {!loading && view === 'Clients' && <Clients clients={data.clients} matters={data.matters} canManage={canManage} isAdmin={isAdmin} reload={refresh} notify={setToast} focus={clientFocus} />}
+            {!loading && view === 'Matters' && <Matters data={data} canManage={canManage} reload={refresh} notify={setToast} focus={matterFocus} onMatterOpened={async matterId => { setNotifications(current => current.filter(item => item.matterId !== matterId)); try { await markNotificationsRead({ matterId }); } catch {} }} />}
+            {!loading && view === 'Tasks' && <Tasks data={data} canManage={canManage} reload={refresh} notify={setToast} focus={taskFocus} />}
+            {!loading && view === 'Deadlines' && <DeadlineCenter data={data} canManage={canManage} notify={setToast} focus={appearanceFocus} />}
+            {!loading && view === 'Communications' && <Communications clients={data.clients} matters={data.matters} focus={communicationFocus} notify={setToast} />}
+            {!loading && view === 'Invoices' && <Invoices invoices={data.invoices} isAdmin={isAdmin} canManage={canManage} reload={refresh} notify={setToast} />}
+            {!loading && view === 'Performance' && isAdmin && <AdvocatePerformance notify={setToast} />}
+            {!loading && view === 'Firm Settings' && isAdmin && <FirmSettings settings={firm} clients={data.clients} reload={refresh} notify={setToast} />}
+            {!loading && view === 'Users' && isAdmin && <Users clients={data.clients} notify={setToast} />}
+            {!loading && view === 'Invitations' && isAdmin && <Invitations clients={data.clients} notify={setToast} />}
+            {!loading && view === 'Audit Log' && isAdmin && <AuditLog notify={setToast} navigate={setView} />}
+            {!loading && view === 'Structured Audit' && isAdmin && <StructuredAuditLog notify={setToast} />}
+          </ViewErrorBoundary>
+        </div>
       </main>
       <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
@@ -620,11 +625,12 @@ export default function App() {
 
 function NotificationBell({ notifications, open, setOpen, onOpen }) {
   const count = notifications.length;
+  const label = count > 0 ? `Client notifications, ${count} unread` : 'Client notifications';
   return (
     <div style={{ position: 'relative' }}>
-      <button type="button" aria-label="Client notifications" onClick={() => setOpen(!open)} style={{ ...styles.ghostButton, position: 'relative', padding: '7px 12px' }}>
-        <span aria-hidden="true">🔔</span>
-        {count > 0 && <span style={{ position: 'absolute', top: -6, right: -6, minWidth: 18, height: 18, borderRadius: 999, display: 'grid', placeItems: 'center', background: theme.red, color: '#fff', fontSize: 10, fontWeight: 900 }}>{count}</span>}
+      <button type="button" className="lf-topbar-icon-btn" aria-label={label} title={label} onClick={() => setOpen(!open)} style={styles.iconButton}>
+        <IconBell size={18} stroke={1.75} aria-hidden="true" />
+        {count > 0 && <span style={styles.iconBadgeDot} aria-hidden="true" />}
       </button>
       {open && (
         <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 8px)', width: 360, maxWidth: 'calc(100vw - 32px)', zIndex: 2200, background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, boxShadow: theme.shadowLift, padding: 10, animation: 'lfDropIn .16s ease-out' }}>
