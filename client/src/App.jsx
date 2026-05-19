@@ -110,7 +110,7 @@ function StaffNavigation({ visibleGroups, openNavGroups, setOpenNavGroups, view,
                     );
                   }
                   return (
-                    <button key={label} type="button" className="lf-nav" onClick={() => { setView(label); onNavigate?.(); }} style={{ ...styles.navItem, ...(view === label ? styles.navActive : {}) }}>
+                    <button key={label} type="button" className={`lf-nav${view === label ? ' is-active' : ''}`} onClick={() => { setView(label); onNavigate?.(); }} style={{ ...styles.navItem, ...(view === label ? styles.navActive : {}) }}>
                       <span style={styles.navNumber}>{NavIcon ? <NavIcon size={16} /> : null}</span>
                       <span>{label}</span>
                     </button>
@@ -477,13 +477,12 @@ export default function App() {
       <aside className="lf-desktop-sidebar" style={styles.sidebar}>
         <div style={styles.brandPanel}>
           <Logo firm={firm} />
-          <div>
+          <div style={{ minWidth: 0 }}>
             <div style={styles.brand}>{firm.name || 'LexFlow Kenya'}</div>
             <div style={styles.brandSub}>Practice suite</div>
           </div>
         </div>
 
-        <div style={styles.sideSectionLabel}>Navigation</div>
         <StaffNavigation visibleGroups={visibleGroups} openNavGroups={openNavGroups} setOpenNavGroups={setOpenNavGroups} view={view} setView={setView} />
 
         <button type="button" onClick={() => setView('Tasks')} style={{ ...styles.timerCard, border: 'none', cursor: 'pointer', textAlign: 'left', color: 'inherit' }}>
@@ -534,7 +533,6 @@ export default function App() {
               </div>
               <button type="button" aria-label="Close navigation menu" title="Close navigation menu" onClick={() => setMobileMenuOpen(false)} style={styles.mobileCloseButton}>x</button>
             </div>
-            <div style={styles.sideSectionLabel}>Navigation</div>
             <StaffNavigation visibleGroups={visibleGroups} openNavGroups={openNavGroups} setOpenNavGroups={setOpenNavGroups} view={view} setView={setView} onNavigate={() => setMobileMenuOpen(false)} />
             <button type="button" onClick={() => { setView('Tasks'); setMobileMenuOpen(false); }} style={{ ...styles.timerCard, border: 'none', cursor: 'pointer', textAlign: 'left', color: 'inherit' }}>
               <div style={styles.timerTop}><span style={styles.liveDot} /> Timekeeper</div>
