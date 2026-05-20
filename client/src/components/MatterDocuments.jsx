@@ -21,9 +21,20 @@ function documentSourceLabel(doc, clientMode) {
 }
 
 function sourceBadge(doc, clientMode) {
-  const client = doc.source === 'client';
   const generated = isGeneratedDocument(doc);
-  return <Badge tone={client || generated ? 'amber' : 'blue'}>{documentSourceLabel(doc, clientMode)}</Badge>;
+  const client = doc.source === 'client';
+  let bg, color, label;
+  if (generated) {
+    bg = '#FFFBEB'; color = '#B45309';
+    label = clientMode ? 'Firm' : 'Generated Draft';
+  } else if (client) {
+    bg = '#FEF8EE'; color = '#8B7A4A';
+    label = clientMode ? 'Shared by you' : 'Client';
+  } else {
+    bg = '#ECFDF5'; color = '#047857';
+    label = 'Firm';
+  }
+  return <span style={{ ...styles.badge, background: bg, color }}>{label}</span>;
 }
 
 function documentLabel(doc) {
@@ -192,7 +203,14 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     if (isGeneratedDocument(doc) && nextVisible) {
       setConfirm({
         title: 'Share generated draft with client?',
-        message: 'This document was generated as a draft. Confirm it has been reviewed before making it visible to the client.',
+        message: (
+          <div style={{ background: '#FFFBEB', borderLeft: '3px solid #D4A34A', borderRadius: 6, padding: '10px 12px', margin: '4px 0', display: 'grid', gap: 4 }}>
+            <strong style={{ color: '#92400E', fontSize: 13 }}>Draft not yet reviewed</strong>
+            <span style={{ color: '#92400E', fontSize: 12, lineHeight: 1.5 }}>
+              This document was generated as a draft. Confirm it has been thoroughly reviewed before making it visible to the client.
+            </span>
+          </div>
+        ),
         onConfirm: () => updateClientVisible(doc, nextVisible),
       });
       return;
@@ -225,6 +243,12 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     : canManage ? 'Upload, move and manage matter documents.' : 'View matter documents.';
 
   return (
+    <>
+    <style>{`
+      .lf-doc-grid section { border-color: #DDD8CE !important; }
+      .lf-doc-grid .lf-doc-table-wrap > div { border-color: #DDD8CE !important; }
+      .lf-doc-upload-area, .lf-doc-generate-area { background: #FAF8F4; border: 1px solid #DDD8CE; border-radius: 8px; padding: 14px 16px; margin-bottom: 14px; }
+    `}</style>
     <div className="lf-doc-grid" style={{ display: 'grid', gridTemplateColumns: '220px minmax(0,1fr)', gap: 16 }}>
       <Card title="Folders" hint="Matter document categories">
         <div style={{ display: 'grid', gap: 6 }}>
@@ -253,50 +277,63 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
 
       <Card title={selectedName} hint={documentCardHint}>
         {showUploadControls && (
-          <div style={{ ...styles.formGrid, marginBottom: 14 }}>
-            {!clientMode && (
-              <Field label="Upload Folder">
-                <select style={styles.input} value={uploadFolderId} onChange={e => setUploadFolderId(e.target.value)}>
-                  {folderOptions.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
-                </select>
+          <div className="lf-doc-upload-area">
+            <div style={{ ...styles.formGrid }}>
+              {!clientMode && (
+                <Field label="Upload Folder">
+                  <select style={styles.input} value={uploadFolderId} onChange={e => setUploadFolderId(e.target.value)}>
+                    {folderOptions.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+                  </select>
+                </Field>
+              )}
+              <Field label={clientMode ? 'Upload to Client Uploads' : 'Upload Document'}>
+                <input style={styles.input} type="file" accept=".pdf,.doc,.docx,image/*" onChange={uploadDoc} />
               </Field>
-            )}
-            <Field label={clientMode ? 'Upload to Client Uploads' : 'Upload Document'}>
-              <input style={styles.input} type="file" accept=".pdf,.doc,.docx,image/*" onChange={uploadDoc} />
-            </Field>
+            </div>
           </div>
         )}
         {showGenerateControls && (
-          <form onSubmit={generateDraft} style={{ display: 'grid', gap: 8, marginBottom: 14 }}>
-            <div style={{ ...styles.formGrid, alignItems: 'end' }}>
-              <Field label="Generate Draft">
-                <select style={styles.input} value={selectedTemplateId} onChange={e => setSelectedTemplateId(e.target.value)} disabled={templatesLoading || generating || !templates.length}>
-                  {templates.length ? templates.map(template => (
-                    <option key={template.id} value={template.id}>{template.name || template.title || 'Document template'}</option>
-                  )) : <option value="">{templatesLoading ? 'Loading templates...' : 'No active templates'}</option>}
-                </select>
-              </Field>
-              <button type="submit" style={styles.primaryButton} disabled={!selectedTemplateId || generating || templatesLoading}>
-                {generating ? 'Generating...' : 'Generate draft'}
-              </button>
-            </div>
-            {templateError && <div style={styles.alert}>Templates unavailable: {templateError}</div>}
-            {generationMessage && <small style={{ color: theme.green }}>{generationMessage}</small>}
-            {generationWarning && <small style={{ color: theme.amber }}>{generationWarning}</small>}
-          </form>
+          <div className="lf-doc-generate-area">
+            <form onSubmit={generateDraft} style={{ display: 'grid', gap: 8 }}>
+              <div style={{ ...styles.formGrid, alignItems: 'end' }}>
+                <Field label="Generate Draft">
+                  <select style={styles.input} value={selectedTemplateId} onChange={e => setSelectedTemplateId(e.target.value)} disabled={templatesLoading || generating || !templates.length}>
+                    {templates.length ? templates.map(template => (
+                      <option key={template.id} value={template.id}>{template.name || template.title || 'Document template'}</option>
+                    )) : <option value="">{templatesLoading ? 'Loading templates...' : 'No active templates'}</option>}
+                  </select>
+                </Field>
+                <button type="submit" style={styles.primaryButton} disabled={!selectedTemplateId || generating || templatesLoading}>
+                  {generating ? 'Generating...' : 'Generate draft'}
+                </button>
+              </div>
+              {templateError && <div style={styles.alert}>Templates unavailable: {templateError}</div>}
+              {generationMessage && <small style={{ color: theme.green }}>{generationMessage}</small>}
+              {generationWarning && <small style={{ color: theme.amber }}>{generationWarning}</small>}
+            </form>
+          </div>
         )}
         {loading ? <div style={styles.alert}>Loading documents...</div> : documents.length ? (
           <div className={canManage ? "lf-doc-cards-staff" : "lf-doc-cards-client"}>
+          <div className="lf-doc-table-wrap">
           <Table
             columns={canManage ? ['Name', 'Folder', 'Date', 'Size', 'Source', 'Client Access', 'Move', 'Actions'] : ['Name', 'Folder', 'Date', 'Size', 'Source', 'Download']}
             rows={documents.map(doc => {
+              const metaStyle = { color: theme.muted, fontSize: 12 };
               const download = <button key={`${doc.id}-download`} type="button" style={{ ...styles.link, border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }} onClick={() => downloadDoc(doc)}>Download</button>;
-              if (!canManage) return [documentLabel(doc), doc.folderName || 'Uncategorised', doc.date || '-', doc.size || '-', sourceBadge(doc, clientMode), download];
+              if (!canManage) return [
+                <strong key={`${doc.id}-n`} style={{ fontWeight: 600 }}>{documentLabel(doc)}</strong>,
+                <span key={`${doc.id}-f`} style={metaStyle}>{doc.folderName || 'Uncategorised'}</span>,
+                <span key={`${doc.id}-d`} style={metaStyle}>{doc.date || '-'}</span>,
+                <span key={`${doc.id}-s`} style={metaStyle}>{doc.size || '-'}</span>,
+                sourceBadge(doc, clientMode),
+                download,
+              ];
               return [
-                documentLabel(doc),
-                doc.folderName || 'Uncategorised',
-                doc.date || '-',
-                doc.size || '-',
+                <strong key={`${doc.id}-n`} style={{ fontWeight: 600 }}>{documentLabel(doc)}</strong>,
+                <span key={`${doc.id}-f`} style={metaStyle}>{doc.folderName || 'Uncategorised'}</span>,
+                <span key={`${doc.id}-d`} style={metaStyle}>{doc.date || '-'}</span>,
+                <span key={`${doc.id}-sz`} style={metaStyle}>{doc.size || '-'}</span>,
                 sourceBadge(doc, clientMode),
                 doc.source === 'client'
                   ? <Badge key={`${doc.id}-own`} tone="green">Client upload</Badge>
@@ -310,9 +347,11 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
             empty="No documents."
           />
           </div>
+          </div>
         ) : <Empty title="This folder is empty" text="Documents uploaded or moved here will appear in this folder." />}
       </Card>
       <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
     </div>
+    </>
   );
 }
