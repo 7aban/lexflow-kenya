@@ -692,6 +692,8 @@ export function StyleTag() { return <style>{`
     #root .lf-dash-panel-head { padding: 12px 14px; }
     #root .lf-dash-pipeline-row { padding: 9px 14px; }
   }
+  /* UI-5C: Deadline Center guidance card hover */
+  .lf-deadline-guidance-card:hover { box-shadow: 0 4px 14px rgba(15,27,51,.10) !important; transform: translateY(-1px); }
 `}</style>; }
 
 export const styles = {

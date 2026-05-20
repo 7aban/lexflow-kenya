@@ -173,9 +173,9 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
 
       <Card title="Compliance Guidance" hint="Rule-based prompts for deadlines, statutory filings and risk controls.">
         {loading ? <Skeleton rows={2} /> : (
-          <div style={styles.statsGrid}>
+          <div className="lf-deadline-guidance-cards" style={styles.statsGrid}>
             {guidance.map(item => (
-              <div key={item.title} style={{ padding: 14, border: `1px solid ${theme.line}`, borderRadius: 10, background: '#fff' }}>
+              <div key={item.title} className="lf-deadline-guidance-card" style={{ padding: 14, border: `1px solid ${theme.line}`, borderRadius: 10, background: '#fff', boxShadow: theme.shadow, transition: 'box-shadow .16s ease, transform .16s ease' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'start' }}>
                   <strong>{item.title}</strong>
                   <Badge tone={guidanceTone(item.tone)}>{item.tone}</Badge>
