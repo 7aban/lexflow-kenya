@@ -1601,22 +1601,25 @@ function MatterChecklistPanel({ items = [], templates = [], canManage, canToggle
 
 function TaskEditorList({ tasks, entries = [], matter, canManage, canViewBilling = true, editingTask, setEditingTask, saveTask, toggle, confirmDelete, taskTimer, setTaskTimer, notify, onTimerSaved }) {
   if (!tasks.length) return <Empty title="No tasks yet." text="Once records exist, they will appear here." />;
+  const warmBorder = '1px solid #DDD8CE';
+  const warmHeadBg = '#F5F2EB';
+  const warmCellPad = '11px 14px';
   return (
-    <div className="lf-task-cards" style={styles.tableWrap}>
-      <table style={styles.table}>
-        <thead><tr>{['Task', 'Assignee', 'Due', 'Status', 'Timer', 'Actions'].map(h => <th key={h}>{h}</th>)}</tr></thead>
+    <div className="lf-task-cards" style={{ ...styles.tableWrap, background: '#fff', border: warmBorder }}>
+      <table style={{ ...styles.table, minWidth: 720 }}>
+        <thead><tr>{['Task', 'Assignee', 'Due', 'Status', 'Timer', 'Actions'].map(h => <th key={h} style={{ background: warmHeadBg, borderBottom: warmBorder, padding: '10px 14px', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700, color: '#6B7280' }}>{h}</th>)}</tr></thead>
         <tbody>{tasks.map(task => {
           const editing = editingTask?.id === task.id;
           const taskEntries = entries.filter(entry => entry.taskId === task.id);
           const isTiming = taskTimerActive(taskTimer, task.id);
           return (
             <tr key={task.id} id={`task-${task.id}`} style={{ borderLeft: `4px solid ${isTiming ? theme.green : 'transparent'}`, transition: 'border-color .18s ease, background .18s ease' }}>
-              <td>{editing ? <input style={styles.input} value={editingTask.title || ''} onChange={e => setEditingTask({ ...editingTask, title: e.target.value })} /> : <div style={{ display: 'grid', gap: 3 }}><strong>{task.title}</strong>{taskEntries.length > 0 && <small style={{ color: theme.muted }}>{taskEntries.reduce((sum, entry) => sum + Number(entry.hours || 0), 0).toFixed(2)} hours logged from {taskEntries.length} entr{taskEntries.length === 1 ? 'y' : 'ies'}</small>}</div>}</td>
-              <td>{editing ? <input style={styles.input} value={editingTask.assignee || ''} onChange={e => setEditingTask({ ...editingTask, assignee: e.target.value })} /> : task.assignee || '-'}</td>
-              <td>{editing ? <input type="date" style={styles.input} value={editingTask.dueDate || ''} onChange={e => setEditingTask({ ...editingTask, dueDate: e.target.value })} /> : task.dueDate || '-'}</td>
-              <td><Badge tone={task.completed ? 'green' : 'amber'}>{task.completed ? 'Done' : 'Open'}</Badge></td>
-              <td>{canManage && matter ? <TaskTimer task={{ ...task, timeEntries: taskEntries }} matterId={matter.id} matterRate={canViewBilling ? matter.billingRate || 15000 : 0} showRate={canViewBilling} timer={taskTimer} setTimer={setTaskTimer} notify={notify} onSaved={onTimerSaved} /> : '-'}</td>
-              <td>{canManage ? editing ? <ActionGroup actions={[['Save', () => saveTask(task, editingTask)], ['Cancel', () => setEditingTask(null)]]} /> : <ActionGroup actions={[[task.completed ? 'Reopen' : 'Complete', () => toggle ? toggle(task) : saveTask(task, { completed: !task.completed })], ['Edit', () => setEditingTask({ ...task })], ['Delete', () => confirmDelete(task)]]} /> : '-'}</td>
+              <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}>{editing ? <input style={styles.input} value={editingTask.title || ''} onChange={e => setEditingTask({ ...editingTask, title: e.target.value })} /> : <div style={{ display: 'grid', gap: 4 }}><strong style={{ fontSize: 13.5 }}>{task.title}</strong>{taskEntries.length > 0 && <small style={{ color: theme.muted, fontSize: 12 }}>{taskEntries.reduce((sum, entry) => sum + Number(entry.hours || 0), 0).toFixed(2)} hours logged from {taskEntries.length} entr{taskEntries.length === 1 ? 'y' : 'ies'}</small>}</div>}</td>
+              <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}>{editing ? <input style={styles.input} value={editingTask.assignee || ''} onChange={e => setEditingTask({ ...editingTask, assignee: e.target.value })} /> : <span style={{ fontWeight: 500 }}>{task.assignee || '-'}</span>}</td>
+              <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}>{editing ? <input type="date" style={styles.input} value={editingTask.dueDate || ''} onChange={e => setEditingTask({ ...editingTask, dueDate: e.target.value })} /> : <span>{task.dueDate || '-'}</span>}</td>
+              <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}><Badge tone={task.completed ? 'green' : 'amber'}>{task.completed ? 'Done' : 'Open'}</Badge></td>
+              <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}>{canManage && matter ? <TaskTimer task={{ ...task, timeEntries: taskEntries }} matterId={matter.id} matterRate={canViewBilling ? matter.billingRate || 15000 : 0} showRate={canViewBilling} timer={taskTimer} setTimer={setTaskTimer} notify={notify} onSaved={onTimerSaved} /> : '-'}</td>
+              <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}>{canManage ? editing ? <ActionGroup actions={[['Save', () => saveTask(task, editingTask)], ['Cancel', () => setEditingTask(null)]]} /> : <ActionGroup actions={[[task.completed ? 'Reopen' : 'Complete', () => toggle ? toggle(task) : saveTask(task, { completed: !task.completed })], ['Edit', () => setEditingTask({ ...task })], ['Delete', () => confirmDelete(task)]]} /> : '-'}</td>
             </tr>
           );
         })}</tbody>
@@ -1653,21 +1656,24 @@ function AppearanceEditorList({ events, canManage, editingEvent, setEditingEvent
 function TimeEntryEditorList({ entries, canManage, canViewBilling = true, editingTime, setEditingTime, saveTimeEntry, confirmDelete }) {
   if (!entries.length) return <Empty title="No time entries." text="Logged time will appear here." />;
   const columns = ['Date', 'Description', 'Hours', ...(canViewBilling ? ['Rate'] : []), 'Billing class', 'Invoice status', 'Actions'];
+  const warmBorder = '1px solid #DDD8CE';
+  const warmHeadBg = '#F5F2EB';
+  const warmCellPad = '11px 14px';
   return (
-    <div className={`lf-time-entry-cards${canViewBilling ? '' : ' lf-time-entry-cards-no-rate'}`} style={styles.tableWrap}>
-      <table style={styles.table}>
-        <thead><tr>{columns.map(h => <th key={h}>{h}</th>)}</tr></thead>
+    <div className={`lf-time-entry-cards${canViewBilling ? '' : ' lf-time-entry-cards-no-rate'}`} style={{ ...styles.tableWrap, background: '#fff', border: warmBorder }}>
+      <table style={{ ...styles.table, minWidth: canViewBilling ? 820 : 720 }}>
+        <thead><tr>{columns.map(h => <th key={h} style={{ background: warmHeadBg, borderBottom: warmBorder, padding: '10px 14px', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700, color: '#6B7280' }}>{h}</th>)}</tr></thead>
         <tbody>{entries.map(entry => {
           const editing = editingTime?.id === entry.id;
           return (
             <tr key={entry.id}>
-              <td>{editing ? <input type="date" style={styles.input} value={editingTime.date || ''} onChange={e => setEditingTime({ ...editingTime, date: e.target.value })} /> : entry.date || '-'}</td>
-              <td>{editing ? <input style={styles.input} value={editingTime.description || ''} onChange={e => setEditingTime({ ...editingTime, description: e.target.value })} /> : <span>{entry.description || entry.activity || '-'}{entry.taskId ? <small style={{ display: 'block', color: theme.muted }}>Task: {entry.taskId}</small> : null}</span>}</td>
-              <td>{editing ? <input type="number" step="0.1" style={styles.input} value={editingTime.hours || 0} onChange={e => setEditingTime({ ...editingTime, hours: Number(e.target.value) })} /> : Number(entry.hours || 0).toFixed(1)}</td>
-              {canViewBilling && <td>{editing ? <input type="number" style={styles.input} value={editingTime.rate || 0} onChange={e => setEditingTime({ ...editingTime, rate: Number(e.target.value) })} /> : kes(entry.rate)}</td>}
-              <td>{editing ? <select style={styles.tableSelect} value={isBillableValue(editingTime.billable) ? 'billable' : 'non_billable'} onChange={e => setEditingTime({ ...editingTime, billable: e.target.value === 'billable' })}><option value="billable">Billable</option><option value="non_billable">Non-billable</option></select> : <BillableBadge value={entry.billable} />}</td>
-              <td><Badge tone={entry.billed ? 'green' : 'amber'}>{entry.billed ? 'Billed' : 'Unbilled'}</Badge></td>
-              <td>{canManage ? editing ? <ActionGroup actions={[['Save', () => saveTimeEntry(entry, editingTime)], ['Cancel', () => setEditingTime(null)]]} /> : <ActionGroup actions={[[entry.billed ? 'Unbill' : 'Bill', () => saveTimeEntry(entry, { billed: !entry.billed })], ['Edit', () => setEditingTime({ ...entry })], ['Delete', () => confirmDelete(entry)]]} /> : '-'}</td>
+              <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}>{editing ? <input type="date" style={styles.input} value={editingTime.date || ''} onChange={e => setEditingTime({ ...editingTime, date: e.target.value })} /> : <span style={{ fontWeight: 500 }}>{entry.date || '-'}</span>}</td>
+              <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}>{editing ? <input style={styles.input} value={editingTime.description || ''} onChange={e => setEditingTime({ ...editingTime, description: e.target.value })} /> : <span>{entry.description || entry.activity || '-'}{entry.taskId ? <small style={{ display: 'block', color: theme.muted, fontSize: 12 }}>Task: {entry.taskId}</small> : null}</span>}</td>
+              <td style={{ padding: warmCellPad, verticalAlign: 'middle', fontWeight: 600 }}>{editing ? <input type="number" step="0.1" style={styles.input} value={editingTime.hours || 0} onChange={e => setEditingTime({ ...editingTime, hours: Number(e.target.value) })} /> : Number(entry.hours || 0).toFixed(1)}</td>
+              {canViewBilling && <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}>{editing ? <input type="number" style={styles.input} value={editingTime.rate || 0} onChange={e => setEditingTime({ ...editingTime, rate: Number(e.target.value) })} /> : <span style={{ fontWeight: 600 }}>{kes(entry.rate)}</span>}</td>}
+              <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}>{editing ? <select style={styles.tableSelect} value={isBillableValue(editingTime.billable) ? 'billable' : 'non_billable'} onChange={e => setEditingTime({ ...editingTime, billable: e.target.value === 'billable' })}><option value="billable">Billable</option><option value="non_billable">Non-billable</option></select> : <BillableBadge value={entry.billable} />}</td>
+              <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}><Badge tone={entry.billed ? 'green' : 'amber'}>{entry.billed ? 'Billed' : 'Unbilled'}</Badge></td>
+              <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}>{canManage ? editing ? <ActionGroup actions={[['Save', () => saveTimeEntry(entry, editingTime)], ['Cancel', () => setEditingTime(null)]]} /> : <ActionGroup actions={[[entry.billed ? 'Unbill' : 'Bill', () => saveTimeEntry(entry, { billed: !entry.billed })], ['Edit', () => setEditingTime({ ...entry })], ['Delete', () => confirmDelete(entry)]]} /> : '-'}</td>
             </tr>
           );
         })}</tbody>
