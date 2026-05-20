@@ -216,6 +216,24 @@ test.describe('Responsive Overflow Verification', () => {
     }
   });
 
+  test('Invoice Register mobile cards expose all 9 column labels at 360px', async ({ page }) => {
+    await staffLogin(page);
+    await staffNavigate(page, 'Invoices');
+    await page.setViewportSize({ width: 360, height: 900 });
+    await page.waitForTimeout(400);
+    const firstCard = page.locator('.lf-invoice-cards tbody tr').first();
+    await expect(firstCard).toBeVisible({ timeout: 15000 });
+    const labels = await firstCard.evaluate((row) =>
+      Array.from(row.querySelectorAll('td')).map((td) =>
+        (window.getComputedStyle(td, '::before').content || '').replace(/^["']|["']$/g, '')
+      )
+    );
+    const expected = ['Invoice', 'Client', 'Matter', 'Amount', 'Paid', 'Balance', 'Status', 'PDF', 'Actions'];
+    for (const label of expected) {
+      expect(labels, `Invoice Register mobile label "${label}"`).toContain(label);
+    }
+  });
+
   test('Client portal — no horizontal overflow at 360, 390, 768, 1280', async ({ page }) => {
     await clientLogin(page);
     const results = {};

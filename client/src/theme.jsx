@@ -273,9 +273,24 @@ export function StyleTag() { return <style>{`
     #root .lf-invoice-cards td:nth-child(2)::before { content: "Client"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
     #root .lf-invoice-cards td:nth-child(3)::before { content: "Matter"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
     #root .lf-invoice-cards td:nth-child(4)::before { content: "Amount"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
-    #root .lf-invoice-cards td:nth-child(5)::before { content: "Status"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
-    #root .lf-invoice-cards td:nth-child(6)::before { content: "PDF"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
-    #root .lf-invoice-cards td:nth-child(7)::before { content: "Actions"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-invoice-cards td:nth-child(5)::before { content: "Paid"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-invoice-cards td:nth-child(6)::before { content: "Balance"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-invoice-cards td:nth-child(7)::before { content: "Status"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-invoice-cards td:nth-child(8)::before { content: "PDF"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-invoice-cards td:nth-child(9)::before { content: "Actions"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    /* UI-5B: Payments sub-table mobile cards */
+    #root .lf-payment-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
+    #root .lf-payment-cards table { min-width: 0 !important; }
+    #root .lf-payment-cards thead { display: none !important; }
+    #root .lf-payment-cards tbody tr { display: block; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    #root .lf-payment-cards tbody td { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: none; background: transparent !important; }
+    #root .lf-payment-cards tbody tr:hover td { background: transparent !important; }
+    #root .lf-payment-cards td:nth-child(1)::before { content: "Date"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-payment-cards td:nth-child(2)::before { content: "Receipt"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-payment-cards td:nth-child(3)::before { content: "Method"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-payment-cards td:nth-child(4)::before { content: "Reference"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-payment-cards td:nth-child(5)::before { content: "Amount"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-payment-cards td:nth-child(6)::before { content: "Receipt PDF"; min-width: 80px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
     /* R15g-6: Matter detail case notes mobile cards */
     #root .lf-matter-notes-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
     #root .lf-matter-notes-cards table { min-width: 0 !important; }
@@ -362,9 +377,11 @@ export function StyleTag() { return <style>{`
     #root .lf-matter-detail-workspace .lf-matter-notes-cards table { min-width: 0 !important; max-width: 100% !important; }
     #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(1)::before { content: "Invoice"; }
     #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(2)::before { content: "Amount"; }
-    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(3)::before { content: "Status"; }
-    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(4)::before { content: "PDF"; }
-    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(5)::before { content: "Actions"; }
+    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(3)::before { content: "Paid"; }
+    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(4)::before { content: "Balance"; }
+    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(5)::before { content: "Status"; }
+    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(6)::before { content: "PDF"; }
+    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(7)::before { content: "Actions"; }
     /* R15g-10: AdvocatePerformance main mobile cards */
     #root .lf-advocate-performance-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
     #root .lf-advocate-performance-cards table { min-width: 0 !important; }
@@ -570,9 +587,11 @@ export function StyleTag() { return <style>{`
     #root .lf-matter-detail-workspace .lf-appearance-cards td:nth-child(7)::before { content: "Actions"; }
     #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(1)::before { content: "Invoice"; }
     #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(2)::before { content: "Amount"; }
-    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(3)::before { content: "Status"; }
-    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(4)::before { content: "PDF"; }
-    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(5)::before { content: "Actions"; }
+    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(3)::before { content: "Paid"; }
+    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(4)::before { content: "Balance"; }
+    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(5)::before { content: "Status"; }
+    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(6)::before { content: "PDF"; }
+    #root .lf-matter-detail-workspace .lf-invoice-cards td:nth-child(7)::before { content: "Actions"; }
     #root .lf-matter-detail-workspace .lf-matter-notes-cards td:nth-child(1)::before { content: "Note"; }
     #root .lf-matter-detail-workspace .lf-matter-notes-cards td:nth-child(2)::before { content: "Author"; }
     #root .lf-matter-detail-workspace .lf-matter-notes-cards td:nth-child(3)::before { content: "Created"; }
