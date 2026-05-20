@@ -35,6 +35,11 @@ const navIcons = {
   'Ardhi Sasa': IconExternalLink,
 };
 
+const navDisplayLabels = {
+  'Audit Log': 'Audit Log (Legacy)',
+  'Structured Audit': 'Audit Events',
+};
+
 const initialData = { dashboard: {}, clients: [], matters: [], tasks: [], invoices: [], firmSettings: defaultFirmSettings };
 const navGroups = [
   { title: 'Overview', items: [['Dashboard', ['admin', 'advocate', 'assistant']], ['Performance', ['admin']]] },
@@ -112,7 +117,7 @@ function StaffNavigation({ visibleGroups, openNavGroups, setOpenNavGroups, view,
                   return (
                     <button key={label} type="button" className={`lf-nav${view === label ? ' is-active' : ''}`} onClick={() => { setView(label); onNavigate?.(); }} style={{ ...styles.navItem, ...(view === label ? styles.navActive : {}) }}>
                       <span style={styles.navNumber}>{NavIcon ? <NavIcon size={16} /> : null}</span>
-                      <span>{label}</span>
+                      <span>{navDisplayLabels[label] || label}</span>
                     </button>
                   );
                 })}
