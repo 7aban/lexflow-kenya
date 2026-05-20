@@ -1606,7 +1606,7 @@ function TaskEditorList({ tasks, entries = [], matter, canManage, canViewBilling
   const warmCellPad = '11px 14px';
   return (
     <div className="lf-task-cards" style={{ ...styles.tableWrap, background: '#fff', border: warmBorder }}>
-      <table style={{ ...styles.table, minWidth: 720 }}>
+      <table style={styles.table}>
         <thead><tr>{['Task', 'Assignee', 'Due', 'Status', 'Timer', 'Actions'].map(h => <th key={h} style={{ background: warmHeadBg, borderBottom: warmBorder, padding: '10px 14px', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700, color: '#6B7280' }}>{h}</th>)}</tr></thead>
         <tbody>{tasks.map(task => {
           const editing = editingTask?.id === task.id;
@@ -1661,7 +1661,7 @@ function TimeEntryEditorList({ entries, canManage, canViewBilling = true, editin
   const warmCellPad = '11px 14px';
   return (
     <div className={`lf-time-entry-cards${canViewBilling ? '' : ' lf-time-entry-cards-no-rate'}`} style={{ ...styles.tableWrap, background: '#fff', border: warmBorder }}>
-      <table style={{ ...styles.table, minWidth: canViewBilling ? 820 : 720 }}>
+      <table style={styles.table}>
         <thead><tr>{columns.map(h => <th key={h} style={{ background: warmHeadBg, borderBottom: warmBorder, padding: '10px 14px', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700, color: '#6B7280' }}>{h}</th>)}</tr></thead>
         <tbody>{entries.map(entry => {
           const editing = editingTime?.id === entry.id;
