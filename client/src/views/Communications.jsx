@@ -297,16 +297,18 @@ export default function Communications({ clients = [], matters = [], focus, noti
           </Card>
 
           <Card title="Client activity" hint="Recent portal activity for this client">
-            <Table
-              columns={['When', 'Action', 'Matter', 'Summary']}
-              rows={activity.map(item => [
-                previewTime(item.createdAt),
-                item.action || '-',
-                item.matterTitle || item.reference || '-',
-                item.summary || '-',
-              ])}
-              empty="No activity yet."
-            />
+            <div className="lf-communications-cards">
+              <Table
+                columns={['When', 'Action', 'Matter', 'Summary']}
+                rows={activity.map(item => [
+                  previewTime(item.createdAt),
+                  item.action || '-',
+                  item.matterTitle || item.reference || '-',
+                  item.summary || '-',
+                ])}
+                empty="No activity yet."
+              />
+            </div>
           </Card>
         </div>
       </div>
