@@ -122,7 +122,19 @@ export function Field({ label, children }) { return <label style={styles.field}>
 export function Stat({ label, value, tone, icon: Icon, onClick, ariaLabel }) { const colors = { navy: theme.navy600, gold: theme.gold, green: theme.green, red: theme.red }; const color = colors[tone] || theme.navy600; const content = <>{Icon ? <Icon size={20} style={{ background: `${color}16`, color, padding: 6, borderRadius: 8, width: 32, height: 32 }} /> : <i style={{ background: `${color}16`, color }}>{label.slice(0, 2).toUpperCase()}</i>}<span>{label}</span><strong>{value}</strong></>; if (onClick) { return <button type="button" onClick={onClick} aria-label={ariaLabel || label} style={{ ...styles.stat, borderLeftColor: color, cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'inherit', width: '100%' }}>{content}</button>; } return <div style={{ ...styles.stat, borderLeftColor: color }}>{content}</div>; }
 export function Badge({ tone = 'blue', children }) { const map = { green: [theme.greenBg, theme.green], amber: [theme.amberBg, theme.amber], red: [theme.redBg, theme.red], blue: [theme.blueBg, theme.blue] }; const [bg, color] = map[tone] || map.blue; return <span style={{ ...styles.badge, background: bg, color }}>{children}</span>; }
 export function Alert({ tone, children }) { return <div style={{ ...styles.alert, ...(tone === 'danger' ? styles.alertDanger : {}) }}>{children}</div>; }
-export function Toast({ toast, onClose }) { if (!toast) return null; const tone = toast.type === 'danger' ? 'red' : toast.type === 'success' ? 'green' : toast.type === 'warning' ? 'amber' : 'blue'; const map = { green: [theme.greenBg, theme.green, '#A7F3D0'], red: [theme.redBg, theme.red, '#FECACA'], amber: [theme.amberBg, theme.amber, '#FDE68A'], blue: [theme.blueBg, theme.blue, '#BFDBFE'] }; const [bg, color, borderColor] = map[tone]; return <div style={{ ...styles.toast, background: bg, color, borderColor }} role="status" aria-live="polite"><strong>{toast.message}</strong><button type="button" aria-label="Dismiss notification" onClick={onClose} style={styles.toastClose}>x</button></div>; }
+export function Toast({ toast, onClose }) {
+  useEffect(() => {
+    if (!toast || toast.type === 'danger') return undefined;
+    const dismissAfter = toast.type === 'warning' ? 6000 : 3500;
+    const timer = setTimeout(onClose, dismissAfter);
+    return () => clearTimeout(timer);
+  }, [toast, onClose]);
+  if (!toast) return null;
+  const tone = toast.type === 'danger' ? 'red' : toast.type === 'success' ? 'green' : toast.type === 'warning' ? 'amber' : 'blue';
+  const map = { green: [theme.greenBg, theme.green, '#A7F3D0'], red: [theme.redBg, theme.red, '#FECACA'], amber: [theme.amberBg, theme.amber, '#FDE68A'], blue: [theme.blueBg, theme.blue, '#BFDBFE'] };
+  const [bg, color, borderColor] = map[tone];
+  return <div style={{ ...styles.toast, background: bg, color, borderColor }} role="status" aria-live="polite"><strong>{toast.message}</strong><button type="button" aria-label="Dismiss notification" onClick={onClose} style={styles.toastClose}>x</button></div>;
+}
 export function Empty({ title, text }) { return <div style={styles.empty}><div style={styles.emptyIcon}>LF</div><strong>{title}</strong><span>{text}</span></div>; }
 export function Skeleton({ rows = 4 }) { return <div style={styles.skeletonGrid}>{Array.from({ length: rows }).map((_, index) => <div key={index} style={styles.skeleton}><span style={styles.skeletonLineLarge} /><span style={styles.skeletonLine} /><span style={styles.skeletonLineShort} /></div>)}</div>; }
 export function Table({ columns, rows, empty, rowIds }) { if (!rows.length) return <Empty title={empty} text="Once records exist, they will appear here." />; return <div style={styles.tableWrap}><table style={styles.table}><thead><tr>{columns.map(c => <th key={c}>{c}</th>)}</tr></thead><tbody>{rows.map((row, i) => <tr key={i} id={rowIds?.[i]}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>)}</tbody></table></div>; }
