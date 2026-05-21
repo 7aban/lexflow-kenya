@@ -56,8 +56,8 @@ function LoginField({ label, children }) {
 
 export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, installDismissed, setInstallDismissed, onInstall }) {
   const [mode, setMode] = useState('staff');
-  const [email, setEmail] = useState('admin@lexflow.co.ke');
-  const [password, setPassword] = useState('password123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [oauthBusy, setOauthBusy] = useState(false);
@@ -80,13 +80,6 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
   }, [mode]);
 
   useEffect(() => {
-    if (mode === 'staff') {
-      setEmail(current => current || 'admin@lexflow.co.ke');
-      setPassword(current => current || 'password123');
-    } else {
-      setEmail('');
-      setPassword('');
-    }
     setError('');
   }, [mode]);
 
@@ -127,9 +120,9 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
 
   const modeCopy = mode === 'client'
     ? { title: 'Client Portal', hint: 'Access your case files, notices, invoices and shared documents.', placeholder: 'client@example.com', button: 'Enter client portal' }
-    : { title: 'Welcome back', hint: 'Enter your advocate credentials to manage the firm workspace.', placeholder: 'admin@lexflow.co.ke', button: 'Sign in securely' };
+    : { title: 'Welcome back', hint: 'Enter your advocate credentials to manage the firm workspace.', placeholder: 'advocate@yourfirm.co.ke', button: 'Sign in securely' };
 
-  const primaryColor = firm?.primaryColor || '#112219';
+  const primaryColor = '#112219';
   const accentColor = firm?.accentColor || theme.gold;
   const staffAuxHidden = mode !== 'staff';
 
@@ -222,7 +215,7 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
               ) : (
                 <div style={{ height: 1 }} />
               )}
-              {isDev && <div style={styles.loginDemoHint}>admin@lexflow.co.ke / password123</div>}
+              {isDev && <div style={styles.loginDemoHint}>Use the seeded demo credentials from the project README / seed output.</div>}
             </div>
           </form>
         </div>
