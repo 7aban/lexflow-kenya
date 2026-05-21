@@ -234,6 +234,60 @@ test.describe('Responsive Overflow Verification', () => {
     }
   });
 
+  test('Invitations mobile cards — thead hidden and labels at 360px; desktop intact at 1280px', async ({ page }) => {
+    await staffLogin(page);
+    const groupBtn = page.locator('button.lf-nav-group', { hasText: 'Relationships' });
+    const navBtn = page.locator('button.lf-nav', { hasText: 'Invitations' });
+    if (!await navBtn.isVisible().catch(() => false)) {
+      await groupBtn.click();
+      await navBtn.waitFor({ state: 'visible', timeout: 5000 });
+    }
+    await navBtn.click();
+    await page.waitForTimeout(600);
+
+    // Create one invitation so the table renders
+    await page.fill('input[type="email"]', 'ui5e-responsive-test@example.com');
+    await page.click('button:has-text("Generate Invitation")');
+    await page.waitForTimeout(800);
+
+    // 360px: thead hidden, card labels visible
+    await page.setViewportSize({ width: 360, height: 900 });
+    await page.waitForTimeout(400);
+    const firstCard = page.locator('.lf-invitation-cards tbody tr').first();
+    await expect(firstCard).toBeVisible({ timeout: 15000 });
+    const theadVisible360 = await page.evaluate(() => {
+      const thead = document.querySelector('.lf-invitation-cards thead');
+      if (!thead) return false;
+      return window.getComputedStyle(thead).display !== 'none';
+    });
+    expect(theadVisible360, 'Invitations thead should be hidden at 360px').toBe(false);
+    const labels = await firstCard.evaluate((row) =>
+      Array.from(row.querySelectorAll('td')).map((td) =>
+        (window.getComputedStyle(td, '::before').content || '').replace(/^["']|["']$/g, '')
+      )
+    );
+    const expectedLabels = ['Email', 'Client', 'Status', 'Created', 'Expires', 'Link'];
+    for (const label of expectedLabels) {
+      expect(labels, `Invitations mobile label "${label}"`).toContain(label);
+    }
+
+    // 1280px: thead visible, no card-style leak
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.waitForTimeout(400);
+    const theadVisible1280 = await page.evaluate(() => {
+      const thead = document.querySelector('.lf-invitation-cards thead');
+      if (!thead) return false;
+      return window.getComputedStyle(thead).display !== 'none';
+    });
+    expect(theadVisible1280, 'Invitations thead should be visible at 1280px').toBe(true);
+    const rowDisplay1280 = await page.evaluate(() => {
+      const tr = document.querySelector('.lf-invitation-cards tbody tr');
+      if (!tr) return 'table-row';
+      return window.getComputedStyle(tr).display;
+    });
+    expect(rowDisplay1280, 'Invitations table row should not be block (card) at 1280px').not.toBe('block');
+  });
+
   test('Client portal — no horizontal overflow at 360, 390, 768, 1280', async ({ page }) => {
     await clientLogin(page);
     const results = {};

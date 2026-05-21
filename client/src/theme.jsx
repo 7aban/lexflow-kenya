@@ -273,6 +273,19 @@ export function StyleTag() { return <style>{`
     #root .lf-communications-cards td:nth-child(2)::before { content: "Action"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
     #root .lf-communications-cards td:nth-child(3)::before { content: "Matter"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
     #root .lf-communications-cards td:nth-child(4)::before { content: "Summary"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    /* UI-5E: Invitations mobile cards */
+    #root .lf-invitation-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
+    #root .lf-invitation-cards table { min-width: 0 !important; }
+    #root .lf-invitation-cards thead { display: none !important; }
+    #root .lf-invitation-cards tbody tr { display: block; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    #root .lf-invitation-cards tbody td { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: none; background: transparent !important; }
+    #root .lf-invitation-cards tbody tr:hover td { background: transparent !important; }
+    #root .lf-invitation-cards td:nth-child(1)::before { content: "Email"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-invitation-cards td:nth-child(2)::before { content: "Client"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-invitation-cards td:nth-child(3)::before { content: "Status"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-invitation-cards td:nth-child(4)::before { content: "Created"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-invitation-cards td:nth-child(5)::before { content: "Expires"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-invitation-cards td:nth-child(6)::before { content: "Link"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
     /* R15g-2: Invoice Register mobile cards */
     #root .lf-invoice-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
     #root .lf-invoice-cards table { min-width: 0 !important; }

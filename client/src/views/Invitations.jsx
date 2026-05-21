@@ -82,7 +82,7 @@ export default function Invitations({ clients = [], notify }) {
 
       <Card title="Invitation Register" hint={`${invitations.length} invitation(s)`}>
         {loading ? <Skeleton rows={3} /> : invitations.length ? (
-          <Table
+          <div className="lf-invitation-cards"><Table
             columns={['Email', 'Client', 'Status', 'Created', 'Expires', 'Link']}
             rows={invitations.map(invite => [
               invite.email,
@@ -93,7 +93,7 @@ export default function Invitations({ clients = [], notify }) {
               invite.status === 'pending' ? <button key={invite.id} type="button" style={styles.tinyButton} onClick={() => copy(invite.url)}>Copy Link</button> : <span style={styles.mutedText}>-</span>,
             ])}
             empty="No invitations yet."
-          />
+          /></div>
         ) : <Empty title="No invitations yet" text="Generate a link to invite a client into the portal." />}
       </Card>
     </div>
