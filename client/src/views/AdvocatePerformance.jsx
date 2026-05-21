@@ -191,7 +191,7 @@ function PerformanceDrawer({ advocate, detail, loading, onClose }) {
           <div>
             <div style={styles.eyebrow}>Advocate detail</div>
             <h2 style={{ margin: '2px 0 0', fontSize: 18 }}>{advocate?.fullName || 'Advocate'}</h2>
-            <p>{advocate?.email || ''}</p>
+            <p style={{ margin: '2px 0 0', color: theme.muted, fontSize: 12 }}>{advocate?.email || ''}</p>
           </div>
           <button type="button" aria-label="Close performance detail" onClick={onClose} style={styles.toastClose}>x</button>
         </div>
