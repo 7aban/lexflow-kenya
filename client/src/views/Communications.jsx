@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createConversation, downloadWithAuth, fileToDataUrl, getClientActivity, getConversationMessages, getConversations, markConversationRead, sendConversationMessage, updateConversationStatus } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
-import { Badge, Card, Empty, Field, Skeleton, Table } from '../components/ui.jsx';
+import { Badge, Card, Field, Table } from '../components/ui.jsx';
 
 function titleFor(conversation) {
   return conversation.subject || conversation.matterTitle || conversation.clientName || 'Client conversation';
@@ -23,7 +23,7 @@ function attachmentList(files = [], notify) {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
       {files.map(file => (
-        <button key={file.id} type="button" style={styles.tinyButton} onClick={() => downloadAttachment(file)}>
+        <button key={file.id} type="button" style={commStyles.tinyButton} onClick={() => downloadAttachment(file)}>
           {file.displayName || file.name || 'Attachment'}
         </button>
       ))}
@@ -35,6 +35,154 @@ function statusTone(status) {
   if (status === 'resolved') return 'green';
   if (status === 'pending') return 'amber';
   return 'amber';
+}
+
+const commPalette = {
+  forestDark: '#112219',
+  forest: '#1A3628',
+  gold: '#C5973C',
+  cream: '#F5F2EB',
+  warm: '#FAF8F4',
+  warmStrong: '#FEF5E4',
+  border: '#E8E2D6',
+  borderStrong: '#DDD8CE',
+  muted: '#5B5346',
+};
+
+const commStyles = {
+  heroCard: {
+    borderRadius: 10,
+    background: `linear-gradient(135deg, ${commPalette.forestDark}, ${commPalette.forest})`,
+    color: '#fff',
+    padding: 24,
+    display: 'flex',
+    justifyContent: 'space-between',
+    gap: 20,
+    alignItems: 'end',
+    boxShadow: '0 1px 3px rgba(17,34,25,.08), 0 18px 40px rgba(17,34,25,.10)',
+  },
+  heroKicker: {
+    color: commPalette.gold,
+    fontSize: 11,
+    fontWeight: 700,
+    textTransform: 'uppercase',
+    letterSpacing: 0,
+  },
+  heroFigure: {
+    fontSize: 24,
+    fontWeight: 700,
+    color: commPalette.gold,
+  },
+  primaryButton: {
+    border: 0,
+    borderRadius: 8,
+    padding: '8px 16px',
+    background: commPalette.forestDark,
+    color: '#fff',
+    fontWeight: 700,
+    cursor: 'pointer',
+    fontSize: 13,
+    boxShadow: '0 8px 18px rgba(17,34,25,.14)',
+  },
+  tinyButton: {
+    border: `1px solid ${commPalette.border}`,
+    borderRadius: 6,
+    padding: '4px 10px',
+    background: '#fff',
+    cursor: 'pointer',
+    fontSize: 12,
+    fontWeight: 700,
+    color: commPalette.forest,
+  },
+  statusActive: {
+    background: commPalette.forest,
+    color: '#fff',
+    border: `1px solid ${commPalette.forest}`,
+    boxShadow: '0 6px 14px rgba(17,34,25,.14)',
+  },
+  threadButton: {
+    borderBottomColor: commPalette.border,
+    color: theme.ink,
+  },
+  threadUnread: {
+    borderLeftColor: commPalette.gold,
+    background: commPalette.warmStrong,
+  },
+  threadActive: {
+    borderLeftColor: commPalette.gold,
+    background: commPalette.warm,
+    boxShadow: `inset 0 0 0 1px ${commPalette.border}`,
+  },
+  empty: {
+    minHeight: 136,
+    display: 'grid',
+    placeItems: 'center',
+    textAlign: 'center',
+    color: commPalette.muted,
+    gap: 6,
+    padding: 18,
+  },
+  emptyIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    display: 'grid',
+    placeItems: 'center',
+    background: commPalette.warmStrong,
+    color: commPalette.forest,
+    border: `1px solid ${commPalette.border}`,
+    fontWeight: 800,
+  },
+  skeleton: {
+    height: 120,
+    borderRadius: 10,
+    background: '#fff',
+    border: `1px solid ${commPalette.border}`,
+    boxShadow: theme.shadow,
+    padding: 16,
+    display: 'grid',
+    gap: 10,
+    alignContent: 'start',
+  },
+  skeletonLineLarge: {
+    height: 18,
+    width: '55%',
+    borderRadius: 6,
+    background: commPalette.borderStrong,
+    animation: 'lfPulse 1.4s ease-in-out infinite',
+  },
+  skeletonLine: {
+    height: 12,
+    width: '80%',
+    borderRadius: 6,
+    background: commPalette.cream,
+    animation: 'lfPulse 1.4s ease-in-out infinite',
+  },
+  skeletonLineShort: {
+    height: 12,
+    width: '42%',
+    borderRadius: 6,
+    background: commPalette.cream,
+    animation: 'lfPulse 1.4s ease-in-out infinite',
+  },
+};
+
+function CommunicationsEmpty({ title, text }) {
+  return <div style={commStyles.empty}><div style={commStyles.emptyIcon}>LF</div><strong>{title}</strong><span>{text}</span></div>;
+}
+
+function CommunicationsSkeleton({ rows = 4 }) {
+  return (
+    <div style={styles.skeletonGrid}>
+      {Array.from({ length: rows }).map((_, index) => (
+        <div key={index} style={commStyles.skeleton}>
+          <span style={commStyles.skeletonLineLarge} />
+          <span style={commStyles.skeletonLine} />
+          <span style={commStyles.skeletonLineShort} />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function Communications({ clients = [], matters = [], focus, notify }) {
@@ -177,17 +325,17 @@ export default function Communications({ clients = [], matters = [], focus, noti
     }
   }
 
-  if (loading) return <Skeleton rows={3} />;
+  if (loading) return <CommunicationsSkeleton rows={3} />;
 
   return (
     <div style={styles.pageStack}>
-      <section style={styles.heroCard}>
+      <section style={commStyles.heroCard}>
         <div>
-          <div style={styles.heroKicker}>Client communications</div>
+          <div style={commStyles.heroKicker}>Client communications</div>
           <h2>One calm inbox for client conversations.</h2>
           <p>Threaded messages, matter context, file attachments, and client activity in one workspace.</p>
         </div>
-        <div style={styles.heroFigure}>{conversations.length}</div>
+        <div style={commStyles.heroFigure}>{conversations.length}</div>
       </section>
 
       <div className="lf-split-grid" style={styles.splitGrid}>
@@ -212,7 +360,7 @@ export default function Communications({ clients = [], matters = [], focus, noti
               <Field label="Subject">
                 <input style={styles.input} value={newThread.subject} onChange={event => setNewThread({ ...newThread, subject: event.target.value })} placeholder="Document review, hearing update..." />
               </Field>
-              <button style={styles.primaryButton}>Open thread</button>
+              <button style={commStyles.primaryButton}>Open thread</button>
             </form>
           </Card>
 
@@ -230,7 +378,7 @@ export default function Communications({ clients = [], matters = [], focus, noti
             </Field>
             <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
               {filtered.length ? filtered.map(item => (
-                <button key={item.id} type="button" onClick={() => setSelectedId(item.id)} style={{ ...styles.matterButton, ...(selectedId === item.id ? styles.matterActive : {}), ...(item.isUnread ? { borderColor: theme.gold, background: theme.amberBg } : {}) }}>
+                <button key={item.id} type="button" onClick={() => setSelectedId(item.id)} style={{ ...styles.matterButton, ...commStyles.threadButton, ...(item.isUnread ? commStyles.threadUnread : {}), ...(selectedId === item.id ? commStyles.threadActive : {}) }}>
                   <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
                     <strong>{titleFor(item)}</strong>
                     <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -241,14 +389,14 @@ export default function Communications({ clients = [], matters = [], focus, noti
                   <span>{item.clientName || 'Client'}{item.matterTitle ? ` / ${item.matterTitle}` : ''}</span>
                   <small>{item.messageCount || 0} message(s) / {item.lastMessageSenderRole || 'no messages'} / {previewTime(item.lastMessageAt || item.createdAt)}</small>
                 </button>
-              )) : <Empty title="No conversations" text="Start a conversation or wait for a client message." />}
+              )) : <CommunicationsEmpty title="No conversations" text="Start a conversation or wait for a client message." />}
             </div>
           </Card>
         </div>
 
         <div style={styles.pageStack}>
           <Card title={selected ? titleFor(selected) : 'Conversation'} hint={selected ? `${selected.clientName || 'Client'} ${selected.reference ? `/ ${selected.reference}` : ''}` : 'Select a thread'}>
-            {!selected ? <Empty title="No thread selected" text="Choose a conversation from the inbox." /> : threadLoading ? <Skeleton rows={1} /> : (
+            {!selected ? <CommunicationsEmpty title="No thread selected" text="Choose a conversation from the inbox." /> : threadLoading ? <CommunicationsSkeleton rows={1} /> : (
               <div style={{ display: 'grid', gap: 12 }}>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between', alignItems: 'center' }}>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -256,9 +404,9 @@ export default function Communications({ clients = [], matters = [], focus, noti
                     {selected.isUnread && <Badge tone="red">{selected.unreadCount || 1} unread</Badge>}
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    <button type="button" style={styles.tinyButton} onClick={markSelectedRead}>Mark read</button>
+                    <button type="button" style={commStyles.tinyButton} onClick={markSelectedRead}>Mark read</button>
                     {['open', 'pending', 'resolved'].map(status => (
-                      <button key={status} type="button" style={{ ...styles.tinyButton, ...(selected.status === status ? { background: theme.navy800, color: '#fff', borderColor: theme.navy800 } : {}) }} onClick={() => changeSelectedStatus(status)}>
+                      <button key={status} type="button" style={{ ...commStyles.tinyButton, ...(selected.status === status ? commStyles.statusActive : {}) }} onClick={() => changeSelectedStatus(status)}>
                         {status}
                       </button>
                     ))}
@@ -280,7 +428,7 @@ export default function Communications({ clients = [], matters = [], focus, noti
                         </div>
                       </div>
                     );
-                  }) : <Empty title="No messages yet" text="Send the first note in this thread." />}
+                  }) : <CommunicationsEmpty title="No messages yet" text="Send the first note in this thread." />}
                 </div>
 
                 <form onSubmit={sendReply} style={{ display: 'grid', gap: 10, borderTop: `1px solid ${theme.line}`, paddingTop: 12 }}>
@@ -290,7 +438,7 @@ export default function Communications({ clients = [], matters = [], focus, noti
                   <Field label="Attachment">
                     <input type="file" style={styles.input} onChange={event => setReply({ ...reply, file: event.target.files?.[0] || null })} />
                   </Field>
-                  <button style={styles.primaryButton}>Send reply</button>
+                  <button style={commStyles.primaryButton}>Send reply</button>
                 </form>
               </div>
             )}
@@ -298,16 +446,18 @@ export default function Communications({ clients = [], matters = [], focus, noti
 
           <Card title="Client activity" hint="Recent portal activity for this client">
             <div className="lf-communications-cards">
-              <Table
-                columns={['When', 'Action', 'Matter', 'Summary']}
-                rows={activity.map(item => [
-                  previewTime(item.createdAt),
-                  item.action || '-',
-                  item.matterTitle || item.reference || '-',
-                  item.summary || '-',
-                ])}
-                empty="No activity yet."
-              />
+              {activity.length ? (
+                <Table
+                  columns={['When', 'Action', 'Matter', 'Summary']}
+                  rows={activity.map(item => [
+                    previewTime(item.createdAt),
+                    item.action || '-',
+                    item.matterTitle || item.reference || '-',
+                    item.summary || '-',
+                  ])}
+                  empty="No activity yet."
+                />
+              ) : <CommunicationsEmpty title="No activity yet." text="Once records exist, they will appear here." />}
             </div>
           </Card>
         </div>
