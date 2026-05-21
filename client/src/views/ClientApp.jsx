@@ -280,7 +280,7 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
         <MatterDocuments matterId={selected.id} clientMode notify={notify} />
         <Card title="Invoices and payment proof" hint="Upload M-PESA or bank transfer confirmation">
           <div className="lf-client-invoices-cards"><Table columns={['Invoice', 'Amount', 'Paid', 'Balance', 'Status', 'PDF']} rows={invoices.map(i => [i.number || i.id, kes(i.amount), kes(i.amountPaid), kes(i.balance), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <DownloadButton key={`${i.id}-pdf`} label="PDF" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />])} empty="No invoices shared yet." /></div>
-          <div className="lf-client-proofs-cards"><Table columns={['Invoice', 'Date', 'Receipt', 'Method', 'Reference', 'Amount']} rows={paymentRows} empty="No payments recorded yet." /></div>
+          <div className="lf-client-invoice-payments-cards"><Table columns={['Invoice', 'Date', 'Receipt', 'Method', 'Reference', 'Amount']} rows={paymentRows} empty="No payments recorded yet." /></div>
           <form onSubmit={submitPayment} style={{ ...styles.formGrid, marginTop: 14 }}>
             <Field label="Invoice"><select style={styles.input} value={payment.invoiceId} onChange={e => setPayment({ ...payment, invoiceId: e.target.value })}><option value="">General payment</option>{invoices.map(i => <option key={i.id} value={i.id}>{i.number || i.id}</option>)}</select></Field>
             <Field label="Method"><select style={styles.input} value={payment.method} onChange={e => setPayment({ ...payment, method: e.target.value })}><option>M-PESA</option><option>Bank Transfer</option><option>Cash Deposit</option></select></Field>
