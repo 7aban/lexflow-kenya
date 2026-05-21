@@ -1262,7 +1262,7 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
         </form>
       </Card>
 
-      <Card title="Firm Branding / Theme" hint="Customize colors and preview firm identity across the workspace">
+      <Card title="Firm Branding / Theme" hint="Choose a preset or adjust colors, then save the workspace theme.">
         <div style={{ ...styles.formGrid, marginBottom: 16 }}>
           <div>
             <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: theme.muted }}><span>Presets</span></label>
@@ -1289,12 +1289,12 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
         </div>
         {themeError && <div style={{ ...styles.alert, ...(themeError.startsWith('Preview warnings') ? {} : styles.alertDanger), padding: 10, borderRadius: 6 }}>{themeError}</div>}
         <div style={{ marginTop: 12, padding: 14, borderRadius: 8, background: 'var(--lf-surface, #111827)', border: `1px solid var(--lf-border, ${theme.line})`, color: 'var(--lf-text, #E5E7EB)' }}>
-          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', marginBottom: 8, color: 'var(--lf-text-muted, #9CA3AF)' }}>Theme Preview</div>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', marginBottom: 8, color: 'var(--lf-text-muted, #9CA3AF)' }}>Theme sample</div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-            <button style={{ border: 0, borderRadius: 6, padding: '6px 14px', background: 'var(--lf-button, #D4A34A)', color: 'var(--lf-button-text, #fff)', fontWeight: 700, cursor: 'pointer' }}>Primary Button</button>
-            <button style={{ border: `1px solid var(--lf-border, ${theme.line})`, borderRadius: 6, padding: '6px 14px', background: '#fff', color: 'var(--lf-primary, #0F1B33)', fontWeight: 700, cursor: 'pointer' }}>Ghost Button</button>
+            <span style={{ border: 0, borderRadius: 6, padding: '6px 14px', background: 'var(--lf-button, #D4A34A)', color: 'var(--lf-button-text, #fff)', fontWeight: 700 }}>Primary action sample</span>
+            <span style={{ border: `1px solid var(--lf-border, ${theme.line})`, borderRadius: 6, padding: '6px 14px', background: '#fff', color: 'var(--lf-primary, #0F1B33)', fontWeight: 700 }}>Secondary action sample</span>
           </div>
-          <div style={{ padding: 10, borderRadius: 6, background: 'var(--lf-background, #0A0F1A)', border: `1px solid var(--lf-border, ${theme.line})`, fontSize: 12, color: 'var(--lf-text-muted, #9CA3AF)' }}>Surface / Card sample with <a href="#" style={{ color: 'var(--lf-link, #D4A34A)', textDecoration: 'none' }}>link sample</a> and <span style={{ color: 'var(--lf-success, #047857)' }}>success</span>, <span style={{ color: 'var(--lf-warning, #B45309)' }}>warning</span>, <span style={{ color: 'var(--lf-danger, #B91C1C)' }}>danger</span> text.</div>
+          <div style={{ padding: 10, borderRadius: 6, background: 'var(--lf-background, #0A0F1A)', border: `1px solid var(--lf-border, ${theme.line})`, fontSize: 12, color: 'var(--lf-text-muted, #9CA3AF)' }}>Card sample with <a href="#" style={{ color: 'var(--lf-link, #D4A34A)', textDecoration: 'none' }}>link</a>, <span style={{ color: 'var(--lf-success, #047857)' }}>success</span>, <span style={{ color: 'var(--lf-warning, #B45309)' }}>warning</span>, and <span style={{ color: 'var(--lf-danger, #B91C1C)' }}>danger</span> text.</div>
         </div>
       </Card>
 
