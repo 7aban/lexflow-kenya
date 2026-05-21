@@ -62,7 +62,7 @@ function MetadataCell({ metadata }) {
         {open ? 'Hide' : `Show (${entries.length})`}
       </button>
       {open && (
-        <pre style={{ fontSize: 11, maxHeight: 200, overflow: 'auto', background: theme.bg, padding: 6, borderRadius: 6, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+        <pre style={{ fontSize: 11, maxHeight: 200, overflow: 'auto', background: theme.wash, padding: 6, borderRadius: 6, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
           {entries.map(([k, v]) => {
             const val = typeof v === 'object' ? JSON.stringify(v) : String(v ?? '');
             const display = val.length > 200 ? val.slice(0, 200) + '...' : val;
