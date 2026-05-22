@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, createFolder, deleteFolder, downloadWithAuth, fileToDataUrl, generateDocumentFromTemplate, getMatterDocuments, getMatterFolders, listDocumentTemplates, moveDocument, updateDocument, updateFolder } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
-import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, Table } from './ui.jsx';
+import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, Skeleton, Table } from './ui.jsx';
 
 function folderIcon(folder) {
   if (folder.id === 'all') return 'ALL';
@@ -313,7 +313,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
             </form>
           </div>
         )}
-        {loading ? <div style={styles.alert}>Loading documents...</div> : documents.length ? (
+        {loading ? <Skeleton rows={2} /> : documents.length ? (
           <div className={canManage ? "lf-doc-cards-staff" : "lf-doc-cards-client"}>
           <div className="lf-doc-table-wrap">
           <Table
