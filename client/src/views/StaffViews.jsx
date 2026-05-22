@@ -1758,6 +1758,7 @@ function MatterNextActionHints({ hints = [] }) {
 }
 
 function MatterCommandSummary({ detail, nextActionHints = [] }) {
+  const [summaryOpen, setSummaryOpen] = useState(false);
   const summary = useMemo(() => {
     const today = isoDateOnly();
     const notes = detail?.notes || [];
@@ -1823,19 +1824,38 @@ function MatterCommandSummary({ detail, nextActionHints = [] }) {
 
   return (
     <section aria-label="Matter Command Summary" style={{ border: `1px solid ${theme.line}`, background: '#fff', borderRadius: 10, padding: 14, display: 'grid', gap: 10 }}>
-      <div style={{ display: 'grid', gap: 2 }}>
-        <strong style={{ fontSize: 13 }}>Matter Command Summary</strong>
-        <span style={{ color: theme.muted, fontSize: 12 }}>Read-only snapshot from current matter data.</span>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ display: 'grid', gap: 2 }}>
+          <strong style={{ fontSize: 13 }}>Matter Command Summary</strong>
+          <span style={{ color: theme.muted, fontSize: 12 }}>Read-only snapshot from current matter data.</span>
+        </div>
+        <button
+          type="button"
+          aria-expanded={summaryOpen}
+          aria-controls="matter-command-summary-grid"
+          onClick={() => setSummaryOpen(open => !open)}
+          style={{ ...styles.ghostButton, fontSize: 12, padding: '4px 10px' }}
+        >
+          {summaryOpen ? 'Hide summary' : 'Show summary'}
+        </button>
       </div>
-      <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))' }}>
-        <SummaryCell label="Stage" value={summary.stage} />
-        <SummaryCell label="Owner" value={summary.paralegal ? `${summary.owner} / ${summary.paralegal}` : summary.owner} />
-        <SummaryCell label="Last activity" value={summary.lastActivity} />
-        <SummaryCell label="Next step" value={summary.nextStep} />
-        <SummaryCell label="Court" value={summary.court} />
-        <SummaryCell label="Overdue" value={summary.overdueLabel} tone={summary.overdue ? 'red' : ''} />
-        <SummaryCell label="SOL / Limitation" value={summary.sol} tone={detail?.solDate ? 'amber' : ''} />
-        <SummaryCell label="Top suggestion" value={summary.topSuggestion} />
+      <div id="matter-command-summary-grid">
+        {!summaryOpen ? (
+          <div style={{ border: `1px dashed ${theme.line}`, borderRadius: 8, padding: 12, color: theme.muted, fontSize: 13 }}>
+            Review matter command summary data when you need a quick overview of stage, ownership, deadlines, and next steps.
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))' }}>
+            <SummaryCell label="Stage" value={summary.stage} />
+            <SummaryCell label="Owner" value={summary.paralegal ? `${summary.owner} / ${summary.paralegal}` : summary.owner} />
+            <SummaryCell label="Last activity" value={summary.lastActivity} />
+            <SummaryCell label="Next step" value={summary.nextStep} />
+            <SummaryCell label="Court" value={summary.court} />
+            <SummaryCell label="Overdue" value={summary.overdueLabel} tone={summary.overdue ? 'red' : ''} />
+            <SummaryCell label="SOL / Limitation" value={summary.sol} tone={detail?.solDate ? 'amber' : ''} />
+            <SummaryCell label="Top suggestion" value={summary.topSuggestion} />
+          </div>
+        )}
       </div>
     </section>
   );
