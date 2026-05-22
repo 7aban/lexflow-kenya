@@ -1480,10 +1480,12 @@ function ChecklistTemplateLibrary({ templates = [], form, setForm, editingTempla
 }
 
 function MatterChecklistPanel({ items = [], templates = [], canManage, canToggle, canApplyTemplate, selectedTemplateId, setSelectedTemplateId, onApplyTemplate, applyingTemplate, form, setForm, onAdd, editingItem, setEditingItem, onToggle, onSave, confirmDelete }) {
+  const [completedOpen, setCompletedOpen] = useState(false);
   const completedCount = items.filter(item => Number(item.completed || 0) === 1).length;
   const completionPercent = items.length ? Math.round((completedCount / items.length) * 100) : 0;
   const openItems = items.filter(item => Number(item.completed || 0) !== 1);
   const completedItems = items.filter(item => Number(item.completed || 0) === 1);
+  const completedItemsId = 'matter-completed-checklist-items';
   const checklistItem = (item) => {
     const completed = Number(item.completed || 0) === 1;
     const editing = editingItem?.id === item.id;
@@ -1555,6 +1557,33 @@ function MatterChecklistPanel({ items = [], templates = [], canManage, canToggle
       </div>
     </section>
   ) : null;
+  const completedChecklistSection = completedItems.length ? (
+    <section aria-label="Completed items" style={{ display: 'grid', gap: 8, minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: theme.muted, fontSize: 11, fontWeight: 700, letterSpacing: 0, textTransform: 'uppercase', flexWrap: 'wrap' }}>
+        <span>Completed items</span>
+        <span style={{ height: 1, flex: '1 1 auto', background: theme.line, minWidth: 40 }} />
+        <span>{completedItems.length} done</span>
+        <button
+          type="button"
+          aria-expanded={completedOpen}
+          aria-controls={completedItemsId}
+          onClick={() => setCompletedOpen(open => !open)}
+          style={{ ...styles.ghostButton, fontSize: 12, padding: '4px 10px' }}
+        >
+          {completedOpen ? 'Hide completed' : 'Show completed'}
+        </button>
+      </div>
+      <div id={completedItemsId} style={{ display: 'grid', gap: 8, minWidth: 0 }}>
+        {completedOpen ? (
+          completedItems.map(checklistItem)
+        ) : (
+          <div style={{ border: `1px dashed ${theme.line}`, borderRadius: 8, padding: 12, color: theme.muted, fontSize: 13 }}>
+            {completedItems.length} completed checklist item{completedItems.length === 1 ? '' : 's'} hidden to keep active work in view.
+          </div>
+        )}
+      </div>
+    </section>
+  ) : null;
   return (
     <section aria-label="Matter checklist" style={{ display: 'grid', gap: 12, minWidth: 0 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1592,7 +1621,7 @@ function MatterChecklistPanel({ items = [], templates = [], canManage, canToggle
       ) : (
         <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
           {checklistSection('Open items', openItems)}
-          {checklistSection('Completed items', completedItems)}
+          {completedChecklistSection}
         </div>
       )}
     </section>
