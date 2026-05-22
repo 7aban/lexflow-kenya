@@ -45,6 +45,7 @@ function dueLabel(date) {
 export default function DeadlineCenter({ data, canManage, notify, focus }) {
   const [deadlines, setDeadlines] = useState([]);
   const [guidance, setGuidance] = useState([]);
+  const [guidanceOpen, setGuidanceOpen] = useState(false);
   const [filters, setFilters] = useState({ type: '', status: '' });
   const [form, setForm] = useState(blankForm);
   const [confirm, setConfirm] = useState(null);
@@ -172,20 +173,38 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
       </div>
 
       <Card title="Compliance Guidance" hint="Rule-based prompts for deadlines, statutory filings and risk controls.">
-        {loading ? <Skeleton rows={2} /> : (
-          <div className="lf-deadline-guidance-cards" style={styles.statsGrid}>
-            {guidance.map(item => (
-              <div key={item.title} className="lf-deadline-guidance-card" style={{ padding: 14, border: `1px solid ${theme.line}`, borderRadius: 10, background: '#fff', boxShadow: theme.shadow, transition: 'box-shadow .16s ease, transform .16s ease' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'start' }}>
-                  <strong>{item.title}</strong>
-                  <Badge tone={guidanceTone(item.tone)}>{item.tone}</Badge>
-                </div>
-                <p>{item.summary}</p>
-                <div style={{ marginTop: 10, color: theme.navy600, fontWeight: 700, fontSize: 12 }}>{item.action}</div>
-              </div>
-            ))}
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            <p style={{ margin: 0, color: theme.muted }}>Review filing, service, and limitation reminders when planning deadline work.</p>
+            <button
+              type="button"
+              style={styles.ghostButton}
+              aria-expanded={guidanceOpen}
+              aria-controls="deadline-compliance-guidance"
+              onClick={() => setGuidanceOpen(open => !open)}
+            >
+              {guidanceOpen ? 'Hide guidance' : 'Show guidance'}
+            </button>
           </div>
-        )}
+          {guidanceOpen && (
+            <div id="deadline-compliance-guidance">
+              {loading ? <Skeleton rows={2} /> : (
+                <div className="lf-deadline-guidance-cards" style={styles.statsGrid}>
+                  {guidance.map(item => (
+                    <div key={item.title} className="lf-deadline-guidance-card" style={{ padding: 14, border: `1px solid ${theme.line}`, borderRadius: 10, background: '#fff', boxShadow: theme.shadow, transition: 'box-shadow .16s ease, transform .16s ease' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'start' }}>
+                        <strong>{item.title}</strong>
+                        <Badge tone={guidanceTone(item.tone)}>{item.tone}</Badge>
+                      </div>
+                      <p>{item.summary}</p>
+                      <div style={{ marginTop: 10, color: theme.navy600, fontWeight: 700, fontSize: 12 }}>{item.action}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </Card>
 
       <div className="lf-split-grid" style={styles.splitGrid}>
