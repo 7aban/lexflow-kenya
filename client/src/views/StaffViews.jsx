@@ -1849,6 +1849,8 @@ function timelineToneColor(tone) {
 }
 
 function MatterActivityTimeline({ detail }) {
+  const [activityOpen, setActivityOpen] = useState(false);
+
   const events = useMemo(() => {
     const timeline = [];
     const addEvent = ({ date, source, tone = 'blue', title, detail: secondary }) => {
@@ -1960,29 +1962,46 @@ function MatterActivityTimeline({ detail }) {
           <strong style={{ fontSize: 13 }}>Matter Activity Timeline</strong>
           <span style={{ color: theme.muted, fontSize: 12 }}>Read-only sequence from current matter records.</span>
         </div>
-        <Badge tone="blue">{events.length} events</Badge>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <Badge tone="blue">{events.length} events</Badge>
+          <button
+            type="button"
+            aria-expanded={activityOpen}
+            aria-controls="matter-activity-timeline-events"
+            onClick={() => setActivityOpen(open => !open)}
+            style={{ ...styles.ghostButton, fontSize: 12, padding: '4px 10px' }}
+          >
+            {activityOpen ? 'Hide activity' : 'Show activity'}
+          </button>
+        </div>
       </div>
-      {events.length === 0 ? (
-        <div style={{ border: `1px dashed ${theme.line}`, borderRadius: 8, padding: 12, color: theme.muted, fontSize: 13 }}>
-          No activity recorded for this matter yet.
-        </div>
-      ) : (
-        <div style={{ display: 'grid', gap: 8 }}>
-          {events.map((event, index) => (
-            <div
-              key={`${event.source}-${event.title}-${event.date || 'undated'}-${index}`}
-              style={{ border: `1px solid ${theme.line}`, borderLeft: `4px solid ${timelineToneColor(event.tone)}`, borderRadius: 8, padding: 10, background: '#F8FAFC', display: 'grid', gap: 6 }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: theme.ink }}>{formatTimelineDate(event.date)}</span>
-                <Badge tone={event.tone}>{event.source}</Badge>
+      <div id="matter-activity-timeline-events">
+        {!activityOpen ? (
+          <div style={{ border: `1px dashed ${theme.line}`, borderRadius: 8, padding: 12, color: theme.muted, fontSize: 13 }}>
+            Review recent matter activity when you need file history or audit context.
+          </div>
+        ) : events.length === 0 ? (
+          <div style={{ border: `1px dashed ${theme.line}`, borderRadius: 8, padding: 12, color: theme.muted, fontSize: 13 }}>
+            No activity recorded for this matter yet.
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: 8 }}>
+            {events.map((event, index) => (
+              <div
+                key={`${event.source}-${event.title}-${event.date || 'undated'}-${index}`}
+                style={{ border: `1px solid ${theme.line}`, borderLeft: `4px solid ${timelineToneColor(event.tone)}`, borderRadius: 8, padding: 10, background: '#F8FAFC', display: 'grid', gap: 6 }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: theme.ink }}>{formatTimelineDate(event.date)}</span>
+                  <Badge tone={event.tone}>{event.source}</Badge>
+                </div>
+                <strong style={{ fontSize: 13 }}>{event.title}</strong>
+                {event.secondary ? <span style={{ color: theme.muted, fontSize: 12 }}>{event.secondary}</span> : null}
               </div>
-              <strong style={{ fontSize: 13 }}>{event.title}</strong>
-              {event.secondary ? <span style={{ color: theme.muted, fontSize: 12 }}>{event.secondary}</span> : null}
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+      </div>
     </section>
   );
 }
