@@ -190,6 +190,7 @@ export default function App() {
   const [appearanceFocus, setAppearanceFocus] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [bootstrapped, setBootstrapped] = useState(false);
   const [toast, setToast] = useState(null);
   const [data, setData] = useState(initialData);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
@@ -381,6 +382,7 @@ export default function App() {
         api('/invoices'),
       ]);
       setData({ dashboard, clients, matters, tasks, invoices, firmSettings });
+      setBootstrapped(true);
     } catch (err) {
       if (err?.isAuthExpired) return;
       setToast({ type: 'danger', message: err.message });
@@ -581,9 +583,14 @@ export default function App() {
           </div>
           <div className="lf-top-actions" style={styles.topActions}>
             <NotificationBell notifications={notifications} open={notificationsOpen} setOpen={setNotificationsOpen} onOpen={openNotification} />
-            <button type="button" className="lf-topbar-icon-btn" aria-label={loading ? 'Refreshing data' : 'Refresh data'} title="Refresh data" onClick={refresh} disabled={loading} style={styles.iconButton}>
-              <IconRefresh size={18} stroke={1.75} style={{ animation: loading ? 'lfPulse 1.1s ease-in-out infinite' : 'none' }} />
-            </button>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+              <button type="button" className="lf-topbar-icon-btn" aria-label={loading ? 'Refreshing data' : 'Refresh data'} title="Refresh data" onClick={refresh} disabled={loading} style={styles.iconButton}>
+                <IconRefresh size={18} stroke={1.75} style={{ animation: loading ? 'lfPulse 1.1s ease-in-out infinite' : 'none' }} />
+              </button>
+              {loading && bootstrapped && (
+                <span style={{ fontSize: 10, color: '#697386', lineHeight: 1, letterSpacing: 0, whiteSpace: 'nowrap' }}>Refreshing…</span>
+              )}
+            </div>
           </div>
         </header>
 
@@ -595,20 +602,20 @@ export default function App() {
           </div>
 
           <ViewErrorBoundary resetKey={view} onDashboard={() => setView('Dashboard')}>
-            {loading && <Skeleton />}
-            {!loading && view === 'Dashboard' && <Dashboard data={data} user={user} onNavigate={setView} />}
-            {!loading && view === 'Clients' && <Clients clients={data.clients} matters={data.matters} canManage={canManage} isAdmin={isAdmin} reload={refresh} notify={setToast} focus={clientFocus} />}
-            {!loading && view === 'Matters' && <Matters data={data} canManage={canManage} reload={refresh} notify={setToast} focus={matterFocus} onMatterOpened={async matterId => { setNotifications(current => current.filter(item => item.matterId !== matterId)); try { await markNotificationsRead({ matterId }); } catch {} }} />}
-            {!loading && view === 'Tasks' && <Tasks data={data} canManage={canManage} reload={refresh} notify={setToast} focus={taskFocus} />}
-            {!loading && view === 'Deadlines' && <DeadlineCenter data={data} canManage={canManage} notify={setToast} focus={appearanceFocus} />}
-            {!loading && view === 'Communications' && <Communications clients={data.clients} matters={data.matters} focus={communicationFocus} notify={setToast} />}
-            {!loading && view === 'Invoices' && <Invoices invoices={data.invoices} isAdmin={isAdmin} canManage={canManage} reload={refresh} notify={setToast} />}
-            {!loading && view === 'Performance' && isAdmin && <AdvocatePerformance notify={setToast} />}
-            {!loading && view === 'Firm Settings' && isAdmin && <FirmSettings settings={firm} clients={data.clients} reload={refresh} notify={setToast} />}
-            {!loading && view === 'Users' && isAdmin && <Users clients={data.clients} notify={setToast} />}
-            {!loading && view === 'Invitations' && isAdmin && <Invitations clients={data.clients} notify={setToast} />}
-            {!loading && view === 'Audit Log' && isAdmin && <AuditLog notify={setToast} navigate={setView} />}
-            {!loading && view === 'Structured Audit' && isAdmin && <StructuredAuditLog notify={setToast} />}
+            {loading && !bootstrapped && <Skeleton />}
+            {(!loading || bootstrapped) && view === 'Dashboard' && <Dashboard data={data} user={user} onNavigate={setView} />}
+            {(!loading || bootstrapped) && view === 'Clients' && <Clients clients={data.clients} matters={data.matters} canManage={canManage} isAdmin={isAdmin} reload={refresh} notify={setToast} focus={clientFocus} />}
+            {(!loading || bootstrapped) && view === 'Matters' && <Matters data={data} canManage={canManage} reload={refresh} notify={setToast} focus={matterFocus} onMatterOpened={async matterId => { setNotifications(current => current.filter(item => item.matterId !== matterId)); try { await markNotificationsRead({ matterId }); } catch {} }} />}
+            {(!loading || bootstrapped) && view === 'Tasks' && <Tasks data={data} canManage={canManage} reload={refresh} notify={setToast} focus={taskFocus} />}
+            {(!loading || bootstrapped) && view === 'Deadlines' && <DeadlineCenter data={data} canManage={canManage} notify={setToast} focus={appearanceFocus} />}
+            {(!loading || bootstrapped) && view === 'Communications' && <Communications clients={data.clients} matters={data.matters} focus={communicationFocus} notify={setToast} />}
+            {(!loading || bootstrapped) && view === 'Invoices' && <Invoices invoices={data.invoices} isAdmin={isAdmin} canManage={canManage} reload={refresh} notify={setToast} />}
+            {(!loading || bootstrapped) && view === 'Performance' && isAdmin && <AdvocatePerformance notify={setToast} />}
+            {(!loading || bootstrapped) && view === 'Firm Settings' && isAdmin && <FirmSettings settings={firm} clients={data.clients} reload={refresh} notify={setToast} />}
+            {(!loading || bootstrapped) && view === 'Users' && isAdmin && <Users clients={data.clients} notify={setToast} />}
+            {(!loading || bootstrapped) && view === 'Invitations' && isAdmin && <Invitations clients={data.clients} notify={setToast} />}
+            {(!loading || bootstrapped) && view === 'Audit Log' && isAdmin && <AuditLog notify={setToast} navigate={setView} />}
+            {(!loading || bootstrapped) && view === 'Structured Audit' && isAdmin && <StructuredAuditLog notify={setToast} />}
           </ViewErrorBoundary>
         </div>
       </main>
