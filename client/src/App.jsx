@@ -490,12 +490,6 @@ export default function App() {
 
         <StaffNavigation visibleGroups={visibleGroups} openNavGroups={openNavGroups} setOpenNavGroups={setOpenNavGroups} view={view} setView={setView} />
 
-        <button type="button" onClick={() => setView('Tasks')} style={{ ...styles.timerCard, border: 'none', cursor: 'pointer', textAlign: 'left', color: 'inherit' }}>
-          <div style={styles.timerTop}><span style={styles.liveDot} /> Timekeeper</div>
-          <strong>Log billable time</strong>
-          <span>Open Tasks to start a timer</span>
-        </button>
-
         <div style={styles.userCard}>
           <div style={styles.avatar}>{(user?.fullName || user?.name || 'U').slice(0, 1).toUpperCase()}</div>
           <div style={{ minWidth: 0 }}>
@@ -539,11 +533,6 @@ export default function App() {
               <button type="button" aria-label="Close navigation menu" title="Close navigation menu" onClick={() => setMobileMenuOpen(false)} style={styles.mobileCloseButton}>x</button>
             </div>
             <StaffNavigation visibleGroups={visibleGroups} openNavGroups={openNavGroups} setOpenNavGroups={setOpenNavGroups} view={view} setView={setView} onNavigate={() => setMobileMenuOpen(false)} />
-            <button type="button" onClick={() => { setView('Tasks'); setMobileMenuOpen(false); }} style={{ ...styles.timerCard, border: 'none', cursor: 'pointer', textAlign: 'left', color: 'inherit' }}>
-              <div style={styles.timerTop}><span style={styles.liveDot} /> Timekeeper</div>
-              <strong>Log billable time</strong>
-              <span>Open Tasks to start a timer</span>
-            </button>
             <div style={styles.userCard}>
               <div style={styles.avatar}>{(user?.fullName || user?.name || 'U').slice(0, 1).toUpperCase()}</div>
               <div style={{ minWidth: 0 }}>
@@ -623,6 +612,20 @@ export default function App() {
           </ViewErrorBoundary>
         </div>
       </main>
+      <button
+        type="button"
+        className="lf-timer-bubble"
+        onClick={() => setView('Matters')}
+        style={styles.timerBubble}
+        aria-label="Open Matters to log billable time"
+        title="Open Matters to log billable time"
+      >
+        <span style={styles.liveDot} />
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 13 }}>Timekeeper</div>
+          <div style={{ color: 'rgba(255,255,255,.5)', fontSize: 10.5, marginTop: 2 }}>Log billable time</div>
+        </div>
+      </button>
       <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   );

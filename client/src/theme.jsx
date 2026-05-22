@@ -502,6 +502,7 @@ export function StyleTag() { return <style>{`
     #root .lf-structured-audit-log-cards td:nth-child(7)::before { content: "Matter ID"; }
     #root .lf-structured-audit-log-cards td:nth-child(8)::before { content: "Client ID"; }
     #root .lf-structured-audit-log-cards td:nth-child(9)::before { content: "Metadata"; }
+    #root .lf-timer-bubble { display: none !important; }
   }
   @media (min-width: 768px) and (max-width: 900px) {
     /* R15g-8: Client portal My Matters - stack grid at tablet widths */
@@ -733,6 +734,7 @@ export function StyleTag() { return <style>{`
   }
   /* UI-5C: Deadline Center guidance card hover */
   .lf-deadline-guidance-card:hover { box-shadow: 0 4px 14px rgba(15,27,51,.10) !important; transform: translateY(-1px); }
+  #root .lf-timer-bubble:hover { transform: translateY(-2px); }
 `}</style>; }
 
 export const styles = {
@@ -796,6 +798,7 @@ loginInstallDismiss: { padding: '4px 6px', borderRadius: 4, border: 'none', back
 loginDemoHint: { marginTop: 12, color: '#9C9384', fontSize: 11.5, textAlign: 'center', letterSpacing: .2 },
   logoPreview: { display: 'flex', alignItems: 'center', gap: 10, minHeight: 36 }, formHelper: { color: theme.muted, fontSize: 12, lineHeight: 1.4, alignSelf: 'center' }, clientShell: { minHeight: '100vh', background: '#F5F7FA' }, clientHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, padding: '16px 24px', background: '#fff', borderBottom: `1px solid ${theme.line}`, boxShadow: theme.shadow }, clientBrand: { display: 'flex', alignItems: 'center', gap: 10 }, clientActions: { display: 'flex', alignItems: 'center', gap: 8 }, clientMain: { display: 'grid', gridTemplateColumns: '300px minmax(0,1fr)', gap: 16, padding: 24 }, clientMatterList: { minWidth: 0 }, clientStatusGrid: { display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }, clientDescription: { color: theme.muted, marginTop: 12 }, profileTooltip: { position: 'fixed', zIndex: 5000, pointerEvents: 'none', width: 260, display: 'grid', gridTemplateColumns: '42px 1fr', gap: 10, background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 12, boxShadow: theme.shadowLift }, tooltipAvatar: { width: 42, height: 42, borderRadius: 10, background: 'var(--lf-primary, #1B3A5C)', color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 900 },
   noticeAttachmentPreview: { gridColumn: '1 / -1', display: 'grid', gap: 8, padding: 10, border: `1px solid ${theme.line}`, borderRadius: 8, background: '#F8FAFC' }, noticeAttachmentPreviewItem: { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 10, alignItems: 'center', padding: '8px 10px', border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff' }, noticeAttachmentSummary: { display: 'flex', flexWrap: 'wrap', gap: 6 }, noticeList: { display: 'grid', gap: 12 }, noticeItem: { display: 'grid', gap: 10, padding: 14, border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff' }, noticeItemHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }, noticeTitle: { margin: 0, fontSize: 15, color: theme.ink, lineHeight: 1.25 }, noticeBody: { margin: 0, color: theme.ink, lineHeight: 1.55, whiteSpace: 'pre-wrap' }, noticeFileGrid: { display: 'grid', gap: 8 }, noticeFileLink: { display: 'grid', gridTemplateColumns: '42px minmax(0,1fr) auto', gap: 10, alignItems: 'center', padding: '9px 10px', border: `1px solid ${theme.line}`, borderRadius: 8, background: '#F8FAFC', color: theme.navy600, textDecoration: 'none', fontWeight: 700 }, noticeFileIcon: { width: 42, minHeight: 28, borderRadius: 6, display: 'grid', placeItems: 'center', background: theme.blueBg, color: theme.blue, fontSize: 10, fontWeight: 900 },
+  timerBubble: { position: 'fixed', bottom: 24, right: 24, zIndex: 500, display: 'flex', alignItems: 'center', gap: 13, background: 'var(--lf-sidebar, #112219)', border: '1px solid rgba(255,255,255,.1)', color: '#fff', borderRadius: 12, padding: '11px 18px', boxShadow: '0 8px 28px rgba(0,0,0,.25)', cursor: 'pointer', fontSize: 12, transition: 'transform .2s ease', textAlign: 'left', fontFamily: 'inherit' },
 };
 
 const THEME_CSS_MAP = {
