@@ -1718,7 +1718,9 @@ function hintLabel(value) {
 }
 
 function MatterNextActionHints({ hints = [] }) {
+  const [hintsOpen, setHintsOpen] = useState(false);
   const visibleHints = hints.slice(0, 5);
+  const hintsBodyId = 'matter-next-action-hints-list';
 
   return (
     <section aria-label="Matter Next-Action Hints" style={{ border: `1px solid ${theme.line}`, background: '#fff', borderRadius: 10, padding: 14, display: 'grid', gap: 12 }}>
@@ -1727,32 +1729,49 @@ function MatterNextActionHints({ hints = [] }) {
           <strong style={{ fontSize: 13 }}>Next-Action Hints</strong>
           <span style={{ color: theme.muted, fontSize: 12 }}>Rule-based from current matter detail only.</span>
         </div>
-        <Badge tone="blue">{visibleHints.length} shown</Badge>
-      </div>
-      {visibleHints.length ? (
-        <div style={{ display: 'grid', gap: 8 }}>
-          {visibleHints.map((hint, index) => {
-            const tone = hintTone(hint.severity);
-            return (
-              <div key={`${hint.title}-${index}`} style={{ border: `1px solid ${theme.line}`, borderLeft: `4px solid ${timelineToneColor(tone)}`, borderRadius: 8, background: '#F8FAFC', padding: 10, display: 'grid', gap: 7 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <Badge tone={tone}>{hintLabel(hint.severity)}</Badge>
-                  <Badge tone="blue">{hintLabel(hint.category)}</Badge>
-                </div>
-                <strong style={{ fontSize: 13 }}>{hint.title}</strong>
-                <span style={{ color: theme.muted, fontSize: 12 }}>{hint.why}</span>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {(hint.evidence || []).map((item, itemIndex) => (
-                    <span key={`${item}-${itemIndex}`} style={{ border: `1px solid ${theme.line}`, background: '#fff', borderRadius: 999, color: theme.ink, fontSize: 11, fontWeight: 700, padding: '3px 8px' }}>{item}</span>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <Badge tone="blue">{visibleHints.length} shown</Badge>
+          <button
+            type="button"
+            aria-expanded={hintsOpen}
+            aria-controls={hintsBodyId}
+            onClick={() => setHintsOpen(open => !open)}
+            style={{ ...styles.ghostButton, fontSize: 12, padding: '4px 10px' }}
+          >
+            {hintsOpen ? 'Hide hints' : 'Show hints'}
+          </button>
         </div>
-      ) : (
-        <span style={{ color: theme.muted, fontSize: 12 }}>Matter appears current from available signals.</span>
-      )}
+      </div>
+      <div id={hintsBodyId}>
+        {!hintsOpen ? (
+          <div style={{ border: `1px dashed ${theme.line}`, borderRadius: 8, padding: 12, color: theme.muted, fontSize: 13 }}>
+            {visibleHints.length ? 'Review next-action hints when you need rule-based prompts from current matter signals.' : 'Matter appears current from available signals.'}
+          </div>
+        ) : visibleHints.length ? (
+          <div style={{ display: 'grid', gap: 8 }}>
+            {visibleHints.map((hint, index) => {
+              const tone = hintTone(hint.severity);
+              return (
+                <div key={`${hint.title}-${index}`} style={{ border: `1px solid ${theme.line}`, borderLeft: `4px solid ${timelineToneColor(tone)}`, borderRadius: 8, background: '#F8FAFC', padding: 10, display: 'grid', gap: 7 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <Badge tone={tone}>{hintLabel(hint.severity)}</Badge>
+                    <Badge tone="blue">{hintLabel(hint.category)}</Badge>
+                  </div>
+                  <strong style={{ fontSize: 13 }}>{hint.title}</strong>
+                  <span style={{ color: theme.muted, fontSize: 12 }}>{hint.why}</span>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {(hint.evidence || []).map((item, itemIndex) => (
+                      <span key={`${item}-${itemIndex}`} style={{ border: `1px solid ${theme.line}`, background: '#fff', borderRadius: 999, color: theme.ink, fontSize: 11, fontWeight: 700, padding: '3px 8px' }}>{item}</span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <span style={{ color: theme.muted, fontSize: 12 }}>Matter appears current from available signals.</span>
+        )}
+      </div>
     </section>
   );
 }
