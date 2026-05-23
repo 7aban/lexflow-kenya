@@ -1010,6 +1010,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
                   </div>
                   <MatterNextStepPanel detail={detail} />
                   <MatterCourtPrepCard detail={detail} />
+                  <MatterKeyDocumentsPanel detail={detail} />
                   <MatterCommandSummary detail={detail} nextActionHints={nextActionHints} />
                   <MatterNextActionHints hints={nextActionHints} />
                   <MatterActivityTimeline detail={detail} />
@@ -1873,6 +1874,45 @@ function MatterCourtPrepCard({ detail }) {
       <span style={{ fontSize: 14, color: theme.ink }}>{nextAppearance.title || `${nextAppearance.type || 'Court'} preparation`}</span>
       {nextAppearance.meetingLink && <a href={nextAppearance.meetingLink} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: theme.blue, textDecoration: 'underline' }}>Virtual court link</a>}
       {chips.length > 0 && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{chips.map((c, i) => <span key={i} style={chipStyle}>{c.label}</span>)}</div>}
+    </section>
+  );
+}
+
+function MatterKeyDocumentsPanel({ detail }) {
+  const documents = Array.isArray(detail?.documents) ? detail.documents : [];
+  const sorted = [...documents].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  const shown = sorted.slice(0, 5);
+  const cardStyle = { border: `1px solid ${theme.line}`, borderLeft: `4px solid ${theme.gold}`, borderRadius: 10, padding: 14, background: '#fff', display: 'grid', gap: 8 };
+  if (!shown.length) {
+    return (
+      <section aria-label="Key documents" style={cardStyle}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <div style={{ display: 'grid', gap: 2 }}>
+            <strong style={{ fontSize: 13 }}>Key documents</strong>
+            <span style={{ color: theme.muted, fontSize: 12 }}>No documents recorded for this matter yet.</span>
+          </div>
+          <button type="button" onClick={() => scrollToSection('matter-section-documents')} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }} aria-label="Go to documents section">Go to documents</button>
+        </div>
+      </section>
+    );
+  }
+  return (
+    <section aria-label="Key documents" style={cardStyle}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <strong style={{ fontSize: 13 }}>Key documents</strong>
+        <button type="button" onClick={() => scrollToSection('matter-section-documents')} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }} aria-label="Go to documents section">Go to documents</button>
+      </div>
+      <div style={{ display: 'grid', gap: 6 }}>
+        {shown.map(doc => (
+          <div key={doc.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', borderBottom: `1px solid ${theme.line}`, paddingBottom: 6, flexWrap: 'wrap' }}>
+            <div style={{ display: 'grid', gap: 1, minWidth: 0 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: theme.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.displayName || doc.friendlyName || doc.name || 'Document'}</span>
+              <span style={{ fontSize: 11, color: theme.muted }}>{doc.date || ''}{doc.source ? ` · ${doc.source}` : ''}</span>
+            </div>
+            <span style={{ fontSize: 11, color: theme.muted, whiteSpace: 'nowrap', flexShrink: 0 }}>{doc.clientVisible ? 'Shared' : doc.source === 'client' ? 'Client upload' : 'Internal'}</span>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
