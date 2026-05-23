@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX } from '@tabler/icons-react';
+import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote } from '@tabler/icons-react';
 import { api, applyChecklistTemplate, createChecklistTemplate, createMatterChecklistItem, deleteChecklistTemplate, deleteMatterChecklistItem, downloadWithAuth, fileToDataUrl, listChecklistTemplates, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, updateChecklistTemplate, updateMatterChecklistItem } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
@@ -349,6 +349,16 @@ function buildMatterNextActionHints(detail) {
       return (categoryRank[a.category] ?? 9) - (categoryRank[b.category] ?? 9);
     })
     .map(({ rank, ...hint }) => hint);
+}
+
+function scrollToSection(sectionId) {
+  const el = document.getElementById(sectionId);
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const prev = el.style.background;
+    el.style.background = 'rgba(212, 163, 74, 0.15)';
+    setTimeout(() => { el.style.background = prev; }, 1200);
+  }
 }
 
 function DashboardStatCard({ accent, iconBg, iconColor, icon: Icon, label, value, note, valueSm = false, onClick, ariaLabel }) {
@@ -943,10 +953,27 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
                 <MatterCourtMode detail={detail} nextActionHints={nextActionHints} />
               ) : (
                 <>
+                  <div className="lf-matter-quick-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 4 }}>
+                    <button type="button" onClick={() => scrollToSection('matter-section-time')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="Log time for this matter">
+                      <IconClock size={14} stroke={1.75} /> Log time
+                    </button>
+                    <button type="button" onClick={() => scrollToSection('matter-section-tasks')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="View and add matter tasks">
+                      <IconListCheck size={14} stroke={1.75} /> Task
+                    </button>
+                    <button type="button" onClick={() => scrollToSection('matter-section-court')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="Add court appearance or date">
+                      <IconCalendarEvent size={14} stroke={1.75} /> Court
+                    </button>
+                    <button type="button" onClick={() => scrollToSection('matter-section-documents')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="Upload or view documents">
+                      <IconUpload size={14} stroke={1.75} /> Document
+                    </button>
+                    <button type="button" onClick={() => scrollToSection('matter-section-notes')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="Add case note">
+                      <IconNote size={14} stroke={1.75} /> Note
+                    </button>
+                  </div>
                   <MatterCommandSummary detail={detail} nextActionHints={nextActionHints} />
                   <MatterNextActionHints hints={nextActionHints} />
                   <MatterActivityTimeline detail={detail} />
-                  <form onSubmit={logTime} style={styles.formGrid}>
+                  <form id="matter-section-time" onSubmit={logTime} style={styles.formGrid}>
                     <Field label="Hours"><input type="number" min="0" step="0.1" style={styles.input} value={time.hours} onChange={e => setTime({ ...time, hours: Number(e.target.value) })} /></Field>
                     <Field label="Description"><input style={styles.input} value={time.description} onChange={e => setTime({ ...time, description: e.target.value })} /></Field>
                     {canViewBilling && <Field label="Rate"><input type="number" style={styles.input} value={time.rate} onChange={e => setTime({ ...time, rate: Number(e.target.value) })} /></Field>}
@@ -956,10 +983,10 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
                   </form>
                   <Sub title="Time entries"><TimeEntryEditorList entries={detail.timeEntries || []} canManage={canManage} canViewBilling={canViewBilling} editingTime={editingTime} setEditingTime={setEditingTime} saveTimeEntry={saveTimeEntry} confirmDelete={entry => setConfirm({ title: 'Delete time entry?', message: 'Delete this time entry?', onConfirm: () => deleteTimeEntryRecord(entry) })} /></Sub>
                   <Sub title="Checklist"><MatterChecklistPanel items={detail.checklistItems || []} templates={activeChecklistTemplates} canManage={canManageChecklist} canToggle={canToggleChecklist} canApplyTemplate={canApplyChecklistTemplate} selectedTemplateId={selectedTemplateId} setSelectedTemplateId={setSelectedTemplateId} onApplyTemplate={applySelectedChecklistTemplate} applyingTemplate={applyingTemplate} form={checklistForm} setForm={setChecklistForm} onAdd={addChecklistItem} editingItem={editingChecklistItem} setEditingItem={setEditingChecklistItem} onToggle={toggleChecklistItem} onSave={saveChecklistItem} confirmDelete={item => setConfirm({ title: 'Delete checklist item?', message: 'Delete this checklist item?', onConfirm: () => deleteChecklistItemRecord(item) })} /></Sub>
-                  <Sub title="Tasks"><TaskEditorList tasks={detail.tasks || []} entries={detail.timeEntries || []} matter={detail} canManage={canManage} canViewBilling={canViewBilling} editingTask={editingTask} setEditingTask={setEditingTask} saveTask={saveTask} taskTimer={taskTimer} setTaskTimer={setTaskTimer} notify={notify} onTimerSaved={async () => { await loadDetail(detail.id); await reload(); }} confirmDelete={task => setConfirm({ title: 'Delete task?', message: 'Delete this task?', onConfirm: () => deleteTaskRecord(task) })} /></Sub>
-                  <Sub title="Court appearances">{canManage && <form onSubmit={createEvent} style={{ ...styles.formGrid, marginBottom: 12 }}><Field label="Title"><input required style={styles.input} value={eventForm.title} onChange={e => setEventForm({ ...eventForm, title: e.target.value })} /></Field><Field label="Date"><input required type="date" style={styles.input} value={eventForm.date} onChange={e => setEventForm({ ...eventForm, date: e.target.value })} /></Field><Field label="Time"><input style={styles.input} value={eventForm.time} onChange={e => setEventForm({ ...eventForm, time: e.target.value })} /></Field><Field label="Type"><input style={styles.input} value={eventForm.type} onChange={e => setEventForm({ ...eventForm, type: e.target.value })} /></Field><Field label="Location"><input style={styles.input} value={eventForm.location} onChange={e => setEventForm({ ...eventForm, location: e.target.value })} /></Field><Field label="Meeting Link"><input type="url" placeholder="https://..." style={styles.input} value={eventForm.meetingLink} onChange={e => setEventForm({ ...eventForm, meetingLink: e.target.value })} /></Field><button style={styles.ghostButton}>Schedule event</button></form>}<AppearanceEditorList events={detail.appearances || []} canManage={canManage} editingEvent={editingEvent} setEditingEvent={setEditingEvent} saveEvent={saveEvent} confirmDelete={event => setConfirm({ title: 'Delete appearance?', message: 'Delete this court appearance?', onConfirm: () => deleteEventRecord(event) })} /></Sub>
-                  <Sub title="Documents"><MatterDocuments matterId={detail.id} canManage={canManage} notify={notify} /></Sub>
-                  <Sub title="Case notes"><form onSubmit={addNote} style={styles.noteForm}><input style={styles.input} value={note} onChange={e => setNote(e.target.value)} placeholder="Add a note" /><button style={styles.ghostButton}>Save note</button></form><div className="lf-matter-notes-cards"><Table columns={['Note', 'Author', 'Created']} rows={(detail.notes || []).map(n => [n.content, n.author || '-', n.createdAt ? new Date(n.createdAt).toLocaleString() : '-'])} empty="No notes yet." /></div></Sub>
+                  <div id="matter-section-tasks"><Sub title="Tasks"><TaskEditorList tasks={detail.tasks || []} entries={detail.timeEntries || []} matter={detail} canManage={canManage} canViewBilling={canViewBilling} editingTask={editingTask} setEditingTask={setEditingTask} saveTask={saveTask} taskTimer={taskTimer} setTaskTimer={setTaskTimer} notify={notify} onTimerSaved={async () => { await loadDetail(detail.id); await reload(); }} confirmDelete={task => setConfirm({ title: 'Delete task?', message: 'Delete this task?', onConfirm: () => deleteTaskRecord(task) })} /></Sub></div>
+                  <div id="matter-section-court"><Sub title="Court appearances">{canManage && <form onSubmit={createEvent} style={{ ...styles.formGrid, marginBottom: 12 }}><Field label="Title"><input required style={styles.input} value={eventForm.title} onChange={e => setEventForm({ ...eventForm, title: e.target.value })} /></Field><Field label="Date"><input required type="date" style={styles.input} value={eventForm.date} onChange={e => setEventForm({ ...eventForm, date: e.target.value })} /></Field><Field label="Time"><input style={styles.input} value={eventForm.time} onChange={e => setEventForm({ ...eventForm, time: e.target.value })} /></Field><Field label="Type"><input style={styles.input} value={eventForm.type} onChange={e => setEventForm({ ...eventForm, type: e.target.value })} /></Field><Field label="Location"><input style={styles.input} value={eventForm.location} onChange={e => setEventForm({ ...eventForm, location: e.target.value })} /></Field><Field label="Meeting Link"><input type="url" placeholder="https://..." style={styles.input} value={eventForm.meetingLink} onChange={e => setEventForm({ ...eventForm, meetingLink: e.target.value })} /></Field><button style={styles.ghostButton}>Schedule event</button></form>}<AppearanceEditorList events={detail.appearances || []} canManage={canManage} editingEvent={editingEvent} setEditingEvent={setEditingEvent} saveEvent={saveEvent} confirmDelete={event => setConfirm({ title: 'Delete appearance?', message: 'Delete this court appearance?', onConfirm: () => deleteEventRecord(event) })} /></Sub></div>
+                  <div id="matter-section-documents"><Sub title="Documents"><MatterDocuments matterId={detail.id} canManage={canManage} notify={notify} /></Sub></div>
+                  <div id="matter-section-notes"><Sub title="Case notes"><form onSubmit={addNote} style={styles.noteForm}><input style={styles.input} value={note} onChange={e => setNote(e.target.value)} placeholder="Add a note" /><button style={styles.ghostButton}>Save note</button></form><div className="lf-matter-notes-cards"><Table columns={['Note', 'Author', 'Created']} rows={(detail.notes || []).map(n => [n.content, n.author || '-', n.createdAt ? new Date(n.createdAt).toLocaleString() : '-'])} empty="No notes yet." /></div></Sub></div>
                   <Sub title="Invoices"><div className="lf-invoice-cards"><Table columns={['Invoice', 'Amount', 'Paid', 'Balance', 'Status', 'PDF', 'Actions']} rows={(detail.invoices || []).map(i => [i.number || i.id, kes(i.amount), kes(i.amountPaid), kes(i.balance), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <DownloadButton key={`${i.id}-pdf`} label="PDF" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />, canManage && i.status !== 'Paid' ? <ActionGroup key={`${i.id}-actions`} actions={[['Delete', () => setConfirm({ title: 'Delete invoice?', message: 'Delete this invoice?', onConfirm: () => deleteInvoiceRecord(i) })]]} /> : '-'])} empty="No invoices yet." /></div></Sub>
                 </>
               )}
