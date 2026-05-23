@@ -198,7 +198,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
           </div>
         </header>
         {loading && <Skeleton />}
-        {!loading && view === 'Dashboard' && <ClientDashboard data={dashboard} stats={stats} selectMatter={id => { setSelectedId(id); setView('My Matters'); }} />}
+        {!loading && view === 'Dashboard' && <ClientDashboard data={dashboard} stats={stats} selectMatter={id => { setSelectedId(id); setView('My Matters'); }} onNavigate={switchView} />}
         {!loading && view === 'My Matters' && (
           <ClientMatterDetail
             matters={dashboard.matters}
@@ -227,12 +227,36 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
   );
 }
 
-function ClientDashboard({ data, stats, selectMatter }) {
+function ClientDashboard({ data, stats, selectMatter, onNavigate }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const nextCourt = data.appearances.filter(a => a.date >= today).sort((a, b) => a.date.localeCompare(b.date))[0];
+  const matterForInvoices = data.invoices.length > 0 ? data.matters.find(m => data.invoices.some(i => i.matterId === m.id)) || data.matters[0] : null;
   return (
     <div style={styles.pageStack}>
       <section style={styles.heroCard}>
         <div><div style={styles.heroKicker}>Client workspace</div><h2>Your matters at a glance.</h2><p>Track active files, court appearances, invoices and documents shared by the firm.</p></div>
         <div style={styles.heroFigure}>{data.client?.name || 'Client'}</div>
+      </section>
+      <section style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: 14 }}>
+        <h3 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>Matter status</h3>
+        {data.matters.length > 0 ? (
+          <>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 16px', fontSize: 13, lineHeight: 1.8 }}>
+              <span>{stats.activeMatters} active matter{stats.activeMatters === 1 ? '' : 's'}</span>
+              {nextCourt && <span>Next court: {nextCourt.date}</span>}
+              <span>{data.documents.length} document{data.documents.length === 1 ? '' : 's'}</span>
+              {stats.unpaidInvoices > 0 && <span>{stats.unpaidInvoices} unpaid invoice{stats.unpaidInvoices === 1 ? '' : 's'}</span>}
+              {data.notices.length > 0 && <span>Latest: {data.notices[0].title}</span>}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+              {data.documents.length > 0 && <button type="button" onClick={() => onNavigate('Documents')} style={styles.tinyButton}>View documents</button>}
+              {matterForInvoices && <button type="button" onClick={() => selectMatter(matterForInvoices.id)} style={styles.tinyButton}>View invoices</button>}
+              {data.notices.length > 0 && <button type="button" onClick={() => onNavigate('Notices')} style={styles.tinyButton}>View updates</button>}
+            </div>
+          </>
+        ) : (
+          <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>Your matter updates will appear here when available.</p>
+        )}
       </section>
       <div style={styles.statsGrid}>
         <Stat label="Active matters" value={stats.activeMatters} tone="navy" />
