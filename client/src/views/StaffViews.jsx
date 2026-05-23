@@ -1008,10 +1008,12 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
                       <IconNote size={14} stroke={1.75} /> Note
                     </button>
                   </div>
-                  <MatterNextStepPanel detail={detail} />
-                  <MatterCourtPrepCard detail={detail} />
-                  <MatterKeyDocumentsPanel detail={detail} />
-                  <MatterBillingSnapshot detail={detail} />
+                  <div className="lf-matter-cockpit" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
+                    <MatterNextStepPanel detail={detail} />
+                    <MatterCourtPrepCard detail={detail} />
+                    <MatterKeyDocumentsPanel detail={detail} />
+                    <MatterBillingSnapshot detail={detail} />
+                  </div>
                   <MatterCommandSummary detail={detail} nextActionHints={nextActionHints} />
                   <MatterNextActionHints hints={nextActionHints} />
                   <MatterActivityTimeline detail={detail} />
