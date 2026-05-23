@@ -1,8 +1,9 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const { hashPassword } = require('../lib/passwords');
+const config = require('../lib/config');
 
-const dbPath = path.join(__dirname, '..', 'lawfirm.db');
+const dbPath = config.DATABASE_PATH;
 const db = new sqlite3.Database(dbPath);
 
 const run = (sql, params = []) => new Promise((resolve, reject) => db.run(sql, params, function onRun(err) { err ? reject(err) : resolve(this); }));
