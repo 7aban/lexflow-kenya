@@ -1,0 +1,45 @@
+services:
+  lexflow-api:
+    build:
+      context: .
+      target: backend-runtime
+    container_name: lexflow-api
+    env_file: deploy/.env
+    environment:
+      NODE_ENV: production
+      PORT: "5000"
+      DATABASE_PATH: /data/lawfirm.db
+      BACKUP_DIR: /backups
+      BACKUP_LOG: /logs/backup.log
+    volumes:
+      - lexflow-data:/data
+      - lexflow-backups:/backups
+      - lexflow-logs:/logs
+    expose:
+      - "5000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:5000/health').then(r=>{if(!r.ok)throw 1})"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  lexflow-web:
+    build:
+      context: .
+      target: web
+    container_name: lexflow-web
+    ports:
+      - "8080:80"
+    volumes:
+      - ./deploy/nginx/lexflow.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      lexflow-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  lexflow-data:
+  lexflow-backups:
+  lexflow-logs:

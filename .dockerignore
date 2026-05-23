@@ -1,0 +1,36 @@
+# Version control
+.git
+.gitignore
+
+# Dependencies (rebuilt in container)
+node_modules
+*/node_modules
+
+# Build outputs (rebuilt in container)
+client/dist
+client/test-results
+coverage
+
+# Environment files (secrets)
+.env
+.env.*
+server/.env
+server/.env.*
+!deploy/.env.example
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+server/lawfirm.db
+server/lawfirm.db-shm
+server/lawfirm.db-wal
+
+# Runtime data
+backups
+logs
+*.log
+
+# Test / smoke artifacts
+test-results
+playwright-report
