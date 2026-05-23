@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createDeadline, deleteDeadline, getComplianceGuidance, getDeadlines, updateDeadline } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Badge, Card, ConfirmModal, Empty, Field, Skeleton, Stat, Table } from '../components/ui.jsx';
@@ -97,6 +97,31 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
     };
   }, [deadlines]);
 
+  const scrollToTimeline = useCallback(() => {
+    const el = document.querySelector('.lf-deadline-cards');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
+
+  const courtItems = useMemo(() => {
+    return (deadlines || []).filter(d => d.type === 'Court Date' && d.status !== 'Done');
+  }, [deadlines]);
+
+  const todayIso = new Date().toISOString().slice(0, 10);
+
+  const nextCourtItem = useMemo(() => {
+    const upcoming = courtItems.filter(d => d.dueDate && d.dueDate >= todayIso).sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)));
+    return upcoming[0] || null;
+  }, [courtItems, todayIso]);
+
+  const todayCourtItems = useMemo(() => {
+    return courtItems.filter(d => d.dueDate === todayIso);
+  }, [courtItems, todayIso]);
+
+  const weekCourtCount = useMemo(() => {
+    const weekLater = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+    return courtItems.filter(d => d.dueDate && d.dueDate >= todayIso && d.dueDate <= weekLater).length;
+  }, [courtItems, todayIso]);
+
   async function submit(event) {
     event.preventDefault();
     if (!canManage) return notify?.({ type: 'warning', message: 'Only advocates and admins can add custom deadlines.' });
@@ -170,6 +195,32 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
         <Stat label="Next 7 days" value={summary.week} tone="gold" />
         <Stat label="Next 30 days" value={summary.month} tone="gold" />
         <Stat label="Open deadlines" value={summary.open} tone="navy" />
+      </div>
+
+      <div style={{ border: `1px solid ${theme.line}`, borderRadius: 10, padding: 16, background: '#fff', boxShadow: theme.shadow, display: 'grid', gap: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+          <strong style={{ fontSize: 15 }}>Court diary</strong>
+          {courtItems.length > 0 && <button type="button" onClick={scrollToTimeline} style={styles.ghostButton}>View in timeline</button>}
+        </div>
+        {nextCourtItem ? (
+          <>
+            <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: 14, display: 'grid', gap: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <Badge tone={todayCourtItems.length > 0 ? 'red' : 'blue'}>{todayCourtItems.length > 0 ? 'Today' : 'Next court date'}</Badge>
+                <span style={{ fontSize: 12, color: theme.muted, textAlign: 'right' }}>{nextCourtItem.dueDate}</span>
+              </div>
+              <span style={{ fontSize: 14, fontWeight: 600, color: theme.ink }}>{nextCourtItem.title || 'Court appearance'}</span>
+              {nextCourtItem.matterTitle && <span style={{ fontSize: 12, color: theme.muted }}>Matter: {nextCourtItem.matterTitle}{nextCourtItem.clientName ? ` · ${nextCourtItem.clientName}` : ''}</span>}
+              {nextCourtItem.notes && <span style={{ fontSize: 12, color: theme.muted, fontStyle: 'italic' }}>{nextCourtItem.notes}</span>}
+            </div>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span style={{ fontSize: 13, color: theme.muted }}><strong style={{ color: theme.ink }}>{weekCourtCount}</strong> court date{weekCourtCount !== 1 ? 's' : ''} next 7 days</span>
+              {todayCourtItems.length > 0 && <Badge tone="red">{todayCourtItems.length} today</Badge>}
+            </div>
+          </>
+        ) : (
+          <span style={{ color: theme.muted, fontSize: 13 }}>No court appearances recorded.</span>
+        )}
       </div>
 
       <Card title="Compliance Guidance" hint="Rule-based prompts for deadlines, statutory filings and risk controls.">
