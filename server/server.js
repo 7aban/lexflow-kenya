@@ -76,6 +76,12 @@ app.use(express.json({ limit: config.JSON_BODY_LIMIT }));
 // Separate upload limit for document routes
 app.use('/api/documents', express.json({ limit: config.UPLOAD_BODY_LIMIT }));
 
+app.use('/api', (_req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.set('Pragma', 'no-cache');
+  next();
+});
+
 // General API rate limiter
 const generalLimiter = rateLimit(config.rateLimitConfig(config.RATE_LIMIT_WINDOW_MS, config.RATE_LIMIT_MAX));
 
@@ -2825,6 +2831,8 @@ app.get('/api/exports/:type.:format', requireStaff, async (req, res) => {
 
 // Health check endpoint — public, no auth, no sensitive data
 app.get('/health', (_req, res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.set('Pragma', 'no-cache');
   res.json({
     status: 'ok',
     service: 'lexflow-api',
