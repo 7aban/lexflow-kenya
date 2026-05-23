@@ -16,6 +16,10 @@ function documentListColumns() {
   return `d.id,d.matterId,d.name,d.displayName,d.type,d.mimeType,d.date,d.size,d.source,d.folderId,d.messageId,d.noticeId,d.clientVisible,d.uploadedBy,f.name folderName`;
 }
 
+function documentMetadataColumns() {
+  return `id,matterId,name,displayName,type,mimeType,date,size,source,folderId,messageId,noticeId,clientVisible,uploadedBy,templateId,templateName,generatedBy,generatedAt,version,deletedAt`;
+}
+
 function clientDocumentVisibilitySql(alias = 'd') {
   return `(
     ${alias}.source='client'
@@ -161,6 +165,7 @@ module.exports = {
   cleanDocumentName,
   fileTypeFor,
   documentListColumns,
+  documentMetadataColumns,
   clientDocumentVisibilitySql,
   publicDocument,
   publicNotice,

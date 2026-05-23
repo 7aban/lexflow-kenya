@@ -21,7 +21,7 @@ const createLogging = require('./lib/logging');
 const createNotifications = require('./lib/notifications');
 const createInvitations = require('./lib/invitations');
 const createAudit = require('./lib/audit');
-const { cleanDocumentName, fileTypeFor, documentListColumns, clientDocumentVisibilitySql, publicDocument, publicNotice, MAX_NOTICE_ATTACHMENTS, MAX_NOTICE_ATTACHMENT_BYTES, allowedNoticeMimeTypes, noticeMimeTypeFor, decodeAttachmentData, prepareNoticeAttachments } = require('./lib/documents');
+const { cleanDocumentName, fileTypeFor, documentListColumns, documentMetadataColumns, clientDocumentVisibilitySql, publicDocument, publicNotice, MAX_NOTICE_ATTACHMENTS, MAX_NOTICE_ATTACHMENT_BYTES, allowedNoticeMimeTypes, noticeMimeTypeFor, decodeAttachmentData, prepareNoticeAttachments } = require('./lib/documents');
 const config = require('./lib/config');
 const { signAccessToken } = require('./lib/tokens');
 const { validatePasswordPolicy } = require('./lib/passwordPolicy');
@@ -2272,7 +2272,7 @@ app.get('/api/documents/:id/download', async (req, res) => {
   res.send(doc.content);
 });
 app.patch('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
-  const doc = await get('SELECT * FROM documents WHERE id=?', [req.params.id]);
+  const doc = await get(`SELECT ${documentMetadataColumns()} FROM documents WHERE id=?`, [req.params.id]);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
   if (doc.matterId && !(await canAccessMatter(req, doc.matterId))) {
     await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
@@ -2333,7 +2333,7 @@ app.patch('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
   res.json(publicDocument(updated));
 });
 app.delete('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
-  const doc = await get('SELECT * FROM documents WHERE id=? AND deletedAt IS NULL', [req.params.id]);
+  const doc = await get(`SELECT ${documentMetadataColumns()} FROM documents WHERE id=? AND deletedAt IS NULL`, [req.params.id]);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
   if (doc.matterId && !(await canAccessMatter(req, doc.matterId))) {
     await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
