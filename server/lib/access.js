@@ -102,20 +102,6 @@ module.exports = ({ get, all }) => {
     return true; // admin/assistant
   };
 
-  const scopeMattersQuery = (user) => {
-    if (user?.role === 'advocate') {
-      return `assignedTo='${user.fullName || ''}'`;
-    }
-    return ''; // admin/assistant - no scoping
-  };
-
-  const scopeClientsQuery = (user) => {
-    if (user?.role === 'advocate') {
-      return `id IN (SELECT clientId FROM matters WHERE assignedTo='${user.fullName || ''}')`;
-    }
-    return ''; // admin/assistant - no scoping
-  };
-
   const isBillingVisibleFor = async (req) => {
     if (req.user?.role !== 'advocate') return true;
     const row = await get('SELECT advocateBillingVisibility FROM firm_settings LIMIT 1');
@@ -132,8 +118,6 @@ module.exports = ({ get, all }) => {
     canAccessTask,
     canAccessAppearance,
     canAccessTimeEntry,
-    scopeMattersQuery,
-    scopeClientsQuery,
     isBillingVisibleFor,
   };
 };
