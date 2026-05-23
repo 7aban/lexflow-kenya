@@ -361,6 +361,44 @@ function scrollToSection(sectionId) {
   }
 }
 
+function computeNextStep(detail) {
+  if (!detail) return null;
+  const today = isoDateOnly();
+  const tasks = Array.isArray(detail.tasks) ? detail.tasks : [];
+  const appearances = Array.isArray(detail.appearances) ? detail.appearances : [];
+  const documents = Array.isArray(detail.documents) ? detail.documents : [];
+  const timeEntries = Array.isArray(detail.timeEntries) ? detail.timeEntries : [];
+  const checklistItems = Array.isArray(detail.checklistItems) ? detail.checklistItems : [];
+
+  const overdueTasks = tasks.filter(t => !t.completed && t.dueDate && t.dueDate < today);
+  if (overdueTasks.length) {
+    return { title: 'Clear overdue work', reason: `${overdueTasks.length} overdue task${overdueTasks.length === 1 ? '' : 's'} need attention`, sectionId: 'matter-section-tasks', actionLabel: 'View tasks' };
+  }
+
+  const overdueChecklist = checklistItems.filter(item => Number(item.completed || 0) !== 1 && item.dueDate && item.dueDate < today);
+  if (overdueChecklist.length) {
+    return { title: 'Complete overdue checklist items', reason: `${overdueChecklist.length} overdue checklist item${overdueChecklist.length === 1 ? '' : 's'}`, sectionId: 'matter-section-tasks', actionLabel: 'View checklist' };
+  }
+
+  const upcomingAppearances = appearances.filter(a => a.date && a.date >= today).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  if (upcomingAppearances.length) {
+    const next = upcomingAppearances[0];
+    return { title: 'Prepare for court', reason: `${next.type || 'Appearance'} on ${next.date}${next.location ? ` at ${next.location}` : ''}`, sectionId: 'matter-section-court', actionLabel: 'View court date' };
+  }
+
+  if (!documents.length) {
+    return { title: 'Upload documents', reason: 'No documents recorded for this matter', sectionId: 'matter-section-documents', actionLabel: 'Upload document' };
+  }
+
+  const unbilledTime = timeEntries.filter(e => !e.billed);
+  if (unbilledTime.length) {
+    const totalHours = unbilledTime.reduce((s, e) => s + Number(e.hours || 0), 0);
+    return { title: 'Review unbilled time', reason: `${unbilledTime.length} unbilled entr${unbilledTime.length === 1 ? 'y' : 'ies'} (${totalHours.toFixed(1)}h)`, sectionId: 'matter-section-time', actionLabel: 'Review time' };
+  }
+
+  return { title: 'Review matter workspace', reason: 'Matter appears current — review open items and upcoming work', sectionId: 'matter-section-tasks', actionLabel: 'Browse workspace' };
+}
+
 function DashboardStatCard({ accent, iconBg, iconColor, icon: Icon, label, value, note, valueSm = false, onClick, ariaLabel }) {
   const content = (
     <>
@@ -970,6 +1008,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
                       <IconNote size={14} stroke={1.75} /> Note
                     </button>
                   </div>
+                  <MatterNextStepPanel detail={detail} />
                   <MatterCommandSummary detail={detail} nextActionHints={nextActionHints} />
                   <MatterNextActionHints hints={nextActionHints} />
                   <MatterActivityTimeline detail={detail} />
@@ -1771,6 +1810,25 @@ function hintTone(severity) {
 
 function hintLabel(value) {
   return String(value || '').replace(/-/g, ' ');
+}
+
+function MatterNextStepPanel({ detail }) {
+  const step = useMemo(() => computeNextStep(detail), [detail]);
+  if (!step) return null;
+  return (
+    <section aria-label="Next step" style={{ border: `1px solid ${theme.line}`, borderLeft: `4px solid ${theme.gold || '#D4A34A'}`, borderRadius: 10, padding: 14, background: '#fff', display: 'grid', gap: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <div style={{ display: 'grid', gap: 2 }}>
+          <strong style={{ fontSize: 13 }}>Next step</strong>
+          <span style={{ color: theme.muted, fontSize: 12 }}>{step.reason}</span>
+        </div>
+        <button type="button" onClick={() => scrollToSection(step.sectionId)} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }} aria-label={step.title}>
+          {step.actionLabel}
+        </button>
+      </div>
+      <span style={{ fontSize: 14, color: theme.ink }}>{step.title}</span>
+    </section>
+  );
 }
 
 function MatterNextActionHints({ hints = [] }) {
