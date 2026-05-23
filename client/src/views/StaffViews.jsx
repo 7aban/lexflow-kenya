@@ -1009,6 +1009,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
                     </button>
                   </div>
                   <MatterNextStepPanel detail={detail} />
+                  <MatterCourtPrepCard detail={detail} />
                   <MatterCommandSummary detail={detail} nextActionHints={nextActionHints} />
                   <MatterNextActionHints hints={nextActionHints} />
                   <MatterActivityTimeline detail={detail} />
@@ -1827,6 +1828,51 @@ function MatterNextStepPanel({ detail }) {
         </button>
       </div>
       <span style={{ fontSize: 14, color: theme.ink }}>{step.title}</span>
+    </section>
+  );
+}
+
+function MatterCourtPrepCard({ detail }) {
+  const appearances = Array.isArray(detail?.appearances) ? detail.appearances : [];
+  const tasks = Array.isArray(detail?.tasks) ? detail.tasks : [];
+  const documents = Array.isArray(detail?.documents) ? detail.documents : [];
+  const notes = Array.isArray(detail?.notes) ? detail.notes : [];
+  const today = isoDateOnly();
+  const upcoming = appearances.filter(a => a.date && a.date >= today).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const nextAppearance = upcoming[0];
+  const openTasks = tasks.filter(t => !t.completed);
+  const chips = [];
+  if (openTasks.length) chips.push({ label: `${openTasks.length} task${openTasks.length === 1 ? '' : 's'} open` });
+  if (documents.length) chips.push({ label: 'Documents available' });
+  if (notes.length) chips.push({ label: 'Notes available' });
+  const cardStyle = { border: `1px solid ${theme.line}`, borderLeft: `4px solid ${theme.gold}`, borderRadius: 10, padding: 14, background: '#fff', display: 'grid', gap: 8 };
+  const chipStyle = { border: `1px solid ${theme.line}`, background: '#fff', borderRadius: 999, color: theme.ink, fontSize: 11, fontWeight: 700, padding: '3px 8px' };
+  if (!nextAppearance) {
+    return (
+      <section aria-label="Court prep" style={cardStyle}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <div style={{ display: 'grid', gap: 2 }}>
+            <strong style={{ fontSize: 13 }}>Court prep</strong>
+            <span style={{ color: theme.muted, fontSize: 12 }}>No upcoming court date recorded for this matter.</span>
+          </div>
+          <button type="button" onClick={() => scrollToSection('matter-section-court')} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }} aria-label="Add or check court dates">Add/check court dates</button>
+        </div>
+        {chips.length > 0 && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{chips.map((c, i) => <span key={i} style={chipStyle}>{c.label}</span>)}</div>}
+      </section>
+    );
+  }
+  return (
+    <section aria-label="Court prep" style={cardStyle}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <div style={{ display: 'grid', gap: 2 }}>
+          <strong style={{ fontSize: 13 }}>Next court prep</strong>
+          <span style={{ color: theme.muted, fontSize: 12 }}>{nextAppearance.type || 'Appearance'} on {nextAppearance.date}{nextAppearance.time ? ` at ${nextAppearance.time}` : ''}{nextAppearance.location ? ` — ${nextAppearance.location}` : ''}</span>
+        </div>
+        <button type="button" onClick={() => scrollToSection('matter-section-court')} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }} aria-label="Go to court section">Go to court section</button>
+      </div>
+      <span style={{ fontSize: 14, color: theme.ink }}>{nextAppearance.title || `${nextAppearance.type || 'Court'} preparation`}</span>
+      {nextAppearance.meetingLink && <a href={nextAppearance.meetingLink} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: theme.blue, textDecoration: 'underline' }}>Virtual court link</a>}
+      {chips.length > 0 && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{chips.map((c, i) => <span key={i} style={chipStyle}>{c.label}</span>)}</div>}
     </section>
   );
 }
