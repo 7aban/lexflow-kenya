@@ -1011,6 +1011,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
                   <MatterNextStepPanel detail={detail} />
                   <MatterCourtPrepCard detail={detail} />
                   <MatterKeyDocumentsPanel detail={detail} />
+                  <MatterBillingSnapshot detail={detail} />
                   <MatterCommandSummary detail={detail} nextActionHints={nextActionHints} />
                   <MatterNextActionHints hints={nextActionHints} />
                   <MatterActivityTimeline detail={detail} />
@@ -1028,7 +1029,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
                   <div id="matter-section-court"><Sub title="Court appearances">{canManage && <form onSubmit={createEvent} style={{ ...styles.formGrid, marginBottom: 12 }}><Field label="Title"><input required style={styles.input} value={eventForm.title} onChange={e => setEventForm({ ...eventForm, title: e.target.value })} /></Field><Field label="Date"><input required type="date" style={styles.input} value={eventForm.date} onChange={e => setEventForm({ ...eventForm, date: e.target.value })} /></Field><Field label="Time"><input style={styles.input} value={eventForm.time} onChange={e => setEventForm({ ...eventForm, time: e.target.value })} /></Field><Field label="Type"><input style={styles.input} value={eventForm.type} onChange={e => setEventForm({ ...eventForm, type: e.target.value })} /></Field><Field label="Location"><input style={styles.input} value={eventForm.location} onChange={e => setEventForm({ ...eventForm, location: e.target.value })} /></Field><Field label="Meeting Link"><input type="url" placeholder="https://..." style={styles.input} value={eventForm.meetingLink} onChange={e => setEventForm({ ...eventForm, meetingLink: e.target.value })} /></Field><button style={styles.ghostButton}>Schedule event</button></form>}<AppearanceEditorList events={detail.appearances || []} canManage={canManage} editingEvent={editingEvent} setEditingEvent={setEditingEvent} saveEvent={saveEvent} confirmDelete={event => setConfirm({ title: 'Delete appearance?', message: 'Delete this court appearance?', onConfirm: () => deleteEventRecord(event) })} /></Sub></div>
                   <div id="matter-section-documents"><Sub title="Documents"><MatterDocuments matterId={detail.id} canManage={canManage} notify={notify} /></Sub></div>
                   <div id="matter-section-notes"><Sub title="Case notes"><form onSubmit={addNote} style={styles.noteForm}><input style={styles.input} value={note} onChange={e => setNote(e.target.value)} placeholder="Add a note" /><button style={styles.ghostButton}>Save note</button></form><div className="lf-matter-notes-cards"><Table columns={['Note', 'Author', 'Created']} rows={(detail.notes || []).map(n => [n.content, n.author || '-', n.createdAt ? new Date(n.createdAt).toLocaleString() : '-'])} empty="No notes yet." /></div></Sub></div>
-                  <Sub title="Invoices"><div className="lf-invoice-cards"><Table columns={['Invoice', 'Amount', 'Paid', 'Balance', 'Status', 'PDF', 'Actions']} rows={(detail.invoices || []).map(i => [i.number || i.id, kes(i.amount), kes(i.amountPaid), kes(i.balance), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <DownloadButton key={`${i.id}-pdf`} label="PDF" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />, canManage && i.status !== 'Paid' ? <ActionGroup key={`${i.id}-actions`} actions={[['Delete', () => setConfirm({ title: 'Delete invoice?', message: 'Delete this invoice?', onConfirm: () => deleteInvoiceRecord(i) })]]} /> : '-'])} empty="No invoices yet." /></div></Sub>
+                  <div id="matter-section-invoices"><Sub title="Invoices"><div className="lf-invoice-cards"><Table columns={['Invoice', 'Amount', 'Paid', 'Balance', 'Status', 'PDF', 'Actions']} rows={(detail.invoices || []).map(i => [i.number || i.id, kes(i.amount), kes(i.amountPaid), kes(i.balance), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <DownloadButton key={`${i.id}-pdf`} label="PDF" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />, canManage && i.status !== 'Paid' ? <ActionGroup key={`${i.id}-actions`} actions={[['Delete', () => setConfirm({ title: 'Delete invoice?', message: 'Delete this invoice?', onConfirm: () => deleteInvoiceRecord(i) })]]} /> : '-'])} empty="No invoices yet." /></div></Sub></div>
                 </>
               )}
             </div>
@@ -1912,6 +1913,59 @@ function MatterKeyDocumentsPanel({ detail }) {
             <span style={{ fontSize: 11, color: theme.muted, whiteSpace: 'nowrap', flexShrink: 0 }}>{doc.clientVisible ? 'Shared' : doc.source === 'client' ? 'Client upload' : 'Internal'}</span>
           </div>
         ))}
+      </div>
+    </section>
+  );
+}
+
+function MatterBillingSnapshot({ detail }) {
+  const timeEntries = Array.isArray(detail?.timeEntries) ? detail.timeEntries : [];
+  const invoices = Array.isArray(detail?.invoices) ? detail.invoices : [];
+  const totalHours = timeEntries.reduce((s, e) => s + Number(e.hours || 0), 0);
+  const unbilledCount = timeEntries.filter(e => !e.billed).length;
+  const invoiceCount = invoices.length;
+  const outstandingCount = invoices.filter(i => i.status === 'Outstanding' || i.status === 'Overdue').length;
+  const paidCount = invoices.filter(i => i.status === 'Paid').length;
+  const hasBilling = totalHours > 0 || invoiceCount > 0;
+  const cardStyle = { border: `1px solid ${theme.line}`, borderLeft: `4px solid #2563EB`, borderRadius: 10, padding: 14, background: '#fff', display: 'grid', gap: 8 };
+  if (!hasBilling) {
+    return (
+      <section aria-label="Billing snapshot" style={cardStyle}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <div style={{ display: 'grid', gap: 2 }}>
+            <strong style={{ fontSize: 13 }}>Billing snapshot</strong>
+            <span style={{ color: theme.muted, fontSize: 12 }}>No billing activity recorded for this matter yet.</span>
+          </div>
+          <button type="button" onClick={() => scrollToSection(invoiceCount ? 'matter-section-invoices' : 'matter-section-time')} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }} aria-label={invoiceCount ? 'Go to invoices' : 'Go to time entries'}>{invoiceCount ? 'Go to invoices' : 'Go to time entries'}</button>
+        </div>
+      </section>
+    );
+  }
+  return (
+    <section aria-label="Billing snapshot" style={cardStyle}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <strong style={{ fontSize: 13 }}>Billing snapshot</strong>
+        <button type="button" onClick={() => scrollToSection(invoiceCount ? 'matter-section-invoices' : 'matter-section-time')} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }} aria-label={invoiceCount ? 'Go to invoices' : 'Go to time entries'}>{invoiceCount ? 'Go to invoices' : 'Go to time entries'}</button>
+      </div>
+      <div style={{ display: 'grid', gap: 6 }}>
+        {totalHours > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', borderBottom: `1px solid ${theme.line}`, paddingBottom: 6 }}>
+            <span style={{ fontSize: 12, color: theme.muted }}>Logged hours</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: theme.ink }}>{totalHours.toFixed(1)}h</span>
+          </div>
+        )}
+        {unbilledCount > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', borderBottom: `1px solid ${theme.line}`, paddingBottom: 6 }}>
+            <span style={{ fontSize: 12, color: theme.muted }}>Unbilled entries</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: theme.ink }}>{unbilledCount}</span>
+          </div>
+        )}
+        {invoiceCount > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', paddingBottom: 0 }}>
+            <span style={{ fontSize: 12, color: theme.muted }}>Invoices</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: theme.ink }}>{invoiceCount} ({paidCount} paid{outstandingCount ? `, ${outstandingCount} outstanding` : ''})</span>
+          </div>
+        )}
       </div>
     </section>
   );
