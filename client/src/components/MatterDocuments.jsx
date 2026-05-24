@@ -56,6 +56,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const [generating, setGenerating] = useState(false);
   const [generationMessage, setGenerationMessage] = useState('');
   const [generationWarning, setGenerationWarning] = useState('');
+  const [templateSearch, setTemplateSearch] = useState('');
 
   const showGenerateControls = canManage === true && clientMode === false && Boolean(matterId);
 
@@ -71,6 +72,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       setTemplateError('');
       setGenerationMessage('');
       setGenerationWarning('');
+      setTemplateSearch('');
       return;
     }
     loadTemplates();
@@ -237,6 +239,20 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const realFolders = folders.filter(folder => !folder.virtual);
   const folderOptions = useMemo(() => [{ id: 'uncategorised', name: 'Uncategorised' }, ...realFolders], [realFolders]);
   const selectedName = folders.find(folder => folder.id === selectedFolder)?.name || 'All Documents';
+
+  const filteredTemplates = useMemo(() => {
+    const q = templateSearch.trim().toLowerCase();
+    if (!q) return templates;
+    return templates.filter(t => (t.name || t.title || '').toLowerCase().includes(q));
+  }, [templates, templateSearch]);
+
+  const selectTemplates = useMemo(() => {
+    if (!templateSearch.trim() || !templates.length) return templates;
+    const hasSelected = filteredTemplates.some(t => String(t.id) === String(selectedTemplateId));
+    if (hasSelected) return filteredTemplates;
+    const sel = templates.find(t => String(t.id) === String(selectedTemplateId));
+    return sel ? [sel, ...filteredTemplates] : filteredTemplates;
+  }, [filteredTemplates, templates, selectedTemplateId, templateSearch]);
   const showUploadControls = clientMode || canManage;
   const documentCardHint = clientMode
     ? 'Client uploads are placed in Client Uploads automatically.'
@@ -321,10 +337,34 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
         {showGenerateControls && (
           <div className="lf-doc-generate-area">
             <form onSubmit={generateDraft} style={{ display: 'grid', gap: 8 }}>
+              {templates.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <input
+                    type="search"
+                    style={{ ...styles.input, flex: '1 1 160px', minWidth: 0 }}
+                    placeholder="Find template…"
+                    value={templateSearch}
+                    onChange={e => setTemplateSearch(e.target.value)}
+                    disabled={templatesLoading || generating}
+                    aria-label="Filter templates by name"
+                  />
+                  <span style={{ fontSize: 11, color: theme.muted, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                    {templateSearch.trim()
+                      ? `Showing ${filteredTemplates.length} of ${templates.length}`
+                      : `${templates.length} template${templates.length !== 1 ? 's' : ''}`}
+                  </span>
+                </div>
+              )}
+              {templateSearch.trim() && filteredTemplates.length === 0 && (
+                <span style={{ fontSize: 12, color: theme.muted, fontStyle: 'italic' }}>No templates match that search.</span>
+              )}
+              {templateSearch.trim() && Boolean(selectedTemplateId) && !filteredTemplates.some(t => String(t.id) === String(selectedTemplateId)) && filteredTemplates.length > 0 && (
+                <span style={{ fontSize: 11, color: theme.muted }}>Current selection retained above filter results.</span>
+              )}
               <div style={{ ...styles.formGrid, alignItems: 'end' }}>
                 <Field label="Generate Draft">
                   <select style={styles.input} value={selectedTemplateId} onChange={e => setSelectedTemplateId(e.target.value)} disabled={templatesLoading || generating || !templates.length}>
-                    {templates.length ? templates.map(template => (
+                    {templates.length ? selectTemplates.map(template => (
                       <option key={template.id} value={template.id}>{template.name || template.title || 'Document template'}</option>
                     )) : <option value="">{templatesLoading ? 'Loading templates...' : 'No active templates'}</option>}
                   </select>
