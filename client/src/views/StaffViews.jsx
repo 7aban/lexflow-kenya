@@ -1075,6 +1075,13 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify }) {
   const session = readSession();
   const canRecordPayment = ['admin', 'assistant'].includes(session?.user?.role);
   const selectedInvoice = invoices.find(invoice => invoice.id === selectedInvoiceId);
+  const invoiceSummary = useMemo(() => {
+    const total = invoices.length;
+    const paid = invoices.filter(i => i.status === 'Paid').length;
+    const outstanding = invoices.filter(i => i.status === 'Outstanding').length;
+    const overdue = invoices.filter(i => i.status === 'Overdue').length;
+    return { total, paid, outstanding, overdue, unpaid: outstanding + overdue };
+  }, [invoices]);
   async function setStatus(id, status) { try { await api(`/invoices/${id}/status`, { method: 'PATCH', body: { status } }); notify({ type: 'success', message: 'Invoice updated.' }); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteInvoiceRecord(invoice) { try { await api(`/invoices/${invoice.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Invoice deleted.' }); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function openPayments(invoice) {
@@ -1101,26 +1108,60 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify }) {
     }
   }
   return <>
-    <Card title="Invoice register" hint="Receivables">
-      <div className="lf-invoice-cards"><Table columns={['Invoice', 'Client', 'Matter', 'Amount', 'Paid', 'Balance', 'Status', 'PDF', 'Actions']} rows={invoices.map(i => [i.number || i.id, i.clientName || '-', i.matterTitle || '-', kes(i.amount), kes(i.amountPaid), kes(i.balance), isAdmin ? <select key={i.id} style={styles.tableSelect} value={i.status} onChange={e => setStatus(i.id, e.target.value)}><option>Outstanding</option><option>Paid</option><option>Overdue</option></select> : <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <DownloadButton key={`${i.id}-pdf`} label="Download" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />, <ActionGroup key={`${i.id}-actions`} actions={[['Payments', () => openPayments(i)], ...(canManage && i.status !== 'Paid' ? [['Delete', () => setConfirm({ title: 'Delete invoice?', message: 'Delete this invoice?', onConfirm: () => deleteInvoiceRecord(i) })]] : [])]} />])} empty="No invoices yet." /></div>
-      {selectedInvoice && (
-        <div style={{ ...styles.pageStack, marginTop: 16 }}>
-          <Sub title={`Payments - ${selectedInvoice.number || selectedInvoice.id}`}>
-            <div className="lf-payment-cards"><Table columns={['Date', 'Receipt', 'Method', 'Reference', 'Amount', 'Receipt PDF']} rows={payments.map(payment => [payment.date || '-', payment.receiptNumber || '-', payment.method || '-', payment.reference || '-', kes(payment.amount), payment.receiptNumber ? <DownloadButton key={`${payment.id}-receipt`} label="Download" path={`/api/invoices/${selectedInvoice.id}/payments/${payment.id}/receipt.pdf`} filename={`${payment.receiptNumber}.pdf`} notify={notify} /> : '-'])} empty="No payments recorded yet." /></div>
-            {canRecordPayment && Number(selectedInvoice.balance || 0) > 0 && (
-              <form onSubmit={submitPayment} style={{ ...styles.formGrid, marginTop: 12 }}>
-                <Field label="Amount"><input required type="number" min="0.01" step="0.01" style={styles.input} value={paymentForm.amount} onChange={e => setPaymentForm({ ...paymentForm, amount: e.target.value })} /></Field>
-                <Field label="Method"><select style={styles.input} value={paymentForm.method} onChange={e => setPaymentForm({ ...paymentForm, method: e.target.value })}><option>Bank Transfer</option><option>M-PESA</option><option>Cash Deposit</option><option>Cheque</option></select></Field>
-                <Field label="Reference"><input style={styles.input} value={paymentForm.reference} onChange={e => setPaymentForm({ ...paymentForm, reference: e.target.value })} /></Field>
-                <Field label="Date"><input required type="date" style={styles.input} value={paymentForm.date} onChange={e => setPaymentForm({ ...paymentForm, date: e.target.value })} /></Field>
-                <Field label="Note"><input style={styles.input} value={paymentForm.note} onChange={e => setPaymentForm({ ...paymentForm, note: e.target.value })} /></Field>
-                <button style={styles.primaryButton}>Record payment</button>
-              </form>
-            )}
-          </Sub>
-        </div>
+    <div style={{ marginBottom: 16, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <IconCash size={16} stroke={1.75} style={{ color: '#697386' }} />
+        <span style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>Billing workflow</span>
+      </div>
+      {invoiceSummary.total === 0 ? (
+        <p style={{ fontSize: 12, color: '#697386', margin: '8px 0 0', fontStyle: 'italic' }}>Invoice activity will appear here when available.</p>
+      ) : (
+        <>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
+            <div style={{ flex: '1 1 80px', background: '#F9FAFB', border: '1px solid #E5E7EB', borderRadius: 8, padding: '10px 12px' }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: '#111827' }}>{invoiceSummary.total}</div>
+              <div style={{ fontSize: 11, color: '#697386', marginTop: 1 }}>Total invoices</div>
+            </div>
+            <div style={{ flex: '1 1 80px', background: '#F9FAFB', border: '1px solid #E5E7EB', borderRadius: 8, padding: '10px 12px' }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: invoiceSummary.unpaid > 0 ? '#991B1B' : '#111827' }}>{invoiceSummary.unpaid}</div>
+              <div style={{ fontSize: 11, color: '#697386', marginTop: 1 }}>Unpaid</div>
+            </div>
+            <div style={{ flex: '1 1 80px', background: '#F9FAFB', border: '1px solid #E5E7EB', borderRadius: 8, padding: '10px 12px' }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: '#111827' }}>{invoiceSummary.paid}</div>
+              <div style={{ fontSize: 11, color: '#697386', marginTop: 1 }}>Paid</div>
+            </div>
+          </div>
+          <p style={{ fontSize: 12, color: '#697386', margin: '8px 0 0' }}>
+            {invoiceSummary.unpaid > 0 ? 'Review unpaid invoices first.' : 'All visible invoices are settled.'}
+          </p>
+          <button type="button" style={{ ...styles.ghostButton, marginTop: 10 }} onClick={() => scrollToSection('invoice-register')}>
+            View invoice register
+          </button>
+        </>
       )}
-    </Card>
+    </div>
+    <div id="invoice-register">
+      <Card title="Invoice register" hint="Receivables">
+        <div className="lf-invoice-cards"><Table columns={['Invoice', 'Client', 'Matter', 'Amount', 'Paid', 'Balance', 'Status', 'PDF', 'Actions']} rows={invoices.map(i => [i.number || i.id, i.clientName || '-', i.matterTitle || '-', kes(i.amount), kes(i.amountPaid), kes(i.balance), isAdmin ? <select key={i.id} style={styles.tableSelect} value={i.status} onChange={e => setStatus(i.id, e.target.value)}><option>Outstanding</option><option>Paid</option><option>Overdue</option></select> : <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <DownloadButton key={`${i.id}-pdf`} label="Download" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />, <ActionGroup key={`${i.id}-actions`} actions={[['Payments', () => openPayments(i)], ...(canManage && i.status !== 'Paid' ? [['Delete', () => setConfirm({ title: 'Delete invoice?', message: 'Delete this invoice?', onConfirm: () => deleteInvoiceRecord(i) })]] : [])]} />])} empty="No invoices yet." /></div>
+        {selectedInvoice && (
+          <div style={{ ...styles.pageStack, marginTop: 16 }}>
+            <Sub title={`Payments - ${selectedInvoice.number || selectedInvoice.id}`}>
+              <div className="lf-payment-cards"><Table columns={['Date', 'Receipt', 'Method', 'Reference', 'Amount', 'Receipt PDF']} rows={payments.map(payment => [payment.date || '-', payment.receiptNumber || '-', payment.method || '-', payment.reference || '-', kes(payment.amount), payment.receiptNumber ? <DownloadButton key={`${payment.id}-receipt`} label="Download" path={`/api/invoices/${selectedInvoice.id}/payments/${payment.id}/receipt.pdf`} filename={`${payment.receiptNumber}.pdf`} notify={notify} /> : '-'])} empty="No payments recorded yet." /></div>
+              {canRecordPayment && Number(selectedInvoice.balance || 0) > 0 && (
+                <form onSubmit={submitPayment} style={{ ...styles.formGrid, marginTop: 12 }}>
+                  <Field label="Amount"><input required type="number" min="0.01" step="0.01" style={styles.input} value={paymentForm.amount} onChange={e => setPaymentForm({ ...paymentForm, amount: e.target.value })} /></Field>
+                  <Field label="Method"><select style={styles.input} value={paymentForm.method} onChange={e => setPaymentForm({ ...paymentForm, method: e.target.value })}><option>Bank Transfer</option><option>M-PESA</option><option>Cash Deposit</option><option>Cheque</option></select></Field>
+                  <Field label="Reference"><input style={styles.input} value={paymentForm.reference} onChange={e => setPaymentForm({ ...paymentForm, reference: e.target.value })} /></Field>
+                  <Field label="Date"><input required type="date" style={styles.input} value={paymentForm.date} onChange={e => setPaymentForm({ ...paymentForm, date: e.target.value })} /></Field>
+                  <Field label="Note"><input style={styles.input} value={paymentForm.note} onChange={e => setPaymentForm({ ...paymentForm, note: e.target.value })} /></Field>
+                  <button style={styles.primaryButton}>Record payment</button>
+                </form>
+              )}
+            </Sub>
+          </div>
+        )}
+      </Card>
+    </div>
     <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
   </>;
 }
