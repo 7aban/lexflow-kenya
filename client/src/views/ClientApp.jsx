@@ -264,6 +264,7 @@ function ClientDashboard({ data, stats, selectMatter, onNavigate }) {
         <Stat label="Recent docs" value={stats.recentDocuments} tone="green" />
         <Stat label="Unpaid invoices" value={stats.unpaidInvoices} tone="red" />
       </div>
+      <ActivityTimeline data={data} onNavigate={onNavigate} />
       <div style={styles.dashboardGrid}>
         <Card title="My matters" hint="Latest matter status">
           <div className="lf-client-matters-cards"><Table columns={['Matter', 'Stage', 'Next Court', 'Action']} rows={data.matters.map(m => {
@@ -276,6 +277,94 @@ function ClientDashboard({ data, stats, selectMatter, onNavigate }) {
         </Card>
       </div>
     </div>
+  );
+}
+
+function ActivityTimeline({ data, onNavigate }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const items = [];
+
+  data.notices.forEach(n => {
+    items.push({
+      type: 'Notice',
+      tone: n.audience === 'direct' ? 'amber' : 'blue',
+      label: n.title,
+      sortKey: n.createdAt || '',
+      date: n.createdAt ? n.createdAt.slice(0, 10) : null,
+      cue: n.audience === 'direct' ? 'Sent to you' : 'Firm update',
+      onAction: () => onNavigate('Notices'),
+      actionLabel: 'View',
+    });
+  });
+
+  data.documents.forEach(d => {
+    items.push({
+      type: 'Document',
+      tone: 'green',
+      label: d.displayName || d.name,
+      sortKey: d.createdAt || '',
+      date: d.createdAt ? d.createdAt.slice(0, 10) : null,
+      cue: d.source === 'client' ? 'Shared by you' : 'From firm',
+      onAction: () => onNavigate('Documents'),
+      actionLabel: 'View',
+    });
+  });
+
+  data.appearances.forEach(a => {
+    items.push({
+      type: 'Court date',
+      tone: 'amber',
+      label: a.title || a.type || 'Appearance',
+      sortKey: a.date || '',
+      date: a.date || null,
+      cue: a.date && a.date >= today ? 'Upcoming' : 'Past hearing',
+      onAction: null,
+    });
+  });
+
+  data.invoices.forEach(i => {
+    items.push({
+      type: 'Invoice',
+      tone: i.status === 'Paid' ? 'green' : 'red',
+      label: i.number || 'Invoice',
+      sortKey: '',
+      date: null,
+      cue: i.status || 'Pending',
+      onAction: null,
+    });
+  });
+
+  items.sort((a, b) => {
+    if (!a.sortKey && !b.sortKey) return 0;
+    if (!a.sortKey) return 1;
+    if (!b.sortKey) return -1;
+    return b.sortKey.localeCompare(a.sortKey);
+  });
+
+  const recent = items.slice(0, 5);
+
+  return (
+    <section style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: 16 }}>
+      <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600 }}>Recent activity</h3>
+      {recent.length === 0 ? (
+        <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>Recent matter activity will appear here when available.</p>
+      ) : (
+        <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {recent.map((item, idx) => (
+            <li key={idx} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', background: '#F9FAFB', borderRadius: 6, fontSize: 13, flexWrap: 'wrap' }}>
+              <Badge tone={item.tone}>{item.type}</Badge>
+              <div style={{ flex: 1, minWidth: 120, overflow: 'hidden' }}>
+                <span style={{ fontWeight: 500, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
+                <span style={{ color: '#6B7280', fontSize: 12 }}>{item.cue}{item.date ? ` · ${item.date}` : ''}</span>
+              </div>
+              {item.onAction && (
+                <button type="button" style={{ ...styles.tinyButton, flexShrink: 0 }} onClick={item.onAction}>{item.actionLabel}</button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
