@@ -293,6 +293,32 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
           </div>
         )}
         {showGenerateControls && (
+          <div style={{ background: theme.amberBg, border: '1px solid #DDD8CE', borderLeft: `3px solid ${theme.amber}`, borderRadius: 8, padding: '12px 14px', marginBottom: 12 }}>
+            <div style={{ display: 'grid', gap: 6 }}>
+              <strong style={{ fontSize: 13, color: theme.ink }}>Generate document</strong>
+              <span style={{ fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>Choose a template, review the matter details, then generate a draft document.</span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '2px 0' }}>
+                {['1. Pick template', '2. Confirm matter details', '3. Generate and review'].map(step => (
+                  <span key={step} style={{ background: '#FEF3C7', color: '#92400E', borderRadius: 4, padding: '3px 8px', fontSize: 11, fontWeight: 600 }}>{step}</span>
+                ))}
+              </div>
+              {!templatesLoading && !templates.length && (
+                <span style={{ fontSize: 12, color: theme.muted }}>Templates will appear here once created.</span>
+              )}
+              <button
+                type="button"
+                style={{ ...styles.ghostButton, alignSelf: 'start', fontSize: 12, padding: '4px 10px', marginTop: 2 }}
+                onClick={() => {
+                  const el = document.querySelector('.lf-doc-generate-area');
+                  if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); el.querySelector('select')?.focus(); }
+                }}
+              >
+                Go to Generate Draft ↓
+              </button>
+            </div>
+          </div>
+        )}
+        {showGenerateControls && (
           <div className="lf-doc-generate-area">
             <form onSubmit={generateDraft} style={{ display: 'grid', gap: 8 }}>
               <div style={{ ...styles.formGrid, alignItems: 'end' }}>
