@@ -207,6 +207,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
             docs={matterDocs}
             invoices={matterInvoices}
             events={matterEvents}
+            notices={dashboard.notices}
             proofs={dashboard.paymentProofs.filter(p => p.matterId === selected?.id)}
             invoicePayments={(dashboard.invoicePayments || []).filter(p => p.matterId === selected?.id)}
             uploadDoc={uploadDoc}
@@ -215,6 +216,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
             setPayment={setPayment}
             submitPayment={submitPayment}
             notify={notify}
+            onNavigate={switchView}
           />
         )}
         {!loading && view === 'Notices' && <Notices notices={dashboard.notices} notify={notify} />}
@@ -382,6 +384,35 @@ function NextActions({ data, selectMatter, onNavigate }) {
   );
 }
 
+function MatterSnapshot({ selected, events, docs, invoices, notices }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const nextCourt = events.filter(a => a.date >= today).sort((a, b) => a.date.localeCompare(b.date))[0];
+  const matterNotice = notices.find(n => n.matterId === selected?.id);
+  const latestDoc = [...docs].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0];
+  const unpaidInv = invoices.filter(i => i.status !== 'Paid')[0];
+
+  const rows = [
+    { key: 'court', label: 'Next court date', value: nextCourt ? [nextCourt.type || nextCourt.title || 'Appearance', nextCourt.date, nextCourt.time, nextCourt.location].filter(Boolean).join(' · ') : 'No upcoming court date listed.' },
+    { key: 'update', label: 'Latest update', value: matterNotice ? [matterNotice.title, matterNotice.createdAt ? matterNotice.createdAt.slice(0, 10) : ''].filter(Boolean).join(' · ') : 'No recent firm update listed.' },
+    { key: 'doc', label: 'Latest document', value: latestDoc ? [(latestDoc.displayName || latestDoc.name || 'Document'), latestDoc.createdAt ? latestDoc.createdAt.slice(0, 10) : ''].filter(Boolean).join(' · ') : 'No recently shared document listed.' },
+    { key: 'billing', label: 'Billing position', value: unpaidInv ? [unpaidInv.number || 'Invoice', unpaidInv.status, unpaidInv.amount ? kes(unpaidInv.amount) : ''].filter(Boolean).join(' · ') : 'No outstanding invoice listed.' },
+  ];
+
+  return (
+    <section style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: 14 }}>
+      <h3 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>This matter at a glance</h3>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {rows.map(row => (
+          <div key={row.key} style={{ display: 'flex', gap: 8, padding: '6px 8px', background: '#F9FAFB', borderRadius: 6, fontSize: 13, lineHeight: 1.5 }}>
+            <span style={{ fontWeight: 500, whiteSpace: 'nowrap', flexShrink: 0, minWidth: 90, color: '#374151' }}>{row.label}</span>
+            <span style={{ color: row.value.startsWith('No ') ? '#9CA3AF' : '#6B7280', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.value}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function ActivityTimeline({ data, onNavigate }) {
   const today = new Date().toISOString().slice(0, 10);
   const items = [];
@@ -470,7 +501,7 @@ function ActivityTimeline({ data, onNavigate }) {
   );
 }
 
-function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, events, proofs, invoicePayments, uploadDoc, uploading, payment, setPayment, submitPayment, notify }) {
+function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, events, notices, proofs, invoicePayments, uploadDoc, uploading, payment, setPayment, submitPayment, notify, onNavigate }) {
   if (!selected) return <Empty title="No matter selected" text="Your matter details will appear here once the firm shares a file." />;
   const paymentRows = invoicePayments.map(payment => {
     const invoice = invoices.find(item => item.id === payment.invoiceId);
@@ -489,6 +520,7 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
           <div style={styles.clientStatusGrid}><Badge tone="blue">{selected.stage || 'Intake'}</Badge><span>{selected.practiceArea || 'General'}</span><span>{selected.assignedTo || 'Firm team'}</span></div>
           <p style={styles.clientDescription}>{selected.description || 'No public description has been added yet.'}</p>
         </Card>
+        <MatterSnapshot selected={selected} events={events} docs={docs} invoices={invoices} notices={notices} />
         <Card title="Court appearances" hint="Virtual court links appear on hearing days">
           <div className="lf-client-events-cards"><Table columns={['Event', 'Date', 'Time', 'Location', 'Virtual Court']} rows={events.map(a => [a.title || a.type || 'Appearance', a.date || '-', a.time || '-', a.location || '-', <MeetingLink key={a.id} event={a} />])} empty="No court dates shared yet." /></div>
         </Card>
