@@ -265,6 +265,35 @@ function ClientDashboard({ data, stats, selectMatter, onNavigate }) {
         <Stat label="Unpaid invoices" value={stats.unpaidInvoices} tone="red" />
       </div>
       <ActivityTimeline data={data} onNavigate={onNavigate} />
+      <section style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: 14 }}>
+        <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 600 }}>Updates & messages</h3>
+        {data.notices.length > 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, lineHeight: 1.6 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', overflow: 'hidden' }}>
+              <span style={{ color: '#6B7280', whiteSpace: 'nowrap', flexShrink: 0 }}>Latest update:</span>
+              <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{data.notices[0].title}</span>
+              {data.notices[0].createdAt && <span style={{ color: '#9CA3AF', fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}>{data.notices[0].createdAt.slice(0, 10)}</span>}
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+              <span style={{ color: '#6B7280', whiteSpace: 'nowrap' }}>Updates on file:</span>
+              <span style={{ fontWeight: 500 }}>{data.notices.length} notice{data.notices.length !== 1 ? 's' : ''}</span>
+            </div>
+            {nextCourt && (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', overflow: 'hidden' }}>
+                <span style={{ color: '#6B7280', whiteSpace: 'nowrap', flexShrink: 0 }}>Next court:</span>
+                <span style={{ fontWeight: 500, whiteSpace: 'nowrap' }}>{nextCourt.date}</span>
+                {nextCourt.title && <span style={{ color: '#9CA3AF', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nextCourt.title}</span>}
+              </div>
+            )}
+          </div>
+        ) : (
+          <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>No new updates yet.</p>
+        )}
+        <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+          <button type="button" onClick={() => onNavigate('Notices')} style={styles.tinyButton}>View updates</button>
+          {data.documents.length > 0 && <button type="button" onClick={() => onNavigate('Documents')} style={styles.tinyButton}>View documents</button>}
+        </div>
+      </section>
       <div style={styles.dashboardGrid}>
         <Card title="My matters" hint="Latest matter status">
           <div className="lf-client-matters-cards"><Table columns={['Matter', 'Stage', 'Next Court', 'Action']} rows={data.matters.map(m => {
