@@ -258,6 +258,7 @@ function ClientDashboard({ data, stats, selectMatter, onNavigate }) {
           <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>Your matter updates will appear here when available.</p>
         )}
       </section>
+      <NextActions data={data} selectMatter={selectMatter} onNavigate={onNavigate} />
       <div style={styles.statsGrid}>
         <Stat label="Active matters" value={stats.activeMatters} tone="navy" />
         <Stat label="Court dates" value={stats.upcomingCourt} tone="gold" />
@@ -306,6 +307,78 @@ function ClientDashboard({ data, stats, selectMatter, onNavigate }) {
         </Card>
       </div>
     </div>
+  );
+}
+
+function NextActions({ data, selectMatter, onNavigate }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const items = [];
+
+  const unpaid = data.invoices.filter(i => i.status !== 'Paid');
+  if (unpaid.length > 0) {
+    const inv = unpaid[0];
+    const matter = data.matters.find(m => data.invoices.some(i => i.matterId === m.id && i.status !== 'Paid'));
+    items.push({
+      key: 'invoice',
+      label: 'Invoice awaiting payment',
+      detail: [inv.number, inv.status, inv.amount ? kes(inv.amount) : ''].filter(Boolean).join(' · '),
+      action: () => matter ? selectMatter(matter.id) : onNavigate('My Matters'),
+      btn: 'View invoice',
+    });
+  }
+
+  const nextCourt = data.appearances.filter(a => a.date >= today).sort((a, b) => a.date.localeCompare(b.date))[0];
+  if (nextCourt) {
+    items.push({
+      key: 'court',
+      label: 'Upcoming court date',
+      detail: [nextCourt.type || nextCourt.title || 'Appearance', nextCourt.date + (nextCourt.time ? ' ' + nextCourt.time : '')].filter(Boolean).join(' · '),
+      action: () => onNavigate('My Matters'),
+      btn: 'View details',
+    });
+  }
+
+  const notice = data.notices[0];
+  if (notice && items.length < 3) {
+    items.push({
+      key: 'notice',
+      label: 'New update from the firm',
+      detail: [notice.title, notice.createdAt ? notice.createdAt.slice(0, 10) : ''].filter(Boolean).join(' · '),
+      action: () => onNavigate('Notices'),
+      btn: 'View update',
+    });
+  }
+
+  const doc = data.documents[0];
+  if (doc && items.length < 4) {
+    items.push({
+      key: 'doc',
+      label: 'Recently shared document',
+      detail: [(doc.displayName || doc.name || 'Document'), doc.createdAt ? doc.createdAt.slice(0, 10) : ''].filter(Boolean).join(' · '),
+      action: () => onNavigate('Documents'),
+      btn: 'View document',
+    });
+  }
+
+  return (
+    <section style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: 14 }}>
+      <h3 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>What needs your attention</h3>
+      {items.length === 0 ? (
+        <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>You're up to date. We'll show important actions here when something needs your attention.</p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {items.map(item => (
+            <div key={item.key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', background: '#F9FAFB', borderRadius: 6, fontSize: 13, flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                <span style={{ fontWeight: 500, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
+                <span style={{ color: '#6B7280', fontSize: 12 }}>{item.detail}</span>
+              </div>
+              <button type="button" style={{ ...styles.tinyButton, flexShrink: 0 }} onClick={item.action}>{item.btn}</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
