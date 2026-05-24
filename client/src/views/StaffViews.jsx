@@ -1082,6 +1082,15 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify }) {
     const overdue = invoices.filter(i => i.status === 'Overdue').length;
     return { total, paid, outstanding, overdue, unpaid: outstanding + overdue };
   }, [invoices]);
+  const followUpItems = useMemo(() => {
+    return invoices
+      .filter(i => i.status !== 'Paid')
+      .sort((a, b) => {
+        const priority = { Overdue: 0, Outstanding: 1 };
+        return (priority[a.status] ?? 2) - (priority[b.status] ?? 2);
+      })
+      .slice(0, 5);
+  }, [invoices]);
   async function setStatus(id, status) { try { await api(`/invoices/${id}/status`, { method: 'PATCH', body: { status } }); notify({ type: 'success', message: 'Invoice updated.' }); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteInvoiceRecord(invoice) { try { await api(`/invoices/${invoice.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Invoice deleted.' }); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function openPayments(invoice) {
@@ -1133,6 +1142,40 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify }) {
           </div>
           <p style={{ fontSize: 12, color: '#697386', margin: '8px 0 0' }}>
             {invoiceSummary.unpaid > 0 ? 'Review unpaid invoices first.' : 'All visible invoices are settled.'}
+          </p>
+          <button type="button" style={{ ...styles.ghostButton, marginTop: 10 }} onClick={() => scrollToSection('invoice-register')}>
+            View invoice register
+          </button>
+        </>
+      )}
+        </div>
+    <div style={{ marginBottom: 16, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <IconAlertCircle size={16} stroke={1.75} style={{ color: '#697386' }} />
+        <span style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>Billing follow-up</span>
+      </div>
+      {followUpItems.length === 0 ? (
+        <p style={{ fontSize: 12, color: '#697386', margin: '8px 0 0', fontStyle: 'italic' }}>No invoices currently need follow-up.</p>
+      ) : (
+        <>
+          <div style={{ marginTop: 10 }}>
+            {followUpItems.map((invoice, idx) => {
+              const days = invoice.dueDate ? daysFromToday(invoice.dueDate) : null;
+              return (
+                <div key={invoice.id} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '6px 0', borderBottom: idx < followUpItems.length - 1 ? '1px solid #F3F4F6' : 'none', fontSize: 13 }}>
+                  <span style={{ fontWeight: 500, color: '#111827', whiteSpace: 'nowrap' }}>{invoice.number || invoice.id}</span>
+                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#697386', flex: '1 1 80px' }}>{invoice.matterTitle || invoice.clientName || ''}</span>
+                  <Badge tone={statusTone(invoice.status)}>{invoice.status}</Badge>
+                  {days !== null && (
+                    <span style={{ fontSize: 11, color: days < 0 ? '#991B1B' : '#697386', whiteSpace: 'nowrap' }}>{formatDayDistance(days)}</span>
+                  )}
+                  <span style={{ fontWeight: 500, color: '#111827', whiteSpace: 'nowrap' }}>{kes(invoice.amount)}</span>
+                </div>
+              );
+            })}
+          </div>
+          <p style={{ fontSize: 12, color: '#697386', margin: '8px 0 0' }}>
+            {followUpItems.some(i => i.status === 'Overdue') ? 'Start with overdue invoices.' : `${followUpItems.length} unpaid invoice${followUpItems.length === 1 ? '' : 's'} need follow-up.`}
           </p>
           <button type="button" style={{ ...styles.ghostButton, marginTop: 10 }} onClick={() => scrollToSection('invoice-register')}>
             View invoice register
