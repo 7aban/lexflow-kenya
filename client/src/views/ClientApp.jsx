@@ -578,7 +578,90 @@ function NoticeItem({ notice, notify }) {
 }
 
 function Documents({ documents, matters, notify }) {
-  return <Card title="All Documents" hint="Files shared across your matters"><div className="lf-client-all-docs-cards"><Table columns={['Name', 'Matter', 'Source', 'Type', 'Download']} rows={documents.map(d => [d.displayName || d.name, matters.find(m => m.id === d.matterId)?.title || d.matterId, <Badge key={`${d.id}-source`} tone={d.source === 'client' ? 'green' : 'blue'}>{d.source === 'client' ? 'Shared by you' : 'Firm'}</Badge>, d.type, <DownloadButton key={d.id} label="Download" path={`/api/documents/${d.id}/download`} filename={d.displayName || d.name || 'document'} notify={notify} />])} empty="No documents shared yet." /></div></Card>;
+  const [search, setSearch] = useState('');
+  const [matterFilter, setMatterFilter] = useState('');
+  const [sortOrder, setSortOrder] = useState('newest');
+
+  const filtered = useMemo(() => {
+    let result = [...documents];
+
+    if (matterFilter) {
+      result = result.filter(d => d.matterId === matterFilter);
+    }
+
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      result = result.filter(d => {
+        const name = (d.displayName || d.name || '').toLowerCase();
+        const matter = matters.find(m => m.id === d.matterId);
+        const matterTitle = (matter?.title || '').toLowerCase();
+        const dType = (d.type || '').toLowerCase();
+        return name.includes(q) || matterTitle.includes(q) || dType.includes(q);
+      });
+    }
+
+    result.sort((a, b) => {
+      const aDate = a.createdAt || a.date || '';
+      const bDate = b.createdAt || b.date || '';
+      const cmp = aDate.localeCompare(bDate);
+      return sortOrder === 'newest' ? -cmp : cmp;
+    });
+
+    return result;
+  }, [documents, matters, search, matterFilter, sortOrder]);
+
+  const hasFilter = search.trim() || matterFilter;
+  const emptyText = documents.length === 0 ? 'No documents shared yet.' : 'No shared documents match your search.';
+
+  return (
+    <Card title="All Documents" hint="Files shared across your matters">
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+        <input
+          type="search"
+          placeholder="Find a document\u2026"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ flex: 1, minWidth: 160, padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+        />
+        <select
+          value={matterFilter}
+          onChange={e => setMatterFilter(e.target.value)}
+          style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+        >
+          <option value="">All matters</option>
+          {matters.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
+        </select>
+        <select
+          value={sortOrder}
+          onChange={e => setSortOrder(e.target.value)}
+          style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+        >
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+        </select>
+      </div>
+      {documents.length > 0 && (
+        <p style={{ margin: '0 0 8px', fontSize: 12, color: '#6B7280' }}>
+          {filtered.length === 0
+            ? 'No shared documents match your search.'
+            : `Showing ${filtered.length} of ${documents.length} shared document${documents.length === 1 ? '' : 's'}`}
+        </p>
+      )}
+      <div className="lf-client-all-docs-cards">
+        <Table
+          columns={['Name', 'Matter', 'Source', 'Type', 'Download']}
+          rows={filtered.map(d => [
+            d.displayName || d.name,
+            matters.find(m => m.id === d.matterId)?.title || d.matterId,
+            <Badge key={`${d.id}-source`} tone={d.source === 'client' ? 'green' : 'blue'}>{d.source === 'client' ? 'Shared by you' : 'Firm'}</Badge>,
+            d.type,
+            <DownloadButton key={d.id} label="Download" path={`/api/documents/${d.id}/download`} filename={d.displayName || d.name || 'document'} notify={notify} />
+          ])}
+          empty={emptyText}
+        />
+      </div>
+    </Card>
+  );
 }
 
 async function downloadWithNotify(path, filename, notify) {
