@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { IconLayoutDashboard, IconBriefcase, IconBell, IconFile, IconInvoice, IconUserCircle } from '@tabler/icons-react';
+import { IconLayoutDashboard, IconBriefcase, IconBell, IconFile, IconInvoice, IconUserCircle, IconCalendarEvent } from '@tabler/icons-react';
 import { api, downloadWithAuth, fileToDataUrl } from '../lib/apiClient.js';
 import { styles, StyleTag, theme, loadAndApplyFirmTheme } from '../theme.jsx';
 import { Badge, Card, Empty, Field, kes, Logo, MeetingLink, Skeleton, Stat, statusTone, Table, Toast } from '../components/ui.jsx';
@@ -13,9 +13,10 @@ const portalIcons = {
   Documents: IconFile,
   Invoices: IconInvoice,
   Account: IconUserCircle,
+  'Court Dates': IconCalendarEvent,
 };
 
-const portalNav = ['Dashboard', 'My Matters', 'Notices', 'Documents', 'Invoices', 'Account'];
+const portalNav = ['Dashboard', 'My Matters', 'Notices', 'Documents', 'Invoices', 'Account', 'Court Dates'];
 
 function PortalNavigation({ view, onSelect, onNavigate }) {
   return (
@@ -224,6 +225,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
         {!loading && view === 'Documents' && <Documents documents={dashboard.documents} matters={dashboard.matters} notify={notify} />}
         {!loading && view === 'Invoices' && <BillingInvoices data={dashboard} matters={dashboard.matters} notify={notify} />}
         {!loading && view === 'Account' && <Account user={user} client={dashboard.client} firm={firm} matters={dashboard.matters} onNavigate={switchView} />}
+        {!loading && view === 'Court Dates' && <CourtDates appearances={dashboard.appearances} matters={dashboard.matters} />}
       </main>
       <ClientChatWidget firm={firm} matters={dashboard.matters} selectedMatterId={selected?.id || ''} user={user} notify={notify} />
       <Toast toast={toast} onClose={() => setToast(null)} />
@@ -873,6 +875,146 @@ function Row({ label, value }) {
       <span style={{ fontWeight: 500, minWidth: 90, color: '#374151' }}>{label}</span>
       <span style={{ color: value ? '#6B7280' : '#9CA3AF' }}>{value || '-'}</span>
     </div>
+  );
+}
+
+function CourtDates({ appearances, matters }) {
+  const [search, setSearch] = useState('');
+  const [timeFilter, setTimeFilter] = useState('upcoming');
+  const [matterFilter, setMatterFilter] = useState('');
+  const [sortOrder, setSortOrder] = useState('soonest');
+
+  const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const matterMap = useMemo(() => { const m = {}; matters.forEach(x => { m[x.id] = x; }); return m; }, [matters]);
+
+  const todayCount = useMemo(() => appearances.filter(a => a.date === today).length, [appearances, today]);
+  const upcomingCount = useMemo(() => appearances.filter(a => a.date >= today).length, [appearances, today]);
+  const pastCount = useMemo(() => appearances.filter(a => a.date < today).length, [appearances, today]);
+  const nextCourt = useMemo(() => {
+    const upcoming = appearances.filter(a => a.date >= today).sort((a, b) => a.date.localeCompare(b.date));
+    return upcoming[0] || null;
+  }, [appearances, today]);
+
+  const filtered = useMemo(() => {
+    let r = [...appearances];
+
+    if (timeFilter === 'upcoming') r = r.filter(a => (a.date || '') >= today);
+    else if (timeFilter === 'past') r = r.filter(a => (a.date || '') < today);
+    else if (timeFilter === 'today') r = r.filter(a => a.date === today);
+
+    if (matterFilter) r = r.filter(a => a.matterId === matterFilter);
+
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      r = r.filter(a => {
+        const type = (a.title || a.type || '').toLowerCase();
+        const matter = matterMap[a.matterId];
+        const matterTitle = (matter?.title || matter?.reference || '').toLowerCase();
+        const court = (a.court || '').toLowerCase();
+        const location = (a.location || a.venue || '').toLowerCase();
+        const status = (a.status || '').toLowerCase();
+        const date = (a.date || '').toLowerCase();
+        const time = (a.time || '').toLowerCase();
+        return type.includes(q) || matterTitle.includes(q) || court.includes(q) || location.includes(q) || status.includes(q) || date.includes(q) || time.includes(q);
+      });
+    }
+
+    r.sort((a, b) => {
+      const aDT = (a.date || '') + 'T' + (a.time || '');
+      const bDT = (b.date || '') + 'T' + (b.time || '');
+      const cmp = aDT.localeCompare(bDT);
+      return sortOrder === 'soonest' ? cmp : -cmp;
+    });
+
+    return r;
+  }, [appearances, search, timeFilter, matterFilter, sortOrder, today, matterMap]);
+
+  const timeOptions = useMemo(() => {
+    const opts = [
+      { value: 'upcoming', label: 'Upcoming' },
+      { value: 'all', label: 'All dates' },
+      { value: 'past', label: 'Past dates' },
+    ];
+    if (todayCount > 0) opts.push({ value: 'today', label: 'Today' });
+    return opts;
+  }, [todayCount]);
+
+  return (
+    <Card title="Court Dates / Appearances" hint="All court dates across your matters">
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+        <input
+          type="search"
+          placeholder="Find a court date\u2026"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ flex: 1, minWidth: 160, padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+        />
+        <select
+          value={timeFilter}
+          onChange={e => setTimeFilter(e.target.value)}
+          style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+        >
+          {timeOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        {matters.length > 0 && (
+          <select
+            value={matterFilter}
+            onChange={e => setMatterFilter(e.target.value)}
+            style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+          >
+            <option value="">All matters</option>
+            {matters.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
+          </select>
+        )}
+        <select
+          value={sortOrder}
+          onChange={e => setSortOrder(e.target.value)}
+          style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+        >
+          <option value="soonest">Soonest first</option>
+          <option value="latest">Latest first</option>
+        </select>
+      </div>
+      {appearances.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap', fontSize: 13 }}>
+          <div style={{ background: '#F9FAFB', borderRadius: 6, padding: '6px 12px', flex: '1 1 auto', minWidth: 80 }}>
+            <span style={{ color: '#6B7280', display: 'block', fontSize: 11 }}>Upcoming</span>
+            <strong>{upcomingCount}</strong>
+          </div>
+          {nextCourt && (
+            <div style={{ background: '#F9FAFB', borderRadius: 6, padding: '6px 12px', flex: '1 1 auto', minWidth: 120 }}>
+              <span style={{ color: '#6B7280', display: 'block', fontSize: 11 }}>Next court date</span>
+              <strong style={{ fontSize: 12 }}>{nextCourt.date}{nextCourt.title || nextCourt.type ? ` \u00b7 ${nextCourt.title || nextCourt.type}` : ''}</strong>
+            </div>
+          )}
+          <div style={{ background: '#F9FAFB', borderRadius: 6, padding: '6px 12px', flex: '1 1 auto', minWidth: 80 }}>
+            <span style={{ color: '#6B7280', display: 'block', fontSize: 11 }}>Past</span>
+            <strong>{pastCount}</strong>
+          </div>
+        </div>
+      )}
+      {appearances.length > 0 && (
+        <p style={{ margin: '0 0 8px', fontSize: 12, color: '#6B7280' }}>
+          {filtered.length === 0
+            ? 'No court dates match your search or filters.'
+            : `Showing ${filtered.length} of ${appearances.length} court date${appearances.length === 1 ? '' : 's'}`}
+        </p>
+      )}
+      <div className="lf-client-all-events-cards">
+        <Table
+          columns={['Event', 'Matter', 'Date', 'Time', 'Location', 'Virtual Court']}
+          rows={filtered.map(a => [
+            a.title || a.type || 'Appearance',
+            matterMap[a.matterId]?.title || a.matterId || '-',
+            a.date || '-',
+            a.time || '-',
+            a.location || '-',
+            <MeetingLink key={a.id} event={a} />
+          ])}
+          empty={appearances.length === 0 ? 'No court dates shared yet.' : 'No court dates match your search or filters.'}
+        />
+      </div>
+    </Card>
   );
 }
 
