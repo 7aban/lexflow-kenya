@@ -1165,7 +1165,7 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify }) {
           </div>
           <div>
             <div style={{ fontSize: 11, color: '#697386', fontWeight: 500, marginBottom: 2 }}>Invoice Date</div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>{detail.invoiceDate ? new Date(detail.invoiceDate).toLocaleDateString('en-KE') : '-'}</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>{detail.date ? new Date(detail.date).toLocaleDateString('en-KE') : '-'}</div>
           </div>
           <div>
             <div style={{ fontSize: 11, color: '#697386', fontWeight: 500, marginBottom: 2 }}>Due Date</div>
