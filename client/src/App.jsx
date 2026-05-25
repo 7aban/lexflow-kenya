@@ -1,5 +1,5 @@
 import { Component, useEffect, useRef, useState } from 'react';
-import { IconLayoutDashboard, IconChartLine, IconUsers, IconUserPlus, IconBriefcase, IconCheckbox, IconCalendarDue, IconFileInvoice, IconMessages, IconUsersGroup, IconSettings, IconListSearch, IconExternalLink, IconChevronDown, IconShield, IconSearch, IconBell, IconRefresh } from '@tabler/icons-react';
+import { IconLayoutDashboard, IconChartLine, IconUsers, IconUserPlus, IconBriefcase, IconCheckbox, IconCalendarDue, IconFileInvoice, IconMessages, IconUsersGroup, IconSettings, IconListSearch, IconExternalLink, IconChevronDown, IconShield, IconSearch, IconBell, IconRefresh, IconTemplate } from '@tabler/icons-react';
 import { api, API_BASE, AUTH_FAILURE_MESSAGE, clearSession, clearAllLexFlowStorage, getNotifications, markNotificationsRead, readSession, saveSession } from './lib/apiClient.js';
 import { globalSearch } from './api.js';
 import { defaultFirmSettings, styles, StyleTag, theme, loadAndApplyFirmTheme } from './theme.jsx';
@@ -15,6 +15,7 @@ import Communications from './views/Communications.jsx';
 import DeadlineCenter from './views/DeadlineCenter.jsx';
 import Invitations from './views/Invitations.jsx';
 import { Clients, Dashboard, FirmSettings, Invoices, Matters, Tasks, Users } from './views/StaffViews.jsx';
+import DocumentStudio from './views/DocumentStudio.jsx';
 
 const navIcons = {
   Dashboard: IconLayoutDashboard,
@@ -30,6 +31,7 @@ const navIcons = {
   'Firm Settings': IconSettings,
   'Audit Log': IconListSearch,
   'Structured Audit': IconShield,
+  'Document Studio': IconTemplate,
   'eFiling CTS': IconExternalLink,
   eCitizen: IconExternalLink,
   'Ardhi Sasa': IconExternalLink,
@@ -46,6 +48,7 @@ const navGroups = [
   { title: 'Relationships', items: [['Clients', ['admin', 'advocate', 'assistant']], ['Invitations', ['admin']]] },
   { title: 'Matters', items: [['Matters', ['admin', 'advocate', 'assistant']]] },
   { title: 'Work', items: [['Tasks', ['admin', 'advocate', 'assistant']], ['Deadlines', ['admin', 'advocate', 'assistant']]] },
+  { title: 'Document Studio', items: [['Document Studio', ['admin', 'advocate']]] },
   { title: 'Finance', items: [['Invoices', ['admin']]] },
   { title: 'Communications', items: [['Communications', ['admin', 'advocate', 'assistant']]] },
   { title: 'Administration', items: [['Users', ['admin']], ['Firm Settings', ['admin']], ['Audit Log', ['admin']], ['Structured Audit', ['admin']]] },
@@ -476,6 +479,7 @@ export default function App() {
     Invitations: 'Secure client portal onboarding links and invitation status.',
     'Audit Log': 'A secure activity trail for important changes and accountability.',
     'Structured Audit': 'Structured event trail for security, access, and operational auditing.',
+    'Document Studio': 'Review active document templates and future document tools.',
   };
 
   return (
@@ -616,6 +620,7 @@ export default function App() {
             {(!loading || bootstrapped) && view === 'Invitations' && isAdmin && <Invitations clients={data.clients} notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Audit Log' && isAdmin && <AuditLog notify={setToast} navigate={setView} />}
             {(!loading || bootstrapped) && view === 'Structured Audit' && isAdmin && <StructuredAuditLog notify={setToast} />}
+            {(!loading || bootstrapped) && view === 'Document Studio' && canManage && <DocumentStudio notify={setToast} />}
           </ViewErrorBoundary>
         </div>
       </main>
