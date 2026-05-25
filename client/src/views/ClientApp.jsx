@@ -220,7 +220,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
             onNavigate={switchView}
           />
         )}
-        {!loading && view === 'Notices' && <Notices notices={dashboard.notices} notify={notify} />}
+        {!loading && view === 'Notices' && <Notices notices={dashboard.notices} matters={dashboard.matters} notify={notify} />}
         {!loading && view === 'Documents' && <Documents documents={dashboard.documents} matters={dashboard.matters} notify={notify} />}
         {!loading && view === 'Invoices' && <BillingInvoices data={dashboard} matters={dashboard.matters} notify={notify} />}
         {!loading && view === 'Account' && <Account user={user} client={dashboard.client} firm={firm} matters={dashboard.matters} onNavigate={switchView} />}
@@ -590,10 +590,101 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
   );
 }
 
-function Notices({ notices, notify }) {
+function Notices({ notices, matters, notify }) {
+  const [search, setSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');
+  const [matterFilter, setMatterFilter] = useState('');
+  const [sortOrder, setSortOrder] = useState('newest');
+
+  const typeOptions = useMemo(() => {
+    const s = new Set();
+    notices.forEach(n => { if (n.audience) s.add(n.audience); });
+    return [...s].sort();
+  }, [notices]);
+
+  const hasAnyMatterId = useMemo(() => notices.some(n => n.matterId), [notices]);
+
+  const filtered = useMemo(() => {
+    let result = [...notices];
+
+    if (typeFilter) {
+      result = result.filter(n => n.audience === typeFilter);
+    }
+
+    if (matterFilter) {
+      result = result.filter(n => n.matterId === matterFilter);
+    }
+
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      result = result.filter(n => {
+        const title = (n.title || '').toLowerCase();
+        const content = (n.content || '').toLowerCase();
+        const audience = (n.audience || '').toLowerCase();
+        const date = (n.createdAt || '').toLowerCase();
+        return title.includes(q) || content.includes(q) || audience.includes(q) || date.includes(q);
+      });
+    }
+
+    result.sort((a, b) => {
+      const aDate = a.createdAt || a.date || a.publishedAt || a.updatedAt || '';
+      const bDate = b.createdAt || b.date || b.publishedAt || b.updatedAt || '';
+      const cmp = aDate.localeCompare(bDate);
+      return sortOrder === 'newest' ? -cmp : cmp;
+    });
+
+    return result;
+  }, [notices, search, typeFilter, matterFilter, sortOrder]);
+
+  const audienceLabel = val => val === 'direct' ? 'For you' : val === 'broadcast' ? 'Broadcast' : val;
+
   return (
     <Card title="Firm Notices" hint="Updates and bulletins from the firm">
-      {notices.length ? <div style={styles.noticeList}>{notices.map(notice => <NoticeItem key={notice.id} notice={notice} notify={notify} />)}</div> : <Empty title="No notices" text="The firm has not posted any notices yet." />}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+        <input
+          type="search"
+          placeholder="Find an update\u2026"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ flex: 1, minWidth: 160, padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+        />
+        {typeOptions.length > 1 && (
+          <select
+            value={typeFilter}
+            onChange={e => setTypeFilter(e.target.value)}
+            style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+          >
+            <option value="">All updates</option>
+            {typeOptions.map(t => <option key={t} value={t}>{audienceLabel(t)}</option>)}
+          </select>
+        )}
+        {hasAnyMatterId && (
+          <select
+            value={matterFilter}
+            onChange={e => setMatterFilter(e.target.value)}
+            style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+          >
+            <option value="">All matters</option>
+            {matters.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
+          </select>
+        )}
+        <select
+          value={sortOrder}
+          onChange={e => setSortOrder(e.target.value)}
+          style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+        >
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+        </select>
+      </div>
+      {notices.length > 0 && (
+        <p style={{ margin: '0 0 8px', fontSize: 12, color: '#6B7280' }}>
+          {filtered.length === 0
+            ? 'No updates match your search or filters.'
+            : `Showing ${filtered.length} of ${notices.length} update${notices.length === 1 ? '' : 's'}`}
+        </p>
+      )}
+      {filtered.length ? <div style={styles.noticeList}>{filtered.map(notice => <NoticeItem key={notice.id} notice={notice} notify={notify} />)}</div> : notices.length === 0 ? <Empty title="No notices" text="The firm has not posted any notices yet." /> : null}
     </Card>
   );
 }
