@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote } from '@tabler/icons-react';
-import { api, applyChecklistTemplate, createChecklistTemplate, createMatterChecklistItem, deleteChecklistTemplate, deleteMatterChecklistItem, downloadWithAuth, fileToDataUrl, listChecklistTemplates, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, updateChecklistTemplate, updateMatterChecklistItem } from '../lib/apiClient.js';
+import { api, applyChecklistTemplate, createChecklistTemplate, createMatterChecklistItem, deleteChecklistTemplate, deleteMatterChecklistItem, downloadWithAuth, fileToDataUrl, getInvoiceDetails, listChecklistTemplates, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, updateChecklistTemplate, updateMatterChecklistItem } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, Skeleton, statusTone, Sub, Table } from '../components/ui.jsx';
@@ -1070,11 +1070,28 @@ export function Tasks({ data, canManage, reload, notify, focus }) {
 export function Invoices({ invoices, isAdmin, canManage, reload, notify }) {
   const [confirm, setConfirm] = useState(null);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState('');
+  const [invoiceDetails, setInvoiceDetails] = useState(null);
   const [payments, setPayments] = useState([]);
   const [paymentForm, setPaymentForm] = useState({ amount: '', method: 'Bank Transfer', reference: '', date: new Date().toISOString().slice(0, 10), note: '' });
   const session = readSession();
   const canRecordPayment = ['admin', 'assistant'].includes(session?.user?.role);
   const selectedInvoice = invoices.find(invoice => invoice.id === selectedInvoiceId);
+
+  useEffect(() => {
+    if (!selectedInvoiceId) {
+      setInvoiceDetails(null);
+      return;
+    }
+    async function loadDetails() {
+      try {
+        const details = await getInvoiceDetails(selectedInvoiceId);
+        setInvoiceDetails(details || null);
+      } catch (err) {
+        setInvoiceDetails(null);
+      }
+    }
+    loadDetails();
+  }, [selectedInvoiceId]);
   const invoiceSummary = useMemo(() => {
     const total = invoices.length;
     const paid = invoices.filter(i => i.status === 'Paid').length;
@@ -1116,6 +1133,115 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify }) {
       notify({ type: 'danger', message: err.message });
     }
   }
+
+  function InvoicePreviewCard() {
+    if (!selectedInvoice) return null;
+    const detail = invoiceDetails || selectedInvoice;
+    const subtotal = Number(detail.amount || 0);
+    const vatRate = 0.16;
+    const vat = subtotal * vatRate;
+    const total = subtotal + vat;
+    const items = Array.isArray(detail.items) ? detail.items : [];
+    return (
+      <div style={{ marginBottom: 16, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 600, color: '#111827', margin: 0 }}>Invoice Preview</h3>
+            <span style={{ fontSize: 11, color: '#697386', fontStyle: 'italic' }}>Read-only preview before PDF download</span>
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: 11, color: '#697386', fontWeight: 500, marginBottom: 2 }}>Invoice Number</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>{detail.number || detail.id}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: '#697386', fontWeight: 500, marginBottom: 2 }}>Client</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>{detail.clientName || '-'}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: '#697386', fontWeight: 500, marginBottom: 2 }}>Matter</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>{detail.matterTitle || '-'}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: '#697386', fontWeight: 500, marginBottom: 2 }}>Invoice Date</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>{detail.invoiceDate ? new Date(detail.invoiceDate).toLocaleDateString('en-KE') : '-'}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: '#697386', fontWeight: 500, marginBottom: 2 }}>Due Date</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>{detail.dueDate ? new Date(detail.dueDate).toLocaleDateString('en-KE') : '-'}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: '#697386', fontWeight: 500, marginBottom: 2 }}>Status</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}><Badge tone={statusTone(detail.status)}>{detail.status}</Badge></div>
+          </div>
+        </div>
+        {detail.source && (
+          <div style={{ fontSize: 12, color: '#697386', marginBottom: 12 }}>
+            <span style={{ fontWeight: 500 }}>Source:</span> {detail.source}
+          </div>
+        )}
+        {items.length > 0 ? (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', marginBottom: 8 }}>Line Items</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid #E5E7EB' }}>
+                  <th style={{ textAlign: 'left', padding: '8px 0', color: '#697386', fontWeight: 500, fontSize: 11 }}>Date</th>
+                  <th style={{ textAlign: 'left', padding: '8px 0', color: '#697386', fontWeight: 500, fontSize: 11 }}>Description</th>
+                  <th style={{ textAlign: 'right', padding: '8px 0', color: '#697386', fontWeight: 500, fontSize: 11 }}>Hours</th>
+                  <th style={{ textAlign: 'right', padding: '8px 0', color: '#697386', fontWeight: 500, fontSize: 11 }}>Rate</th>
+                  <th style={{ textAlign: 'right', padding: '8px 0', color: '#697386', fontWeight: 500, fontSize: 11 }}>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item, idx) => (
+                  <tr key={idx} style={{ borderBottom: '1px solid #F3F4F6' }}>
+                    <td style={{ padding: '8px 0', color: '#111827' }}>{item.date ? new Date(item.date).toLocaleDateString('en-KE') : '-'}</td>
+                    <td style={{ padding: '8px 0', color: '#111827' }}>{item.description || '-'}</td>
+                    <td style={{ textAlign: 'right', padding: '8px 0', color: '#111827' }}>{item.hours ? Number(item.hours).toFixed(1) : '-'}</td>
+                    <td style={{ textAlign: 'right', padding: '8px 0', color: '#111827' }}>{item.rate ? kes(item.rate) : '-'}</td>
+                    <td style={{ textAlign: 'right', padding: '8px 0', color: '#111827', fontWeight: 500 }}>{item.amount ? kes(item.amount) : '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: '#697386', fontStyle: 'italic', marginBottom: 12, padding: 8, background: '#F9FAFB', borderRadius: 4 }}>
+            Line items are not available in this preview yet. The PDF download remains the source for the current invoice layout.
+          </div>
+        )}
+        <div style={{ borderTop: '1px solid #E5E7EB', paddingTop: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, marginBottom: 8 }}>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 12, color: '#697386' }}>Subtotal</div>
+            </div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#111827', minWidth: 100, textAlign: 'right' }}>{kes(subtotal)}</div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, marginBottom: 8 }}>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 12, color: '#697386' }}>VAT (16%)</div>
+            </div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#111827', minWidth: 100, textAlign: 'right' }}>{kes(vat)}</div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, paddingTop: 8, borderTop: '1px solid #E5E7EB', marginBottom: 12 }}>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>Total</div>
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#111827', minWidth: 100, textAlign: 'right' }}>{kes(total)}</div>
+          </div>
+        </div>
+        <div style={{ fontSize: 11, color: '#697386', fontStyle: 'italic', padding: 8, background: '#F0FDF4', borderLeft: '3px solid #16A34A', marginBottom: 12 }}>
+          Preview only — does not change the saved invoice.
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <DownloadButton label="Download PDF" path={`/api/invoices/${selectedInvoice.id}/pdf`} filename={`${selectedInvoice.number || selectedInvoice.id}.pdf`} notify={notify} />
+        </div>
+      </div>
+    );
+  }
+
   return <>
     <div style={{ marginBottom: 16, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1183,6 +1309,7 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify }) {
         </>
       )}
     </div>
+    <InvoicePreviewCard />
     <div id="invoice-register">
       <Card title="Invoice register" hint="Receivables">
         <div className="lf-invoice-cards"><Table columns={['Invoice', 'Client', 'Matter', 'Amount', 'Paid', 'Balance', 'Status', 'PDF', 'Actions']} rows={invoices.map(i => [i.number || i.id, i.clientName || '-', i.matterTitle || '-', kes(i.amount), kes(i.amountPaid), kes(i.balance), isAdmin ? <select key={i.id} style={styles.tableSelect} value={i.status} onChange={e => setStatus(i.id, e.target.value)}><option>Outstanding</option><option>Paid</option><option>Overdue</option></select> : <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <DownloadButton key={`${i.id}-pdf`} label="Download" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />, <ActionGroup key={`${i.id}-actions`} actions={[['Payments', () => openPayments(i)], ...(canManage && i.status !== 'Paid' ? [['Delete', () => setConfirm({ title: 'Delete invoice?', message: 'Delete this invoice?', onConfirm: () => deleteInvoiceRecord(i) })]] : [])]} />])} empty="No invoices yet." /></div>
