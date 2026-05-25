@@ -250,6 +250,11 @@ export const generateDocumentFromTemplate = (matterId, templateId) =>
     method: 'POST',
     body: {},
   });
+export const previewDocumentTemplate = (matterId, templateId) =>
+  api(`/matters/${matterId}/document-templates/${templateId}/preview`, {
+    method: 'POST',
+    body: {},
+  });
 export const moveDocument = (docId, folderId) => api(`/documents/${docId}`, { method: 'PATCH', body: { folderId } });
 export const updateDocument = (docId, data) => api(`/documents/${docId}`, { method: 'PATCH', body: data });
 export const getClientActivity = (clientId, limit = 100) => api(`/clients/${clientId}/activity?limit=${encodeURIComponent(limit)}`);
