@@ -504,6 +504,32 @@ function ActivityTimeline({ data, onNavigate }) {
 }
 
 function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, events, notices, proofs, invoicePayments, uploadDoc, uploading, payment, setPayment, submitPayment, notify, onNavigate }) {
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [sortOrder, setSortOrder] = useState('newest');
+
+  const statusOptions = useMemo(() => {
+    const s = new Set();
+    matters.forEach(m => { if (m.stage) s.add(m.stage); if (m.status) s.add(m.status); });
+    return [...s].sort();
+  }, [matters]);
+
+  const filteredMatters = useMemo(() => {
+    let r = [...matters];
+    if (statusFilter) r = r.filter(m => (m.stage || m.status) === statusFilter);
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      r = r.filter(m => (m.title || '').toLowerCase().includes(q) || (m.reference || '').toLowerCase().includes(q) || (m.stage || '').toLowerCase().includes(q) || (m.status || '').toLowerCase().includes(q) || (m.practiceArea || m.category || m.type || '').toLowerCase().includes(q));
+    }
+    r.sort((a, b) => {
+      const aDate = a.createdAt || a.openedAt || a.updatedAt || a.date || '';
+      const bDate = b.createdAt || b.openedAt || b.updatedAt || b.date || '';
+      const cmp = aDate.localeCompare(bDate);
+      return sortOrder === 'newest' ? -cmp : cmp;
+    });
+    return r;
+  }, [matters, search, statusFilter, sortOrder]);
+
   if (!selected) return <Empty title="No matter selected" text="Your matter details will appear here once the firm shares a file." />;
   const paymentRows = invoicePayments.map(payment => {
     const invoice = invoices.find(item => item.id === payment.invoiceId);
@@ -515,7 +541,25 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
   return (
     <div className="lf-matter-grid lf-client-matter-grid" style={styles.matterGrid}>
       <Card title="My matters" hint={`${matters.length} file(s)`}>
-        {matters.map(m => <button key={m.id} type="button" onClick={() => setSelectedId(m.id)} style={{ ...styles.matterButton, ...(selected.id === m.id ? styles.matterActive : {}) }}><strong>{m.title}</strong><span>{m.reference || m.id}</span><small>{m.stage || 'Intake'}</small></button>)}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+          <input type="search" placeholder="Find a matter\u2026" value={search} onChange={e => setSearch(e.target.value)} style={{ flex: 1, minWidth: 140, padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }} />
+          {statusOptions.length > 0 && (
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}>
+              <option value="">All matters</option>
+              {statusOptions.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          )}
+          <select value={sortOrder} onChange={e => setSortOrder(e.target.value)} style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}>
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+          </select>
+        </div>
+        {matters.length > 0 && (
+          <p style={{ margin: '0 0 8px', fontSize: 12, color: '#6B7280' }}>
+            {filteredMatters.length === 0 ? 'No matters match your search or filters.' : `Showing ${filteredMatters.length} of ${matters.length} matter${matters.length === 1 ? '' : 's'}`}
+          </p>
+        )}
+        {filteredMatters.map(m => <button key={m.id} type="button" onClick={() => setSelectedId(m.id)} style={{ ...styles.matterButton, ...(selected.id === m.id ? styles.matterActive : {}) }}><strong>{m.title}</strong><span>{m.reference || m.id}</span><small>{m.stage || 'Intake'}</small></button>)}
       </Card>
       <div style={styles.pageStack}>
         <Card title={selected.title} hint={selected.reference || 'Matter overview'}>
