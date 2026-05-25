@@ -1417,6 +1417,55 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
         </form>
       </Card>
 
+      <Card title="Firm Identity Preview" hint="Current firm identity for documents, invoices, and client-facing information">
+        {(() => {
+          const previewInitials = (settings.name || 'LF').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || 'LF';
+          return (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
+                <div style={{ width: 56, height: 56, borderRadius: 10, background: settings.primaryColor || '#0F1B33', display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 900, fontSize: 18, overflow: 'hidden', flexShrink: 0 }}>
+                  {settings.logo ? <img src={settings.logo} alt="Firm logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span>{previewInitials}</span>}
+                </div>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: theme.ink }}>{settings.name || <span style={styles.mutedText}>Not set</span>}</div>
+                </div>
+              </div>
+              <div style={styles.formGrid}>
+                <div style={styles.field}>
+                  <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: theme.muted }}>Email</label>
+                  <div>{settings.email || <span style={styles.mutedText}>Not set</span>}</div>
+                </div>
+                <div style={styles.field}>
+                  <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: theme.muted }}>Phone</label>
+                  <div>{settings.phone || <span style={styles.mutedText}>Not set</span>}</div>
+                </div>
+                <div style={styles.field}>
+                  <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: theme.muted }}>Address</label>
+                  <div>{settings.address || <span style={styles.mutedText}>Not set</span>}</div>
+                </div>
+                <div style={styles.field}>
+                  <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: theme.muted }}>Website</label>
+                  <div>{settings.websiteURL || <span style={styles.mutedText}>Not set</span>}</div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 16, marginTop: 12, marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ width: 20, height: 20, borderRadius: 5, background: settings.primaryColor || '#0F1B33', flexShrink: 0, border: '1px solid rgba(0,0,0,.08)' }} />
+                  <span style={{ fontSize: 12, color: theme.ink, fontWeight: 600 }}>Primary</span>
+                  <span style={{ fontSize: 12, color: theme.muted }}>{settings.primaryColor || 'default'}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ width: 20, height: 20, borderRadius: 5, background: settings.accentColor || '#D4A34A', flexShrink: 0, border: '1px solid rgba(0,0,0,.08)' }} />
+                  <span style={{ fontSize: 12, color: theme.ink, fontWeight: 600 }}>Accent</span>
+                  <span style={{ fontSize: 12, color: theme.muted }}>{settings.accentColor || 'default'}</span>
+                </div>
+              </div>
+              <div style={styles.formHelper}>This preview shows the identity currently available for LexFlow documents, invoices, receipts, and client-facing firm information. Later phases will apply branding more deeply to generated documents and letterheads.</div>
+            </div>
+          );
+        })()}
+      </Card>
+
       <Card title="Firm Branding / Theme" hint="Choose a preset or adjust colors, then save the workspace theme.">
         <div style={{ ...styles.formGrid, marginBottom: 16 }}>
           <div>
