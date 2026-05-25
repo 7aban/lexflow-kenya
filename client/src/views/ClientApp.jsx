@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { IconLayoutDashboard, IconBriefcase, IconBell, IconFile, IconUserCircle } from '@tabler/icons-react';
+import { IconLayoutDashboard, IconBriefcase, IconBell, IconFile, IconInvoice, IconUserCircle } from '@tabler/icons-react';
 import { api, downloadWithAuth, fileToDataUrl } from '../lib/apiClient.js';
 import { styles, StyleTag, theme, loadAndApplyFirmTheme } from '../theme.jsx';
 import { Badge, Card, Empty, Field, kes, Logo, MeetingLink, Skeleton, Stat, statusTone, Table, Toast } from '../components/ui.jsx';
@@ -11,10 +11,11 @@ const portalIcons = {
   'My Matters': IconBriefcase,
   Notices: IconBell,
   Documents: IconFile,
+  Invoices: IconInvoice,
   Account: IconUserCircle,
 };
 
-const portalNav = ['Dashboard', 'My Matters', 'Notices', 'Documents', 'Account'];
+const portalNav = ['Dashboard', 'My Matters', 'Notices', 'Documents', 'Invoices', 'Account'];
 
 function PortalNavigation({ view, onSelect, onNavigate }) {
   return (
@@ -221,6 +222,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
         )}
         {!loading && view === 'Notices' && <Notices notices={dashboard.notices} notify={notify} />}
         {!loading && view === 'Documents' && <Documents documents={dashboard.documents} matters={dashboard.matters} notify={notify} />}
+        {!loading && view === 'Invoices' && <BillingInvoices data={dashboard} matters={dashboard.matters} notify={notify} />}
         {!loading && view === 'Account' && <Account user={user} client={dashboard.client} firm={firm} />}
       </main>
       <ClientChatWidget firm={firm} matters={dashboard.matters} selectedMatterId={selected?.id || ''} user={user} notify={notify} />
@@ -682,4 +684,156 @@ function DownloadButton({ label, path, filename, notify }) {
 
 function Account({ user, client, firm }) {
   return <div style={styles.dashboardGrid}><Card title="Account" hint="Portal identity"><Table columns={['Field', 'Value']} rows={[['Name', user?.fullName || '-'], ['Email', user?.email || '-'], ['Linked client', client?.name || '-'], ['Phone', client?.phone || '-']]} empty="No account details." /></Card><Card title="Firm Contact" hint={firm?.name || 'Firm'}><Table columns={['Field', 'Value']} rows={[['Email', firm?.email || '-'], ['Phone', firm?.phone || '-'], ['Address', firm?.address || '-'], ['Website', firm?.websiteURL ? <a style={styles.link} href={firm.websiteURL} target="_blank" rel="noopener noreferrer">Open website</a> : '-']]} empty="No firm details." /></Card></div>;
+}
+
+function BillingInvoices({ data, matters, notify }) {
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [matterFilter, setMatterFilter] = useState('');
+  const [sortOrder, setSortOrder] = useState('newest');
+
+  const invoices = data.invoices || [];
+
+  const filtered = useMemo(() => {
+    let result = [...invoices];
+
+    if (statusFilter) {
+      const s = statusFilter;
+      result = result.filter(i => {
+        const st = (i.status || '').toLowerCase();
+        if (s === 'needs-payment') return st !== 'paid' && st !== 'cancelled' && st !== '';
+        if (s === 'paid') return st === 'paid';
+        if (s === 'overdue') return st === 'overdue';
+        return true;
+      });
+    }
+
+    if (matterFilter) {
+      result = result.filter(i => i.matterId && i.matterId === matterFilter);
+    }
+
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      result = result.filter(i => {
+        const number = (i.number || i.id || '').toLowerCase();
+        const matter = matters.find(m => m.id === i.matterId);
+        const matterTitle = (matter?.title || matter?.name || '').toLowerCase();
+        const status = (i.status || '').toLowerCase();
+        const amount = String(i.amount != null ? i.amount : '');
+        return number.includes(q) || matterTitle.includes(q) || status.includes(q) || amount.includes(q);
+      });
+    }
+
+    result.sort((a, b) => {
+      if (sortOrder === 'newest') {
+        const aDate = a.createdAt || a.date || '';
+        const bDate = b.createdAt || b.date || '';
+        return bDate.localeCompare(aDate);
+      }
+      if (sortOrder === 'oldest') {
+        const aDate = a.createdAt || a.date || '';
+        const bDate = b.createdAt || b.date || '';
+        return aDate.localeCompare(bDate);
+      }
+      if (sortOrder === 'amount-desc') return (b.amount || 0) - (a.amount || 0);
+      if (sortOrder === 'amount-asc') return (a.amount || 0) - (b.amount || 0);
+      return 0;
+    });
+
+    return result;
+  }, [invoices, matters, search, statusFilter, matterFilter, sortOrder]);
+
+  const summary = useMemo(() => {
+    const paid = invoices.filter(i => i.status === 'Paid');
+    const unpaid = invoices.filter(i => i.status !== 'Paid');
+    const overdue = invoices.filter(i => i.status === 'Overdue');
+    const totalOutstanding = unpaid.reduce((sum, i) => sum + (Number(i.balance) || Number(i.amount) || 0), 0);
+    return { total: invoices.length, paidCount: paid.length, unpaidCount: unpaid.length, overdueCount: overdue.length, totalOutstanding };
+  }, [invoices]);
+
+  const emptyText = invoices.length === 0 ? 'No invoices shared yet.' : 'No invoices match your search or filters.';
+
+  return (
+    <Card title="Invoices" hint="Billing across your matters">
+      <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap', fontSize: 13 }}>
+        <div style={{ background: '#F9FAFB', borderRadius: 6, padding: '6px 12px', flex: '1 1 auto', minWidth: 120 }}>
+          <span style={{ color: '#6B7280', display: 'block', fontSize: 11 }}>Outstanding</span>
+          <strong>{summary.totalOutstanding > 0 ? kes(summary.totalOutstanding) : 'Kes 0'}</strong>
+        </div>
+        <div style={{ background: '#F9FAFB', borderRadius: 6, padding: '6px 12px', flex: '1 1 auto', minWidth: 80 }}>
+          <span style={{ color: '#6B7280', display: 'block', fontSize: 11 }}>Unpaid</span>
+          <strong>{summary.unpaidCount}</strong>
+        </div>
+        <div style={{ background: '#F9FAFB', borderRadius: 6, padding: '6px 12px', flex: '1 1 auto', minWidth: 80 }}>
+          <span style={{ color: '#6B7280', display: 'block', fontSize: 11 }}>Paid</span>
+          <strong>{summary.paidCount}</strong>
+        </div>
+        {summary.overdueCount > 0 && (
+          <div style={{ background: '#FEF2F2', borderRadius: 6, padding: '6px 12px', flex: '1 1 auto', minWidth: 80 }}>
+            <span style={{ color: '#DC2626', display: 'block', fontSize: 11 }}>Overdue</span>
+            <strong style={{ color: '#DC2626' }}>{summary.overdueCount}</strong>
+          </div>
+        )}
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+        <input
+          type="search"
+          placeholder="Find an invoice\u2026"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ flex: 1, minWidth: 160, padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+        />
+        <select
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+        >
+          <option value="">All invoices</option>
+          <option value="needs-payment">Needs payment</option>
+          <option value="paid">Paid</option>
+          <option value="overdue">Overdue</option>
+        </select>
+        <select
+          value={matterFilter}
+          onChange={e => setMatterFilter(e.target.value)}
+          style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+        >
+          <option value="">All matters</option>
+          {matters.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
+        </select>
+        <select
+          value={sortOrder}
+          onChange={e => setSortOrder(e.target.value)}
+          style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+        >
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+          <option value="amount-desc">Amount high to low</option>
+          <option value="amount-asc">Amount low to high</option>
+        </select>
+      </div>
+      {invoices.length > 0 && (
+        <p style={{ margin: '0 0 8px', fontSize: 12, color: '#6B7280' }}>
+          {filtered.length === 0
+            ? 'No invoices match your search or filters.'
+            : `Showing ${filtered.length} of ${invoices.length} invoice${invoices.length === 1 ? '' : 's'}`}
+        </p>
+      )}
+      <div className="lf-client-all-invoices-cards">
+        <Table
+          columns={['Invoice', 'Matter', 'Amount', 'Paid', 'Balance', 'Status', 'PDF']}
+          rows={filtered.map(i => [
+            i.number || i.id,
+            matters.find(m => m.id === i.matterId)?.title || i.matterId || '-',
+            kes(i.amount),
+            kes(i.amountPaid),
+            kes(i.balance),
+            <Badge key={`${i.id}-status`} tone={statusTone(i.status)}>{i.status}</Badge>,
+            <DownloadButton key={`${i.id}-pdf`} label="PDF" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />
+          ])}
+          empty={emptyText}
+        />
+      </div>
+    </Card>
+  );
 }
