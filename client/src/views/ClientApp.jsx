@@ -223,7 +223,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
         {!loading && view === 'Notices' && <Notices notices={dashboard.notices} notify={notify} />}
         {!loading && view === 'Documents' && <Documents documents={dashboard.documents} matters={dashboard.matters} notify={notify} />}
         {!loading && view === 'Invoices' && <BillingInvoices data={dashboard} matters={dashboard.matters} notify={notify} />}
-        {!loading && view === 'Account' && <Account user={user} client={dashboard.client} firm={firm} />}
+        {!loading && view === 'Account' && <Account user={user} client={dashboard.client} firm={firm} matters={dashboard.matters} onNavigate={switchView} />}
       </main>
       <ClientChatWidget firm={firm} matters={dashboard.matters} selectedMatterId={selected?.id || ''} user={user} notify={notify} />
       <Toast toast={toast} onClose={() => setToast(null)} />
@@ -682,8 +682,63 @@ function DownloadButton({ label, path, filename, notify }) {
   );
 }
 
-function Account({ user, client, firm }) {
-  return <div style={styles.dashboardGrid}><Card title="Account" hint="Portal identity"><Table columns={['Field', 'Value']} rows={[['Name', user?.fullName || '-'], ['Email', user?.email || '-'], ['Linked client', client?.name || '-'], ['Phone', client?.phone || '-']]} empty="No account details." /></Card><Card title="Firm Contact" hint={firm?.name || 'Firm'}><Table columns={['Field', 'Value']} rows={[['Email', firm?.email || '-'], ['Phone', firm?.phone || '-'], ['Address', firm?.address || '-'], ['Website', firm?.websiteURL ? <a style={styles.link} href={firm.websiteURL} target="_blank" rel="noopener noreferrer">Open website</a> : '-']]} empty="No firm details." /></Card></div>;
+function Account({ user, client, firm, matters, onNavigate }) {
+  const activeMatters = matters ? matters.filter(m => !['Closed', 'Archived'].includes(m.stage)) : [];
+  const linkedMatters = matters ? matters.slice(0, 3) : [];
+  return (
+    <div style={styles.pageStack}>
+      <Card title="Account details" hint="Your portal identity">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
+          <Row label="Name" value={user?.fullName} />
+          <Row label="Email" value={user?.email} />
+          <Row label="Phone" value={client?.phone} />
+        </div>
+      </Card>
+      <Card title="Linked matters" hint={`${matters ? matters.length : 0} file(s)`}>
+        {activeMatters.length > 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
+            <p style={{ margin: '0 0 4px', color: '#6B7280' }}>{activeMatters.length} active matter{activeMatters.length === 1 ? '' : 's'} of {matters.length}</p>
+            {linkedMatters.map(m => (
+              <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', background: '#F9FAFB', borderRadius: 6 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontWeight: 500, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</span>
+                  <span style={{ color: '#6B7280', fontSize: 12 }}>{m.stage || 'Intake'}</span>
+                </div>
+              </div>
+            ))}
+            {matters.length > 3 && <p style={{ margin: '4px 0 0', color: '#9CA3AF', fontSize: 12 }}>And {matters.length - 3} more matter{matters.length - 3 === 1 ? '' : 's'}</p>}
+            <button type="button" onClick={() => onNavigate('My Matters')} style={{ ...styles.tinyButton, alignSelf: 'flex-start' }}>View all matters</button>
+          </div>
+        ) : (
+          <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>Your matters will appear here when shared by the firm.</p>
+        )}
+      </Card>
+      <Card title="Firm contact" hint={firm?.name || 'LexFlow Kenya'}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
+          <p style={{ margin: '0 0 4px', color: '#6B7280', lineHeight: 1.5 }}>For corrections to your account details or urgent matter updates, contact the firm directly.</p>
+          <Row label="Email" value={firm?.email} />
+          <Row label="Phone" value={firm?.phone} />
+          <Row label="Address" value={firm?.address} />
+          {firm?.websiteURL && (
+            <div style={{ display: 'flex', gap: 8, padding: '6px 8px', background: '#F9FAFB', borderRadius: 6 }}>
+              <span style={{ fontWeight: 500, minWidth: 90, color: '#374151' }}>Website</span>
+              <a style={styles.link} href={firm.websiteURL} target="_blank" rel="noopener noreferrer">Open website</a>
+            </div>
+          )}
+        </div>
+      </Card>
+      <p style={{ margin: 0, fontSize: 12, color: '#9CA3AF', lineHeight: 1.5 }}>For your security, sign out after using LexFlow on a shared device.</p>
+    </div>
+  );
+}
+
+function Row({ label, value }) {
+  return (
+    <div style={{ display: 'flex', gap: 8, padding: '6px 8px', background: '#F9FAFB', borderRadius: 6 }}>
+      <span style={{ fontWeight: 500, minWidth: 90, color: '#374151' }}>{label}</span>
+      <span style={{ color: value ? '#6B7280' : '#9CA3AF' }}>{value || '-'}</span>
+    </div>
+  );
 }
 
 function BillingInvoices({ data, matters, notify }) {
