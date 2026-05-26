@@ -2189,7 +2189,7 @@ function MatterBillingSnapshot({ detail }) {
   const outstandingCount = invoices.filter(i => i.status === 'Outstanding' || i.status === 'Overdue').length;
   const paidCount = invoices.filter(i => i.status === 'Paid').length;
   const hasBilling = totalHours > 0 || invoiceCount > 0;
-  const cardStyle = { border: `1px solid ${theme.line}`, borderLeft: `4px solid #2563EB`, borderRadius: 10, padding: 14, background: '#fff', display: 'grid', gap: 8 };
+  const cardStyle = { border: `1px solid ${theme.line}`, borderLeft: `4px solid ${theme.blue}`, borderRadius: 10, padding: 14, background: '#fff', display: 'grid', gap: 8 };
   if (!hasBilling) {
     return (
       <section aria-label="Billing snapshot" style={cardStyle}>

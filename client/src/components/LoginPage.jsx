@@ -29,9 +29,9 @@ function MicrosoftLogo() {
 function OAuthDivider() {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '16px 0 10px' }}>
-      <div style={{ flex: 1, height: 1, background: '#E8E2D6' }} />
-      <span style={{ fontSize: 11, color: '#9C9384', textTransform: 'uppercase', letterSpacing: 1 }}>or continue with</span>
-      <div style={{ flex: 1, height: 1, background: '#E8E2D6' }} />
+      <div style={{ flex: 1, height: 1, background: theme.line }} />
+      <span style={{ fontSize: 11, color: theme.muted, textTransform: 'uppercase', letterSpacing: 1 }}>or continue with</span>
+      <div style={{ flex: 1, height: 1, background: theme.line }} />
     </div>
   );
 }
@@ -210,7 +210,7 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
                     <OAuthButton provider="google" onClick={() => handleOAuth('google')} />
                     <OAuthButton provider="microsoft" onClick={() => handleOAuth('microsoft')} />
                   </div>
-                  <div style={{ fontSize: 11, color: '#9C9384', textAlign: 'center', marginTop: 8 }}>For authorised firm users only.</div>
+                  <div style={{ fontSize: 11, color: theme.muted, textAlign: 'center', marginTop: 8 }}>For authorised firm users only.</div>
                 </>
               ) : (
                 <div style={{ height: 1 }} />

@@ -40,6 +40,19 @@ export function StyleTag() { return <style>{`
     #root .lf-page-inner { padding: 20px 18px 60px !important; }
     #root header.lf-topbar { padding: 0 18px !important; }
     #root .lf-top-actions { flex-wrap: nowrap; }
+    /* OVERFLOW-1: payment/invoice preview card layout for tablet (sidebar still visible at 768px) */
+    #root .lf-payment-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
+    #root .lf-payment-cards table { min-width: 0 !important; }
+    #root .lf-payment-cards thead { display: none !important; }
+    #root .lf-payment-cards tbody tr { display: block; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    #root .lf-payment-cards tbody td { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: none; background: transparent !important; }
+    #root .lf-payment-cards tbody tr:hover td { background: transparent !important; }
+    #root .lf-payment-cards td:nth-child(1)::before { content: "Date"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-payment-cards td:nth-child(2)::before { content: "Receipt"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-payment-cards td:nth-child(3)::before { content: "Method"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-payment-cards td:nth-child(4)::before { content: "Reference"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-payment-cards td:nth-child(5)::before { content: "Amount"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-payment-cards td:nth-child(6)::before { content: "Receipt PDF"; min-width: 80px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
   }
   @media (max-width: 767px) {
     #root .lf-app-shell { grid-template-columns: 1fr; }
