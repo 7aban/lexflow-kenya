@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { IconLayoutDashboard, IconBriefcase, IconBell, IconFile, IconInvoice, IconUserCircle, IconCalendarEvent } from '@tabler/icons-react';
 import { api, downloadWithAuth, fileToDataUrl } from '../lib/apiClient.js';
 import { styles, StyleTag, theme, loadAndApplyFirmTheme } from '../theme.jsx';
-import { Badge, Card, Empty, Field, kes, Logo, MeetingLink, Skeleton, Stat, statusTone, Table, Toast } from '../components/ui.jsx';
+import { Badge, Card, Empty, Field, kes, Logo, MeetingLink, Skeleton, statusTone, Table, Toast } from '../components/ui.jsx';
 import ClientChatWidget from '../components/ClientChatWidget.jsx';
 import MatterDocuments from '../components/MatterDocuments.jsx';
 
@@ -243,7 +243,7 @@ function ClientDashboard({ data, stats, selectMatter, onNavigate }) {
         <div><div style={styles.heroKicker}>Client workspace</div><h2>Your matters at a glance.</h2><p>Track active files, court appearances, invoices and documents shared by the firm.</p></div>
         <div style={styles.heroFigure}>{data.client?.name || 'Client'}</div>
       </section>
-      <section style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: 14 }}>
+      <section style={{ background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 14 }}>
         <h3 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>Matter status</h3>
         {data.matters.length > 0 ? (
           <>
@@ -265,14 +265,30 @@ function ClientDashboard({ data, stats, selectMatter, onNavigate }) {
         )}
       </section>
       <NextActions data={data} selectMatter={selectMatter} onNavigate={onNavigate} />
-      <div style={styles.statsGrid}>
-        <Stat label="Active matters" value={stats.activeMatters} tone="navy" />
-        <Stat label="Court dates" value={stats.upcomingCourt} tone="gold" />
-        <Stat label="Recent docs" value={stats.recentDocuments} tone="green" />
-        <Stat label="Unpaid invoices" value={stats.unpaidInvoices} tone="red" />
+      <div style={styles.dashStatsGrid}>
+        <div style={styles.dashStatCard}>
+          <span style={{ ...styles.dashStatTopBar, background: theme.navy600 }} aria-hidden="true" />
+          <div style={styles.dashStatHead}><span style={styles.dashStatLabel}>Active matters</span></div>
+          <div style={styles.dashStatValue}>{stats.activeMatters}</div>
+        </div>
+        <div style={styles.dashStatCard}>
+          <span style={{ ...styles.dashStatTopBar, background: theme.gold }} aria-hidden="true" />
+          <div style={styles.dashStatHead}><span style={styles.dashStatLabel}>Court dates</span></div>
+          <div style={styles.dashStatValue}>{stats.upcomingCourt}</div>
+        </div>
+        <div style={styles.dashStatCard}>
+          <span style={{ ...styles.dashStatTopBar, background: theme.green }} aria-hidden="true" />
+          <div style={styles.dashStatHead}><span style={styles.dashStatLabel}>Recent docs</span></div>
+          <div style={styles.dashStatValue}>{stats.recentDocuments}</div>
+        </div>
+        <div style={styles.dashStatCard}>
+          <span style={{ ...styles.dashStatTopBar, background: theme.red }} aria-hidden="true" />
+          <div style={styles.dashStatHead}><span style={styles.dashStatLabel}>Unpaid invoices</span></div>
+          <div style={styles.dashStatValue}>{stats.unpaidInvoices}</div>
+        </div>
       </div>
       <ActivityTimeline data={data} onNavigate={onNavigate} />
-      <section style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: 14 }}>
+      <section style={{ background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 14 }}>
         <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 600 }}>Updates & messages</h3>
         {data.notices.length > 0 ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13, lineHeight: 1.6 }}>
@@ -367,14 +383,14 @@ function NextActions({ data, selectMatter, onNavigate }) {
   }
 
   return (
-    <section style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: 14 }}>
+    <section style={{ background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 14 }}>
       <h3 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>What needs your attention</h3>
       {items.length === 0 ? (
         <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>You're up to date. We'll show important actions here when something needs your attention.</p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {items.map(item => (
-            <div key={item.key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', background: '#F9FAFB', borderRadius: 6, fontSize: 13, flexWrap: 'wrap' }}>
+            <div key={item.key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', background: theme.wash, borderRadius: 6, fontSize: 13, flexWrap: 'wrap' }}>
               <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
                 <span style={{ fontWeight: 500, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
                 <span style={{ color: '#6B7280', fontSize: 12 }}>{item.detail}</span>
@@ -403,11 +419,11 @@ function MatterSnapshot({ selected, events, docs, invoices, notices }) {
   ];
 
   return (
-    <section style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: 14 }}>
+    <section style={{ background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 14 }}>
       <h3 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>This matter at a glance</h3>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {rows.map(row => (
-          <div key={row.key} style={{ display: 'flex', gap: 8, padding: '6px 8px', background: '#F9FAFB', borderRadius: 6, fontSize: 13, lineHeight: 1.5 }}>
+          <div key={row.key} style={{ display: 'flex', gap: 8, padding: '6px 8px', background: theme.wash, borderRadius: 6, fontSize: 13, lineHeight: 1.5 }}>
             <span style={{ fontWeight: 500, whiteSpace: 'nowrap', flexShrink: 0, minWidth: 90, color: '#374151' }}>{row.label}</span>
             <span style={{ color: row.value.startsWith('No ') ? '#9CA3AF' : '#6B7280', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.value}</span>
           </div>
@@ -481,14 +497,14 @@ function ActivityTimeline({ data, onNavigate }) {
   const recent = items.slice(0, 5);
 
   return (
-    <section style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: 16 }}>
+    <section style={{ background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 16 }}>
       <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600 }}>Recent activity</h3>
       {recent.length === 0 ? (
         <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>Recent matter activity will appear here when available.</p>
       ) : (
         <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {recent.map((item, idx) => (
-            <li key={idx} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', background: '#F9FAFB', borderRadius: 6, fontSize: 13, flexWrap: 'wrap' }}>
+            <li key={idx} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', background: theme.wash, borderRadius: 6, fontSize: 13, flexWrap: 'wrap' }}>
               <Badge tone={item.tone}>{item.type}</Badge>
               <div style={{ flex: 1, minWidth: 120, overflow: 'hidden' }}>
                 <span style={{ fontWeight: 500, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.label}</span>
@@ -544,14 +560,14 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
     <div className="lf-matter-grid lf-client-matter-grid" style={styles.matterGrid}>
       <Card title="My matters" hint={`${matters.length} file(s)`}>
         <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-          <input type="search" placeholder="Find a matter\u2026" value={search} onChange={e => setSearch(e.target.value)} style={{ flex: 1, minWidth: 140, padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }} />
+          <input type="search" placeholder="Find a matter\u2026" value={search} onChange={e => setSearch(e.target.value)} style={{ flex: 1, minWidth: 140, padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }} />
           {statusOptions.length > 0 && (
-            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}>
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}>
               <option value="">All matters</option>
               {statusOptions.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           )}
-          <select value={sortOrder} onChange={e => setSortOrder(e.target.value)} style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}>
+          <select value={sortOrder} onChange={e => setSortOrder(e.target.value)} style={{ padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}>
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>
           </select>
@@ -648,13 +664,13 @@ function Notices({ notices, matters, notify }) {
           placeholder="Find an update\u2026"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          style={{ flex: 1, minWidth: 160, padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+          style={{ flex: 1, minWidth: 160, padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}
         />
         {typeOptions.length > 1 && (
           <select
             value={typeFilter}
             onChange={e => setTypeFilter(e.target.value)}
-            style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+            style={{ padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}
           >
             <option value="">All updates</option>
             {typeOptions.map(t => <option key={t} value={t}>{audienceLabel(t)}</option>)}
@@ -664,7 +680,7 @@ function Notices({ notices, matters, notify }) {
           <select
             value={matterFilter}
             onChange={e => setMatterFilter(e.target.value)}
-            style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+            style={{ padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}
           >
             <option value="">All matters</option>
             {matters.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
@@ -673,7 +689,7 @@ function Notices({ notices, matters, notify }) {
         <select
           value={sortOrder}
           onChange={e => setSortOrder(e.target.value)}
-          style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+          style={{ padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}
         >
           <option value="newest">Newest first</option>
           <option value="oldest">Oldest first</option>
@@ -760,12 +776,12 @@ function Documents({ documents, matters, notify }) {
           placeholder="Find a document\u2026"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          style={{ flex: 1, minWidth: 160, padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+          style={{ flex: 1, minWidth: 160, padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}
         />
         <select
           value={matterFilter}
           onChange={e => setMatterFilter(e.target.value)}
-          style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+          style={{ padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}
         >
           <option value="">All matters</option>
           {matters.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
@@ -773,7 +789,7 @@ function Documents({ documents, matters, notify }) {
         <select
           value={sortOrder}
           onChange={e => setSortOrder(e.target.value)}
-          style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+          style={{ padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}
         >
           <option value="newest">Newest first</option>
           <option value="oldest">Oldest first</option>
@@ -836,7 +852,7 @@ function Account({ user, client, firm, matters, onNavigate }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
             <p style={{ margin: '0 0 4px', color: '#6B7280' }}>{activeMatters.length} active matter{activeMatters.length === 1 ? '' : 's'} of {matters.length}</p>
             {linkedMatters.map(m => (
-              <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', background: '#F9FAFB', borderRadius: 6 }}>
+              <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', background: theme.wash, borderRadius: 6 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <span style={{ fontWeight: 500, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</span>
                   <span style={{ color: '#6B7280', fontSize: 12 }}>{m.stage || 'Intake'}</span>
@@ -857,7 +873,7 @@ function Account({ user, client, firm, matters, onNavigate }) {
           <Row label="Phone" value={firm?.phone} />
           <Row label="Address" value={firm?.address} />
           {firm?.websiteURL && (
-            <div style={{ display: 'flex', gap: 8, padding: '6px 8px', background: '#F9FAFB', borderRadius: 6 }}>
+            <div style={{ display: 'flex', gap: 8, padding: '6px 8px', background: theme.wash, borderRadius: 6 }}>
               <span style={{ fontWeight: 500, minWidth: 90, color: '#374151' }}>Website</span>
               <a style={styles.link} href={firm.websiteURL} target="_blank" rel="noopener noreferrer">Open website</a>
             </div>
@@ -871,7 +887,7 @@ function Account({ user, client, firm, matters, onNavigate }) {
 
 function Row({ label, value }) {
   return (
-    <div style={{ display: 'flex', gap: 8, padding: '6px 8px', background: '#F9FAFB', borderRadius: 6 }}>
+    <div style={{ display: 'flex', gap: 8, padding: '6px 8px', background: theme.wash, borderRadius: 6 }}>
       <span style={{ fontWeight: 500, minWidth: 90, color: '#374151' }}>{label}</span>
       <span style={{ color: value ? '#6B7280' : '#9CA3AF' }}>{value || '-'}</span>
     </div>
@@ -947,12 +963,12 @@ function CourtDates({ appearances, matters }) {
           placeholder="Find a court date\u2026"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          style={{ flex: 1, minWidth: 160, padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+          style={{ flex: 1, minWidth: 160, padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}
         />
         <select
           value={timeFilter}
           onChange={e => setTimeFilter(e.target.value)}
-          style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+          style={{ padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}
         >
           {timeOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
@@ -960,7 +976,7 @@ function CourtDates({ appearances, matters }) {
           <select
             value={matterFilter}
             onChange={e => setMatterFilter(e.target.value)}
-            style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+            style={{ padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}
           >
             <option value="">All matters</option>
             {matters.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
@@ -969,7 +985,7 @@ function CourtDates({ appearances, matters }) {
         <select
           value={sortOrder}
           onChange={e => setSortOrder(e.target.value)}
-          style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+          style={{ padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}
         >
           <option value="soonest">Soonest first</option>
           <option value="latest">Latest first</option>
@@ -977,17 +993,17 @@ function CourtDates({ appearances, matters }) {
       </div>
       {appearances.length > 0 && (
         <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap', fontSize: 13 }}>
-          <div style={{ background: '#F9FAFB', borderRadius: 6, padding: '6px 12px', flex: '1 1 auto', minWidth: 80 }}>
+          <div style={{ background: theme.wash, borderRadius: 6, padding: '6px 12px', flex: '1 1 auto', minWidth: 80 }}>
             <span style={{ color: '#6B7280', display: 'block', fontSize: 11 }}>Upcoming</span>
             <strong>{upcomingCount}</strong>
           </div>
           {nextCourt && (
-            <div style={{ background: '#F9FAFB', borderRadius: 6, padding: '6px 12px', flex: '1 1 auto', minWidth: 120 }}>
+            <div style={{ background: theme.wash, borderRadius: 6, padding: '6px 12px', flex: '1 1 auto', minWidth: 120 }}>
               <span style={{ color: '#6B7280', display: 'block', fontSize: 11 }}>Next court date</span>
               <strong style={{ fontSize: 12 }}>{nextCourt.date}{nextCourt.title || nextCourt.type ? ` \u00b7 ${nextCourt.title || nextCourt.type}` : ''}</strong>
             </div>
           )}
-          <div style={{ background: '#F9FAFB', borderRadius: 6, padding: '6px 12px', flex: '1 1 auto', minWidth: 80 }}>
+          <div style={{ background: theme.wash, borderRadius: 6, padding: '6px 12px', flex: '1 1 auto', minWidth: 80 }}>
             <span style={{ color: '#6B7280', display: 'block', fontSize: 11 }}>Past</span>
             <strong>{pastCount}</strong>
           </div>
@@ -1088,15 +1104,15 @@ function BillingInvoices({ data, matters, notify }) {
   return (
     <Card title="Invoices" hint="Billing across your matters">
       <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap', fontSize: 13 }}>
-        <div style={{ background: '#F9FAFB', borderRadius: 6, padding: '6px 12px', flex: '1 1 auto', minWidth: 120 }}>
+        <div style={{ background: theme.wash, borderRadius: 6, padding: '6px 12px', flex: '1 1 auto', minWidth: 120 }}>
           <span style={{ color: '#6B7280', display: 'block', fontSize: 11 }}>Outstanding</span>
           <strong>{summary.totalOutstanding > 0 ? kes(summary.totalOutstanding) : 'Kes 0'}</strong>
         </div>
-        <div style={{ background: '#F9FAFB', borderRadius: 6, padding: '6px 12px', flex: '1 1 auto', minWidth: 80 }}>
+        <div style={{ background: theme.wash, borderRadius: 6, padding: '6px 12px', flex: '1 1 auto', minWidth: 80 }}>
           <span style={{ color: '#6B7280', display: 'block', fontSize: 11 }}>Unpaid</span>
           <strong>{summary.unpaidCount}</strong>
         </div>
-        <div style={{ background: '#F9FAFB', borderRadius: 6, padding: '6px 12px', flex: '1 1 auto', minWidth: 80 }}>
+        <div style={{ background: theme.wash, borderRadius: 6, padding: '6px 12px', flex: '1 1 auto', minWidth: 80 }}>
           <span style={{ color: '#6B7280', display: 'block', fontSize: 11 }}>Paid</span>
           <strong>{summary.paidCount}</strong>
         </div>
@@ -1113,12 +1129,12 @@ function BillingInvoices({ data, matters, notify }) {
           placeholder="Find an invoice\u2026"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          style={{ flex: 1, minWidth: 160, padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+          style={{ flex: 1, minWidth: 160, padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}
         />
         <select
           value={statusFilter}
           onChange={e => setStatusFilter(e.target.value)}
-          style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+          style={{ padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}
         >
           <option value="">All invoices</option>
           <option value="needs-payment">Needs payment</option>
@@ -1128,7 +1144,7 @@ function BillingInvoices({ data, matters, notify }) {
         <select
           value={matterFilter}
           onChange={e => setMatterFilter(e.target.value)}
-          style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+          style={{ padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}
         >
           <option value="">All matters</option>
           {matters.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
@@ -1136,7 +1152,7 @@ function BillingInvoices({ data, matters, notify }) {
         <select
           value={sortOrder}
           onChange={e => setSortOrder(e.target.value)}
-          style={{ padding: '6px 10px', fontSize: 13, border: '1px solid #E5E7EB', borderRadius: 6, background: '#fff', outline: 'none' }}
+          style={{ padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}
         >
           <option value="newest">Newest first</option>
           <option value="oldest">Oldest first</option>
