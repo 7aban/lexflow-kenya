@@ -32,7 +32,7 @@ const defaultReminderTemplates = [
 async function createSchema() {
   const tables = [
     'audit_logs', 'notifications', 'payment_proofs', 'payments', 'receipt_sequences', 'expenses', 'disbursements', 'invoice_items', 'invoices',
-    'messages', 'conversations', 'client_activity', 'case_notes', 'documents', 'folders', 'appearances', 'time_entries', 'tasks', 'deadlines', 'checklist_template_items', 'checklist_templates', 'matter_checklist_items', 'matters', 'clients',
+    'messages', 'conversations', 'client_activity', 'case_notes', 'documents', 'folders', 'appearances', 'time_entries', 'tasks', 'deadlines', 'document_templates', 'checklist_template_items', 'checklist_templates', 'matter_checklist_items', 'matters', 'clients',
     'users', 'integrations_log', 'firm_settings', 'reminder_settings', 'reminder_templates', 'reminder_logs',
     'firm_notices', 'invitations',
   ];
@@ -45,6 +45,7 @@ async function createSchema() {
   await run(`CREATE TABLE matter_checklist_items (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT NOT NULL, completed INTEGER DEFAULT 0, position INTEGER DEFAULT 0, notes TEXT, createdBy TEXT, createdAt TEXT NOT NULL, completedAt TEXT, completedBy TEXT)`);
   await run(`CREATE TABLE checklist_templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, practiceArea TEXT, active INTEGER DEFAULT 1, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
   await run(`CREATE TABLE checklist_template_items (id TEXT PRIMARY KEY, templateId TEXT NOT NULL, title TEXT NOT NULL, notes TEXT, position INTEGER DEFAULT 0, createdAt TEXT NOT NULL)`);
+  await run(`CREATE TABLE document_templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, practiceArea TEXT, category TEXT, bodyMarkup TEXT, active INTEGER DEFAULT 1, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
   await run(`CREATE TABLE tasks (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT NOT NULL, completed INTEGER DEFAULT 0, assignee TEXT, dueDate TEXT, auto_generated INTEGER DEFAULT 0)`);
   await run(`CREATE TABLE time_entries (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, taskId TEXT, attorney TEXT, date TEXT, hours REAL DEFAULT 0, activity TEXT, description TEXT, rate REAL DEFAULT 0, billed INTEGER DEFAULT 0)`);
   await run(`CREATE TABLE appearances (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT, date TEXT, time TEXT, type TEXT, location TEXT, meetingLink TEXT, attorney TEXT, prepNote TEXT)`);
@@ -226,6 +227,101 @@ async function main() {
     }
   }
 
+  const documentTemplates = [
+    {
+      name: 'General Practice - Client Update Letter',
+      description: 'Short client status update for any active matter.',
+      practiceArea: 'General Practice',
+      category: 'Letter',
+      bodyMarkup: [
+        'Dear {{client.name}},',
+        '',
+        'RE: {{matter.title}} ({{matter.reference}})',
+        '',
+        'We write to update you on the current status of the above matter as at {{today}}.',
+        'Current stage: {{matter.stage}}',
+        'Assigned advocate: {{matter.assignedAdvocate}}',
+        '',
+        'We will continue to keep you informed of material developments.',
+        '',
+        'Yours faithfully,',
+        '{{user.fullName}}',
+        '{{firm.name}}',
+      ].join('\n'),
+    },
+    {
+      name: 'Litigation - Mention Attendance Note',
+      description: 'Concise post-mention attendance note for court-tracked matters.',
+      practiceArea: 'Litigation',
+      category: 'Court Attendance',
+      bodyMarkup: [
+        'Matter: {{matter.title}}',
+        'Reference: {{matter.reference}}',
+        'Court: {{matter.court}}',
+        'Case number: {{matter.caseNo}}',
+        '',
+        'Attendance note prepared on {{today}} by {{user.fullName}}.',
+        '',
+        'The matter was reviewed for attendance, directions, and next steps. The client should be updated once the court record is confirmed.',
+        '',
+        '{{firm.name}}',
+      ].join('\n'),
+    },
+    {
+      name: 'Probate - Estate Administration Client Update',
+      description: 'Client update for succession and estate administration matters.',
+      practiceArea: 'Probate and Administration',
+      category: 'Letter',
+      bodyMarkup: [
+        'Dear {{client.name}},',
+        '',
+        'RE: {{matter.title}} - {{matter.reference}}',
+        '',
+        'We refer to the estate administration matter above and confirm that the file remains at the {{matter.stage}} stage.',
+        '',
+        'Court: {{matter.court}}',
+        'Case number: {{matter.caseNo}}',
+        '',
+        'We will notify you after the next registry or court update.',
+        '',
+        'Yours faithfully,',
+        '{{firm.name}}',
+      ].join('\n'),
+    },
+    {
+      name: 'Commercial Law - Demand / Status Letter',
+      description: 'Short commercial matter status or demand follow-up letter.',
+      practiceArea: 'Commercial Law',
+      category: 'Letter',
+      bodyMarkup: [
+        '{{client.name}}',
+        '{{client.email}}',
+        '',
+        'Dear {{client.name}},',
+        '',
+        'RE: {{matter.title}} ({{matter.reference}})',
+        '',
+        'We write to provide a brief status update on the above commercial matter as at {{today}}.',
+        'Matter stage: {{matter.stage}}',
+        'Assigned advocate: {{matter.assignedAdvocate}}',
+        '',
+        'Please contact us if you would like to discuss the next practical steps.',
+        '',
+        '{{user.fullName}}',
+        '{{firm.name}}',
+        '{{firm.email}}',
+        '{{firm.phone}}',
+      ].join('\n'),
+    },
+  ];
+  for (const template of documentTemplates) {
+    const createdAt = nowIso();
+    await run(
+      'INSERT INTO document_templates (id,name,description,practiceArea,category,bodyMarkup,active,createdBy,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      [id('DTPL'), template.name, template.description, template.practiceArea, template.category, template.bodyMarkup, 1, admin.id, createdAt, createdAt],
+    );
+  }
+
   const activities = ['Research', 'Drafting', 'Court Appearance', 'Client Call', 'Document Review', 'Filing', 'Preparation', 'Negotiation'];
   const sarahMatters = matters.filter(m => m.advocate === 'Sarah Mwangi');
   for (let i = 0; i < 120; i += 1) {
@@ -271,10 +367,13 @@ async function main() {
   }
 
   const appearanceTitles = ['Mention', 'Hearing', 'Directions', 'Ruling', 'Pre-trial conference'];
+  const appearanceTimes = ['9:00 AM', '10:00 AM', '11:00 AM', '2:30 PM', '8:30 AM'];
+  const appearanceOffsets = [7, 1, 2, 3, 4, 5, 6, 7, -24, -27, -30, -33, -36, -39, -42, -45, -48, -51];
   for (let i = 0; i < 18; i += 1) {
     const matter = matters[i % matters.length];
-    const offset = i === 0 ? 0 : i === 1 ? 1 : i < 8 ? i + 2 : -(i * 3);
-    await run('INSERT INTO appearances (id,matterId,title,date,time,type,location,meetingLink,attorney,prepNote) VALUES (?,?,?,?,?,?,?,?,?,?)', [id('EV'), matter.id, pick(appearanceTitles, i), daysFromNow(offset), `${8 + (i % 5)}:00 AM`, pick(appearanceTitles, i), matter.court || 'Milimani Law Courts', i % 4 === 0 ? `https://meet.google.com/lex-demo-${i}` : '', matter.advocate, 'Review bundle and update client after appearance.']);
+    const title = pick(appearanceTitles, i);
+    const location = i === 0 ? 'High Court Family Division - Probate and Administration Registry' : matter.court || 'Milimani Law Courts';
+    await run('INSERT INTO appearances (id,matterId,title,date,time,type,location,meetingLink,attorney,prepNote) VALUES (?,?,?,?,?,?,?,?,?,?)', [id('EV'), matter.id, title, daysFromNow(appearanceOffsets[i]), pick(appearanceTimes, i), title, location, i % 4 === 0 ? `https://meet.google.com/lex-demo-${i}` : '', matter.advocate, 'Review bundle and update client after appearance.']);
   }
 
   for (let i = 0; i < 8; i += 1) {
