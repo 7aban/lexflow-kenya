@@ -241,6 +241,8 @@ async function initDb() {
   await ensureColumn('time_entries', 'billable', 'INTEGER DEFAULT 1');
   await run('UPDATE time_entries SET billable=1 WHERE billable IS NULL');
   await ensureColumn('users', 'isActive', 'INTEGER DEFAULT 1');
+  await ensureColumn('users', 'avatar', 'BLOB');
+  await ensureColumn('users', 'avatarMimeType', "TEXT DEFAULT ''");
   await ensureColumn('firm_settings', 'themeJson', 'TEXT');
   await ensureColumn('firm_settings', 'advocateBillingVisibility', 'INTEGER DEFAULT 1');
   await ensureColumn('payments', 'proofId', 'TEXT');
@@ -740,8 +742,8 @@ app.post('/api/auth/oauth/exchange', async (req, res) => {
 app.use('/api', authenticate);
 
 app.get('/api/auth/me', async (req, res) => {
-  const user = await get('SELECT id,email,fullName,role,clientId,createdAt FROM users WHERE id=?', [req.user.userId]);
-  user ? res.json({ ...user, name: user.fullName }) : res.status(404).json({ error: 'User not found' });
+  const user = await get('SELECT id,email,fullName,role,clientId,createdAt,(CASE WHEN avatar IS NOT NULL THEN 1 ELSE 0 END) hasAvatar FROM users WHERE id=?', [req.user.userId]);
+  user ? res.json({ ...user, name: user.fullName, hasAvatar: Boolean(user.hasAvatar) }) : res.status(404).json({ error: 'User not found' });
 });
 app.post('/api/auth/change-password', async (req, res) => {
   try {
@@ -764,10 +766,10 @@ app.post('/api/auth/change-password', async (req, res) => {
 app.get('/api/auth/users', requireAdmin, async (req, res) => {
   const includeInactive = req.query.include_inactive === 'true';
   const sql = includeInactive
-    ? 'SELECT id,email,fullName,role,clientId,createdAt,isActive FROM users ORDER BY createdAt DESC'
-    : 'SELECT id,email,fullName,role,clientId,createdAt,isActive FROM users WHERE COALESCE(isActive,1)=1 ORDER BY createdAt DESC';
+    ? 'SELECT id,email,fullName,role,clientId,createdAt,isActive,(CASE WHEN avatar IS NOT NULL THEN 1 ELSE 0 END) hasAvatar FROM users ORDER BY createdAt DESC'
+    : 'SELECT id,email,fullName,role,clientId,createdAt,isActive,(CASE WHEN avatar IS NOT NULL THEN 1 ELSE 0 END) hasAvatar FROM users WHERE COALESCE(isActive,1)=1 ORDER BY createdAt DESC';
   const users = await all(sql);
-  res.json(users.map(u => ({ ...u, isActive: Boolean(u.isActive ?? 1) })));
+  res.json(users.map(u => ({ ...u, isActive: Boolean(u.isActive ?? 1), hasAvatar: Boolean(u.hasAvatar) })));
 });
 app.post('/api/auth/register', requireAdmin, validate(registerValidation), async (req, res) => {
   try {
@@ -852,6 +854,66 @@ app.delete('/api/auth/oauth/accounts/:provider', requireStaff, async (req, res) 
   if (!result.ok) return res.status(404).json({ error: result.message });
   await recordAuditEvent(req, { action: 'oauth_account_unlinked', entityType: 'oauth', metadata: { provider: req.params.provider } }).catch(() => {});
   res.json({ ok: true, provider: req.params.provider });
+});
+
+// User avatar routes — staff only, BLOB storage, no external dependency
+const AVATAR_MAX_BYTES = 512 * 1024;
+const AVATAR_ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
+async function resolveAvatarTarget(req, res) {
+  const target = await get('SELECT id, role FROM users WHERE id=?', [req.params.id]);
+  if (!target) { res.status(404).json({ error: 'User not found' }); return null; }
+  if (target.role === 'client') { res.status(400).json({ error: 'Client user avatars are not supported in this phase' }); return null; }
+  const isAdmin = req.user.role === 'admin';
+  const isSelf = req.user.userId === target.id;
+  if (!isAdmin && !isSelf) { res.status(403).json({ error: 'Access denied' }); return null; }
+  return target;
+}
+
+app.get('/api/users/:id/avatar', async (req, res) => {
+  if (req.user.role === 'client') return res.status(403).json({ error: 'Access denied' });
+  const isAdmin = req.user.role === 'admin';
+  const isSelf = req.user.userId === req.params.id;
+  if (!isAdmin && !isSelf) return res.status(403).json({ error: 'Access denied' });
+  const row = await get('SELECT avatar, avatarMimeType FROM users WHERE id=?', [req.params.id]);
+  if (!row || !row.avatar) return res.status(404).json({ error: 'No avatar set' });
+  res.setHeader('Content-Type', row.avatarMimeType || 'image/jpeg');
+  res.setHeader('Cache-Control', 'private, max-age=300');
+  res.send(row.avatar);
+});
+
+app.post('/api/users/:id/avatar', async (req, res) => {
+  if (req.user.role === 'client') return res.status(403).json({ error: 'Access denied' });
+  const target = await resolveAvatarTarget(req, res);
+  if (!target) return;
+  const { data, mimeType } = req.body;
+  if (!data || !mimeType) return res.status(400).json({ error: 'data and mimeType are required' });
+  const normalizedMime = String(mimeType).toLowerCase();
+  if (!AVATAR_ALLOWED_MIME.has(normalizedMime)) return res.status(400).json({ error: 'Only image/jpeg, image/png, and image/webp are supported' });
+  let buffer;
+  try {
+    const raw = String(data);
+    const payload = (raw.includes(',') ? raw.split(',').pop() : raw).replace(/\s/g, '');
+    if (!payload) throw new Error('empty');
+    if (!/^[A-Za-z0-9+/]+=*$/.test(payload) || payload.length % 4 === 1) throw new Error('invalid base64');
+    buffer = Buffer.from(payload, 'base64');
+  } catch {
+    return res.status(400).json({ error: 'Invalid image data' });
+  }
+  if (!buffer || buffer.length === 0) return res.status(400).json({ error: 'Image data is empty' });
+  if (buffer.length > AVATAR_MAX_BYTES) return res.status(400).json({ error: 'Image exceeds 512 KB limit' });
+  await run('UPDATE users SET avatar=?, avatarMimeType=? WHERE id=?', [buffer, normalizedMime, target.id]);
+  await recordAuditEvent(req, { action: 'user_avatar_updated', entityType: 'user', entityId: target.id, metadata: { role: target.role } }).catch(() => {});
+  res.json({ id: target.id, hasAvatar: true, mimeType: normalizedMime });
+});
+
+app.delete('/api/users/:id/avatar', async (req, res) => {
+  if (req.user.role === 'client') return res.status(403).json({ error: 'Access denied' });
+  const target = await resolveAvatarTarget(req, res);
+  if (!target) return;
+  await run("UPDATE users SET avatar=NULL, avatarMimeType='' WHERE id=?", [target.id]);
+  await recordAuditEvent(req, { action: 'user_avatar_reset', entityType: 'user', entityId: target.id, metadata: { role: target.role } }).catch(() => {});
+  res.json({ id: target.id, hasAvatar: false });
 });
 
 app.post('/api/invitations', requireAdmin, validate(invitationValidation), async (req, res) => {

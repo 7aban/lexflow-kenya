@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote } from '@tabler/icons-react';
-import { api, applyChecklistTemplate, createChecklistTemplate, createMatterChecklistItem, deleteChecklistTemplate, deleteMatterChecklistItem, downloadWithAuth, fileToDataUrl, getInvoiceDetails, listChecklistTemplates, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, updateChecklistTemplate, updateMatterChecklistItem } from '../lib/apiClient.js';
+import { api, applyChecklistTemplate, createChecklistTemplate, createMatterChecklistItem, deleteChecklistTemplate, deleteUserAvatar, deleteMatterChecklistItem, downloadWithAuth, fetchAvatarObjectUrl, fileToDataUrl, getInvoiceDetails, listChecklistTemplates, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, updateChecklistTemplate, updateMatterChecklistItem, uploadUserAvatar } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, Skeleton, statusTone, Sub, Table } from '../components/ui.jsx';
@@ -1694,6 +1694,31 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
     </div>
   );
 }
+function UserAvatar({ userId, hasAvatar, fullName, size = 28 }) {
+  const [src, setSrc] = useState(null);
+  const srcRef = useRef(null);
+  useEffect(() => {
+    function revoke() { if (srcRef.current) { URL.revokeObjectURL(srcRef.current); srcRef.current = null; } }
+    if (!hasAvatar) { revoke(); setSrc(null); return; }
+    let alive = true;
+    fetchAvatarObjectUrl(userId).then(url => {
+      if (!alive) { if (url) URL.revokeObjectURL(url); return; }
+      revoke();
+      srcRef.current = url;
+      setSrc(url);
+    });
+    return () => { alive = false; revoke(); };
+  }, [userId, hasAvatar]);
+  const initial = (fullName || '?').slice(0, 1).toUpperCase();
+  return (
+    <div style={{ width: size, height: size, borderRadius: 999, background: 'var(--lf-accent, #D4A34A)', color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: Math.round(size * 0.43), overflow: 'hidden', flexShrink: 0 }}>
+      {src
+        ? <img src={src} alt={fullName || ''} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} onError={() => setSrc(null)} />
+        : initial}
+    </div>
+  );
+}
+
 export function Users({ clients = [], notify }) {
   const [users, setUsers] = useState([]);
   const [userLoadError, setUserLoadError] = useState('');
@@ -1727,6 +1752,25 @@ export function Users({ clients = [], notify }) {
       await load();
     } catch (err) { notify({ type: 'danger', message: err.message }); }
   }
+  async function handleAvatarUpload(userId, file) {
+    if (!file) return;
+    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!allowed.includes(file.type)) { notify({ type: 'danger', message: 'Only JPEG, PNG, and WebP images are supported.' }); return; }
+    if (file.size > 512 * 1024) { notify({ type: 'danger', message: 'Image must be 512 KB or smaller.' }); return; }
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      await uploadUserAvatar(userId, dataUrl, file.type);
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, hasAvatar: true } : u));
+      notify({ type: 'success', message: 'Photo uploaded.' });
+    } catch (err) { notify({ type: 'danger', message: err.message }); }
+  }
+  async function handleAvatarRemove(userId, fullName) {
+    try {
+      await deleteUserAvatar(userId);
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, hasAvatar: false } : u));
+      notify({ type: 'success', message: `Photo removed for ${fullName}.` });
+    } catch (err) { notify({ type: 'danger', message: err.message }); }
+  }
   const clientOptions = Array.isArray(clients) ? clients : [];
   const visibleUsers = Array.isArray(users) ? users : [];
   return <div className="lf-split-grid" style={styles.splitGrid}>
@@ -1745,8 +1789,22 @@ export function Users({ clients = [], notify }) {
         Show inactive users
       </label>
       <div className="lf-user-cards">
-        <Table columns={['Name', 'Email', 'Role', 'Status', 'Client', 'Actions']} rows={visibleUsers.map(u => [
-          u.fullName,
+        <Table columns={['Photo', 'Name', 'Email', 'Role', 'Status', 'Client', 'Actions']} rows={visibleUsers.map(u => [
+          <UserAvatar key={`av-${u.id}`} userId={u.id} hasAvatar={u.hasAvatar} fullName={u.fullName} size={28} />,
+          <div key={`name-${u.id}`} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span>{u.fullName}</span>
+            {u.role !== 'client' && (
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 2 }}>
+                <label style={{ cursor: 'pointer' }}>
+                  <span style={{ ...styles.tinyButton, display: 'inline-block' }}>
+                    {u.hasAvatar ? 'Change photo' : 'Upload photo'}
+                  </span>
+                  <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} onChange={e => { handleAvatarUpload(u.id, e.target.files?.[0]); e.target.value = ''; }} />
+                </label>
+                {u.hasAvatar && <button style={styles.tinyButton} onClick={() => handleAvatarRemove(u.id, u.fullName)}>Remove photo</button>}
+              </div>
+            )}
+          </div>,
           u.email,
           <select key={`role-${u.id}`} style={{ ...styles.input, width: 140 }} value={u.role} disabled={u.role === 'client'} onChange={e => updateRole(u.id, e.target.value, u.fullName)}>
             <option value="assistant">Assistant</option>

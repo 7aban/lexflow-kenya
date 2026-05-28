@@ -1,6 +1,6 @@
 import { Component, useEffect, useRef, useState } from 'react';
 import { IconLayoutDashboard, IconChartLine, IconUsers, IconUserPlus, IconBriefcase, IconCheckbox, IconCalendarDue, IconFileInvoice, IconMessages, IconUsersGroup, IconSettings, IconListSearch, IconExternalLink, IconChevronDown, IconShield, IconSearch, IconBell, IconRefresh, IconTemplate } from '@tabler/icons-react';
-import { api, API_BASE, AUTH_FAILURE_MESSAGE, clearSession, clearAllLexFlowStorage, getNotifications, markNotificationsRead, readSession, saveSession } from './lib/apiClient.js';
+import { api, API_BASE, AUTH_FAILURE_MESSAGE, clearSession, clearAllLexFlowStorage, fetchAvatarObjectUrl, getNotifications, markNotificationsRead, readSession, saveSession } from './lib/apiClient.js';
 import { globalSearch } from './api.js';
 import { defaultFirmSettings, styles, StyleTag, theme, loadAndApplyFirmTheme } from './theme.jsx';
 import { Logo, Skeleton, Toast, Alert } from './components/ui.jsx';
@@ -199,6 +199,8 @@ export default function App() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [installDismissed, setInstallDismissed] = useState(false);
+  const [myAvatarUrl, setMyAvatarUrl] = useState(null);
+  const myAvatarUrlRef = useRef(null);
 
   const authenticated = Boolean(session?.token);
   const isAdmin = user?.role === 'admin';
@@ -294,6 +296,25 @@ export default function App() {
     const timer = window.setInterval(loadNotifications, 60000);
     return () => window.clearInterval(timer);
   }, [authenticated, user?.role]);
+
+  useEffect(() => {
+    function revokeExisting() {
+      if (myAvatarUrlRef.current) { URL.revokeObjectURL(myAvatarUrlRef.current); myAvatarUrlRef.current = null; }
+    }
+    if (!user?.id || !user?.hasAvatar || user?.role === 'client') {
+      revokeExisting();
+      setMyAvatarUrl(null);
+      return;
+    }
+    let alive = true;
+    fetchAvatarObjectUrl(user.id).then(url => {
+      if (!alive) { if (url) URL.revokeObjectURL(url); return; }
+      revokeExisting();
+      myAvatarUrlRef.current = url;
+      setMyAvatarUrl(url);
+    });
+    return () => { alive = false; revokeExisting(); };
+  }, [user?.id, user?.hasAvatar]);
 
   useEffect(() => {
     document.title = firm?.name || 'LexFlow Kenya';
@@ -497,7 +518,11 @@ export default function App() {
         <StaffNavigation visibleGroups={visibleGroups} openNavGroups={openNavGroups} setOpenNavGroups={setOpenNavGroups} view={view} setView={setView} />
 
         <div style={styles.userCard}>
-          <div style={styles.avatar}>{(user?.fullName || user?.name || 'U').slice(0, 1).toUpperCase()}</div>
+          <div style={styles.avatar}>
+            {myAvatarUrl
+              ? <img src={myAvatarUrl} alt={user?.fullName || ''} style={styles.avatarImg} onError={() => setMyAvatarUrl(null)} />
+              : (user?.fullName || user?.name || 'U').slice(0, 1).toUpperCase()}
+          </div>
           <div style={{ minWidth: 0 }}>
             <div style={styles.userName}>{user?.fullName || user?.name || 'Signed in'}</div>
             <div style={styles.userRole}>{user?.role || 'user'}</div>
@@ -540,7 +565,11 @@ export default function App() {
             </div>
             <StaffNavigation visibleGroups={visibleGroups} openNavGroups={openNavGroups} setOpenNavGroups={setOpenNavGroups} view={view} setView={setView} onNavigate={() => setMobileMenuOpen(false)} />
             <div style={styles.userCard}>
-              <div style={styles.avatar}>{(user?.fullName || user?.name || 'U').slice(0, 1).toUpperCase()}</div>
+              <div style={styles.avatar}>
+                {myAvatarUrl
+                  ? <img src={myAvatarUrl} alt={user?.fullName || ''} style={styles.avatarImg} onError={() => setMyAvatarUrl(null)} />
+                  : (user?.fullName || user?.name || 'U').slice(0, 1).toUpperCase()}
+              </div>
               <div style={{ minWidth: 0 }}>
                 <div style={styles.userName}>{user?.fullName || user?.name || 'Signed in'}</div>
                 <div style={styles.userRole}>{user?.role || 'user'}</div>

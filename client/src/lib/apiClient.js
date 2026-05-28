@@ -262,3 +262,23 @@ export const getClientActivity = (clientId, limit = 100) => api(`/clients/${clie
 export const updateReminderTemplate = (id, data) => api(`/reminder-templates/${id}`, { method: 'PUT', body: data });
 export const getReminderLogs = (limit = 100) => api(`/reminder-logs?limit=${encodeURIComponent(limit)}`);
 
+export const uploadUserAvatar = (userId, data, mimeType) =>
+  api(`/users/${userId}/avatar`, { method: 'POST', body: { data, mimeType } });
+export const deleteUserAvatar = (userId) =>
+  api(`/users/${userId}/avatar`, { method: 'DELETE' });
+
+export async function fetchAvatarObjectUrl(userId) {
+  const session = readSession();
+  if (!session?.token) return null;
+  try {
+    const response = await fetch(`${API_BASE}/users/${userId}/avatar`, {
+      headers: { Authorization: `Bearer ${session.token}` },
+    });
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    return URL.createObjectURL(blob);
+  } catch {
+    return null;
+  }
+}
+
