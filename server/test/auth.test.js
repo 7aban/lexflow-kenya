@@ -36,7 +36,7 @@ afterAll(async () => {
   const { hashPassword } = require('../lib/passwords');
   try {
     const defaultHash = await hashPassword('password123');
-    await run("UPDATE users SET password=? WHERE email IN (?,?)", [defaultHash, 'admin@lexflow.co.ke', 'sarah.mwangi@achokilaw.co.ke']);
+    await run("UPDATE users SET password=?, tokenVersion=1 WHERE email IN (?,?)", [defaultHash, 'admin@lexflow.co.ke', 'sarah.mwangi@achokilaw.co.ke']);
   } finally {
     db.close();
   }

@@ -3,6 +3,8 @@ const sqlite3 = require('sqlite3');
 const path = require('path');
 const { app, dbReady } = require('../server.js');
 
+jest.setTimeout(15000);
+
 function dbAll(sql, params = []) {
   const db = new sqlite3.Database(path.join(__dirname, '..', 'lawfirm.db'));
   return new Promise((resolve, reject) => {

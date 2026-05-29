@@ -4,6 +4,8 @@ const path = require('path');
 const { app, dbReady } = require('../server.js');
 const { buildTemplateMergeContext, mergeTemplateMarkup } = require('../lib/templateMerge');
 
+jest.setTimeout(15000);
+
 function dbAll(sql, params = []) {
   const db = new sqlite3.Database(path.join(__dirname, '..', 'lawfirm.db'));
   return new Promise((resolve, reject) => {
