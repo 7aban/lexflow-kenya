@@ -239,7 +239,7 @@ function ClientDashboard({ data, stats, selectMatter, onNavigate }) {
   const matterForInvoices = data.invoices.length > 0 ? data.matters.find(m => data.invoices.some(i => i.matterId === m.id)) || data.matters[0] : null;
   return (
     <div style={styles.pageStack}>
-      <section style={styles.heroCard}>
+      <section style={{ ...styles.heroCard, background: 'linear-gradient(135deg, #112219, #1A3628)' }}>
         <div><div style={styles.heroKicker}>Client workspace</div><h2>Your matters at a glance.</h2><p>Track active files, court appearances, invoices and documents shared by the firm.</p></div>
         <div style={styles.heroFigure}>{data.client?.name || 'Client'}</div>
       </section>
@@ -267,7 +267,7 @@ function ClientDashboard({ data, stats, selectMatter, onNavigate }) {
       <NextActions data={data} selectMatter={selectMatter} onNavigate={onNavigate} />
       <div style={styles.dashStatsGrid}>
         <div style={styles.dashStatCard}>
-          <span style={{ ...styles.dashStatTopBar, background: theme.navy600 }} aria-hidden="true" />
+          <span style={{ ...styles.dashStatTopBar, background: '#1A3628' }} aria-hidden="true" />
           <div style={styles.dashStatHead}><span style={styles.dashStatLabel}>Active matters</span></div>
           <div style={styles.dashStatValue}>{stats.activeMatters}</div>
         </div>
