@@ -317,7 +317,7 @@ function ClientDashboard({ data, stats, selectMatter, onNavigate }) {
           {data.documents.length > 0 && <button type="button" onClick={() => onNavigate('Documents')} style={styles.tinyButton}>View documents</button>}
         </div>
       </section>
-      <div style={styles.dashboardGrid}>
+      <div className="lf-dashboard-grid" style={styles.dashboardGrid}>
         <Card title="My matters" hint="Latest matter status">
           <div className="lf-client-matters-cards"><Table columns={['Matter', 'Stage', 'Next Court', 'Action']} rows={data.matters.map(m => {
             const next = nextEventFor(m, data.appearances);

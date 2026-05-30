@@ -55,7 +55,8 @@ export function StyleTag() { return <style>{`
     #root .lf-payment-cards td:nth-child(6)::before { content: "Receipt PDF"; min-width: 80px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
   }
   @media (max-width: 767px) {
-    #root .lf-app-shell { grid-template-columns: 1fr; }
+    /* UI-BUG-1: collapse app shell to a single column on mobile. The shell carries an inline gridTemplateColumns '224px minmax(0,1fr)', so this override needs !important to win over it; otherwise main is squeezed into the 224px sidebar track and content (incl. the client hero) overlaps. */
+    #root .lf-app-shell { grid-template-columns: minmax(0, 1fr) !important; }
     #root .lf-desktop-sidebar { display: none !important; }
     #root .lf-mobile-only { display: inline-flex !important; }
     #root .lf-mobile-drawer-layer { display: block !important; }
