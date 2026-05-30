@@ -185,7 +185,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
         </div>
       )}
       <main style={styles.main}>
-        <header style={styles.topbar}>
+        <header className="lf-topbar" style={styles.topbar}>
           <div className="lf-topbar-title" style={styles.topbarTitle}>
             <button type="button" className="lf-mobile-only" aria-label="Open portal navigation menu" title="Open portal navigation menu" onClick={() => setMobileMenuOpen(true)} style={styles.mobileMenuButton}>Menu</button>
             <div style={{ minWidth: 0 }}>
