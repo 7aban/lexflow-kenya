@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconLayoutDashboard, IconBriefcase, IconBell, IconFile, IconInvoice, IconUserCircle, IconCalendarEvent } from '@tabler/icons-react';
-import { api, downloadWithAuth, fileToDataUrl } from '../lib/apiClient.js';
+import { api, deleteMyAvatar, downloadWithAuth, fileToDataUrl, getMyAvatar, uploadMyAvatar } from '../lib/apiClient.js';
 import { styles, StyleTag, theme, loadAndApplyFirmTheme } from '../theme.jsx';
 import { Badge, Card, Empty, Field, kes, Logo, MeetingLink, Skeleton, statusTone, Table, Toast } from '../components/ui.jsx';
 import ClientChatWidget from '../components/ClientChatWidget.jsx';
@@ -17,6 +17,26 @@ const portalIcons = {
 };
 
 const portalNav = ['Dashboard', 'My Matters', 'Notices', 'Documents', 'Invoices', 'Account', 'Court Dates'];
+const AVATAR_ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp'];
+const AVATAR_MAX_BYTES = 512 * 1024;
+
+function AvatarCircle({ src, name, size = 30 }) {
+  const initial = (name || 'C').slice(0, 1).toUpperCase();
+  return (
+    <div style={{ ...styles.avatar, width: size, height: size, fontSize: Math.max(12, Math.round(size * 0.38)) }}>
+      {src
+        ? <img src={src} alt={name || ''} style={styles.avatarImg} />
+        : initial}
+    </div>
+  );
+}
+
+function avatarFileError(file) {
+  if (!file) return 'Choose a photo first.';
+  if (!AVATAR_ALLOWED_MIME.includes(file.type)) return 'Only JPEG, PNG, and WebP images are supported.';
+  if (file.size > AVATAR_MAX_BYTES) return 'Image must be 512 KB or smaller.';
+  return '';
+}
 
 function PortalNavigation({ view, onSelect, onNavigate }) {
   return (
@@ -53,6 +73,10 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
   const [payment, setPayment] = useState({ invoiceId: '', method: 'M-PESA', reference: '', amount: '', note: '', file: null });
   const [loading, setLoading] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [selfHasAvatar, setSelfHasAvatar] = useState(Boolean(user?.hasAvatar));
+  const [myAvatarUrl, setMyAvatarUrl] = useState(null);
+  const [avatarVersion, setAvatarVersion] = useState(0);
+  const myAvatarUrlRef = useRef(null);
   const selected = dashboard.matters.find(m => m.id === selectedId) || dashboard.matters[0];
   const matterDocs = dashboard.documents.filter(d => d.matterId === selected?.id);
   const matterInvoices = dashboard.invoices.filter(i => i.matterId === selected?.id);
@@ -60,6 +84,31 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
   const firmName = firm?.name || 'LexFlow Kenya';
 
   useEffect(() => { load(); loadAndApplyFirmTheme(); }, []);
+  useEffect(() => { setSelfHasAvatar(Boolean(user?.hasAvatar)); setAvatarVersion(v => v + 1); }, [user?.id, user?.hasAvatar]);
+  useEffect(() => {
+    function revokeExisting() {
+      if (myAvatarUrlRef.current) {
+        URL.revokeObjectURL(myAvatarUrlRef.current);
+        myAvatarUrlRef.current = null;
+      }
+    }
+    if (!user?.id || !selfHasAvatar) {
+      revokeExisting();
+      setMyAvatarUrl(null);
+      return undefined;
+    }
+    let alive = true;
+    getMyAvatar().then(url => {
+      if (!alive) {
+        if (url) URL.revokeObjectURL(url);
+        return;
+      }
+      revokeExisting();
+      myAvatarUrlRef.current = url;
+      setMyAvatarUrl(url);
+    });
+    return () => { alive = false; revokeExisting(); };
+  }, [user?.id, selfHasAvatar, avatarVersion]);
   useEffect(() => { if (selected?.id) setSelectedId(selected.id); }, [selected?.id]);
   useEffect(() => {
     if (!mobileMenuOpen) return;
@@ -134,6 +183,30 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
     } catch (err) { notify({ type: 'danger', message: err.message }); }
   }
 
+  async function handleAvatarUpload(file) {
+    const error = avatarFileError(file);
+    if (error) return notify({ type: 'danger', message: error });
+    try {
+      const result = await uploadMyAvatar(file);
+      setSelfHasAvatar(Boolean(result?.hasAvatar));
+      setAvatarVersion(v => v + 1);
+      notify({ type: 'success', message: 'Profile photo updated.' });
+    } catch (err) {
+      notify({ type: 'danger', message: err.message });
+    }
+  }
+
+  async function handleAvatarRemove() {
+    try {
+      await deleteMyAvatar();
+      setSelfHasAvatar(false);
+      setAvatarVersion(v => v + 1);
+      notify({ type: 'success', message: 'Profile photo removed.' });
+    } catch (err) {
+      notify({ type: 'danger', message: err.message });
+    }
+  }
+
   return (
     <div className="lf-app-shell" style={{ ...styles.shell, '--lf-primary': firm?.primaryColor || theme.navy800, '--lf-accent': firm?.accentColor || theme.gold }}>
       <StyleTag />
@@ -150,7 +223,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
           <span>Your private client workspace</span>
         </div>
         <div style={styles.userCard}>
-          <div style={styles.avatar}>{(user?.fullName || 'C').slice(0, 1).toUpperCase()}</div>
+          <AvatarCircle src={myAvatarUrl} name={user?.fullName || 'Client'} />
           <div style={{ minWidth: 0 }}><div style={styles.userName}>{user?.fullName || 'Client'}</div><div style={styles.userRole}>client</div></div>
           <button type="button" onClick={logout} style={styles.logout}>Exit</button>
         </div>
@@ -177,7 +250,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
               <span>Your private client workspace</span>
             </div>
             <div style={styles.userCard}>
-              <div style={styles.avatar}>{(user?.fullName || 'C').slice(0, 1).toUpperCase()}</div>
+              <AvatarCircle src={myAvatarUrl} name={user?.fullName || 'Client'} />
               <div style={{ minWidth: 0 }}><div style={styles.userName}>{user?.fullName || 'Client'}</div><div style={styles.userRole}>client</div></div>
               <button type="button" onClick={() => { setMobileMenuOpen(false); logout(); }} style={styles.logout}>Exit</button>
             </div>
@@ -200,7 +273,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
           </div>
         </header>
         {loading && <Skeleton />}
-        {!loading && view === 'Dashboard' && <ClientDashboard data={dashboard} stats={stats} selectMatter={id => { setSelectedId(id); setView('My Matters'); }} onNavigate={switchView} />}
+        {!loading && view === 'Dashboard' && <ClientDashboard data={dashboard} stats={stats} user={user} avatarUrl={myAvatarUrl} selectMatter={id => { setSelectedId(id); setView('My Matters'); }} onNavigate={switchView} />}
         {!loading && view === 'My Matters' && (
           <ClientMatterDetail
             matters={dashboard.matters}
@@ -224,7 +297,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
         {!loading && view === 'Notices' && <Notices notices={dashboard.notices} matters={dashboard.matters} notify={notify} />}
         {!loading && view === 'Documents' && <Documents documents={dashboard.documents} matters={dashboard.matters} notify={notify} />}
         {!loading && view === 'Invoices' && <BillingInvoices data={dashboard} matters={dashboard.matters} notify={notify} />}
-        {!loading && view === 'Account' && <Account user={user} client={dashboard.client} firm={firm} matters={dashboard.matters} onNavigate={switchView} />}
+        {!loading && view === 'Account' && <Account user={user} client={dashboard.client} firm={firm} matters={dashboard.matters} avatarUrl={myAvatarUrl} hasAvatar={selfHasAvatar} onAvatarUpload={handleAvatarUpload} onAvatarRemove={handleAvatarRemove} onNavigate={switchView} />}
         {!loading && view === 'Court Dates' && <CourtDates appearances={dashboard.appearances} matters={dashboard.matters} />}
       </main>
       <ClientChatWidget firm={firm} matters={dashboard.matters} selectedMatterId={selected?.id || ''} user={user} notify={notify} />
@@ -233,15 +306,19 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
   );
 }
 
-function ClientDashboard({ data, stats, selectMatter, onNavigate }) {
+function ClientDashboard({ data, stats, user, avatarUrl, selectMatter, onNavigate }) {
   const today = new Date().toISOString().slice(0, 10);
   const nextCourt = data.appearances.filter(a => a.date >= today).sort((a, b) => a.date.localeCompare(b.date))[0];
   const matterForInvoices = data.invoices.length > 0 ? data.matters.find(m => data.invoices.some(i => i.matterId === m.id)) || data.matters[0] : null;
+  const identityName = data.client?.name || user?.fullName || 'Client';
   return (
     <div style={styles.pageStack}>
       <section style={{ ...styles.heroCard, background: 'linear-gradient(135deg, #112219, #1A3628)' }}>
         <div><div style={styles.heroKicker}>Client workspace</div><h2>Your matters at a glance.</h2><p>Track active files, court appearances, invoices and documents shared by the firm.</p></div>
-        <div style={styles.heroFigure}>{data.client?.name || 'Client'}</div>
+        <div style={{ ...styles.heroFigure, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, minWidth: 0 }}>
+          <AvatarCircle src={avatarUrl} name={identityName} size={46} />
+          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{identityName}</span>
+        </div>
       </section>
       <section style={{ background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 14 }}>
         <h3 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>Matter status</h3>
@@ -835,12 +912,22 @@ function DownloadButton({ label, path, filename, notify }) {
   );
 }
 
-function Account({ user, client, firm, matters, onNavigate }) {
+function Account({ user, client, firm, matters, avatarUrl, hasAvatar, onAvatarUpload, onAvatarRemove, onNavigate }) {
   const activeMatters = matters ? matters.filter(m => !['Closed', 'Archived'].includes(m.stage)) : [];
   const linkedMatters = matters ? matters.slice(0, 3) : [];
   return (
     <div style={styles.pageStack}>
       <Card title="Account details" hint="Your portal identity">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+          <AvatarCircle src={avatarUrl} name={user?.fullName || 'Client'} size={56} />
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <label style={{ cursor: 'pointer' }}>
+              <span style={{ ...styles.tinyButton, display: 'inline-block' }}>{hasAvatar ? 'Change photo' : 'Upload photo'}</span>
+              <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} onChange={event => { onAvatarUpload(event.target.files?.[0]); event.target.value = ''; }} />
+            </label>
+            {hasAvatar && <button type="button" style={styles.tinyButton} onClick={onAvatarRemove}>Remove photo</button>}
+          </div>
+        </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
           <Row label="Name" value={user?.fullName} />
           <Row label="Email" value={user?.email} />

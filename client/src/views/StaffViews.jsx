@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote } from '@tabler/icons-react';
-import { api, applyChecklistTemplate, createChecklistTemplate, createMatterChecklistItem, deleteChecklistTemplate, deleteUserAvatar, deleteMatterChecklistItem, downloadWithAuth, fetchAvatarObjectUrl, fileToDataUrl, getInvoiceDetails, listChecklistTemplates, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, updateChecklistTemplate, updateMatterChecklistItem, uploadUserAvatar } from '../lib/apiClient.js';
+import { api, applyChecklistTemplate, createChecklistTemplate, createMatterChecklistItem, deleteChecklistTemplate, deleteClientAvatar, deleteUserAvatar, deleteMatterChecklistItem, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getInvoiceDetails, listChecklistTemplates, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, updateChecklistTemplate, updateMatterChecklistItem, uploadClientAvatar, uploadUserAvatar } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, Skeleton, statusTone, Sub, Table } from '../components/ui.jsx';
@@ -8,6 +8,8 @@ import MatterDocuments from '../components/MatterDocuments.jsx';
 import TaskTimer, { taskTimerActive } from '../components/TaskTimer.jsx';
 
 const BILLABLE_TIME_GUIDANCE = 'Billable time may be included in hourly invoices. Non-billable time is tracked for workload and productivity but excluded from hourly invoice generation.';
+const AVATAR_ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp'];
+const AVATAR_MAX_BYTES = 512 * 1024;
 
 function listFromResponse(response, key) {
   if (Array.isArray(response)) return response;
@@ -653,6 +655,31 @@ export function Dashboard({ data, user, onNavigate }) {
   );
 }
 
+function ClientAvatar({ clientId, hasAvatar, fullName, size = 28 }) {
+  const [src, setSrc] = useState(null);
+  const srcRef = useRef(null);
+  useEffect(() => {
+    function revoke() { if (srcRef.current) { URL.revokeObjectURL(srcRef.current); srcRef.current = null; } }
+    if (!clientId || !hasAvatar) { revoke(); setSrc(null); return undefined; }
+    let alive = true;
+    fetchClientAvatarObjectUrl(clientId).then(url => {
+      if (!alive) { if (url) URL.revokeObjectURL(url); return; }
+      revoke();
+      srcRef.current = url;
+      setSrc(url);
+    });
+    return () => { alive = false; revoke(); };
+  }, [clientId, hasAvatar]);
+  const initial = (fullName || 'C').slice(0, 1).toUpperCase();
+  return (
+    <div style={{ width: size, height: size, borderRadius: 999, background: 'var(--lf-accent, #D4A34A)', color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: Math.round(size * 0.43), overflow: 'hidden', flexShrink: 0 }}>
+      {src
+        ? <img src={src} alt={fullName || ''} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} onError={() => setSrc(null)} />
+        : initial}
+    </div>
+  );
+}
+
 export function Clients({ clients, matters, canManage, isAdmin = false, reload, notify, focus }) {
   const emptyClientForm = { name: '', type: 'Individual', contact: '', email: '', phone: '', remindersEnabled: true, preferredChannel: 'firm_default' };
   const [form, setForm] = useState(emptyClientForm);
@@ -713,7 +740,24 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
     const channel = client.preferredChannel || 'firm_default';
     return <Badge tone={channel === 'none' ? 'red' : channel === 'firm_default' ? 'blue' : 'green'}>{channel === 'firm_default' ? 'Firm default' : channel}</Badge>;
   }
-  return <div className="lf-split-grid" style={styles.splitGrid}><Card title={editing ? 'Edit client' : 'New client'} hint={editing ? 'Save client changes and communication preference' : 'Intake record'}><form onSubmit={submit} style={styles.formGrid}><Field label="Name"><input required style={styles.input} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field><Field label="Type"><select style={styles.input} value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}><option>Individual</option><option>Company</option></select></Field><Field label="Contact"><input style={styles.input} value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} /></Field><Field label="Email"><input style={styles.input} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field><Field label="Phone"><input style={styles.input} value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></Field><Field label="Reminders"><select style={styles.input} value={form.remindersEnabled ? 'on' : 'off'} onChange={e => setForm({ ...form, remindersEnabled: e.target.value === 'on' })}><option value="on">On</option><option value="off">Off for this client</option></select></Field><Field label="Preferred Channel"><select style={styles.input} value={form.preferredChannel} onChange={e => setForm({ ...form, preferredChannel: e.target.value })}><option value="firm_default">Firm default</option><option value="both">WhatsApp and Email</option><option value="whatsapp">WhatsApp only</option><option value="email">Email only</option><option value="none">None</option></select></Field><button style={styles.primaryButton}>{editing ? 'Save changes' : 'Create client'}</button>{editing && <button type="button" style={styles.ghostButton} onClick={() => { setEditing(null); setForm(emptyClientForm); }}>Cancel</button>}</form></Card><Card title="Client directory" hint={`${clients.length} records`}><div className="lf-client-cards"><Table columns={['Name', 'Type', 'Email', 'Phone', 'Status', 'Reminders', 'Portal', 'Actions']} rows={clients.map(c => [<span key={c.id} onMouseMove={e => setTooltip({ x: e.clientX, y: e.clientY, title: c.name, lines: [`${c.type || 'Client'} / ${c.status || 'Active'}`, `${matters.filter(m => m.clientId === c.id).length} matter(s)`, `Joined ${c.joinDate || '-'}`], initial: (c.name || 'C').slice(0, 1) })} onMouseLeave={() => setTooltip(null)} style={styles.hoverName}>{c.name}</span>, c.type, c.email || '-', c.phone || '-', <Badge key={`${c.id}-status`} tone="green">{c.status || 'Active'}</Badge>, reminderCell(c), portalCell(c), canManage ? <ActionGroup key={`${c.id}-actions`} actions={[[ 'Edit', () => startEdit(c)], ['Delete', () => setConfirm({ title: 'Delete client?', message: 'Are you sure you want to delete this client? This will also remove all related matters.', onConfirm: () => deleteClient(c) })]]} /> : '-'])} rowIds={clients.map(c => `client-${c.id}`)} empty="No clients yet." /></div></Card><ProfileTooltip tooltip={tooltip} /><ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} /></div>;
+  async function handleClientAvatarUpload(client, file) {
+    if (!file) return;
+    if (!AVATAR_ALLOWED_MIME.includes(file.type)) { notify({ type: 'danger', message: 'Only JPEG, PNG, and WebP images are supported.' }); return; }
+    if (file.size > AVATAR_MAX_BYTES) { notify({ type: 'danger', message: 'Image must be 512 KB or smaller.' }); return; }
+    try {
+      await uploadClientAvatar(client.id, file);
+      notify({ type: 'success', message: 'Client photo uploaded.' });
+      await reload();
+    } catch (err) { notify({ type: 'danger', message: err.message }); }
+  }
+  async function handleClientAvatarRemove(client) {
+    try {
+      await deleteClientAvatar(client.id);
+      notify({ type: 'success', message: 'Client photo removed.' });
+      await reload();
+    } catch (err) { notify({ type: 'danger', message: err.message }); }
+  }
+  return <div className="lf-split-grid" style={styles.splitGrid}><Card title={editing ? 'Edit client' : 'New client'} hint={editing ? 'Save client changes and communication preference' : 'Intake record'}><form onSubmit={submit} style={styles.formGrid}><Field label="Name"><input required style={styles.input} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field><Field label="Type"><select style={styles.input} value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}><option>Individual</option><option>Company</option></select></Field><Field label="Contact"><input style={styles.input} value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} /></Field><Field label="Email"><input style={styles.input} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field><Field label="Phone"><input style={styles.input} value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></Field><Field label="Reminders"><select style={styles.input} value={form.remindersEnabled ? 'on' : 'off'} onChange={e => setForm({ ...form, remindersEnabled: e.target.value === 'on' })}><option value="on">On</option><option value="off">Off for this client</option></select></Field><Field label="Preferred Channel"><select style={styles.input} value={form.preferredChannel} onChange={e => setForm({ ...form, preferredChannel: e.target.value })}><option value="firm_default">Firm default</option><option value="both">WhatsApp and Email</option><option value="whatsapp">WhatsApp only</option><option value="email">Email only</option><option value="none">None</option></select></Field><button style={styles.primaryButton}>{editing ? 'Save changes' : 'Create client'}</button>{editing && <button type="button" style={styles.ghostButton} onClick={() => { setEditing(null); setForm(emptyClientForm); }}>Cancel</button>}</form></Card><Card title="Client directory" hint={`${clients.length} records`}><div className="lf-client-cards"><Table columns={['Photo', 'Name', 'Type', 'Email', 'Phone', 'Status', 'Reminders', 'Portal', 'Actions']} rows={clients.map(c => [<ClientAvatar key={`client-avatar-${c.id}`} clientId={c.id} hasAvatar={c.hasAvatar} fullName={c.name} size={28} />, <div key={`client-name-${c.id}`} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}><span onMouseMove={e => setTooltip({ x: e.clientX, y: e.clientY, title: c.name, lines: [`${c.type || 'Client'} / ${c.status || 'Active'}`, `${matters.filter(m => m.clientId === c.id).length} matter(s)`, `Joined ${c.joinDate || '-'}`], initial: (c.name || 'C').slice(0, 1) })} onMouseLeave={() => setTooltip(null)} style={styles.hoverName}>{c.name}</span>{isAdmin && c.clientUserId && <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 2 }}><label style={{ cursor: 'pointer' }}><span style={{ ...styles.tinyButton, display: 'inline-block' }}>{c.hasAvatar ? 'Change photo' : 'Upload photo'}</span><input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} onChange={e => { handleClientAvatarUpload(c, e.target.files?.[0]); e.target.value = ''; }} /></label>{c.hasAvatar && <button type="button" style={styles.tinyButton} onClick={() => handleClientAvatarRemove(c)}>Remove photo</button>}</div>}</div>, c.type, c.email || '-', c.phone || '-', <Badge key={`${c.id}-status`} tone="green">{c.status || 'Active'}</Badge>, reminderCell(c), portalCell(c), canManage ? <ActionGroup key={`${c.id}-actions`} actions={[[ 'Edit', () => startEdit(c)], ['Delete', () => setConfirm({ title: 'Delete client?', message: 'Are you sure you want to delete this client? This will also remove all related matters.', onConfirm: () => deleteClient(c) })]]} /> : '-'])} rowIds={clients.map(c => `client-${c.id}`)} empty="No clients yet." /></div></Card><ProfileTooltip tooltip={tooltip} /><ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} /></div>;
 }export function Matters({ data, canManage, reload, notify, focus, onMatterOpened }) {
   const [selectedId, setSelectedId] = useState('');
   const [detail, setDetail] = useState(null);

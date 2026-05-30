@@ -267,11 +267,11 @@ export const uploadUserAvatar = (userId, data, mimeType) =>
 export const deleteUserAvatar = (userId) =>
   api(`/users/${userId}/avatar`, { method: 'DELETE' });
 
-export async function fetchAvatarObjectUrl(userId) {
+async function fetchAvatarPathObjectUrl(path) {
   const session = readSession();
   if (!session?.token) return null;
   try {
-    const response = await fetch(`${API_BASE}/users/${userId}/avatar`, {
+    const response = await fetch(`${API_BASE}${path}`, {
       headers: { Authorization: `Bearer ${session.token}` },
     });
     if (!response.ok) return null;
@@ -282,3 +282,24 @@ export async function fetchAvatarObjectUrl(userId) {
   }
 }
 
+export async function fetchAvatarObjectUrl(userId) {
+  return fetchAvatarPathObjectUrl(`/users/${userId}/avatar`);
+}
+
+export const getMyAvatar = () => fetchAvatarPathObjectUrl('/auth/me/avatar');
+export const fetchMyAvatarObjectUrl = getMyAvatar;
+export const uploadMyAvatar = (file) => {
+  const body = new FormData();
+  body.append('avatar', file);
+  return api('/auth/me/avatar', { method: 'POST', body });
+};
+export const deleteMyAvatar = () => api('/auth/me/avatar', { method: 'DELETE' });
+
+export const getClientAvatar = (clientId) => fetchAvatarPathObjectUrl(`/clients/${clientId}/avatar`);
+export const fetchClientAvatarObjectUrl = getClientAvatar;
+export const uploadClientAvatar = (clientId, file) => {
+  const body = new FormData();
+  body.append('avatar', file);
+  return api(`/clients/${clientId}/avatar`, { method: 'POST', body });
+};
+export const deleteClientAvatar = (clientId) => api(`/clients/${clientId}/avatar`, { method: 'DELETE' });
