@@ -321,6 +321,13 @@ export const saveDeletedPdf = (documentId, pages, filename, matterId) =>
     method: 'POST',
     body: { matterId, documentId, pages, filename, clientVisible: false },
   });
+export const numberPdfPages = (documentId, startNumber, position, filename) =>
+  postDownloadWithAuth('/document-tools/number-pdf-pages', { documentId, startNumber, position, filename }, filename || 'paginated-document.pdf');
+export const saveNumberedPdf = (documentId, startNumber, position, filename, matterId) =>
+  api('/document-tools/number-pdf-pages/save', {
+    method: 'POST',
+    body: { matterId, documentId, startNumber, position, filename, clientVisible: false },
+  });
 export const moveDocument = (docId, folderId) => api(`/documents/${docId}`, { method: 'PATCH', body: { folderId } });
 export const updateDocument = (docId, data) => api(`/documents/${docId}`, { method: 'PATCH', body: data });
 export const getClientActivity = (clientId, limit = 100) => api(`/clients/${clientId}/activity?limit=${encodeURIComponent(limit)}`);

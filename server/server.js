@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const { hashPassword, verifyPassword } = require('./lib/passwords');
 const jwt = require('jsonwebtoken');
 const PDFDocument = require('pdfkit');
-const { PDFDocument: PDFLibDocument, degrees } = require('pdf-lib');
+const { PDFDocument: PDFLibDocument, degrees, StandardFonts, rgb } = require('pdf-lib');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { authenticate, requireAdmin, requireAdvocateOrAdmin, requireStaff } = require('./middleware');
@@ -3270,6 +3270,222 @@ app.post('/api/document-tools/delete-pdf-pages/save', requireAdvocateOrAdmin, as
     res.json(publicDocument(resultDoc));
   } catch {
     res.status(500).json({ error: 'Unable to save deleted PDF' });
+  }
+});
+
+const VALID_PAGINATE_POSITIONS = new Set(['bottom-center', 'bottom-right', 'bottom-left']);
+
+function paginateTextX(pageWidth, textWidth, position) {
+  const margin = 36;
+  if (position === 'bottom-left') return margin;
+  if (position === 'bottom-right') return pageWidth - margin - textWidth;
+  return (pageWidth - textWidth) / 2;
+}
+
+app.post('/api/document-tools/number-pdf-pages', requireStaff, async (req, res) => {
+  try {
+    const { documentId, startNumber: rawStart, position: rawPosition, filename: rawFilename } = req.body || {};
+
+    if (!documentId) return res.status(400).json({ error: 'documentId is required' });
+
+    const startNumber = rawStart === undefined || rawStart === null || rawStart === '' ? 1 : Number(rawStart);
+    if (!Number.isInteger(startNumber) || startNumber < 1) return res.status(400).json({ error: 'startNumber must be a positive integer' });
+    if (startNumber > 99999) return res.status(400).json({ error: 'startNumber must be 99999 or less' });
+
+    const position = rawPosition || 'bottom-center';
+    if (!VALID_PAGINATE_POSITIONS.has(position)) return res.status(400).json({ error: 'position must be one of: bottom-center, bottom-right, bottom-left' });
+
+    const doc = await get('SELECT * FROM documents WHERE id=? AND deletedAt IS NULL', [documentId]);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    if (!(await canAccessDocument(req, doc)) || !doc.matterId || !(await canAccessMatter(req, doc.matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: documentId, matterId: doc.matterId || '', clientId: await documentAuditClientId(doc, req), metadata: { reason: 'insufficient permissions', context: documentAuditContext(doc), route: 'document_tool_number_pdf_pages' } }).catch(() => {});
+      return res.status(403).json({ error: 'Document access denied' });
+    }
+    if (doc.mimeType !== 'application/pdf') return res.status(400).json({ error: 'Only PDF documents can be processed' });
+
+    const inputContent = Buffer.isBuffer(doc.content) ? doc.content : Buffer.from(doc.content || '');
+    if (inputContent.length > MAX_MERGE_PDF_INPUT_BYTES) return res.status(413).json({ error: 'Document exceeds the 20 MB input limit' });
+
+    const outputFilename = cleanPdfDownloadName(rawFilename || 'paginated-document.pdf');
+
+    let sourcePdf;
+    try {
+      sourcePdf = await PDFLibDocument.load(inputContent, { ignoreEncryption: false });
+    } catch {
+      return res.status(400).json({ error: 'Could not read PDF — it may be corrupt or encrypted' });
+    }
+
+    const font = await sourcePdf.embedFont(StandardFonts.Helvetica);
+    const fontSize = 10;
+    const fontColor = rgb(0, 0, 0);
+    const bottomMargin = 24;
+
+    const pages = sourcePdf.getPages();
+    for (let i = 0; i < pages.length; i++) {
+      const page = pages[i];
+      const { width, height } = page.getSize();
+      const number = startNumber + i;
+      const text = String(number);
+      const textWidth = font.widthOfTextAtSize(text, fontSize);
+      const x = paginateTextX(width, textWidth, position);
+      const y = bottomMargin + fontSize * 0.35;
+      page.drawText(text, { x, y, size: fontSize, font, color: fontColor });
+    }
+
+    let outputBuffer;
+    try {
+      outputBuffer = Buffer.from(await sourcePdf.save());
+    } catch {
+      return res.status(400).json({ error: 'Could not generate paginated PDF' });
+    }
+
+    if (outputBuffer.length > 50 * 1024 * 1024) return res.status(413).json({ error: 'Output PDF exceeds the 50 MB limit' });
+
+    const clientId = await documentAuditClientId(doc, req);
+    await recordAuditEvent(req, {
+      action: 'document_tool_number_pdf_pages_downloaded',
+      entityType: 'document_tool',
+      entityId: documentId,
+      matterId: doc.matterId || '',
+      clientId,
+      metadata: {
+        route: 'document_tool_number_pdf_pages',
+        sourceDocumentId: documentId,
+        sourceMatterId: doc.matterId || '',
+        startNumber,
+        position,
+        pageCount: pages.length,
+        inputBytes: inputContent.length,
+        outputBytes: outputBuffer.length,
+        filename: outputFilename,
+      },
+    }).catch(() => {});
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(outputBuffer);
+  } catch {
+    res.status(500).json({ error: 'Unable to add page numbers' });
+  }
+});
+
+app.post('/api/document-tools/number-pdf-pages/save', requireAdvocateOrAdmin, async (req, res) => {
+  try {
+    const { matterId, documentId, startNumber: rawStart, position: rawPosition, filename: rawFilename } = req.body || {};
+
+    if (!documentId) return res.status(400).json({ error: 'documentId is required' });
+    if (!matterId) return res.status(400).json({ error: 'matterId is required' });
+
+    const startNumber = rawStart === undefined || rawStart === null || rawStart === '' ? 1 : Number(rawStart);
+    if (!Number.isInteger(startNumber) || startNumber < 1) return res.status(400).json({ error: 'startNumber must be a positive integer' });
+    if (startNumber > 99999) return res.status(400).json({ error: 'startNumber must be 99999 or less' });
+
+    const position = rawPosition || 'bottom-center';
+    if (!VALID_PAGINATE_POSITIONS.has(position)) return res.status(400).json({ error: 'position must be one of: bottom-center, bottom-right, bottom-left' });
+
+    const matter = await get('SELECT * FROM matters WHERE id=?', [matterId]);
+    if (!matter) return res.status(404).json({ error: 'Matter not found' });
+    if (!(await canAccessMatter(req, matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: matterId, metadata: { reason: 'insufficient permissions', route: 'document_tool_number_pdf_pages_save' } }).catch(() => {});
+      return res.status(403).json({ error: 'Matter access denied' });
+    }
+
+    const doc = await get('SELECT * FROM documents WHERE id=? AND deletedAt IS NULL', [documentId]);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    if (!(await canAccessDocument(req, doc)) || !doc.matterId || !(await canAccessMatter(req, doc.matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: documentId, matterId: doc.matterId || '', clientId: await documentAuditClientId(doc, req), metadata: { reason: 'insufficient permissions', context: documentAuditContext(doc), route: 'document_tool_number_pdf_pages_save' } }).catch(() => {});
+      return res.status(403).json({ error: 'Document access denied' });
+    }
+    if (doc.mimeType !== 'application/pdf') return res.status(400).json({ error: 'Only PDF documents can be processed' });
+    if (doc.matterId !== matterId) return res.status(400).json({ error: 'Document must belong to the target matter' });
+
+    const inputContent = Buffer.isBuffer(doc.content) ? doc.content : Buffer.from(doc.content || '');
+    if (inputContent.length > MAX_MERGE_PDF_INPUT_BYTES) return res.status(413).json({ error: 'Document exceeds the 20 MB input limit' });
+
+    const outputFilename = cleanPdfDownloadName(rawFilename || 'paginated-document.pdf');
+
+    let sourcePdf;
+    try {
+      sourcePdf = await PDFLibDocument.load(inputContent, { ignoreEncryption: false });
+    } catch {
+      return res.status(400).json({ error: 'Could not read PDF — it may be corrupt or encrypted' });
+    }
+
+    const font = await sourcePdf.embedFont(StandardFonts.Helvetica);
+    const fontSize = 10;
+    const fontColor = rgb(0, 0, 0);
+    const bottomMargin = 24;
+
+    const pages = sourcePdf.getPages();
+    for (let i = 0; i < pages.length; i++) {
+      const page = pages[i];
+      const { width, height } = page.getSize();
+      const number = startNumber + i;
+      const text = String(number);
+      const textWidth = font.widthOfTextAtSize(text, fontSize);
+      const x = paginateTextX(width, textWidth, position);
+      const y = bottomMargin + fontSize * 0.35;
+      page.drawText(text, { x, y, size: fontSize, font, color: fontColor });
+    }
+
+    let outputBuffer;
+    try {
+      outputBuffer = Buffer.from(await sourcePdf.save());
+    } catch {
+      return res.status(400).json({ error: 'Could not generate paginated PDF' });
+    }
+
+    if (outputBuffer.length > 50 * 1024 * 1024) return res.status(413).json({ error: 'Output PDF exceeds the 50 MB limit' });
+
+    const documentIdNew = genId('DOC');
+    const cleanName = cleanDocumentName(outputFilename);
+    const size = `${Math.max(1, Math.round(outputBuffer.length / 1024))} KB`;
+
+    await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+      documentIdNew,
+      matterId,
+      cleanName,
+      cleanName,
+      'PDF',
+      'application/pdf',
+      today(),
+      size,
+      outputBuffer,
+      'document_tool',
+      null,
+      null,
+      null,
+      0,
+      req.user.userId || '',
+    ]);
+
+    const resultDoc = await get(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=?`, [documentIdNew]);
+
+    await recordAuditEvent(req, {
+      action: 'document_tool_number_pdf_pages_saved',
+      entityType: 'document_tool',
+      entityId: documentIdNew,
+      matterId,
+      clientId: await documentAuditClientId(resultDoc, req),
+      metadata: {
+        sourceDocumentId: documentId,
+        targetMatterId: matterId,
+        outputDocumentId: documentIdNew,
+        startNumber,
+        position,
+        pageCount: pages.length,
+        inputBytes: inputContent.length,
+        outputBytes: outputBuffer.length,
+        filename: cleanName,
+        clientVisible: false,
+      },
+    }).catch(() => {});
+
+    res.json(publicDocument(resultDoc));
+  } catch {
+    res.status(500).json({ error: 'Unable to save paginated PDF' });
   }
 });
 

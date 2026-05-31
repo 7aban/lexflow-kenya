@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf, deletePdfPages, saveDeletedPdf } from '../lib/apiClient.js';
+import { api, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf, deletePdfPages, saveDeletedPdf, numberPdfPages, saveNumberedPdf } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Skeleton } from '../components/ui.jsx';
 
@@ -123,11 +123,27 @@ export default function DocumentStudio({ notify }) {
   const [deleteSaveError, setDeleteSaveError] = useState(null);
   const [deleteSaveSuccess, setDeleteSaveSuccess] = useState('');
 
+  const [paginateMatterId, setPaginateMatterId] = useState('');
+  const [paginateDocuments, setPaginateDocuments] = useState([]);
+  const [paginateDocsLoading, setPaginateDocsLoading] = useState(false);
+  const [paginateDocsError, setPaginateDocsError] = useState(null);
+  const [paginateDocumentId, setPaginateDocumentId] = useState('');
+  const [paginateStartNumber, setPaginateStartNumber] = useState(1);
+  const [paginatePosition, setPaginatePosition] = useState('bottom-center');
+  const [paginateFilename, setPaginateFilename] = useState('paginated-document.pdf');
+  const [paginateLoading, setPaginateLoading] = useState(false);
+  const [paginateError, setPaginateError] = useState(null);
+  const [paginateSuccess, setPaginateSuccess] = useState('');
+  const [paginateSaveLoading, setPaginateSaveLoading] = useState(false);
+  const [paginateSaveError, setPaginateSaveError] = useState(null);
+  const [paginateSaveSuccess, setPaginateSaveSuccess] = useState('');
+
   const panelRef = useRef(null);
   const mergePanelRef = useRef(null);
   const rotatePanelRef = useRef(null);
   const extractPanelRef = useRef(null);
   const deletePanelRef = useRef(null);
+  const paginatePanelRef = useRef(null);
 
   useEffect(() => {
     load();
@@ -189,6 +205,20 @@ export default function DocumentStudio({ notify }) {
       setDeleteSaveSuccess('');
     }
   }, [deleteMatterId]);
+
+  useEffect(() => {
+    if (paginateMatterId) {
+      loadPaginateDocuments(paginateMatterId);
+    } else {
+      setPaginateDocuments([]);
+      setPaginateDocumentId('');
+      setPaginateDocsError(null);
+      setPaginateError(null);
+      setPaginateSuccess('');
+      setPaginateSaveError(null);
+      setPaginateSaveSuccess('');
+    }
+  }, [paginateMatterId]);
 
   async function load() {
     setLoading(true);
@@ -465,6 +495,73 @@ export default function DocumentStudio({ notify }) {
     }
   }
 
+  async function loadPaginateDocuments(matterId) {
+    setPaginateDocsLoading(true);
+    setPaginateDocsError(null);
+    setPaginateError(null);
+    setPaginateSuccess('');
+    setPaginateSaveError(null);
+    setPaginateSaveSuccess('');
+    setPaginateDocumentId('');
+    try {
+      const docs = await getMatterDocuments(matterId);
+      setPaginateDocuments((Array.isArray(docs) ? docs : []).filter(doc => doc.mimeType === 'application/pdf'));
+    } catch (err) {
+      setPaginateDocuments([]);
+      setPaginateDocsError(err.message || 'Could not load matter documents.');
+    } finally {
+      setPaginateDocsLoading(false);
+    }
+  }
+
+  async function runPaginatePdf() {
+    setPaginateError(null);
+    setPaginateSuccess('');
+    setPaginateSaveError(null);
+    setPaginateSaveSuccess('');
+    if (!paginateDocumentId) {
+      setPaginateError('Select a PDF document.');
+      return;
+    }
+    setPaginateLoading(true);
+    try {
+      await numberPdfPages(paginateDocumentId, paginateStartNumber, paginatePosition, paginateFilename);
+      setPaginateSuccess('Paginated PDF downloaded.');
+      notify?.({ type: 'success', message: 'Paginated PDF downloaded.' });
+    } catch (err) {
+      const message = err.message || 'Could not add page numbers.';
+      setPaginateError(message);
+      notify?.({ type: 'danger', message });
+    } finally {
+      setPaginateLoading(false);
+    }
+  }
+
+  async function runPaginateSave() {
+    setPaginateSaveError(null);
+    setPaginateSaveSuccess('');
+    if (!paginateDocumentId) {
+      setPaginateSaveError('Select a PDF document.');
+      return;
+    }
+    if (!paginateMatterId) {
+      setPaginateSaveError('Select a matter first.');
+      return;
+    }
+    setPaginateSaveLoading(true);
+    try {
+      await saveNumberedPdf(paginateDocumentId, paginateStartNumber, paginatePosition, paginateFilename, paginateMatterId);
+      setPaginateSaveSuccess('Saved to matter documents. Open the matter Documents tab to view it.');
+      notify?.({ type: 'success', message: 'Saved to matter documents. Open the matter Documents tab to view it.' });
+    } catch (err) {
+      const message = err.message || 'Could not save paginated PDF.';
+      setPaginateSaveError(message);
+      notify?.({ type: 'danger', message });
+    } finally {
+      setPaginateSaveLoading(false);
+    }
+  }
+
   async function loadMergeDocuments(matterId) {
     setMergeDocsLoading(true);
     setMergeDocsError(null);
@@ -585,6 +682,11 @@ export default function DocumentStudio({ notify }) {
     setTimeout(() => deletePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 40);
   }
 
+  function scrollToPaginateTool() {
+    if (!matters.length && !mattersLoading) loadMatters();
+    setTimeout(() => paginatePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 40);
+  }
+
   if (loading) return <Skeleton />;
 
   if (error) return <Alert tone="danger">{error}</Alert>;
@@ -596,13 +698,15 @@ export default function DocumentStudio({ notify }) {
     .filter(Boolean);
   const canMerge = selectedMergeDocumentIds.length >= 2 && selectedMergeDocumentIds.length <= 10 && !mergeLoading && !mergeDocsLoading;
   const canSave = selectedMergeDocumentIds.length >= 2 && selectedMergeDocumentIds.length <= 10 && !saveLoading && !mergeDocsLoading && !!mergeMatterId;
-  const activeToolNames = new Set(['Merge PDFs', 'Rotate pages', 'Extract pages', 'Delete pages']);
+  const activeToolNames = new Set(['Merge PDFs', 'Rotate pages', 'Extract pages', 'Delete pages', 'Add page numbers / paginate bundle']);
   const canRotate = !!rotateDocumentId && !rotateLoading && !rotateDocsLoading;
   const canRotateSave = !!rotateDocumentId && !rotateSaveLoading && !rotateDocsLoading && !!rotateMatterId;
   const canExtract = !!extractDocumentId && !!extractRanges.trim() && !extractLoading && !extractDocsLoading;
   const canExtractSave = !!extractDocumentId && !!extractRanges.trim() && !extractSaveLoading && !extractDocsLoading && !!extractMatterId;
   const canDelete = !!deleteDocumentId && !!deletePages.trim() && !deleteLoading && !deleteDocsLoading;
   const canDeleteSave = !!deleteDocumentId && !!deletePages.trim() && !deleteSaveLoading && !deleteDocsLoading && !!deleteMatterId;
+  const canPaginate = !!paginateDocumentId && !paginateLoading && !paginateDocsLoading;
+  const canPaginateSave = !!paginateDocumentId && !paginateSaveLoading && !paginateDocsLoading && !!paginateMatterId;
 
   return (
     <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
@@ -1172,10 +1276,127 @@ export default function DocumentStudio({ notify }) {
             </div>
           </div>
 
+          <div
+            ref={paginatePanelRef}
+            style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 16, display: 'grid', gap: 14, minWidth: 0 }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                <strong style={{ fontSize: 14, color: theme.ink }}>Add page numbers / paginate bundle</strong>
+                <span style={{ fontSize: 12, color: theme.muted }}>Number every page then download or save</span>
+              </div>
+              <Badge tone="green">Available</Badge>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, alignItems: 'end', minWidth: 0 }}>
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Matter</span>
+                <select
+                  style={styles.input}
+                  value={paginateMatterId}
+                  onChange={event => { setPaginateMatterId(event.target.value); setPaginateError(null); setPaginateSuccess(''); setPaginateSaveError(null); setPaginateSaveSuccess(''); }}
+                  disabled={mattersLoading || paginateLoading || paginateSaveLoading}
+                >
+                  <option value="">{mattersLoading ? 'Loading matters...' : 'Select a matter'}</option>
+                  {matters.map(m => (
+                    <option key={m.id} value={m.id}>{matterLabel(m)}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>PDF document</span>
+                <select
+                  style={styles.input}
+                  value={paginateDocumentId}
+                  onChange={event => { setPaginateDocumentId(event.target.value); setPaginateError(null); setPaginateSuccess(''); setPaginateSaveError(null); setPaginateSaveSuccess(''); }}
+                  disabled={!paginateMatterId || paginateDocsLoading || paginateLoading || paginateSaveLoading}
+                >
+                  <option value="">
+                    {!paginateMatterId ? 'Select a matter first' : paginateDocsLoading ? 'Loading documents...' : paginateDocuments.length === 0 ? 'No PDFs found' : '— Select a PDF —'}
+                  </option>
+                  {paginateDocuments.map(doc => (
+                    <option key={doc.id} value={doc.id}>
+                      {doc.displayName || doc.name || doc.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Starting number</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="99999"
+                  style={styles.input}
+                  value={paginateStartNumber}
+                  onChange={event => { setPaginateStartNumber(Number(event.target.value)); setPaginateError(null); setPaginateSuccess(''); setPaginateSaveError(null); setPaginateSaveSuccess(''); }}
+                  disabled={paginateLoading || paginateSaveLoading}
+                />
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Position</span>
+                <select
+                  style={styles.input}
+                  value={paginatePosition}
+                  onChange={event => { setPaginatePosition(event.target.value); setPaginateError(null); setPaginateSuccess(''); setPaginateSaveError(null); setPaginateSaveSuccess(''); }}
+                  disabled={paginateLoading || paginateSaveLoading}
+                >
+                  <option value="bottom-center">Bottom center</option>
+                  <option value="bottom-right">Bottom right</option>
+                  <option value="bottom-left">Bottom left</option>
+                </select>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Output filename</span>
+                <input
+                  style={styles.input}
+                  value={paginateFilename}
+                  onChange={event => setPaginateFilename(event.target.value)}
+                  placeholder="paginated-document.pdf"
+                  disabled={paginateLoading || paginateSaveLoading}
+                />
+              </label>
+
+              <button
+                type="button"
+                style={{ ...styles.primaryButton, minHeight: 36, opacity: canPaginate ? 1 : 0.65, cursor: canPaginate ? 'pointer' : 'not-allowed' }}
+                onClick={runPaginatePdf}
+                disabled={!canPaginate}
+              >
+                {paginateLoading ? 'Adding numbers...' : 'Add numbers and Download'}
+              </button>
+
+              {paginateMatterId && (
+                <button
+                  type="button"
+                  style={{ ...styles.ghostButton, minHeight: 36, opacity: canPaginateSave ? 1 : 0.65, cursor: canPaginateSave ? 'pointer' : 'not-allowed' }}
+                  onClick={runPaginateSave}
+                  disabled={!canPaginateSave}
+                >
+                  {paginateSaveLoading ? 'Saving...' : 'Save to matter documents'}
+                </button>
+              )}
+            </div>
+
+            {paginateDocsError && <Alert tone="danger">{paginateDocsError}</Alert>}
+            {paginateError && <Alert tone="danger">{paginateError}</Alert>}
+            {paginateSuccess && <Alert tone="success">{paginateSuccess}</Alert>}
+            {paginateSaveError && <Alert tone="danger">{paginateSaveError}</Alert>}
+            {paginateSaveSuccess && <Alert tone="success">{paginateSaveSuccess}</Alert>}
+
+            <div style={{ border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
+              Numbers are added to every page in the selected PDF. For formal court bundles, verify pagination before filing.
+            </div>
+          </div>
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(230px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
             {documentToolCards.map(tool => {
               const active = activeToolNames.has(tool.title);
-              const handler = tool.title === 'Merge PDFs' ? scrollToMergeTool : tool.title === 'Rotate pages' ? scrollToRotateTool : tool.title === 'Extract pages' ? scrollToExtractTool : tool.title === 'Delete pages' ? scrollToDeleteTool : undefined;
+              const handler = tool.title === 'Merge PDFs' ? scrollToMergeTool : tool.title === 'Rotate pages' ? scrollToRotateTool : tool.title === 'Extract pages' ? scrollToExtractTool : tool.title === 'Delete pages' ? scrollToDeleteTool : tool.title === 'Add page numbers / paginate bundle' ? scrollToPaginateTool : undefined;
               return (
                 <div key={tool.title} style={{ border: `1px solid ${active ? theme.blue : theme.line}`, borderRadius: 8, background: '#fff', padding: '14px 16px', display: 'grid', gap: 10, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
