@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf } from '../lib/apiClient.js';
+import { api, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf, deletePdfPages, saveDeletedPdf } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Skeleton } from '../components/ui.jsx';
 
@@ -109,10 +109,25 @@ export default function DocumentStudio({ notify }) {
   const [extractSaveError, setExtractSaveError] = useState(null);
   const [extractSaveSuccess, setExtractSaveSuccess] = useState('');
 
+  const [deleteMatterId, setDeleteMatterId] = useState('');
+  const [deleteDocuments, setDeleteDocuments] = useState([]);
+  const [deleteDocsLoading, setDeleteDocsLoading] = useState(false);
+  const [deleteDocsError, setDeleteDocsError] = useState(null);
+  const [deleteDocumentId, setDeleteDocumentId] = useState('');
+  const [deletePages, setDeletePages] = useState('');
+  const [deleteFilename, setDeleteFilename] = useState('pages-removed.pdf');
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
+  const [deleteSuccess, setDeleteSuccess] = useState('');
+  const [deleteSaveLoading, setDeleteSaveLoading] = useState(false);
+  const [deleteSaveError, setDeleteSaveError] = useState(null);
+  const [deleteSaveSuccess, setDeleteSaveSuccess] = useState('');
+
   const panelRef = useRef(null);
   const mergePanelRef = useRef(null);
   const rotatePanelRef = useRef(null);
   const extractPanelRef = useRef(null);
+  const deletePanelRef = useRef(null);
 
   useEffect(() => {
     load();
@@ -160,6 +175,20 @@ export default function DocumentStudio({ notify }) {
       setExtractSaveSuccess('');
     }
   }, [extractMatterId]);
+
+  useEffect(() => {
+    if (deleteMatterId) {
+      loadDeleteDocuments(deleteMatterId);
+    } else {
+      setDeleteDocuments([]);
+      setDeleteDocumentId('');
+      setDeleteDocsError(null);
+      setDeleteError(null);
+      setDeleteSuccess('');
+      setDeleteSaveError(null);
+      setDeleteSaveSuccess('');
+    }
+  }, [deleteMatterId]);
 
   async function load() {
     setLoading(true);
@@ -361,6 +390,81 @@ export default function DocumentStudio({ notify }) {
     }
   }
 
+  async function loadDeleteDocuments(matterId) {
+    setDeleteDocsLoading(true);
+    setDeleteDocsError(null);
+    setDeleteError(null);
+    setDeleteSuccess('');
+    setDeleteSaveError(null);
+    setDeleteSaveSuccess('');
+    setDeleteDocumentId('');
+    try {
+      const docs = await getMatterDocuments(matterId);
+      setDeleteDocuments((Array.isArray(docs) ? docs : []).filter(doc => doc.mimeType === 'application/pdf'));
+    } catch (err) {
+      setDeleteDocuments([]);
+      setDeleteDocsError(err.message || 'Could not load matter documents.');
+    } finally {
+      setDeleteDocsLoading(false);
+    }
+  }
+
+  async function runDeletePdf() {
+    setDeleteError(null);
+    setDeleteSuccess('');
+    setDeleteSaveError(null);
+    setDeleteSaveSuccess('');
+    if (!deleteDocumentId) {
+      setDeleteError('Select a PDF document.');
+      return;
+    }
+    if (!deletePages.trim()) {
+      setDeleteError('Enter pages to remove.');
+      return;
+    }
+    setDeleteLoading(true);
+    try {
+      await deletePdfPages(deleteDocumentId, deletePages.trim(), deleteFilename);
+      setDeleteSuccess('Deleted PDF downloaded.');
+      notify?.({ type: 'success', message: 'Deleted PDF downloaded.' });
+    } catch (err) {
+      const message = err.message || 'Could not delete pages.';
+      setDeleteError(message);
+      notify?.({ type: 'danger', message });
+    } finally {
+      setDeleteLoading(false);
+    }
+  }
+
+  async function runDeleteSave() {
+    setDeleteSaveError(null);
+    setDeleteSaveSuccess('');
+    if (!deleteDocumentId) {
+      setDeleteSaveError('Select a PDF document.');
+      return;
+    }
+    if (!deleteMatterId) {
+      setDeleteSaveError('Select a matter first.');
+      return;
+    }
+    if (!deletePages.trim()) {
+      setDeleteSaveError('Enter pages to remove.');
+      return;
+    }
+    setDeleteSaveLoading(true);
+    try {
+      await saveDeletedPdf(deleteDocumentId, deletePages.trim(), deleteFilename, deleteMatterId);
+      setDeleteSaveSuccess('Saved to matter documents. Open the matter Documents tab to view it.');
+      notify?.({ type: 'success', message: 'Saved to matter documents. Open the matter Documents tab to view it.' });
+    } catch (err) {
+      const message = err.message || 'Could not save deleted PDF.';
+      setDeleteSaveError(message);
+      notify?.({ type: 'danger', message });
+    } finally {
+      setDeleteSaveLoading(false);
+    }
+  }
+
   async function loadMergeDocuments(matterId) {
     setMergeDocsLoading(true);
     setMergeDocsError(null);
@@ -476,6 +580,11 @@ export default function DocumentStudio({ notify }) {
     setTimeout(() => extractPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 40);
   }
 
+  function scrollToDeleteTool() {
+    if (!matters.length && !mattersLoading) loadMatters();
+    setTimeout(() => deletePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 40);
+  }
+
   if (loading) return <Skeleton />;
 
   if (error) return <Alert tone="danger">{error}</Alert>;
@@ -487,11 +596,13 @@ export default function DocumentStudio({ notify }) {
     .filter(Boolean);
   const canMerge = selectedMergeDocumentIds.length >= 2 && selectedMergeDocumentIds.length <= 10 && !mergeLoading && !mergeDocsLoading;
   const canSave = selectedMergeDocumentIds.length >= 2 && selectedMergeDocumentIds.length <= 10 && !saveLoading && !mergeDocsLoading && !!mergeMatterId;
-  const activeToolNames = new Set(['Merge PDFs', 'Rotate pages', 'Extract pages']);
+  const activeToolNames = new Set(['Merge PDFs', 'Rotate pages', 'Extract pages', 'Delete pages']);
   const canRotate = !!rotateDocumentId && !rotateLoading && !rotateDocsLoading;
   const canRotateSave = !!rotateDocumentId && !rotateSaveLoading && !rotateDocsLoading && !!rotateMatterId;
   const canExtract = !!extractDocumentId && !!extractRanges.trim() && !extractLoading && !extractDocsLoading;
   const canExtractSave = !!extractDocumentId && !!extractRanges.trim() && !extractSaveLoading && !extractDocsLoading && !!extractMatterId;
+  const canDelete = !!deleteDocumentId && !!deletePages.trim() && !deleteLoading && !deleteDocsLoading;
+  const canDeleteSave = !!deleteDocumentId && !!deletePages.trim() && !deleteSaveLoading && !deleteDocsLoading && !!deleteMatterId;
 
   return (
     <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
@@ -628,7 +739,7 @@ export default function DocumentStudio({ notify }) {
           <div style={{ border: `1px solid ${theme.line}`, borderLeft: `3px solid ${theme.blue}`, borderRadius: 8, background: '#FAFAF9', padding: '12px 14px', display: 'grid', gap: 4 }}>
             <strong style={{ fontSize: 14, color: theme.ink }}>Legal PDF utilities</strong>
             <span style={{ fontSize: 13, color: theme.muted, lineHeight: 1.55 }}>
-              Merge existing matter PDFs, rotate a PDF page orientation, or extract selected pages. Other document tools remain staged.
+              Merge existing matter PDFs, rotate PDF pages, extract selected pages, or remove unwanted pages. Other document tools remain staged.
             </span>
           </div>
 
@@ -959,10 +1070,112 @@ export default function DocumentStudio({ notify }) {
             {extractSaveSuccess && <Alert tone="success">{extractSaveSuccess}</Alert>}
           </div>
 
+          <div
+            ref={deletePanelRef}
+            style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 16, display: 'grid', gap: 14, minWidth: 0 }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                <strong style={{ fontSize: 14, color: theme.ink }}>Delete pages</strong>
+                <span style={{ fontSize: 12, color: theme.muted }}>Remove unwanted pages then download or save</span>
+              </div>
+              <Badge tone="green">Available</Badge>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, alignItems: 'end', minWidth: 0 }}>
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Matter</span>
+                <select
+                  style={styles.input}
+                  value={deleteMatterId}
+                  onChange={event => { setDeleteMatterId(event.target.value); setDeleteError(null); setDeleteSuccess(''); setDeleteSaveError(null); setDeleteSaveSuccess(''); }}
+                  disabled={mattersLoading || deleteLoading || deleteSaveLoading}
+                >
+                  <option value="">{mattersLoading ? 'Loading matters...' : 'Select a matter'}</option>
+                  {matters.map(m => (
+                    <option key={m.id} value={m.id}>{matterLabel(m)}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>PDF document</span>
+                <select
+                  style={styles.input}
+                  value={deleteDocumentId}
+                  onChange={event => { setDeleteDocumentId(event.target.value); setDeleteError(null); setDeleteSuccess(''); setDeleteSaveError(null); setDeleteSaveSuccess(''); }}
+                  disabled={!deleteMatterId || deleteDocsLoading || deleteLoading || deleteSaveLoading}
+                >
+                  <option value="">
+                    {!deleteMatterId ? 'Select a matter first' : deleteDocsLoading ? 'Loading documents...' : deleteDocuments.length === 0 ? 'No PDFs found' : '— Select a PDF —'}
+                  </option>
+                  {deleteDocuments.map(doc => (
+                    <option key={doc.id} value={doc.id}>
+                      {doc.displayName || doc.name || doc.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Pages to remove</span>
+                <input
+                  style={styles.input}
+                  value={deletePages}
+                  onChange={event => { setDeletePages(event.target.value); setDeleteError(null); setDeleteSuccess(''); setDeleteSaveError(null); setDeleteSaveSuccess(''); }}
+                  placeholder="2,4-5"
+                  disabled={deleteLoading || deleteSaveLoading}
+                />
+                <span style={{ fontSize: 11, color: theme.muted, marginTop: 4 }}>Enter the pages to remove. At least one page must remain.</span>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Output filename</span>
+                <input
+                  style={styles.input}
+                  value={deleteFilename}
+                  onChange={event => setDeleteFilename(event.target.value)}
+                  placeholder="pages-removed.pdf"
+                  disabled={deleteLoading || deleteSaveLoading}
+                />
+              </label>
+
+              <button
+                type="button"
+                style={{ ...styles.primaryButton, minHeight: 36, opacity: canDelete ? 1 : 0.65, cursor: canDelete ? 'pointer' : 'not-allowed' }}
+                onClick={runDeletePdf}
+                disabled={!canDelete}
+              >
+                {deleteLoading ? 'Deleting...' : 'Delete and Download'}
+              </button>
+
+              {deleteMatterId && (
+                <button
+                  type="button"
+                  style={{ ...styles.ghostButton, minHeight: 36, opacity: canDeleteSave ? 1 : 0.65, cursor: canDeleteSave ? 'pointer' : 'not-allowed' }}
+                  onClick={runDeleteSave}
+                  disabled={!canDeleteSave}
+                >
+                  {deleteSaveLoading ? 'Saving...' : 'Save to matter documents'}
+                </button>
+              )}
+            </div>
+
+            {deleteDocsError && <Alert tone="danger">{deleteDocsError}</Alert>}
+            {deleteError && <Alert tone="danger">{deleteError}</Alert>}
+            {deleteSuccess && <Alert tone="success">{deleteSuccess}</Alert>}
+            {deleteSaveError && <Alert tone="danger">{deleteSaveError}</Alert>}
+            {deleteSaveSuccess && <Alert tone="success">{deleteSaveSuccess}</Alert>}
+
+            <div style={{ border: `1px solid ${theme.amber}`, borderLeft: `3px solid ${theme.amber}`, borderRadius: 6, background: '#FFFBEB', padding: '8px 12px', fontSize: 12, color: '#92400E', lineHeight: 1.5 }}>
+              This operation cannot be undone once saved.
+            </div>
+          </div>
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(230px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
             {documentToolCards.map(tool => {
               const active = activeToolNames.has(tool.title);
-              const handler = tool.title === 'Merge PDFs' ? scrollToMergeTool : tool.title === 'Rotate pages' ? scrollToRotateTool : tool.title === 'Extract pages' ? scrollToExtractTool : undefined;
+              const handler = tool.title === 'Merge PDFs' ? scrollToMergeTool : tool.title === 'Rotate pages' ? scrollToRotateTool : tool.title === 'Extract pages' ? scrollToExtractTool : tool.title === 'Delete pages' ? scrollToDeleteTool : undefined;
               return (
                 <div key={tool.title} style={{ border: `1px solid ${active ? theme.blue : theme.line}`, borderRadius: 8, background: '#fff', padding: '14px 16px', display: 'grid', gap: 10, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>

@@ -46,6 +46,7 @@ const CONVERSATION_STATUSES = new Set(['open', 'pending', 'resolved']);
 const MAX_MERGE_PDF_COUNT = 10;
 const MAX_MERGE_PDF_INPUT_BYTES = 20 * 1024 * 1024;
 const MAX_EXTRACT_PDF_PAGES = 250;
+const MAX_DELETE_PDF_PAGES = 250;
 
 // CORS configuration
 const corsOptions = {
@@ -3082,6 +3083,193 @@ app.post('/api/document-tools/extract-pdf-pages/save', requireAdvocateOrAdmin, a
     res.json(publicDocument(resultDoc));
   } catch {
     res.status(500).json({ error: 'Unable to save extracted PDF' });
+  }
+});
+
+app.post('/api/document-tools/delete-pdf-pages', requireStaff, async (req, res) => {
+  try {
+    const { documentId, pages: rawPages, filename: rawFilename } = req.body || {};
+
+    if (!documentId) return res.status(400).json({ error: 'documentId is required' });
+    if (typeof rawPages !== 'string' || !rawPages.trim()) return res.status(400).json({ error: 'pages is required' });
+
+    const doc = await get('SELECT * FROM documents WHERE id=? AND deletedAt IS NULL', [documentId]);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    if (!(await canAccessDocument(req, doc)) || !doc.matterId || !(await canAccessMatter(req, doc.matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: documentId, matterId: doc.matterId || '', clientId: await documentAuditClientId(doc, req), metadata: { reason: 'insufficient permissions', context: documentAuditContext(doc), route: 'document_tool_delete_pdf_pages' } }).catch(() => {});
+      return res.status(403).json({ error: 'Document access denied' });
+    }
+    if (doc.mimeType !== 'application/pdf') return res.status(400).json({ error: 'Only PDF documents can be processed' });
+
+    const inputContent = Buffer.isBuffer(doc.content) ? doc.content : Buffer.from(doc.content || '');
+    if (inputContent.length > MAX_MERGE_PDF_INPUT_BYTES) return res.status(413).json({ error: 'Document exceeds the 20 MB input limit' });
+
+    const outputFilename = cleanPdfDownloadName(rawFilename || 'pages-removed.pdf');
+
+    let sourcePdf;
+    try {
+      sourcePdf = await PDFLibDocument.load(inputContent, { ignoreEncryption: false });
+    } catch {
+      return res.status(400).json({ error: 'Could not read PDF — it may be corrupt or encrypted' });
+    }
+
+    const pageCount = sourcePdf.getPageCount();
+    const parsed = parsePageRanges(rawPages, pageCount);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+
+    const removeSet = new Set(parsed.indices);
+    if (removeSet.size >= pageCount) return res.status(400).json({ error: 'At least one page must remain.' });
+
+    const allIndices = sourcePdf.getPageIndices();
+    const remainingIndices = allIndices.filter(i => !removeSet.has(i));
+
+    let outputBuffer;
+    try {
+      const outputPdf = await PDFLibDocument.create();
+      const copiedPages = await outputPdf.copyPages(sourcePdf, remainingIndices);
+      copiedPages.forEach(page => outputPdf.addPage(page));
+      outputBuffer = Buffer.from(await outputPdf.save());
+    } catch {
+      return res.status(400).json({ error: 'Could not delete the requested pages' });
+    }
+
+    if (outputBuffer.length > 50 * 1024 * 1024) return res.status(413).json({ error: 'Output PDF exceeds the 50 MB limit' });
+
+    const clientId = await documentAuditClientId(doc, req);
+    await recordAuditEvent(req, {
+      action: 'document_tool_delete_pdf_pages_downloaded',
+      entityType: 'document_tool',
+      entityId: documentId,
+      matterId: doc.matterId || '',
+      clientId,
+      metadata: {
+        route: 'document_tool_delete_pdf_pages',
+        sourceDocumentId: documentId,
+        sourceMatterId: doc.matterId || '',
+        pages: rawPages.trim(),
+        removedPageCount: parsed.indices.length,
+        remainingPageCount: remainingIndices.length,
+        inputBytes: inputContent.length,
+        outputBytes: outputBuffer.length,
+        filename: outputFilename,
+      },
+    }).catch(() => {});
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(outputBuffer);
+  } catch {
+    res.status(500).json({ error: 'Unable to delete PDF pages' });
+  }
+});
+
+app.post('/api/document-tools/delete-pdf-pages/save', requireAdvocateOrAdmin, async (req, res) => {
+  try {
+    const { matterId, documentId, pages: rawPages, filename: rawFilename } = req.body || {};
+
+    if (!documentId) return res.status(400).json({ error: 'documentId is required' });
+    if (!matterId) return res.status(400).json({ error: 'matterId is required' });
+    if (typeof rawPages !== 'string' || !rawPages.trim()) return res.status(400).json({ error: 'pages is required' });
+
+    const matter = await get('SELECT * FROM matters WHERE id=?', [matterId]);
+    if (!matter) return res.status(404).json({ error: 'Matter not found' });
+    if (!(await canAccessMatter(req, matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: matterId, metadata: { reason: 'insufficient permissions', route: 'document_tool_delete_pdf_pages_save' } }).catch(() => {});
+      return res.status(403).json({ error: 'Matter access denied' });
+    }
+
+    const doc = await get('SELECT * FROM documents WHERE id=? AND deletedAt IS NULL', [documentId]);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    if (!(await canAccessDocument(req, doc)) || !doc.matterId || !(await canAccessMatter(req, doc.matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: documentId, matterId: doc.matterId || '', clientId: await documentAuditClientId(doc, req), metadata: { reason: 'insufficient permissions', context: documentAuditContext(doc), route: 'document_tool_delete_pdf_pages_save' } }).catch(() => {});
+      return res.status(403).json({ error: 'Document access denied' });
+    }
+    if (doc.mimeType !== 'application/pdf') return res.status(400).json({ error: 'Only PDF documents can be processed' });
+    if (doc.matterId !== matterId) return res.status(400).json({ error: 'Document must belong to the target matter' });
+
+    const inputContent = Buffer.isBuffer(doc.content) ? doc.content : Buffer.from(doc.content || '');
+    if (inputContent.length > MAX_MERGE_PDF_INPUT_BYTES) return res.status(413).json({ error: 'Document exceeds the 20 MB input limit' });
+
+    const outputFilename = cleanPdfDownloadName(rawFilename || 'pages-removed.pdf');
+
+    let sourcePdf;
+    try {
+      sourcePdf = await PDFLibDocument.load(inputContent, { ignoreEncryption: false });
+    } catch {
+      return res.status(400).json({ error: 'Could not read PDF — it may be corrupt or encrypted' });
+    }
+
+    const pageCount = sourcePdf.getPageCount();
+    const parsed = parsePageRanges(rawPages, pageCount);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+
+    const removeSet = new Set(parsed.indices);
+    if (removeSet.size >= pageCount) return res.status(400).json({ error: 'At least one page must remain.' });
+
+    const allIndices = sourcePdf.getPageIndices();
+    const remainingIndices = allIndices.filter(i => !removeSet.has(i));
+
+    let outputBuffer;
+    try {
+      const outputPdf = await PDFLibDocument.create();
+      const copiedPages = await outputPdf.copyPages(sourcePdf, remainingIndices);
+      copiedPages.forEach(page => outputPdf.addPage(page));
+      outputBuffer = Buffer.from(await outputPdf.save());
+    } catch {
+      return res.status(400).json({ error: 'Could not delete the requested pages' });
+    }
+
+    if (outputBuffer.length > 50 * 1024 * 1024) return res.status(413).json({ error: 'Output PDF exceeds the 50 MB limit' });
+
+    const documentIdNew = genId('DOC');
+    const cleanName = cleanDocumentName(outputFilename);
+    const size = `${Math.max(1, Math.round(outputBuffer.length / 1024))} KB`;
+
+    await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+      documentIdNew,
+      matterId,
+      cleanName,
+      cleanName,
+      'PDF',
+      'application/pdf',
+      today(),
+      size,
+      outputBuffer,
+      'document_tool',
+      null,
+      null,
+      null,
+      0,
+      req.user.userId || '',
+    ]);
+
+    const resultDoc = await get(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=?`, [documentIdNew]);
+
+    await recordAuditEvent(req, {
+      action: 'document_tool_delete_pdf_pages_saved',
+      entityType: 'document_tool',
+      entityId: documentIdNew,
+      matterId,
+      clientId: await documentAuditClientId(resultDoc, req),
+      metadata: {
+        sourceDocumentId: documentId,
+        targetMatterId: matterId,
+        outputDocumentId: documentIdNew,
+        pages: rawPages.trim(),
+        removedPageCount: parsed.indices.length,
+        remainingPageCount: remainingIndices.length,
+        inputBytes: inputContent.length,
+        outputBytes: outputBuffer.length,
+        filename: cleanName,
+        clientVisible: false,
+      },
+    }).catch(() => {});
+
+    res.json(publicDocument(resultDoc));
+  } catch {
+    res.status(500).json({ error: 'Unable to save deleted PDF' });
   }
 });
 

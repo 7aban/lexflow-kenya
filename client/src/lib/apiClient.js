@@ -314,6 +314,13 @@ export const saveExtractedPdf = (documentId, ranges, filename, matterId) =>
     method: 'POST',
     body: { matterId, documentId, ranges, filename, clientVisible: false },
   });
+export const deletePdfPages = (documentId, pages, filename) =>
+  postDownloadWithAuth('/document-tools/delete-pdf-pages', { documentId, pages, filename }, filename || 'pages-removed.pdf');
+export const saveDeletedPdf = (documentId, pages, filename, matterId) =>
+  api('/document-tools/delete-pdf-pages/save', {
+    method: 'POST',
+    body: { matterId, documentId, pages, filename, clientVisible: false },
+  });
 export const moveDocument = (docId, folderId) => api(`/documents/${docId}`, { method: 'PATCH', body: { folderId } });
 export const updateDocument = (docId, data) => api(`/documents/${docId}`, { method: 'PATCH', body: data });
 export const getClientActivity = (clientId, limit = 100) => api(`/clients/${clientId}/activity?limit=${encodeURIComponent(limit)}`);
