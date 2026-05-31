@@ -2604,6 +2604,113 @@ app.post('/api/document-tools/merge-pdfs', requireStaff, async (req, res) => {
     res.status(500).json({ error: 'Unable to merge PDFs' });
   }
 });
+app.post('/api/document-tools/merge-pdfs/save', requireAdvocateOrAdmin, async (req, res) => {
+  try {
+    const { matterId, documentIds: rawDocumentIds, filename: rawFilename, folderId: rawFolderId } = req.body || {};
+
+    if (!matterId) return res.status(400).json({ error: 'matterId is required' });
+
+    const matter = await get('SELECT * FROM matters WHERE id=?', [matterId]);
+    if (!matter) return res.status(404).json({ error: 'Matter not found' });
+    if (!(await canAccessMatter(req, matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: matterId, metadata: { reason: 'insufficient permissions', route: 'document_tool_merge_pdf_save' } }).catch(() => {});
+      return res.status(403).json({ error: 'Matter access denied' });
+    }
+
+    const documentIds = Array.isArray(rawDocumentIds)
+      ? rawDocumentIds.map(id => String(id || '').trim()).filter(Boolean)
+      : null;
+
+    if (!documentIds) return res.status(400).json({ error: 'documentIds must be an array' });
+    if (documentIds.length < 2) return res.status(400).json({ error: 'Select at least 2 PDF documents to merge' });
+    if (documentIds.length > MAX_MERGE_PDF_COUNT) return res.status(400).json({ error: `Select no more than ${MAX_MERGE_PDF_COUNT} PDF documents` });
+    if (new Set(documentIds).size !== documentIds.length) return res.status(400).json({ error: 'Duplicate document IDs are not allowed' });
+
+    const outputFilename = cleanPdfDownloadName(rawFilename || 'merged-document.pdf');
+    const sourceDocs = [];
+    let combinedInputBytes = 0;
+
+    for (const documentId of documentIds) {
+      const doc = await get('SELECT * FROM documents WHERE id=? AND deletedAt IS NULL', [documentId]);
+      if (!doc) return res.status(404).json({ error: 'Document not found' });
+      if (!(await canAccessDocument(req, doc)) || !doc.matterId || !(await canAccessMatter(req, doc.matterId))) {
+        await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: documentId, matterId: doc.matterId || '', clientId: await documentAuditClientId(doc, req), metadata: { reason: 'insufficient permissions', context: documentAuditContext(doc), route: 'document_tool_merge_pdf_save' } }).catch(() => {});
+        return res.status(403).json({ error: 'Document access denied' });
+      }
+      if (doc.matterId !== matterId) return res.status(400).json({ error: 'All PDFs must belong to the target matter' });
+      if (doc.mimeType !== 'application/pdf') return res.status(400).json({ error: 'Only PDF documents can be merged' });
+
+      const content = Buffer.isBuffer(doc.content) ? doc.content : Buffer.from(doc.content || '');
+      combinedInputBytes += content.length;
+      if (combinedInputBytes > MAX_MERGE_PDF_INPUT_BYTES) return res.status(413).json({ error: 'Selected PDFs exceed the 20 MB merge limit' });
+      sourceDocs.push({ ...doc, content });
+    }
+
+    const mergedPdf = await PDFLibDocument.create();
+    try {
+      for (const doc of sourceDocs) {
+        const sourcePdf = await PDFLibDocument.load(doc.content, { ignoreEncryption: false });
+        const copiedPages = await mergedPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
+        copiedPages.forEach(page => mergedPdf.addPage(page));
+      }
+    } catch {
+      return res.status(400).json({ error: 'One or more selected PDFs could not be read' });
+    }
+
+    const mergedBytes = await mergedPdf.save();
+    const mergedBuffer = Buffer.from(mergedBytes);
+
+    if (mergedBuffer.length > 50 * 1024 * 1024) return res.status(413).json({ error: 'Merged PDF exceeds the 50 MB output limit' });
+
+    const documentId = genId('DOC');
+    const cleanName = cleanDocumentName(outputFilename);
+    const size = `${Math.max(1, Math.round(mergedBuffer.length / 1024))} KB`;
+
+    await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+      documentId,
+      matterId,
+      cleanName,
+      cleanName,
+      'PDF',
+      'application/pdf',
+      today(),
+      size,
+      mergedBuffer,
+      'document_tool',
+      rawFolderId || null,
+      null,
+      null,
+      0,
+      req.user.userId || '',
+    ]);
+
+    const doc = await get(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=?`, [documentId]);
+
+    await recordAuditEvent(req, {
+      action: 'document_tool_merge_pdf_saved',
+      entityType: 'document_tool',
+      entityId: documentId,
+      matterId,
+      clientId: await documentAuditClientId(doc, req),
+      metadata: {
+        sourceDocumentIds: documentIds,
+        sourceCount: sourceDocs.length,
+        targetMatterId: matterId,
+        outputDocumentId: documentId,
+        combinedInputBytes,
+        outputBytes: mergedBuffer.length,
+        filename: cleanName,
+        clientVisible: false,
+      },
+    }).catch(() => {});
+
+    res.json(publicDocument(doc));
+  } catch {
+    res.status(500).json({ error: 'Unable to save merged PDF' });
+  }
+});
+
 app.patch('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
   const doc = await get(`SELECT ${documentMetadataColumns()} FROM documents WHERE id=?`, [req.params.id]);
   if (!doc) return res.status(404).json({ error: 'Document not found' });

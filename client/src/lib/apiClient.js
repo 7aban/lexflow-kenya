@@ -295,6 +295,11 @@ export const previewDocumentTemplate = (matterId, templateId) =>
   });
 export const mergePdfDocuments = (documentIds, filename) =>
   postDownloadWithAuth('/document-tools/merge-pdfs', { documentIds, filename }, filename || 'merged-document.pdf');
+export const saveMergedPdf = (documentIds, filename, matterId) =>
+  api('/document-tools/merge-pdfs/save', {
+    method: 'POST',
+    body: { matterId, documentIds, filename, clientVisible: false },
+  });
 export const moveDocument = (docId, folderId) => api(`/documents/${docId}`, { method: 'PATCH', body: { folderId } });
 export const updateDocument = (docId, data) => api(`/documents/${docId}`, { method: 'PATCH', body: data });
 export const getClientActivity = (clientId, limit = 100) => api(`/clients/${clientId}/activity?limit=${encodeURIComponent(limit)}`);

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, previewDocumentTemplate } from '../lib/apiClient.js';
+import { api, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, saveMergedPdf, previewDocumentTemplate } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Skeleton } from '../components/ui.jsx';
 
@@ -73,6 +73,9 @@ export default function DocumentStudio({ notify }) {
   const [mergeLoading, setMergeLoading] = useState(false);
   const [mergeError, setMergeError] = useState(null);
   const [mergeSuccess, setMergeSuccess] = useState('');
+  const [saveLoading, setSaveLoading] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+  const [saveSuccess, setSaveSuccess] = useState('');
 
   const panelRef = useRef(null);
   const mergePanelRef = useRef(null);
@@ -91,6 +94,8 @@ export default function DocumentStudio({ notify }) {
       setMergeDocsError(null);
       setMergeError(null);
       setMergeSuccess('');
+      setSaveError(null);
+      setSaveSuccess('');
     }
   }, [mergeMatterId]);
 
@@ -157,6 +162,8 @@ export default function DocumentStudio({ notify }) {
     setMergeDocsError(null);
     setMergeError(null);
     setMergeSuccess('');
+    setSaveError(null);
+    setSaveSuccess('');
     setSelectedMergeDocumentIds([]);
     try {
       const docs = await getMatterDocuments(matterId);
@@ -172,6 +179,8 @@ export default function DocumentStudio({ notify }) {
   function toggleMergeDocument(documentId) {
     setMergeError(null);
     setMergeSuccess('');
+    setSaveError(null);
+    setSaveSuccess('');
     setSelectedMergeDocumentIds(current => {
       if (current.includes(documentId)) return current.filter(id => id !== documentId);
       if (current.length >= 10) {
@@ -195,6 +204,8 @@ export default function DocumentStudio({ notify }) {
   async function runMergePdfs() {
     setMergeError(null);
     setMergeSuccess('');
+    setSaveError(null);
+    setSaveSuccess('');
     if (selectedMergeDocumentIds.length < 2) {
       setMergeError('Select at least 2 PDF documents.');
       return;
@@ -217,6 +228,35 @@ export default function DocumentStudio({ notify }) {
     }
   }
 
+  async function runSaveMergedPdf() {
+    setSaveError(null);
+    setSaveSuccess('');
+    if (selectedMergeDocumentIds.length < 2) {
+      setSaveError('Select at least 2 PDF documents.');
+      return;
+    }
+    if (selectedMergeDocumentIds.length > 10) {
+      setSaveError('Select no more than 10 PDF documents.');
+      return;
+    }
+    if (!mergeMatterId) {
+      setSaveError('Select a matter first.');
+      return;
+    }
+    setSaveLoading(true);
+    try {
+      await saveMergedPdf(selectedMergeDocumentIds, mergeFilename, mergeMatterId);
+      setSaveSuccess('Saved to matter documents. Open the matter Documents tab to view it.');
+      notify?.({ type: 'success', message: 'Saved to matter documents. Open the matter Documents tab to view it.' });
+    } catch (err) {
+      const message = err.message || 'Could not save merged PDF.';
+      setSaveError(message);
+      notify?.({ type: 'danger', message });
+    } finally {
+      setSaveLoading(false);
+    }
+  }
+
   function scrollToMergeTool() {
     if (!matters.length && !mattersLoading) loadMatters();
     setTimeout(() => mergePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 40);
@@ -232,6 +272,7 @@ export default function DocumentStudio({ notify }) {
     .map(id => mergeDocuments.find(doc => doc.id === id))
     .filter(Boolean);
   const canMerge = selectedMergeDocumentIds.length >= 2 && selectedMergeDocumentIds.length <= 10 && !mergeLoading && !mergeDocsLoading;
+  const canSave = selectedMergeDocumentIds.length >= 2 && selectedMergeDocumentIds.length <= 10 && !saveLoading && !mergeDocsLoading && !!mergeMatterId;
 
   return (
     <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
@@ -419,12 +460,23 @@ export default function DocumentStudio({ notify }) {
               >
                 {mergeLoading ? 'Merging...' : 'Merge and Download'}
               </button>
+
+              <button
+                type="button"
+                style={{ ...styles.ghostButton, minHeight: 36, opacity: canSave ? 1 : 0.65, cursor: canSave ? 'pointer' : 'not-allowed' }}
+                onClick={runSaveMergedPdf}
+                disabled={!canSave}
+              >
+                {saveLoading ? 'Saving...' : 'Save to matter documents'}
+              </button>
             </div>
 
             {mattersError && <Alert tone="danger">{mattersError}</Alert>}
             {mergeDocsError && <Alert tone="danger">{mergeDocsError}</Alert>}
             {mergeError && <Alert tone="danger">{mergeError}</Alert>}
             {mergeSuccess && <Alert tone="success">{mergeSuccess}</Alert>}
+            {saveError && <Alert tone="danger">{saveError}</Alert>}
+            {saveSuccess && <Alert tone="success">{saveSuccess}</Alert>}
 
             {mergeMatterId && (
               <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
