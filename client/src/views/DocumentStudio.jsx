@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf } from '../lib/apiClient.js';
+import { api, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Skeleton } from '../components/ui.jsx';
 
@@ -7,6 +7,10 @@ const documentToolCards = [
   {
     title: 'Merge PDFs',
     description: 'Combine pleadings, exhibits, and annexures into one staged court bundle.',
+  },
+  {
+    title: 'Extract pages',
+    description: 'Pull selected page ranges from one matter PDF into a new document.',
   },
   {
     title: 'Split / reorder pages',
@@ -91,9 +95,24 @@ export default function DocumentStudio({ notify }) {
   const [rotateSaveError, setRotateSaveError] = useState(null);
   const [rotateSaveSuccess, setRotateSaveSuccess] = useState('');
 
+  const [extractMatterId, setExtractMatterId] = useState('');
+  const [extractDocuments, setExtractDocuments] = useState([]);
+  const [extractDocsLoading, setExtractDocsLoading] = useState(false);
+  const [extractDocsError, setExtractDocsError] = useState(null);
+  const [extractDocumentId, setExtractDocumentId] = useState('');
+  const [extractRanges, setExtractRanges] = useState('');
+  const [extractFilename, setExtractFilename] = useState('extracted-pages.pdf');
+  const [extractLoading, setExtractLoading] = useState(false);
+  const [extractError, setExtractError] = useState(null);
+  const [extractSuccess, setExtractSuccess] = useState('');
+  const [extractSaveLoading, setExtractSaveLoading] = useState(false);
+  const [extractSaveError, setExtractSaveError] = useState(null);
+  const [extractSaveSuccess, setExtractSaveSuccess] = useState('');
+
   const panelRef = useRef(null);
   const mergePanelRef = useRef(null);
   const rotatePanelRef = useRef(null);
+  const extractPanelRef = useRef(null);
 
   useEffect(() => {
     load();
@@ -127,6 +146,20 @@ export default function DocumentStudio({ notify }) {
       setRotateSaveSuccess('');
     }
   }, [rotateMatterId]);
+
+  useEffect(() => {
+    if (extractMatterId) {
+      loadExtractDocuments(extractMatterId);
+    } else {
+      setExtractDocuments([]);
+      setExtractDocumentId('');
+      setExtractDocsError(null);
+      setExtractError(null);
+      setExtractSuccess('');
+      setExtractSaveError(null);
+      setExtractSaveSuccess('');
+    }
+  }, [extractMatterId]);
 
   async function load() {
     setLoading(true);
@@ -253,6 +286,81 @@ export default function DocumentStudio({ notify }) {
     }
   }
 
+  async function loadExtractDocuments(matterId) {
+    setExtractDocsLoading(true);
+    setExtractDocsError(null);
+    setExtractError(null);
+    setExtractSuccess('');
+    setExtractSaveError(null);
+    setExtractSaveSuccess('');
+    setExtractDocumentId('');
+    try {
+      const docs = await getMatterDocuments(matterId);
+      setExtractDocuments((Array.isArray(docs) ? docs : []).filter(doc => doc.mimeType === 'application/pdf'));
+    } catch (err) {
+      setExtractDocuments([]);
+      setExtractDocsError(err.message || 'Could not load matter documents.');
+    } finally {
+      setExtractDocsLoading(false);
+    }
+  }
+
+  async function runExtractPdf() {
+    setExtractError(null);
+    setExtractSuccess('');
+    setExtractSaveError(null);
+    setExtractSaveSuccess('');
+    if (!extractDocumentId) {
+      setExtractError('Select a PDF document.');
+      return;
+    }
+    if (!extractRanges.trim()) {
+      setExtractError('Enter page ranges such as 1-3,5.');
+      return;
+    }
+    setExtractLoading(true);
+    try {
+      await extractPdfPages(extractDocumentId, extractRanges.trim(), extractFilename);
+      setExtractSuccess('Extracted pages downloaded.');
+      notify?.({ type: 'success', message: 'Extracted pages downloaded.' });
+    } catch (err) {
+      const message = err.message || 'Could not extract pages.';
+      setExtractError(message);
+      notify?.({ type: 'danger', message });
+    } finally {
+      setExtractLoading(false);
+    }
+  }
+
+  async function runExtractSave() {
+    setExtractSaveError(null);
+    setExtractSaveSuccess('');
+    if (!extractDocumentId) {
+      setExtractSaveError('Select a PDF document.');
+      return;
+    }
+    if (!extractMatterId) {
+      setExtractSaveError('Select a matter first.');
+      return;
+    }
+    if (!extractRanges.trim()) {
+      setExtractSaveError('Enter page ranges such as 1-3,5.');
+      return;
+    }
+    setExtractSaveLoading(true);
+    try {
+      await saveExtractedPdf(extractDocumentId, extractRanges.trim(), extractFilename, extractMatterId);
+      setExtractSaveSuccess('Saved to matter documents. Open the matter Documents tab to view it.');
+      notify?.({ type: 'success', message: 'Saved to matter documents. Open the matter Documents tab to view it.' });
+    } catch (err) {
+      const message = err.message || 'Could not save extracted PDF.';
+      setExtractSaveError(message);
+      notify?.({ type: 'danger', message });
+    } finally {
+      setExtractSaveLoading(false);
+    }
+  }
+
   async function loadMergeDocuments(matterId) {
     setMergeDocsLoading(true);
     setMergeDocsError(null);
@@ -363,6 +471,11 @@ export default function DocumentStudio({ notify }) {
     setTimeout(() => rotatePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 40);
   }
 
+  function scrollToExtractTool() {
+    if (!matters.length && !mattersLoading) loadMatters();
+    setTimeout(() => extractPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 40);
+  }
+
   if (loading) return <Skeleton />;
 
   if (error) return <Alert tone="danger">{error}</Alert>;
@@ -374,9 +487,11 @@ export default function DocumentStudio({ notify }) {
     .filter(Boolean);
   const canMerge = selectedMergeDocumentIds.length >= 2 && selectedMergeDocumentIds.length <= 10 && !mergeLoading && !mergeDocsLoading;
   const canSave = selectedMergeDocumentIds.length >= 2 && selectedMergeDocumentIds.length <= 10 && !saveLoading && !mergeDocsLoading && !!mergeMatterId;
-  const rotateToolNames = new Set(['Merge PDFs', 'Rotate pages']);
+  const activeToolNames = new Set(['Merge PDFs', 'Rotate pages', 'Extract pages']);
   const canRotate = !!rotateDocumentId && !rotateLoading && !rotateDocsLoading;
   const canRotateSave = !!rotateDocumentId && !rotateSaveLoading && !rotateDocsLoading && !!rotateMatterId;
+  const canExtract = !!extractDocumentId && !!extractRanges.trim() && !extractLoading && !extractDocsLoading;
+  const canExtractSave = !!extractDocumentId && !!extractRanges.trim() && !extractSaveLoading && !extractDocsLoading && !!extractMatterId;
 
   return (
     <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
@@ -513,7 +628,7 @@ export default function DocumentStudio({ notify }) {
           <div style={{ border: `1px solid ${theme.line}`, borderLeft: `3px solid ${theme.blue}`, borderRadius: 8, background: '#FAFAF9', padding: '12px 14px', display: 'grid', gap: 4 }}>
             <strong style={{ fontSize: 14, color: theme.ink }}>Legal PDF utilities</strong>
             <span style={{ fontSize: 13, color: theme.muted, lineHeight: 1.55 }}>
-              Merge existing matter PDFs or rotate a PDF page orientation. Other document tools remain staged.
+              Merge existing matter PDFs, rotate a PDF page orientation, or extract selected pages. Other document tools remain staged.
             </span>
           </div>
 
@@ -746,10 +861,108 @@ export default function DocumentStudio({ notify }) {
             {rotateSaveSuccess && <Alert tone="success">{rotateSaveSuccess}</Alert>}
           </div>
 
+          <div
+            ref={extractPanelRef}
+            style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 16, display: 'grid', gap: 14, minWidth: 0 }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                <strong style={{ fontSize: 14, color: theme.ink }}>Extract pages</strong>
+                <span style={{ fontSize: 12, color: theme.muted }}>Pull selected page ranges then download or save</span>
+              </div>
+              <Badge tone="green">Available</Badge>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, alignItems: 'end', minWidth: 0 }}>
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Matter</span>
+                <select
+                  style={styles.input}
+                  value={extractMatterId}
+                  onChange={event => { setExtractMatterId(event.target.value); setExtractError(null); setExtractSuccess(''); setExtractSaveError(null); setExtractSaveSuccess(''); }}
+                  disabled={mattersLoading || extractLoading || extractSaveLoading}
+                >
+                  <option value="">{mattersLoading ? 'Loading matters...' : 'Select a matter'}</option>
+                  {matters.map(m => (
+                    <option key={m.id} value={m.id}>{matterLabel(m)}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>PDF document</span>
+                <select
+                  style={styles.input}
+                  value={extractDocumentId}
+                  onChange={event => { setExtractDocumentId(event.target.value); setExtractError(null); setExtractSuccess(''); setExtractSaveError(null); setExtractSaveSuccess(''); }}
+                  disabled={!extractMatterId || extractDocsLoading || extractLoading || extractSaveLoading}
+                >
+                  <option value="">
+                    {!extractMatterId ? 'Select a matter first' : extractDocsLoading ? 'Loading documents...' : extractDocuments.length === 0 ? 'No PDFs found' : '— Select a PDF —'}
+                  </option>
+                  {extractDocuments.map(doc => (
+                    <option key={doc.id} value={doc.id}>
+                      {doc.displayName || doc.name || doc.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Page ranges</span>
+                <input
+                  style={styles.input}
+                  value={extractRanges}
+                  onChange={event => { setExtractRanges(event.target.value); setExtractError(null); setExtractSuccess(''); setExtractSaveError(null); setExtractSaveSuccess(''); }}
+                  placeholder="1-3,5,7"
+                  disabled={extractLoading || extractSaveLoading}
+                />
+                <span style={{ fontSize: 11, color: theme.muted, marginTop: 4 }}>Use page numbers as shown in the PDF, e.g. 1-3,5.</span>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Output filename</span>
+                <input
+                  style={styles.input}
+                  value={extractFilename}
+                  onChange={event => setExtractFilename(event.target.value)}
+                  placeholder="extracted-pages.pdf"
+                  disabled={extractLoading || extractSaveLoading}
+                />
+              </label>
+
+              <button
+                type="button"
+                style={{ ...styles.primaryButton, minHeight: 36, opacity: canExtract ? 1 : 0.65, cursor: canExtract ? 'pointer' : 'not-allowed' }}
+                onClick={runExtractPdf}
+                disabled={!canExtract}
+              >
+                {extractLoading ? 'Extracting...' : 'Extract and Download'}
+              </button>
+
+              {extractMatterId && (
+                <button
+                  type="button"
+                  style={{ ...styles.ghostButton, minHeight: 36, opacity: canExtractSave ? 1 : 0.65, cursor: canExtractSave ? 'pointer' : 'not-allowed' }}
+                  onClick={runExtractSave}
+                  disabled={!canExtractSave}
+                >
+                  {extractSaveLoading ? 'Saving...' : 'Save to matter documents'}
+                </button>
+              )}
+            </div>
+
+            {extractDocsError && <Alert tone="danger">{extractDocsError}</Alert>}
+            {extractError && <Alert tone="danger">{extractError}</Alert>}
+            {extractSuccess && <Alert tone="success">{extractSuccess}</Alert>}
+            {extractSaveError && <Alert tone="danger">{extractSaveError}</Alert>}
+            {extractSaveSuccess && <Alert tone="success">{extractSaveSuccess}</Alert>}
+          </div>
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(230px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
             {documentToolCards.map(tool => {
-              const active = rotateToolNames.has(tool.title);
-              const handler = tool.title === 'Merge PDFs' ? scrollToMergeTool : tool.title === 'Rotate pages' ? scrollToRotateTool : undefined;
+              const active = activeToolNames.has(tool.title);
+              const handler = tool.title === 'Merge PDFs' ? scrollToMergeTool : tool.title === 'Rotate pages' ? scrollToRotateTool : tool.title === 'Extract pages' ? scrollToExtractTool : undefined;
               return (
                 <div key={tool.title} style={{ border: `1px solid ${active ? theme.blue : theme.line}`, borderRadius: 8, background: '#fff', padding: '14px 16px', display: 'grid', gap: 10, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>

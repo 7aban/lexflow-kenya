@@ -45,6 +45,7 @@ const oauth = createOAuth({ run, get, all });
 const CONVERSATION_STATUSES = new Set(['open', 'pending', 'resolved']);
 const MAX_MERGE_PDF_COUNT = 10;
 const MAX_MERGE_PDF_INPUT_BYTES = 20 * 1024 * 1024;
+const MAX_EXTRACT_PDF_PAGES = 250;
 
 // CORS configuration
 const corsOptions = {
@@ -432,6 +433,51 @@ function safeDocumentMetadata(doc = {}, context, route, extra = {}) {
 function cleanPdfDownloadName(filename = '') {
   const requested = cleanDocumentName(String(filename || '').trim() || 'merged-document.pdf');
   return /\.pdf$/i.test(requested) ? requested : `${requested}.pdf`;
+}
+
+// Parse a one-based page-range string (e.g. "1-3,5,7-9") into zero-based page
+// indexes, preserving the explicit order entered. Returns { indices } on success
+// or { error } with a safe message. Pure: no I/O, no thrown stack traces.
+function parsePageRanges(input, pageCount) {
+  if (typeof input !== 'string') return { error: 'Enter page ranges such as 1-3,5,7' };
+  const trimmed = input.trim();
+  if (!trimmed) return { error: 'Enter page ranges such as 1-3,5,7' };
+  if (!Number.isInteger(pageCount) || pageCount < 1) return { error: 'The PDF has no pages to extract' };
+
+  const pages = [];
+  for (const rawToken of trimmed.split(',')) {
+    const token = rawToken.trim();
+    if (!token) return { error: 'Page ranges contain an empty value' };
+    if (token.includes('-')) {
+      const parts = token.split('-').map(part => part.trim());
+      if (parts.length !== 2 || !/^\d+$/.test(parts[0]) || !/^\d+$/.test(parts[1])) {
+        return { error: `"${token}" is not a valid page range` };
+      }
+      const start = Number(parts[0]);
+      const end = Number(parts[1]);
+      if (start < 1 || end < 1) return { error: 'Page numbers must be 1 or greater' };
+      if (end < start) return { error: `"${token}" is a reversed range` };
+      if (end > pageCount) return { error: `Page ${end} is out of range — the PDF has ${pageCount} page(s)` };
+      for (let page = start; page <= end; page++) pages.push(page);
+    } else {
+      if (!/^\d+$/.test(token)) return { error: `"${token}" is not a valid page number` };
+      const page = Number(token);
+      if (page < 1) return { error: 'Page numbers must be 1 or greater' };
+      if (page > pageCount) return { error: `Page ${page} is out of range — the PDF has ${pageCount} page(s)` };
+      pages.push(page);
+    }
+  }
+
+  if (!pages.length) return { error: 'Enter page ranges such as 1-3,5,7' };
+  if (pages.length > MAX_EXTRACT_PDF_PAGES) return { error: `Select no more than ${MAX_EXTRACT_PDF_PAGES} pages` };
+
+  const seen = new Set();
+  for (const page of pages) {
+    if (seen.has(page)) return { error: `Page ${page} is selected more than once` };
+    seen.add(page);
+  }
+
+  return { indices: pages.map(page => page - 1) };
 }
 
 async function matterFolders(matterId, req = null) {
@@ -2865,6 +2911,177 @@ app.post('/api/document-tools/rotate-pdf/save', requireAdvocateOrAdmin, async (r
     res.json(publicDocument(resultDoc));
   } catch {
     res.status(500).json({ error: 'Unable to save rotated PDF' });
+  }
+});
+
+app.post('/api/document-tools/extract-pdf-pages', requireStaff, async (req, res) => {
+  try {
+    const { documentId, ranges: rawRanges, filename: rawFilename } = req.body || {};
+
+    if (!documentId) return res.status(400).json({ error: 'documentId is required' });
+    if (typeof rawRanges !== 'string' || !rawRanges.trim()) return res.status(400).json({ error: 'ranges is required' });
+
+    const doc = await get('SELECT * FROM documents WHERE id=? AND deletedAt IS NULL', [documentId]);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    if (!(await canAccessDocument(req, doc)) || !doc.matterId || !(await canAccessMatter(req, doc.matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: documentId, matterId: doc.matterId || '', clientId: await documentAuditClientId(doc, req), metadata: { reason: 'insufficient permissions', context: documentAuditContext(doc), route: 'document_tool_extract_pdf_pages' } }).catch(() => {});
+      return res.status(403).json({ error: 'Document access denied' });
+    }
+    if (doc.mimeType !== 'application/pdf') return res.status(400).json({ error: 'Only PDF documents can be extracted' });
+
+    const inputContent = Buffer.isBuffer(doc.content) ? doc.content : Buffer.from(doc.content || '');
+    if (inputContent.length > MAX_MERGE_PDF_INPUT_BYTES) return res.status(413).json({ error: 'Document exceeds the 20 MB input limit' });
+
+    const outputFilename = cleanPdfDownloadName(rawFilename || 'extracted-pages.pdf');
+
+    let sourcePdf;
+    try {
+      sourcePdf = await PDFLibDocument.load(inputContent, { ignoreEncryption: false });
+    } catch {
+      return res.status(400).json({ error: 'Could not read PDF — it may be corrupt or encrypted' });
+    }
+
+    const parsed = parsePageRanges(rawRanges, sourcePdf.getPageCount());
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+
+    let outputBuffer;
+    try {
+      const outputPdf = await PDFLibDocument.create();
+      const copiedPages = await outputPdf.copyPages(sourcePdf, parsed.indices);
+      copiedPages.forEach(page => outputPdf.addPage(page));
+      outputBuffer = Buffer.from(await outputPdf.save());
+    } catch {
+      return res.status(400).json({ error: 'Could not extract the requested pages' });
+    }
+
+    if (outputBuffer.length > 50 * 1024 * 1024) return res.status(413).json({ error: 'Extracted PDF exceeds the 50 MB output limit' });
+
+    const clientId = await documentAuditClientId(doc, req);
+    await recordAuditEvent(req, {
+      action: 'document_tool_extract_pdf_pages_downloaded',
+      entityType: 'document_tool',
+      entityId: documentId,
+      matterId: doc.matterId || '',
+      clientId,
+      metadata: {
+        route: 'document_tool_extract_pdf_pages',
+        sourceDocumentId: documentId,
+        sourceMatterId: doc.matterId || '',
+        ranges: rawRanges.trim(),
+        extractedPageCount: parsed.indices.length,
+        inputBytes: inputContent.length,
+        outputBytes: outputBuffer.length,
+        filename: outputFilename,
+      },
+    }).catch(() => {});
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(outputBuffer);
+  } catch {
+    res.status(500).json({ error: 'Unable to extract PDF pages' });
+  }
+});
+
+app.post('/api/document-tools/extract-pdf-pages/save', requireAdvocateOrAdmin, async (req, res) => {
+  try {
+    const { matterId, documentId, ranges: rawRanges, filename: rawFilename } = req.body || {};
+
+    if (!documentId) return res.status(400).json({ error: 'documentId is required' });
+    if (!matterId) return res.status(400).json({ error: 'matterId is required' });
+    if (typeof rawRanges !== 'string' || !rawRanges.trim()) return res.status(400).json({ error: 'ranges is required' });
+
+    const matter = await get('SELECT * FROM matters WHERE id=?', [matterId]);
+    if (!matter) return res.status(404).json({ error: 'Matter not found' });
+    if (!(await canAccessMatter(req, matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: matterId, metadata: { reason: 'insufficient permissions', route: 'document_tool_extract_pdf_pages_save' } }).catch(() => {});
+      return res.status(403).json({ error: 'Matter access denied' });
+    }
+
+    const doc = await get('SELECT * FROM documents WHERE id=? AND deletedAt IS NULL', [documentId]);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    if (!(await canAccessDocument(req, doc)) || !doc.matterId || !(await canAccessMatter(req, doc.matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: documentId, matterId: doc.matterId || '', clientId: await documentAuditClientId(doc, req), metadata: { reason: 'insufficient permissions', context: documentAuditContext(doc), route: 'document_tool_extract_pdf_pages_save' } }).catch(() => {});
+      return res.status(403).json({ error: 'Document access denied' });
+    }
+    if (doc.mimeType !== 'application/pdf') return res.status(400).json({ error: 'Only PDF documents can be extracted' });
+    if (doc.matterId !== matterId) return res.status(400).json({ error: 'Document must belong to the target matter' });
+
+    const inputContent = Buffer.isBuffer(doc.content) ? doc.content : Buffer.from(doc.content || '');
+    if (inputContent.length > MAX_MERGE_PDF_INPUT_BYTES) return res.status(413).json({ error: 'Document exceeds the 20 MB input limit' });
+
+    const outputFilename = cleanPdfDownloadName(rawFilename || 'extracted-pages.pdf');
+
+    let sourcePdf;
+    try {
+      sourcePdf = await PDFLibDocument.load(inputContent, { ignoreEncryption: false });
+    } catch {
+      return res.status(400).json({ error: 'Could not read PDF — it may be corrupt or encrypted' });
+    }
+
+    const parsed = parsePageRanges(rawRanges, sourcePdf.getPageCount());
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+
+    let outputBuffer;
+    try {
+      const outputPdf = await PDFLibDocument.create();
+      const copiedPages = await outputPdf.copyPages(sourcePdf, parsed.indices);
+      copiedPages.forEach(page => outputPdf.addPage(page));
+      outputBuffer = Buffer.from(await outputPdf.save());
+    } catch {
+      return res.status(400).json({ error: 'Could not extract the requested pages' });
+    }
+
+    if (outputBuffer.length > 50 * 1024 * 1024) return res.status(413).json({ error: 'Extracted PDF exceeds the 50 MB output limit' });
+
+    const documentIdNew = genId('DOC');
+    const cleanName = cleanDocumentName(outputFilename);
+    const size = `${Math.max(1, Math.round(outputBuffer.length / 1024))} KB`;
+
+    await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+      documentIdNew,
+      matterId,
+      cleanName,
+      cleanName,
+      'PDF',
+      'application/pdf',
+      today(),
+      size,
+      outputBuffer,
+      'document_tool',
+      null,
+      null,
+      null,
+      0,
+      req.user.userId || '',
+    ]);
+
+    const resultDoc = await get(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=?`, [documentIdNew]);
+
+    await recordAuditEvent(req, {
+      action: 'document_tool_extract_pdf_pages_saved',
+      entityType: 'document_tool',
+      entityId: documentIdNew,
+      matterId,
+      clientId: await documentAuditClientId(resultDoc, req),
+      metadata: {
+        sourceDocumentId: documentId,
+        targetMatterId: matterId,
+        outputDocumentId: documentIdNew,
+        ranges: rawRanges.trim(),
+        extractedPageCount: parsed.indices.length,
+        inputBytes: inputContent.length,
+        outputBytes: outputBuffer.length,
+        filename: cleanName,
+        clientVisible: false,
+      },
+    }).catch(() => {});
+
+    res.json(publicDocument(resultDoc));
+  } catch {
+    res.status(500).json({ error: 'Unable to save extracted PDF' });
   }
 });
 

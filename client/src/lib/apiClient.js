@@ -307,6 +307,13 @@ export const saveRotatedPdf = (documentId, degrees, filename, matterId) =>
     method: 'POST',
     body: { matterId, documentId, degrees, filename, clientVisible: false },
   });
+export const extractPdfPages = (documentId, ranges, filename) =>
+  postDownloadWithAuth('/document-tools/extract-pdf-pages', { documentId, ranges, filename }, filename || 'extracted-pages.pdf');
+export const saveExtractedPdf = (documentId, ranges, filename, matterId) =>
+  api('/document-tools/extract-pdf-pages/save', {
+    method: 'POST',
+    body: { matterId, documentId, ranges, filename, clientVisible: false },
+  });
 export const moveDocument = (docId, folderId) => api(`/documents/${docId}`, { method: 'PATCH', body: { folderId } });
 export const updateDocument = (docId, data) => api(`/documents/${docId}`, { method: 'PATCH', body: data });
 export const getClientActivity = (clientId, limit = 100) => api(`/clients/${clientId}/activity?limit=${encodeURIComponent(limit)}`);
