@@ -25,7 +25,7 @@ module.exports = ({ run, get }) => {
       };
     }
     return {
-      actorUserId: req.user.id || '',
+      actorUserId: req.user.userId || req.user.id || '',
       actorRole: req.user.role || '',
       actorEmail: req.user.email || '',
     };
@@ -102,7 +102,7 @@ module.exports = ({ run, get }) => {
       if (!req?.user) return;
       await run(`INSERT INTO audit_logs (id, userId, userName, role, action, entityType, entityId, summary, createdAt) VALUES (?,?,?,?,?,?,?)`, [
         genId('AUD'),
-        req.user.id || '',
+        req.user.userId || req.user.id || '',
         req.user.fullName || '',
         req.user.role || '',
         action,

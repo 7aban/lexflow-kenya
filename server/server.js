@@ -3088,9 +3088,21 @@ app.post('/api/whatsapp/reminders', requireStaff, async (req, res) => { const ro
 app.get('/api/exports/:type.:format', requireStaff, async (req, res) => {
   const exportType = req.params.type;
   const format = req.params.format;
-  const rows = exportType === 'itax'
-    ? await all(`SELECT i.number,i.date,c.name client,i.amount,i.status FROM invoices i LEFT JOIN clients c ON c.id=i.clientId`)
-    : await all(`SELECT m.reference,m.title,c.name client,m.practiceArea,m.stage,m.totalBilled FROM matters m LEFT JOIN clients c ON c.id=m.clientId`);
+  if (!['itax', 'matters'].includes(exportType)) return res.status(400).json({ error: 'Invalid export type' });
+  const billingVisible = await isBillingVisibleFor(req);
+  const advocateName = req.user?.fullName || '';
+  let rows;
+  if (exportType === 'itax') {
+    rows = req.user?.role === 'advocate'
+      ? await all(`SELECT i.number,i.date,c.name client,i.amount,i.status FROM invoices i JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId WHERE m.assignedTo=?`, [advocateName])
+      : await all(`SELECT i.number,i.date,c.name client,i.amount,i.status FROM invoices i LEFT JOIN clients c ON c.id=i.clientId`);
+    if (!billingVisible) rows = rows.map(r => ({ ...r, amount: null }));
+  } else {
+    rows = req.user?.role === 'advocate'
+      ? await all(`SELECT m.reference,m.title,c.name client,m.practiceArea,m.stage,m.totalBilled FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.assignedTo=?`, [advocateName])
+      : await all(`SELECT m.reference,m.title,c.name client,m.practiceArea,m.stage,m.totalBilled FROM matters m LEFT JOIN clients c ON c.id=m.clientId`);
+    if (!billingVisible) rows = rows.map(r => ({ ...r, totalBilled: null }));
+  }
   if (format === 'pdf') {
     const doc = new PDFDocument();
     res.setHeader('Content-Type', 'application/pdf');
