@@ -3,14 +3,14 @@
   "version": "1.0.0",
   "description": "LexFlow Kenya Express API",
   "main": "server.js",
-    "scripts": {
-      "start": "node server.js",
-      "seed:demo": "node scripts/seed-demo-data.js",
-      "test": "npx jest --runInBand",
-      "test:seeded": "npm run seed:demo && npm test",
-      "backup": "node scripts/backup.js",
-      "restore:backup": "node scripts/restore-backup.js"
-    },
+  "scripts": {
+    "start": "node server.js",
+    "seed:demo": "node scripts/seed-demo-data.js",
+    "test": "npx jest --runInBand",
+    "test:seeded": "npm run seed:demo && npm test",
+    "backup": "node scripts/backup.js",
+    "restore:backup": "node scripts/restore-backup.js"
+  },
   "type": "commonjs",
   "engines": {
     "node": ">=22.0.0"
@@ -25,6 +25,7 @@
     "jsonwebtoken": "^9.0.3",
     "node-cron": "^4.2.1",
     "nodemailer": "^8.0.7",
+    "pdf-lib": "^1.17.1",
     "pdfkit": "^0.18.0",
     "sqlite3": "^6.0.1",
     "twilio": "^6.0.0"

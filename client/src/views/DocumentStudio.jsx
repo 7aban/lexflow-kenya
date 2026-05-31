@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, listDocumentTemplates, previewDocumentTemplate } from '../lib/apiClient.js';
+import { api, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, previewDocumentTemplate } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Skeleton } from '../components/ui.jsx';
 
@@ -45,6 +45,11 @@ const workflowPrinciples = [
   'Current matter, document, and client visibility controls remain unchanged.',
 ];
 
+function matterLabel(matter = {}) {
+  const base = matter.title || matter.reference || matter.caseNumber || `Matter ${matter.id}`;
+  return matter.reference && matter.title ? `${matter.title} (${matter.reference})` : base;
+}
+
 export default function DocumentStudio({ notify }) {
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -59,9 +64,35 @@ export default function DocumentStudio({ notify }) {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState(null);
 
-  const panelRef = useRef(null);
+  const [mergeMatterId, setMergeMatterId] = useState('');
+  const [mergeDocuments, setMergeDocuments] = useState([]);
+  const [mergeDocsLoading, setMergeDocsLoading] = useState(false);
+  const [mergeDocsError, setMergeDocsError] = useState(null);
+  const [selectedMergeDocumentIds, setSelectedMergeDocumentIds] = useState([]);
+  const [mergeFilename, setMergeFilename] = useState('merged-document.pdf');
+  const [mergeLoading, setMergeLoading] = useState(false);
+  const [mergeError, setMergeError] = useState(null);
+  const [mergeSuccess, setMergeSuccess] = useState('');
 
-  useEffect(() => { load(); }, []);
+  const panelRef = useRef(null);
+  const mergePanelRef = useRef(null);
+
+  useEffect(() => {
+    load();
+    loadMatters();
+  }, []);
+
+  useEffect(() => {
+    if (mergeMatterId) {
+      loadMergeDocuments(mergeMatterId);
+    } else {
+      setMergeDocuments([]);
+      setSelectedMergeDocumentIds([]);
+      setMergeDocsError(null);
+      setMergeError(null);
+      setMergeSuccess('');
+    }
+  }, [mergeMatterId]);
 
   async function load() {
     setLoading(true);
@@ -121,12 +152,86 @@ export default function DocumentStudio({ notify }) {
     }
   }
 
+  async function loadMergeDocuments(matterId) {
+    setMergeDocsLoading(true);
+    setMergeDocsError(null);
+    setMergeError(null);
+    setMergeSuccess('');
+    setSelectedMergeDocumentIds([]);
+    try {
+      const docs = await getMatterDocuments(matterId);
+      setMergeDocuments((Array.isArray(docs) ? docs : []).filter(doc => doc.mimeType === 'application/pdf'));
+    } catch (err) {
+      setMergeDocuments([]);
+      setMergeDocsError(err.message || 'Could not load matter documents.');
+    } finally {
+      setMergeDocsLoading(false);
+    }
+  }
+
+  function toggleMergeDocument(documentId) {
+    setMergeError(null);
+    setMergeSuccess('');
+    setSelectedMergeDocumentIds(current => {
+      if (current.includes(documentId)) return current.filter(id => id !== documentId);
+      if (current.length >= 10) {
+        setMergeError('Select no more than 10 PDF documents.');
+        return current;
+      }
+      return [...current, documentId];
+    });
+  }
+
+  function moveMergeDocument(index, direction) {
+    setSelectedMergeDocumentIds(current => {
+      const target = index + direction;
+      if (target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
+  async function runMergePdfs() {
+    setMergeError(null);
+    setMergeSuccess('');
+    if (selectedMergeDocumentIds.length < 2) {
+      setMergeError('Select at least 2 PDF documents.');
+      return;
+    }
+    if (selectedMergeDocumentIds.length > 10) {
+      setMergeError('Select no more than 10 PDF documents.');
+      return;
+    }
+    setMergeLoading(true);
+    try {
+      await mergePdfDocuments(selectedMergeDocumentIds, mergeFilename);
+      setMergeSuccess('Merged PDF downloaded.');
+      notify?.({ type: 'success', message: 'Merged PDF downloaded.' });
+    } catch (err) {
+      const message = err.message || 'Could not merge PDFs.';
+      setMergeError(message);
+      notify?.({ type: 'danger', message });
+    } finally {
+      setMergeLoading(false);
+    }
+  }
+
+  function scrollToMergeTool() {
+    if (!matters.length && !mattersLoading) loadMatters();
+    setTimeout(() => mergePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 40);
+  }
+
   if (loading) return <Skeleton />;
 
   if (error) return <Alert tone="danger">{error}</Alert>;
 
   const hint = templates.length === 1 ? '1 template configured' : `${templates.length} templates configured`;
   const unresolvedTokens = Array.isArray(previewResult?.unresolvedTokens) ? previewResult.unresolvedTokens : [];
+  const selectedMergeDocuments = selectedMergeDocumentIds
+    .map(id => mergeDocuments.find(doc => doc.id === id))
+    .filter(Boolean);
+  const canMerge = selectedMergeDocumentIds.length >= 2 && selectedMergeDocumentIds.length <= 10 && !mergeLoading && !mergeDocsLoading;
 
   return (
     <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
@@ -263,36 +368,158 @@ export default function DocumentStudio({ notify }) {
           <div style={{ border: `1px solid ${theme.line}`, borderLeft: `3px solid ${theme.blue}`, borderRadius: 8, background: '#FAFAF9', padding: '12px 14px', display: 'grid', gap: 4 }}>
             <strong style={{ fontSize: 14, color: theme.ink }}>Legal PDF utilities</strong>
             <span style={{ fontSize: 13, color: theme.muted, lineHeight: 1.55 }}>
-              Tools are being staged for staff document workflows. This phase is a preview shell only; no files are processed yet.
+              Merge existing matter PDFs into a temporary download. Other document tools remain staged.
             </span>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(230px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
-            {documentToolCards.map(tool => (
-              <div key={tool.title} style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: '14px 16px', display: 'grid', gap: 10, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-                  <strong style={{ fontSize: 14, color: theme.ink, lineHeight: 1.35, wordBreak: 'break-word' }}>{tool.title}</strong>
-                  <Badge tone="amber">Coming soon</Badge>
-                </div>
-                <span style={{ fontSize: 13, color: theme.muted, lineHeight: 1.5 }}>{tool.description}</span>
-                <button
-                  type="button"
-                  disabled
-                  style={{
-                    ...styles.ghostButton,
-                    justifySelf: 'start',
-                    fontSize: 12,
-                    padding: '5px 12px',
-                    color: theme.muted,
-                    borderColor: theme.line,
-                    cursor: 'not-allowed',
-                    opacity: 0.75,
-                  }}
-                >
-                  Not available yet
-                </button>
+          <div
+            ref={mergePanelRef}
+            style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 16, display: 'grid', gap: 14, minWidth: 0 }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                <strong style={{ fontSize: 14, color: theme.ink }}>Merge PDFs</strong>
+                <span style={{ fontSize: 12, color: theme.muted }}>Temporary download only</span>
               </div>
-            ))}
+              <Badge tone="green">Available</Badge>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, alignItems: 'end', minWidth: 0 }}>
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Matter</span>
+                <select
+                  style={styles.input}
+                  value={mergeMatterId}
+                  onChange={event => setMergeMatterId(event.target.value)}
+                  disabled={mattersLoading || mergeLoading}
+                >
+                  <option value="">{mattersLoading ? 'Loading matters...' : 'Select a matter'}</option>
+                  {matters.map(m => (
+                    <option key={m.id} value={m.id}>{matterLabel(m)}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Output filename</span>
+                <input
+                  style={styles.input}
+                  value={mergeFilename}
+                  onChange={event => setMergeFilename(event.target.value)}
+                  placeholder="merged-document.pdf"
+                  disabled={mergeLoading}
+                />
+              </label>
+
+              <button
+                type="button"
+                style={{ ...styles.primaryButton, minHeight: 36, opacity: canMerge ? 1 : 0.65, cursor: canMerge ? 'pointer' : 'not-allowed' }}
+                onClick={runMergePdfs}
+                disabled={!canMerge}
+              >
+                {mergeLoading ? 'Merging...' : 'Merge and Download'}
+              </button>
+            </div>
+
+            {mattersError && <Alert tone="danger">{mattersError}</Alert>}
+            {mergeDocsError && <Alert tone="danger">{mergeDocsError}</Alert>}
+            {mergeError && <Alert tone="danger">{mergeError}</Alert>}
+            {mergeSuccess && <Alert tone="success">{mergeSuccess}</Alert>}
+
+            {mergeMatterId && (
+              <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
+                  <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#FAFAF9', padding: 12, display: 'grid', gap: 10, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                      <strong style={{ fontSize: 13, color: theme.ink }}>Available PDFs</strong>
+                      <span style={{ fontSize: 12, color: theme.muted }}>{mergeDocuments.length} PDF{mergeDocuments.length === 1 ? '' : 's'}</span>
+                    </div>
+                    {mergeDocsLoading ? (
+                      <span style={{ fontSize: 13, color: theme.muted }}>Loading documents...</span>
+                    ) : mergeDocuments.length === 0 ? (
+                      <Empty title="No PDFs found" text="This matter has no existing PDF documents." />
+                    ) : (
+                      <div style={{ display: 'grid', gap: 8, maxHeight: 320, overflowY: 'auto', minWidth: 0 }}>
+                        {mergeDocuments.map(doc => {
+                          const selected = selectedMergeDocumentIds.includes(doc.id);
+                          const disabled = !selected && selectedMergeDocumentIds.length >= 10;
+                          return (
+                            <label key={doc.id} style={{ display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', gap: 10, alignItems: 'start', border: `1px solid ${selected ? theme.blue : theme.line}`, borderRadius: 8, background: selected ? theme.blueBg : '#fff', padding: 10, minWidth: 0 }}>
+                              <input
+                                type="checkbox"
+                                checked={selected}
+                                disabled={disabled || mergeLoading}
+                                onChange={() => toggleMergeDocument(doc.id)}
+                                style={{ marginTop: 3 }}
+                              />
+                              <span style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                                <span style={{ fontSize: 13, fontWeight: 600, color: theme.ink, overflowWrap: 'anywhere' }}>{doc.displayName || doc.name || doc.id}</span>
+                                <span style={{ fontSize: 12, color: theme.muted }}>{doc.date || 'No date'} | {doc.size || 'Unknown size'}</span>
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#FAFAF9', padding: 12, display: 'grid', gap: 10, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                      <strong style={{ fontSize: 13, color: theme.ink }}>Merge Order</strong>
+                      <span style={{ fontSize: 12, color: theme.muted }}>{selectedMergeDocuments.length}/10 selected</span>
+                    </div>
+                    {selectedMergeDocuments.length === 0 ? (
+                      <Empty title="No PDFs selected" text="Select PDF documents from this matter." />
+                    ) : (
+                      <div style={{ display: 'grid', gap: 8, minWidth: 0 }}>
+                        {selectedMergeDocuments.map((doc, index) => (
+                          <div key={doc.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 8, alignItems: 'center', border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 10, minWidth: 0 }}>
+                            <span style={{ fontSize: 13, color: theme.ink, overflowWrap: 'anywhere' }}>{index + 1}. {doc.displayName || doc.name || doc.id}</span>
+                            <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                              <button type="button" style={{ ...styles.tinyButton, opacity: index === 0 ? 0.55 : 1 }} onClick={() => moveMergeDocument(index, -1)} disabled={index === 0 || mergeLoading}>Up</button>
+                              <button type="button" style={{ ...styles.tinyButton, opacity: index === selectedMergeDocuments.length - 1 ? 0.55 : 1 }} onClick={() => moveMergeDocument(index, 1)} disabled={index === selectedMergeDocuments.length - 1 || mergeLoading}>Down</button>
+                              <button type="button" style={styles.dangerTinyButton} onClick={() => toggleMergeDocument(doc.id)} disabled={mergeLoading}>Remove</button>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(230px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
+            {documentToolCards.map(tool => {
+              const isMergeTool = tool.title === 'Merge PDFs';
+              return (
+                <div key={tool.title} style={{ border: `1px solid ${isMergeTool ? theme.blue : theme.line}`, borderRadius: 8, background: '#fff', padding: '14px 16px', display: 'grid', gap: 10, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                    <strong style={{ fontSize: 14, color: theme.ink, lineHeight: 1.35, wordBreak: 'break-word' }}>{tool.title}</strong>
+                    <Badge tone={isMergeTool ? 'green' : 'amber'}>{isMergeTool ? 'Available' : 'Coming soon'}</Badge>
+                  </div>
+                  <span style={{ fontSize: 13, color: theme.muted, lineHeight: 1.5 }}>{tool.description}</span>
+                  <button
+                    type="button"
+                    disabled={!isMergeTool}
+                    onClick={isMergeTool ? scrollToMergeTool : undefined}
+                    style={{
+                      ...styles.ghostButton,
+                      justifySelf: 'start',
+                      fontSize: 12,
+                      padding: '5px 12px',
+                      color: isMergeTool ? 'var(--lf-primary, #1B3A5C)' : theme.muted,
+                      borderColor: isMergeTool ? theme.blue : theme.line,
+                      cursor: isMergeTool ? 'pointer' : 'not-allowed',
+                      opacity: isMergeTool ? 1 : 0.75,
+                    }}
+                  >
+                    {isMergeTool ? 'Open Tool' : 'Not available yet'}
+                  </button>
+                </div>
+              );
+            })}
           </div>
 
           <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#F8FAFC', padding: '14px 16px', display: 'grid', gap: 10 }}>

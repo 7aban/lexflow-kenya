@@ -166,6 +166,43 @@ export async function downloadWithAuth(path, fallbackFilename = 'download') {
   return blob;
 }
 
+export async function postDownloadWithAuth(path, body = {}, fallbackFilename = 'download') {
+  const session = readSession();
+  if (!session?.token) throw new AuthExpiredError();
+
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.token}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (response.status === 401) {
+    clearSession();
+    emitAuthFailure();
+    throw new AuthExpiredError();
+  }
+  if (!response.ok) {
+    const type = response.headers.get('content-type') || '';
+    const payload = type.includes('application/json') ? await response.json().catch(() => ({})) : await response.text().catch(() => '');
+    throw new Error(payload?.error || payload || `Download failed (${response.status})`);
+  }
+
+  const blob = await response.blob();
+  const filename = filenameFromDisposition(response.headers.get('Content-Disposition') || '', fallbackFilename);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  return blob;
+}
+
 export function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -256,6 +293,8 @@ export const previewDocumentTemplate = (matterId, templateId) =>
     method: 'POST',
     body: {},
   });
+export const mergePdfDocuments = (documentIds, filename) =>
+  postDownloadWithAuth('/document-tools/merge-pdfs', { documentIds, filename }, filename || 'merged-document.pdf');
 export const moveDocument = (docId, folderId) => api(`/documents/${docId}`, { method: 'PATCH', body: { folderId } });
 export const updateDocument = (docId, data) => api(`/documents/${docId}`, { method: 'PATCH', body: data });
 export const getClientActivity = (clientId, limit = 100) => api(`/clients/${clientId}/activity?limit=${encodeURIComponent(limit)}`);
