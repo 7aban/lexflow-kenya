@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, saveMergedPdf, previewDocumentTemplate } from '../lib/apiClient.js';
+import { api, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Skeleton } from '../components/ui.jsx';
 
@@ -77,8 +77,23 @@ export default function DocumentStudio({ notify }) {
   const [saveError, setSaveError] = useState(null);
   const [saveSuccess, setSaveSuccess] = useState('');
 
+  const [rotateMatterId, setRotateMatterId] = useState('');
+  const [rotateDocuments, setRotateDocuments] = useState([]);
+  const [rotateDocsLoading, setRotateDocsLoading] = useState(false);
+  const [rotateDocsError, setRotateDocsError] = useState(null);
+  const [rotateDocumentId, setRotateDocumentId] = useState('');
+  const [rotateDegrees, setRotateDegrees] = useState(90);
+  const [rotateFilename, setRotateFilename] = useState('rotated-document.pdf');
+  const [rotateLoading, setRotateLoading] = useState(false);
+  const [rotateError, setRotateError] = useState(null);
+  const [rotateSuccess, setRotateSuccess] = useState('');
+  const [rotateSaveLoading, setRotateSaveLoading] = useState(false);
+  const [rotateSaveError, setRotateSaveError] = useState(null);
+  const [rotateSaveSuccess, setRotateSaveSuccess] = useState('');
+
   const panelRef = useRef(null);
   const mergePanelRef = useRef(null);
+  const rotatePanelRef = useRef(null);
 
   useEffect(() => {
     load();
@@ -98,6 +113,20 @@ export default function DocumentStudio({ notify }) {
       setSaveSuccess('');
     }
   }, [mergeMatterId]);
+
+  useEffect(() => {
+    if (rotateMatterId) {
+      loadRotateDocuments(rotateMatterId);
+    } else {
+      setRotateDocuments([]);
+      setRotateDocumentId('');
+      setRotateDocsError(null);
+      setRotateError(null);
+      setRotateSuccess('');
+      setRotateSaveError(null);
+      setRotateSaveSuccess('');
+    }
+  }, [rotateMatterId]);
 
   async function load() {
     setLoading(true);
@@ -154,6 +183,73 @@ export default function DocumentStudio({ notify }) {
       setPreviewError(err.message || 'Preview failed.');
     } finally {
       setPreviewLoading(false);
+    }
+  }
+
+  async function loadRotateDocuments(matterId) {
+    setRotateDocsLoading(true);
+    setRotateDocsError(null);
+    setRotateError(null);
+    setRotateSuccess('');
+    setRotateSaveError(null);
+    setRotateSaveSuccess('');
+    setRotateDocumentId('');
+    try {
+      const docs = await getMatterDocuments(matterId);
+      setRotateDocuments((Array.isArray(docs) ? docs : []).filter(doc => doc.mimeType === 'application/pdf'));
+    } catch (err) {
+      setRotateDocuments([]);
+      setRotateDocsError(err.message || 'Could not load matter documents.');
+    } finally {
+      setRotateDocsLoading(false);
+    }
+  }
+
+  async function runRotatePdf() {
+    setRotateError(null);
+    setRotateSuccess('');
+    setRotateSaveError(null);
+    setRotateSaveSuccess('');
+    if (!rotateDocumentId) {
+      setRotateError('Select a PDF document.');
+      return;
+    }
+    setRotateLoading(true);
+    try {
+      await rotatePdfDocument(rotateDocumentId, rotateDegrees, rotateFilename);
+      setRotateSuccess('Rotated PDF downloaded.');
+      notify?.({ type: 'success', message: 'Rotated PDF downloaded.' });
+    } catch (err) {
+      const message = err.message || 'Could not rotate PDF.';
+      setRotateError(message);
+      notify?.({ type: 'danger', message });
+    } finally {
+      setRotateLoading(false);
+    }
+  }
+
+  async function runRotateSave() {
+    setRotateSaveError(null);
+    setRotateSaveSuccess('');
+    if (!rotateDocumentId) {
+      setRotateSaveError('Select a PDF document.');
+      return;
+    }
+    if (!rotateMatterId) {
+      setRotateSaveError('Select a matter first.');
+      return;
+    }
+    setRotateSaveLoading(true);
+    try {
+      await saveRotatedPdf(rotateDocumentId, rotateDegrees, rotateFilename, rotateMatterId);
+      setRotateSaveSuccess('Saved to matter documents. Open the matter Documents tab to view it.');
+      notify?.({ type: 'success', message: 'Saved to matter documents. Open the matter Documents tab to view it.' });
+    } catch (err) {
+      const message = err.message || 'Could not save rotated PDF.';
+      setRotateSaveError(message);
+      notify?.({ type: 'danger', message });
+    } finally {
+      setRotateSaveLoading(false);
     }
   }
 
@@ -262,6 +358,11 @@ export default function DocumentStudio({ notify }) {
     setTimeout(() => mergePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 40);
   }
 
+  function scrollToRotateTool() {
+    if (!matters.length && !mattersLoading) loadMatters();
+    setTimeout(() => rotatePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 40);
+  }
+
   if (loading) return <Skeleton />;
 
   if (error) return <Alert tone="danger">{error}</Alert>;
@@ -273,6 +374,9 @@ export default function DocumentStudio({ notify }) {
     .filter(Boolean);
   const canMerge = selectedMergeDocumentIds.length >= 2 && selectedMergeDocumentIds.length <= 10 && !mergeLoading && !mergeDocsLoading;
   const canSave = selectedMergeDocumentIds.length >= 2 && selectedMergeDocumentIds.length <= 10 && !saveLoading && !mergeDocsLoading && !!mergeMatterId;
+  const rotateToolNames = new Set(['Merge PDFs', 'Rotate pages']);
+  const canRotate = !!rotateDocumentId && !rotateLoading && !rotateDocsLoading;
+  const canRotateSave = !!rotateDocumentId && !rotateSaveLoading && !rotateDocsLoading && !!rotateMatterId;
 
   return (
     <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
@@ -409,7 +513,7 @@ export default function DocumentStudio({ notify }) {
           <div style={{ border: `1px solid ${theme.line}`, borderLeft: `3px solid ${theme.blue}`, borderRadius: 8, background: '#FAFAF9', padding: '12px 14px', display: 'grid', gap: 4 }}>
             <strong style={{ fontSize: 14, color: theme.ink }}>Legal PDF utilities</strong>
             <span style={{ fontSize: 13, color: theme.muted, lineHeight: 1.55 }}>
-              Merge existing matter PDFs into a temporary download. Other document tools remain staged.
+              Merge existing matter PDFs or rotate a PDF page orientation. Other document tools remain staged.
             </span>
           </div>
 
@@ -542,32 +646,133 @@ export default function DocumentStudio({ notify }) {
             )}
           </div>
 
+          <div
+            ref={rotatePanelRef}
+            style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 16, display: 'grid', gap: 14, minWidth: 0 }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                <strong style={{ fontSize: 14, color: theme.ink }}>Rotate PDF</strong>
+                <span style={{ fontSize: 12, color: theme.muted }}>Rotate all pages then download or save</span>
+              </div>
+              <Badge tone="green">Available</Badge>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, alignItems: 'end', minWidth: 0 }}>
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Matter</span>
+                <select
+                  style={styles.input}
+                  value={rotateMatterId}
+                  onChange={event => { setRotateMatterId(event.target.value); setRotateError(null); setRotateSuccess(''); setRotateSaveError(null); setRotateSaveSuccess(''); }}
+                  disabled={mattersLoading || rotateLoading || rotateSaveLoading}
+                >
+                  <option value="">{mattersLoading ? 'Loading matters...' : 'Select a matter'}</option>
+                  {matters.map(m => (
+                    <option key={m.id} value={m.id}>{matterLabel(m)}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>PDF document</span>
+                <select
+                  style={styles.input}
+                  value={rotateDocumentId}
+                  onChange={event => { setRotateDocumentId(event.target.value); setRotateError(null); setRotateSuccess(''); setRotateSaveError(null); setRotateSaveSuccess(''); }}
+                  disabled={!rotateMatterId || rotateDocsLoading || rotateLoading || rotateSaveLoading}
+                >
+                  <option value="">
+                    {!rotateMatterId ? 'Select a matter first' : rotateDocsLoading ? 'Loading documents...' : rotateDocuments.length === 0 ? 'No PDFs found' : '— Select a PDF —'}
+                  </option>
+                  {rotateDocuments.map(doc => (
+                    <option key={doc.id} value={doc.id}>
+                      {doc.displayName || doc.name || doc.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Rotation</span>
+                <select
+                  style={styles.input}
+                  value={rotateDegrees}
+                  onChange={event => setRotateDegrees(Number(event.target.value))}
+                  disabled={rotateLoading || rotateSaveLoading}
+                >
+                  <option value={90}>90° clockwise</option>
+                  <option value={180}>180°</option>
+                  <option value={270}>270° clockwise (90° counter-clockwise)</option>
+                </select>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Output filename</span>
+                <input
+                  style={styles.input}
+                  value={rotateFilename}
+                  onChange={event => setRotateFilename(event.target.value)}
+                  placeholder="rotated-document.pdf"
+                  disabled={rotateLoading || rotateSaveLoading}
+                />
+              </label>
+
+              <button
+                type="button"
+                style={{ ...styles.primaryButton, minHeight: 36, opacity: canRotate ? 1 : 0.65, cursor: canRotate ? 'pointer' : 'not-allowed' }}
+                onClick={runRotatePdf}
+                disabled={!canRotate}
+              >
+                {rotateLoading ? 'Rotating...' : 'Rotate and Download'}
+              </button>
+
+              {rotateMatterId && (
+                <button
+                  type="button"
+                  style={{ ...styles.ghostButton, minHeight: 36, opacity: canRotateSave ? 1 : 0.65, cursor: canRotateSave ? 'pointer' : 'not-allowed' }}
+                  onClick={runRotateSave}
+                  disabled={!canRotateSave}
+                >
+                  {rotateSaveLoading ? 'Saving...' : 'Save to matter documents'}
+                </button>
+              )}
+            </div>
+
+            {rotateDocsError && <Alert tone="danger">{rotateDocsError}</Alert>}
+            {rotateError && <Alert tone="danger">{rotateError}</Alert>}
+            {rotateSuccess && <Alert tone="success">{rotateSuccess}</Alert>}
+            {rotateSaveError && <Alert tone="danger">{rotateSaveError}</Alert>}
+            {rotateSaveSuccess && <Alert tone="success">{rotateSaveSuccess}</Alert>}
+          </div>
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(230px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
             {documentToolCards.map(tool => {
-              const isMergeTool = tool.title === 'Merge PDFs';
+              const active = rotateToolNames.has(tool.title);
+              const handler = tool.title === 'Merge PDFs' ? scrollToMergeTool : tool.title === 'Rotate pages' ? scrollToRotateTool : undefined;
               return (
-                <div key={tool.title} style={{ border: `1px solid ${isMergeTool ? theme.blue : theme.line}`, borderRadius: 8, background: '#fff', padding: '14px 16px', display: 'grid', gap: 10, minWidth: 0 }}>
+                <div key={tool.title} style={{ border: `1px solid ${active ? theme.blue : theme.line}`, borderRadius: 8, background: '#fff', padding: '14px 16px', display: 'grid', gap: 10, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
                     <strong style={{ fontSize: 14, color: theme.ink, lineHeight: 1.35, wordBreak: 'break-word' }}>{tool.title}</strong>
-                    <Badge tone={isMergeTool ? 'green' : 'amber'}>{isMergeTool ? 'Available' : 'Coming soon'}</Badge>
+                    <Badge tone={active ? 'green' : 'amber'}>{active ? 'Available' : 'Coming soon'}</Badge>
                   </div>
                   <span style={{ fontSize: 13, color: theme.muted, lineHeight: 1.5 }}>{tool.description}</span>
                   <button
                     type="button"
-                    disabled={!isMergeTool}
-                    onClick={isMergeTool ? scrollToMergeTool : undefined}
+                    disabled={!active}
+                    onClick={handler}
                     style={{
                       ...styles.ghostButton,
                       justifySelf: 'start',
                       fontSize: 12,
                       padding: '5px 12px',
-                      color: isMergeTool ? 'var(--lf-primary, #1B3A5C)' : theme.muted,
-                      borderColor: isMergeTool ? theme.blue : theme.line,
-                      cursor: isMergeTool ? 'pointer' : 'not-allowed',
-                      opacity: isMergeTool ? 1 : 0.75,
+                      color: active ? 'var(--lf-primary, #1B3A5C)' : theme.muted,
+                      borderColor: active ? theme.blue : theme.line,
+                      cursor: active ? 'pointer' : 'not-allowed',
+                      opacity: active ? 1 : 0.75,
                     }}
                   >
-                    {isMergeTool ? 'Open Tool' : 'Not available yet'}
+                    {active ? 'Open Tool' : 'Not available yet'}
                   </button>
                 </div>
               );

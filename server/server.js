@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const { hashPassword, verifyPassword } = require('./lib/passwords');
 const jwt = require('jsonwebtoken');
 const PDFDocument = require('pdfkit');
-const { PDFDocument: PDFLibDocument } = require('pdf-lib');
+const { PDFDocument: PDFLibDocument, degrees } = require('pdf-lib');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { authenticate, requireAdmin, requireAdvocateOrAdmin, requireStaff } = require('./middleware');
@@ -2708,6 +2708,163 @@ app.post('/api/document-tools/merge-pdfs/save', requireAdvocateOrAdmin, async (r
     res.json(publicDocument(doc));
   } catch {
     res.status(500).json({ error: 'Unable to save merged PDF' });
+  }
+});
+
+app.post('/api/document-tools/rotate-pdf', requireStaff, async (req, res) => {
+  try {
+    const { documentId, degrees: rawDegrees, filename: rawFilename } = req.body || {};
+
+    if (!documentId) return res.status(400).json({ error: 'documentId is required' });
+
+    const doc = await get('SELECT * FROM documents WHERE id=? AND deletedAt IS NULL', [documentId]);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    if (!(await canAccessDocument(req, doc)) || !doc.matterId || !(await canAccessMatter(req, doc.matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: documentId, matterId: doc.matterId || '', clientId: await documentAuditClientId(doc, req), metadata: { reason: 'insufficient permissions', context: documentAuditContext(doc), route: 'document_tool_rotate_pdf' } }).catch(() => {});
+      return res.status(403).json({ error: 'Document access denied' });
+    }
+    if (doc.mimeType !== 'application/pdf') return res.status(400).json({ error: 'Only PDF documents can be rotated' });
+
+    const degreesValue = Number(rawDegrees);
+    if (![90, 180, 270].includes(degreesValue)) return res.status(400).json({ error: 'degrees must be 90, 180, or 270' });
+
+    const inputContent = Buffer.isBuffer(doc.content) ? doc.content : Buffer.from(doc.content || '');
+    if (inputContent.length > MAX_MERGE_PDF_INPUT_BYTES) return res.status(413).json({ error: 'Document exceeds the 20 MB input limit' });
+
+    const outputFilename = cleanPdfDownloadName(rawFilename || 'rotated-document.pdf');
+    let sourcePdf;
+    try {
+      sourcePdf = await PDFLibDocument.load(inputContent, { ignoreEncryption: false });
+    } catch {
+      return res.status(400).json({ error: 'Could not read PDF — it may be corrupt or encrypted' });
+    }
+
+    const pages = sourcePdf.getPages();
+    for (const page of pages) {
+      page.setRotation(degrees(degreesValue));
+    }
+
+    const rotatedBytes = await sourcePdf.save();
+    const rotatedBuffer = Buffer.from(rotatedBytes);
+    const clientId = await documentAuditClientId(doc, req);
+
+    await recordAuditEvent(req, {
+      action: 'document_tool_rotate_pdf_downloaded',
+      entityType: 'document_tool',
+      entityId: documentId,
+      matterId: doc.matterId || '',
+      clientId,
+      metadata: {
+        sourceDocumentId: documentId,
+        sourceMatterId: doc.matterId || '',
+        degrees: degreesValue,
+        inputBytes: inputContent.length,
+        outputBytes: rotatedBuffer.length,
+        filename: outputFilename,
+      },
+    }).catch(() => {});
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(rotatedBuffer);
+  } catch {
+    res.status(500).json({ error: 'Unable to rotate PDF' });
+  }
+});
+
+app.post('/api/document-tools/rotate-pdf/save', requireAdvocateOrAdmin, async (req, res) => {
+  try {
+    const { matterId, documentId, degrees: rawDegrees, filename: rawFilename } = req.body || {};
+
+    if (!documentId) return res.status(400).json({ error: 'documentId is required' });
+    if (!matterId) return res.status(400).json({ error: 'matterId is required' });
+
+    const matter = await get('SELECT * FROM matters WHERE id=?', [matterId]);
+    if (!matter) return res.status(404).json({ error: 'Matter not found' });
+    if (!(await canAccessMatter(req, matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: matterId, metadata: { reason: 'insufficient permissions', route: 'document_tool_rotate_pdf_save' } }).catch(() => {});
+      return res.status(403).json({ error: 'Matter access denied' });
+    }
+
+    const doc = await get('SELECT * FROM documents WHERE id=? AND deletedAt IS NULL', [documentId]);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    if (!(await canAccessDocument(req, doc)) || !doc.matterId || !(await canAccessMatter(req, doc.matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: documentId, matterId: doc.matterId || '', clientId: await documentAuditClientId(doc, req), metadata: { reason: 'insufficient permissions', context: documentAuditContext(doc), route: 'document_tool_rotate_pdf_save' } }).catch(() => {});
+      return res.status(403).json({ error: 'Document access denied' });
+    }
+    if (doc.mimeType !== 'application/pdf') return res.status(400).json({ error: 'Only PDF documents can be rotated' });
+    if (doc.matterId !== matterId) return res.status(400).json({ error: 'Document must belong to the target matter' });
+
+    const degreesValue = Number(rawDegrees);
+    if (![90, 180, 270].includes(degreesValue)) return res.status(400).json({ error: 'degrees must be 90, 180, or 270' });
+
+    const inputContent = Buffer.isBuffer(doc.content) ? doc.content : Buffer.from(doc.content || '');
+    if (inputContent.length > MAX_MERGE_PDF_INPUT_BYTES) return res.status(413).json({ error: 'Document exceeds the 20 MB input limit' });
+
+    let sourcePdf;
+    try {
+      sourcePdf = await PDFLibDocument.load(inputContent, { ignoreEncryption: false });
+    } catch {
+      return res.status(400).json({ error: 'Could not read PDF — it may be corrupt or encrypted' });
+    }
+
+    const pages = sourcePdf.getPages();
+    for (const page of pages) {
+      page.setRotation(degrees(degreesValue));
+    }
+
+    const rotatedBytes = await sourcePdf.save();
+    const rotatedBuffer = Buffer.from(rotatedBytes);
+
+    if (rotatedBuffer.length > 50 * 1024 * 1024) return res.status(413).json({ error: 'Rotated PDF exceeds the 50 MB output limit' });
+
+    const documentIdNew = genId('DOC');
+    const cleanName = cleanDocumentName(rawFilename || 'rotated-document.pdf');
+    const size = `${Math.max(1, Math.round(rotatedBuffer.length / 1024))} KB`;
+
+    await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+      documentIdNew,
+      matterId,
+      cleanName,
+      cleanName,
+      'PDF',
+      'application/pdf',
+      today(),
+      size,
+      rotatedBuffer,
+      'document_tool',
+      null,
+      null,
+      null,
+      0,
+      req.user.userId || '',
+    ]);
+
+    const resultDoc = await get(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=?`, [documentIdNew]);
+
+    await recordAuditEvent(req, {
+      action: 'document_tool_rotate_pdf_saved',
+      entityType: 'document_tool',
+      entityId: documentIdNew,
+      matterId,
+      clientId: await documentAuditClientId(resultDoc, req),
+      metadata: {
+        sourceDocumentId: documentId,
+        targetMatterId: matterId,
+        outputDocumentId: documentIdNew,
+        degrees: degreesValue,
+        inputBytes: inputContent.length,
+        outputBytes: rotatedBuffer.length,
+        filename: cleanName,
+        clientVisible: false,
+      },
+    }).catch(() => {});
+
+    res.json(publicDocument(resultDoc));
+  } catch {
+    res.status(500).json({ error: 'Unable to save rotated PDF' });
   }
 });
 

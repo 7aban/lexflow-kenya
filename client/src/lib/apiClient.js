@@ -300,6 +300,13 @@ export const saveMergedPdf = (documentIds, filename, matterId) =>
     method: 'POST',
     body: { matterId, documentIds, filename, clientVisible: false },
   });
+export const rotatePdfDocument = (documentId, degrees, filename) =>
+  postDownloadWithAuth('/document-tools/rotate-pdf', { documentId, degrees, filename }, filename || 'rotated-document.pdf');
+export const saveRotatedPdf = (documentId, degrees, filename, matterId) =>
+  api('/document-tools/rotate-pdf/save', {
+    method: 'POST',
+    body: { matterId, documentId, degrees, filename, clientVisible: false },
+  });
 export const moveDocument = (docId, folderId) => api(`/documents/${docId}`, { method: 'PATCH', body: { folderId } });
 export const updateDocument = (docId, data) => api(`/documents/${docId}`, { method: 'PATCH', body: data });
 export const getClientActivity = (clientId, limit = 100) => api(`/clients/${clientId}/activity?limit=${encodeURIComponent(limit)}`);
