@@ -1,7 +1,32 @@
-import { useEffect, useMemo, useState } from 'react';
-import { createConversation, downloadWithAuth, fileToDataUrl, getConversationMessages, getConversations, markConversationRead, sendConversationMessage } from '../lib/apiClient.js';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createConversation, downloadWithAuth, fileToDataUrl, getConversationMessages, getConversations, getMessageAvatar, markConversationRead, sendConversationMessage } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Badge, Empty, Field } from './ui.jsx';
+
+function MessageAvatar({ conversationId, messageId, hasAvatar, name, size = 28 }) {
+  const [src, setSrc] = useState(null);
+  const srcRef = useRef(null);
+  useEffect(() => {
+    function revoke() { if (srcRef.current) { URL.revokeObjectURL(srcRef.current); srcRef.current = null; } }
+    if (!hasAvatar || !conversationId || !messageId) { revoke(); setSrc(null); return undefined; }
+    let alive = true;
+    getMessageAvatar(conversationId, messageId).then(url => {
+      if (!alive) { if (url) URL.revokeObjectURL(url); return; }
+      revoke();
+      srcRef.current = url;
+      setSrc(url);
+    });
+    return () => { alive = false; revoke(); };
+  }, [conversationId, messageId, hasAvatar]);
+  const initial = (name || '?').slice(0, 1).toUpperCase();
+  return (
+    <div style={{ width: size, height: size, borderRadius: 999, background: 'var(--lf-accent, #D4A34A)', color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: Math.round(size * 0.43), overflow: 'hidden', flexShrink: 0 }}>
+      {src
+        ? <img src={src} alt={name || ''} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} onError={() => setSrc(null)} />
+        : initial}
+    </div>
+  );
+}
 
 const faqItems = [
   ['How do I view my court date?', 'Open My Matters, choose the relevant matter, then check Court appearances. If a virtual link exists, it appears beside the event.'],
@@ -240,7 +265,10 @@ export default function ClientChatWidget({ firm, matters = [], selectedMatterId 
                 {loadingThread ? <span style={styles.mutedText}>Loading conversation...</span> : messages.length ? messages.map(item => (
                   <div key={item.id} style={{ display: 'grid', justifyItems: item.senderRole === 'client' ? 'end' : 'start' }}>
                     <div style={{ maxWidth: '86%', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 10, background: item.senderRole === 'client' ? theme.blueBg : '#fff' }}>
-                      <strong>{item.senderRole === 'client' ? 'You' : item.senderName || 'Firm team'}</strong>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                        <MessageAvatar conversationId={activeConversation?.id} messageId={item.id} hasAvatar={item.senderHasAvatar} name={item.senderName || (item.senderRole === 'client' ? 'You' : 'Firm team')} />
+                        <strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.senderRole === 'client' ? 'You' : item.senderName || 'Firm team'}</strong>
+                      </div>
                       {item.body && <p style={{ margin: '5px 0 0', color: theme.ink }}>{item.body}</p>}
                       {!!item.attachments?.length && <div style={{ display: 'grid', gap: 4, marginTop: 8 }}>{item.attachments.map(file => <button key={file.id} type="button" style={{ ...styles.link, border: 0, background: 'transparent', padding: 0, cursor: 'pointer', textAlign: 'left' }} onClick={() => downloadAttachment(file)}>{file.displayName || file.name || 'Attachment'}</button>)}</div>}
                       <small style={{ color: theme.muted }}>{item.createdAt ? new Date(item.createdAt).toLocaleString() : ''}</small>

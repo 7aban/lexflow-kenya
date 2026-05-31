@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { createConversation, downloadWithAuth, fileToDataUrl, getClientActivity, getConversationMessages, getConversations, markConversationRead, sendConversationMessage, updateConversationStatus } from '../lib/apiClient.js';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createConversation, downloadWithAuth, fileToDataUrl, getClientActivity, getConversationMessages, getConversations, getMessageAvatar, markConversationRead, sendConversationMessage, updateConversationStatus } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Badge, Card, Field, Table } from '../components/ui.jsx';
 
@@ -9,6 +9,31 @@ function titleFor(conversation) {
 
 function previewTime(value) {
   return value ? new Date(value).toLocaleString() : '-';
+}
+
+function MessageAvatar({ conversationId, messageId, hasAvatar, name, size = 28 }) {
+  const [src, setSrc] = useState(null);
+  const srcRef = useRef(null);
+  useEffect(() => {
+    function revoke() { if (srcRef.current) { URL.revokeObjectURL(srcRef.current); srcRef.current = null; } }
+    if (!hasAvatar || !conversationId || !messageId) { revoke(); setSrc(null); return undefined; }
+    let alive = true;
+    getMessageAvatar(conversationId, messageId).then(url => {
+      if (!alive) { if (url) URL.revokeObjectURL(url); return; }
+      revoke();
+      srcRef.current = url;
+      setSrc(url);
+    });
+    return () => { alive = false; revoke(); };
+  }, [conversationId, messageId, hasAvatar]);
+  const initial = (name || '?').slice(0, 1).toUpperCase();
+  return (
+    <div style={{ width: size, height: size, borderRadius: 999, background: 'var(--lf-accent, #D4A34A)', color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: Math.round(size * 0.43), overflow: 'hidden', flexShrink: 0 }}>
+      {src
+        ? <img src={src} alt={name || ''} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} onError={() => setSrc(null)} />
+        : initial}
+    </div>
+  );
 }
 
 function attachmentList(files = [], notify) {
@@ -415,11 +440,15 @@ export default function Communications({ clients = [], matters = [], focus, noti
                 <div style={{ display: 'grid', gap: 10, maxHeight: 430, overflowY: 'auto', paddingRight: 4 }}>
                   {messages.length ? messages.map(message => {
                     const firmSide = message.senderRole !== 'client';
+                    const senderDisplayName = firmSide ? message.senderName || 'Firm team' : message.senderName || selected.clientName || 'Client';
                     return (
                       <div key={message.id} style={{ display: 'grid', justifyItems: firmSide ? 'end' : 'start' }}>
                         <div style={{ maxWidth: '78%', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 12, background: firmSide ? '#FDF8EE' : '#fff' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
-                            <strong>{firmSide ? message.senderName || 'Firm team' : message.senderName || selected.clientName || 'Client'}</strong>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                              <MessageAvatar conversationId={selected.id} messageId={message.id} hasAvatar={message.senderHasAvatar} name={senderDisplayName} />
+                              <strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{senderDisplayName}</strong>
+                            </div>
                             <Badge tone={firmSide ? 'green' : 'amber'}>{message.senderRole}</Badge>
                           </div>
                           {message.body && <p style={{ marginTop: 7, color: theme.ink }}>{message.body}</p>}

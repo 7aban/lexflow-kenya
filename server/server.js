@@ -1288,7 +1288,8 @@ app.patch('/api/conversations/:id/status', requireStaff, async (req, res) => {
 
 app.get('/api/conversations/:id/messages', async (req, res) => {
   if (!(await canAccessConversation(req, req.params.id))) return res.status(403).json({ error: 'Conversation access denied' });
-  const messages = await all(`SELECT msg.*, u.fullName senderName
+  const messages = await all(`SELECT msg.*, u.fullName senderName,
+      (CASE WHEN u.avatar IS NOT NULL THEN 1 ELSE 0 END) senderHasAvatar
     FROM messages msg
     LEFT JOIN users u ON u.id=msg.senderId
     WHERE msg.conversationId=?
@@ -1298,8 +1299,17 @@ app.get('/api/conversations/:id/messages', async (req, res) => {
   const attachments = await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.messageId IN (${ids.map(() => '?').join(',')}) AND d.deletedAt IS NULL ORDER BY d.date DESC`, ids);
   res.json(messages.map(message => ({
     ...message,
+    senderHasAvatar: Boolean(message.senderHasAvatar),
     attachments: attachments.filter(doc => doc.messageId === message.id).map(publicDocument),
   })));
+});
+
+app.get('/api/conversations/:id/messages/:messageId/avatar', async (req, res) => {
+  if (!(await canAccessConversation(req, req.params.id))) return res.status(403).json({ error: 'Conversation access denied' });
+  const message = await get('SELECT senderId FROM messages WHERE id=? AND conversationId=?', [req.params.messageId, req.params.id]);
+  if (!message) return res.status(404).json({ error: 'Message not found' });
+  const row = message.senderId ? await get('SELECT avatar, avatarMimeType FROM users WHERE id=?', [message.senderId]) : null;
+  return sendAvatarResponse(res, row);
 });
 
 app.post('/api/conversations/:id/messages', async (req, res) => {

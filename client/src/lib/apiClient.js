@@ -303,3 +303,6 @@ export const uploadClientAvatar = (clientId, file) => {
   return api(`/clients/${clientId}/avatar`, { method: 'POST', body });
 };
 export const deleteClientAvatar = (clientId) => api(`/clients/${clientId}/avatar`, { method: 'DELETE' });
+
+export const getMessageAvatar = (conversationId, messageId) =>
+  fetchAvatarPathObjectUrl(`/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/avatar`);
