@@ -328,12 +328,12 @@ export const saveNumberedPdf = (documentId, startNumber, position, filename, mat
     method: 'POST',
     body: { matterId, documentId, startNumber, position, filename, clientVisible: false },
   });
-export const createCourtBundle = (matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, includeCover, cover) =>
-  postDownloadWithAuth('/document-tools/court-bundle', { matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, ...(includeCover ? { includeCover: true, cover } : {}) }, filename || 'court-bundle.pdf');
-export const saveCourtBundle = (matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, includeCover, cover) =>
+export const createCourtBundle = (matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, includeCover, cover, includeDividers, dividerLabels) =>
+  postDownloadWithAuth('/document-tools/court-bundle', { matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, ...(includeCover ? { includeCover: true, cover } : {}), ...(includeDividers ? { includeDividers: true, dividerLabels: dividerLabels || {} } : {}) }, filename || 'court-bundle.pdf');
+export const saveCourtBundle = (matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, includeCover, cover, includeDividers, dividerLabels) =>
   api('/document-tools/court-bundle/save', {
     method: 'POST',
-    body: { matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, ...(includeCover ? { includeCover: true, cover } : {}) },
+    body: { matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, ...(includeCover ? { includeCover: true, cover } : {}), ...(includeDividers ? { includeDividers: true, dividerLabels: dividerLabels || {} } : {}) },
   });
 export const moveDocument = (docId, folderId) => api(`/documents/${docId}`, { method: 'PATCH', body: { folderId } });
 export const updateDocument = (docId, data) => api(`/documents/${docId}`, { method: 'PATCH', body: data });

@@ -151,6 +151,8 @@ export default function DocumentStudio({ notify }) {
   const [bundleDocumentLabels, setBundleDocumentLabels] = useState({});
   const [bundleIncludeCover, setBundleIncludeCover] = useState(false);
   const [bundleCover, setBundleCover] = useState({ title: 'COURT BUNDLE', court: '', caseNumber: '', caseTitle: '', bundleTitle: '', preparedBy: '', date: '' });
+  const [bundleIncludeDividers, setBundleIncludeDividers] = useState(false);
+  const [bundleDividerLabels, setBundleDividerLabels] = useState({});
   const [firmName, setFirmName] = useState('');
   const [bundleLoading, setBundleLoading] = useState(false);
   const [bundleError, setBundleError] = useState(null);
@@ -652,6 +654,10 @@ export default function DocumentStudio({ notify }) {
     setBundleCover(current => ({ ...current, [field]: value }));
   }
 
+  function setBundleDividerLabel(docId, value) {
+    setBundleDividerLabels(current => ({ ...current, [docId]: value }));
+  }
+
   function toggleBundleCover(checked) {
     setBundleIncludeCover(checked);
     if (!checked) return;
@@ -689,7 +695,7 @@ export default function DocumentStudio({ notify }) {
     }
     setBundleLoading(true);
     try {
-      await createCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined, bundleIncludeCover, bundleIncludeCover ? bundleCover : undefined);
+      await createCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined, bundleIncludeCover, bundleIncludeCover ? bundleCover : undefined, bundleIncludeDividers, bundleIncludeDividers ? bundleDividerLabels : undefined);
       setBundleSuccess('Court bundle downloaded.');
       notify?.({ type: 'success', message: 'Court bundle downloaded.' });
     } catch (err) {
@@ -718,7 +724,7 @@ export default function DocumentStudio({ notify }) {
     }
     setBundleSaveLoading(true);
     try {
-      await saveCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined, bundleIncludeCover, bundleIncludeCover ? bundleCover : undefined);
+      await saveCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined, bundleIncludeCover, bundleIncludeCover ? bundleCover : undefined, bundleIncludeDividers, bundleIncludeDividers ? bundleDividerLabels : undefined);
       setBundleSaveSuccess('Saved to matter documents. Open the matter Documents tab to view it.');
       notify?.({ type: 'success', message: 'Saved to matter documents. Open the matter Documents tab to view it.' });
     } catch (err) {
@@ -1646,6 +1652,17 @@ export default function DocumentStudio({ notify }) {
                 />
                 <span style={{ fontSize: 12, color: theme.ink }}>Add cover page</span>
               </label>
+
+              <label style={{ ...styles.field, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0' }}>
+                <input
+                  type="checkbox"
+                  checked={bundleIncludeDividers}
+                  onChange={event => setBundleIncludeDividers(event.target.checked)}
+                  disabled={bundleLoading || bundleSaveLoading}
+                  style={{ margin: 0 }}
+                />
+                <span style={{ fontSize: 12, color: theme.ink }}>Add section dividers</span>
+              </label>
             </div>
 
             {bundlePaginate && (
@@ -1682,6 +1699,12 @@ export default function DocumentStudio({ notify }) {
               <div style={{ border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
                 The index lists selected documents and their starting pages. A single A4 page titled "BUNDLE INDEX" is added as {bundleIncludeCover ? 'the page after the cover' : 'the first page'}. Edit document labels in the Bundle Order list below; blank labels use the document name.
                 {bundlePaginate ? (bundleIncludeCover ? ' If pagination is enabled, the index follows the cover and is included in the page count.' : ' If pagination is enabled, the index page is page 1 and is included in the page count.') : ''}
+              </div>
+            )}
+
+            {bundleIncludeDividers && (
+              <div style={{ border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
+                Dividers are inserted before each selected PDF. {bundlePaginate ? 'If pagination is enabled, cover, index, and dividers are included in the page count.' : ''}
               </div>
             )}
 
@@ -1807,13 +1830,13 @@ export default function DocumentStudio({ notify }) {
                                 <button type="button" style={styles.dangerTinyButton} onClick={() => toggleBundleDocument(doc.id)} disabled={bundleLoading || bundleSaveLoading}>Remove</button>
                               </span>
                             </div>
-                            {bundleIncludeIndex && (
+                            {(bundleIncludeIndex || (!bundleIncludeIndex && bundleIncludeDividers)) && (
                               <label style={{ display: 'grid', gap: 3, minWidth: 0 }}>
-                                <span style={{ fontSize: 11, color: theme.muted }}>Index label (optional)</span>
+                                <span style={{ fontSize: 11, color: theme.muted }}>{bundleIncludeIndex ? 'Index label' : 'Divider label'} (optional)</span>
                                 <input
                                   style={{ ...styles.input, fontSize: 13 }}
-                                  value={bundleDocumentLabels[doc.id] ?? ''}
-                                  onChange={event => setBundleLabel(doc.id, event.target.value)}
+                                  value={bundleIncludeIndex ? (bundleDocumentLabels[doc.id] ?? '') : (bundleDividerLabels[doc.id] ?? '')}
+                                  onChange={event => bundleIncludeIndex ? setBundleLabel(doc.id, event.target.value) : setBundleDividerLabel(doc.id, event.target.value)}
                                   placeholder={doc.displayName || doc.name || doc.id}
                                   maxLength={80}
                                   disabled={bundleLoading || bundleSaveLoading}

@@ -3523,13 +3523,14 @@ function sanitizeIndexLabel(raw, fallback) {
 // physical page 2 and the first document begins at physical page 3. When
 // pagination is enabled the value honours startNumber so the printed numbers
 // match; otherwise it is the physical 1-based position.
-function bundleIndexStartingPages(pageCounts, { paginate, startNumber, coverPages = 0 }) {
+function bundleIndexStartingPages(pageCounts, { paginate, startNumber, coverPages = 0, includeDividers = false }) {
   const starts = [];
   let cumulative = 0;
-  for (const count of pageCounts) {
-    const physicalStart = 2 + coverPages + cumulative; // index sits after any cover page
+  for (let i = 0; i < pageCounts.length; i++) {
+    const adjust = includeDividers ? i : 0;
+    const physicalStart = 2 + coverPages + adjust + cumulative;
     starts.push(paginate ? startNumber + (physicalStart - 1) : physicalStart);
-    cumulative += count;
+    cumulative += pageCounts[i];
   }
   return starts;
 }
@@ -3686,9 +3687,57 @@ async function prependBundleCoverPage(bundlePdf, cover) {
   if (cover.date) drawCentered(cover.date, 12, helvetica, 0, 1);
 }
 
+// Build the sanitized label for a divider page. Prefers dividerLabels[doc.id],
+// falls back to documentLabels[doc.id], then to doc.displayName/doc.name.
+// Reuses sanitizeIndexLabel for safe WinAnsi output.
+function buildDividerLabel(doc, dividerLabels, documentLabels) {
+  const fallback = doc.displayName || doc.name || doc.id;
+  const labels1 = dividerLabels && typeof dividerLabels === 'object' && !Array.isArray(dividerLabels) ? dividerLabels : {};
+  const labels2 = documentLabels && typeof documentLabels === 'object' && !Array.isArray(documentLabels) ? documentLabels : {};
+  const fromDivider = labels1[doc.id];
+  if (fromDivider !== undefined && String(fromDivider).trim()) {
+    return sanitizeIndexLabel(fromDivider, fallback);
+  }
+  const fromDocument = labels2[doc.id];
+  if (fromDocument !== undefined && String(fromDocument).trim()) {
+    return sanitizeIndexLabel(fromDocument, fallback);
+  }
+  return sanitizeIndexLabel('', fallback);
+}
+
+// Insert a single A4 divider page at the given position in bundlePdf.
+// Renders "SECTION N" and the label centered on the page using bundled
+// standard fonts (Helvetica / HelveticaBold), no logo, no custom fonts.
+async function insertDividerPage(bundlePdf, position, label, seq) {
+  const page = bundlePdf.insertPage(position, BUNDLE_INDEX_PAGE_SIZE);
+  const { width, height } = page.getSize();
+  const helvetica = await bundlePdf.embedFont(StandardFonts.Helvetica);
+  const helveticaBold = await bundlePdf.embedFont(StandardFonts.HelveticaBold);
+  const black = rgb(0, 0, 0);
+  const sectionText = `SECTION ${seq}`;
+  const sectionSize = 18;
+  const sectionWidth = helveticaBold.widthOfTextAtSize(sectionText, sectionSize);
+  page.drawText(sectionText, {
+    x: (width - sectionWidth) / 2,
+    y: height / 2 + 20,
+    size: sectionSize,
+    font: helveticaBold,
+    color: black,
+  });
+  const labelSize = 14;
+  const labelWidth = helvetica.widthOfTextAtSize(label, labelSize);
+  page.drawText(label, {
+    x: (width - labelWidth) / 2,
+    y: height / 2 - 30,
+    size: labelSize,
+    font: helvetica,
+    color: black,
+  });
+}
+
 app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
   try {
-    const { matterId, documentIds: rawDocumentIds, filename: rawFilename, paginate: rawPaginate, startNumber: rawStart, position: rawPosition, includeIndex: rawIncludeIndex, documentLabels: rawDocumentLabels, includeCover: rawIncludeCover, cover: rawCover } = req.body || {};
+    const { matterId, documentIds: rawDocumentIds, filename: rawFilename, paginate: rawPaginate, startNumber: rawStart, position: rawPosition, includeIndex: rawIncludeIndex, documentLabels: rawDocumentLabels, includeCover: rawIncludeCover, cover: rawCover, includeDividers: rawIncludeDividers, dividerLabels: rawDividerLabels } = req.body || {};
 
     if (!matterId) return res.status(400).json({ error: 'matterId is required' });
     const matter = await get('SELECT * FROM matters WHERE id=?', [matterId]);
@@ -3722,6 +3771,8 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
     const includeCover = rawIncludeCover === true;
     const coverFields = buildCoverFields(rawCover);
     const coverFieldCount = Object.values(coverFields).filter(Boolean).length;
+    const includeDividers = rawIncludeDividers === true;
+    const dividerLabels = rawDividerLabels && typeof rawDividerLabels === 'object' && !Array.isArray(rawDividerLabels) ? rawDividerLabels : {};
 
     const outputFilename = cleanPdfDownloadName(rawFilename || 'court-bundle.pdf');
     const sourceDocs = [];
@@ -3756,10 +3807,26 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
       return res.status(400).json({ error: 'One or more selected PDFs could not be read — they may be corrupt or encrypted' });
     }
 
+    // Insert divider pages before each source document (reverse order to avoid
+    // shifting page index arithmetic). Each divider appears between the index
+    // (or cover) and its corresponding source PDF.
+    if (includeDividers) {
+      for (let i = sourceDocs.length - 1; i >= 0; i--) {
+        const doc = sourceDocs[i];
+        const label = buildDividerLabel(doc, dividerLabels, documentLabels);
+        const pos = sourcePageCounts.slice(0, i).reduce((a, b) => a + b, 0);
+        try {
+          await insertDividerPage(bundlePdf, pos, label, i + 1);
+        } catch {
+          return res.status(400).json({ error: 'Could not generate divider page' });
+        }
+      }
+    }
+
     // Insert front matter so the cover is physical page 1 and the index follows
     // it: add the index at position 0 first, then the cover at position 0.
     if (includeIndex) {
-      const startingPages = bundleIndexStartingPages(sourcePageCounts, { paginate, startNumber, coverPages: includeCover ? 1 : 0 });
+      const startingPages = bundleIndexStartingPages(sourcePageCounts, { paginate, startNumber, coverPages: includeCover ? 1 : 0, includeDividers });
       const indexRows = sourceDocs.map((doc, i) => ({
         seq: i + 1,
         label: sanitizeIndexLabel(documentLabels[doc.id], doc.displayName || doc.name || doc.id),
@@ -3833,6 +3900,8 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
     }
     metadata.includeCover = includeCover;
     metadata.coverFieldCount = includeCover ? coverFieldCount : 0;
+    metadata.includeDividers = includeDividers;
+    metadata.dividerCount = includeDividers ? sourceDocs.length : 0;
 
     await recordAuditEvent(req, {
       action: 'document_tool_court_bundle_downloaded',
@@ -3854,7 +3923,7 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
 
 app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async (req, res) => {
   try {
-    const { matterId, documentIds: rawDocumentIds, filename: rawFilename, paginate: rawPaginate, startNumber: rawStart, position: rawPosition, includeIndex: rawIncludeIndex, documentLabels: rawDocumentLabels, includeCover: rawIncludeCover, cover: rawCover } = req.body || {};
+    const { matterId, documentIds: rawDocumentIds, filename: rawFilename, paginate: rawPaginate, startNumber: rawStart, position: rawPosition, includeIndex: rawIncludeIndex, documentLabels: rawDocumentLabels, includeCover: rawIncludeCover, cover: rawCover, includeDividers: rawIncludeDividers, dividerLabels: rawDividerLabels } = req.body || {};
 
     if (!matterId) return res.status(400).json({ error: 'matterId is required' });
     const matter = await get('SELECT * FROM matters WHERE id=?', [matterId]);
@@ -3888,6 +3957,8 @@ app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async 
     const includeCover = rawIncludeCover === true;
     const coverFields = buildCoverFields(rawCover);
     const coverFieldCount = Object.values(coverFields).filter(Boolean).length;
+    const includeDividers = rawIncludeDividers === true;
+    const dividerLabels = rawDividerLabels && typeof rawDividerLabels === 'object' && !Array.isArray(rawDividerLabels) ? rawDividerLabels : {};
 
     const outputFilename = cleanPdfDownloadName(rawFilename || 'court-bundle.pdf');
     const sourceDocs = [];
@@ -3922,10 +3993,26 @@ app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async 
       return res.status(400).json({ error: 'One or more selected PDFs could not be read — they may be corrupt or encrypted' });
     }
 
+    // Insert divider pages before each source document (reverse order to avoid
+    // shifting page index arithmetic). Each divider appears between the index
+    // (or cover) and its corresponding source PDF.
+    if (includeDividers) {
+      for (let i = sourceDocs.length - 1; i >= 0; i--) {
+        const doc = sourceDocs[i];
+        const label = buildDividerLabel(doc, dividerLabels, documentLabels);
+        const pos = sourcePageCounts.slice(0, i).reduce((a, b) => a + b, 0);
+        try {
+          await insertDividerPage(bundlePdf, pos, label, i + 1);
+        } catch {
+          return res.status(400).json({ error: 'Could not generate divider page' });
+        }
+      }
+    }
+
     // Insert front matter so the cover is physical page 1 and the index follows
     // it: add the index at position 0 first, then the cover at position 0.
     if (includeIndex) {
-      const startingPages = bundleIndexStartingPages(sourcePageCounts, { paginate, startNumber, coverPages: includeCover ? 1 : 0 });
+      const startingPages = bundleIndexStartingPages(sourcePageCounts, { paginate, startNumber, coverPages: includeCover ? 1 : 0, includeDividers });
       const indexRows = sourceDocs.map((doc, i) => ({
         seq: i + 1,
         label: sanitizeIndexLabel(documentLabels[doc.id], doc.displayName || doc.name || doc.id),
@@ -4025,6 +4112,8 @@ app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async 
     }
     metadata.includeCover = includeCover;
     metadata.coverFieldCount = includeCover ? coverFieldCount : 0;
+    metadata.includeDividers = includeDividers;
+    metadata.dividerCount = includeDividers ? sourceDocs.length : 0;
 
     await recordAuditEvent(req, {
       action: 'document_tool_court_bundle_saved',
