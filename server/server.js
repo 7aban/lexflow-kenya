@@ -3489,6 +3489,283 @@ app.post('/api/document-tools/number-pdf-pages/save', requireAdvocateOrAdmin, as
   }
 });
 
+app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
+  try {
+    const { matterId, documentIds: rawDocumentIds, filename: rawFilename, paginate: rawPaginate, startNumber: rawStart, position: rawPosition } = req.body || {};
+
+    if (!matterId) return res.status(400).json({ error: 'matterId is required' });
+    const matter = await get('SELECT * FROM matters WHERE id=?', [matterId]);
+    if (!matter) return res.status(404).json({ error: 'Matter not found' });
+    if (!(await canAccessMatter(req, matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: matterId, metadata: { reason: 'insufficient permissions', route: 'document_tool_court_bundle' } }).catch(() => {});
+      return res.status(403).json({ error: 'Matter access denied' });
+    }
+
+    const documentIds = Array.isArray(rawDocumentIds)
+      ? rawDocumentIds.map(id => String(id || '').trim()).filter(Boolean)
+      : null;
+    if (!documentIds) return res.status(400).json({ error: 'documentIds must be an array' });
+    if (documentIds.length < 2) return res.status(400).json({ error: 'Select at least 2 PDF documents' });
+    if (documentIds.length > MAX_MERGE_PDF_COUNT) return res.status(400).json({ error: `Select no more than ${MAX_MERGE_PDF_COUNT} PDF documents` });
+    if (new Set(documentIds).size !== documentIds.length) return res.status(400).json({ error: 'Duplicate document IDs are not allowed' });
+
+    const paginate = rawPaginate === true;
+    let startNumber = 1;
+    let position = '';
+    if (paginate) {
+      startNumber = rawStart === undefined || rawStart === null || rawStart === '' ? 1 : Number(rawStart);
+      if (!Number.isInteger(startNumber) || startNumber < 1) return res.status(400).json({ error: 'startNumber must be a positive integer' });
+      if (startNumber > 99999) return res.status(400).json({ error: 'startNumber must be 99999 or less' });
+      position = rawPosition || 'bottom-center';
+      if (!VALID_PAGINATE_POSITIONS.has(position)) return res.status(400).json({ error: 'position must be one of: bottom-center, bottom-right, bottom-left' });
+    }
+
+    const outputFilename = cleanPdfDownloadName(rawFilename || 'court-bundle.pdf');
+    const sourceDocs = [];
+    let combinedInputBytes = 0;
+
+    for (const documentId of documentIds) {
+      const doc = await get('SELECT * FROM documents WHERE id=? AND deletedAt IS NULL', [documentId]);
+      if (!doc) return res.status(404).json({ error: 'Document not found' });
+      if (!(await canAccessDocument(req, doc)) || !doc.matterId || !(await canAccessMatter(req, doc.matterId))) {
+        await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: documentId, matterId: doc.matterId || '', clientId: await documentAuditClientId(doc, req), metadata: { reason: 'insufficient permissions', context: documentAuditContext(doc), route: 'document_tool_court_bundle' } }).catch(() => {});
+        return res.status(403).json({ error: 'Document access denied' });
+      }
+      if (doc.matterId !== matterId) return res.status(400).json({ error: 'All PDFs must belong to the target matter' });
+      if (doc.mimeType !== 'application/pdf') return res.status(400).json({ error: 'Only PDF documents can be included' });
+
+      const content = Buffer.isBuffer(doc.content) ? doc.content : Buffer.from(doc.content || '');
+      combinedInputBytes += content.length;
+      if (combinedInputBytes > MAX_MERGE_PDF_INPUT_BYTES) return res.status(413).json({ error: 'Selected PDFs exceed the 20 MB input limit' });
+      sourceDocs.push({ ...doc, content });
+    }
+
+    const bundlePdf = await PDFLibDocument.create();
+    try {
+      for (const doc of sourceDocs) {
+        const sourcePdf = await PDFLibDocument.load(doc.content, { ignoreEncryption: false });
+        const copiedPages = await bundlePdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
+        copiedPages.forEach(page => bundlePdf.addPage(page));
+      }
+    } catch {
+      return res.status(400).json({ error: 'One or more selected PDFs could not be read — they may be corrupt or encrypted' });
+    }
+
+    if (paginate) {
+      const font = await bundlePdf.embedFont(StandardFonts.Helvetica);
+      const fontSize = 10;
+      const fontColor = rgb(0, 0, 0);
+      const bottomMargin = 24;
+      const pages = bundlePdf.getPages();
+      for (let i = 0; i < pages.length; i++) {
+        const page = pages[i];
+        const { width, height } = page.getSize();
+        const number = startNumber + i;
+        const text = String(number);
+        const textWidth = font.widthOfTextAtSize(text, fontSize);
+        const x = paginateTextX(width, textWidth, position);
+        const y = bottomMargin + fontSize * 0.35;
+        page.drawText(text, { x, y, size: fontSize, font, color: fontColor });
+      }
+    }
+
+    let outputBuffer;
+    try {
+      outputBuffer = Buffer.from(await bundlePdf.save());
+    } catch {
+      return res.status(400).json({ error: 'Could not generate court bundle PDF' });
+    }
+
+    if (outputBuffer.length > 50 * 1024 * 1024) return res.status(413).json({ error: 'Output PDF exceeds the 50 MB limit' });
+
+    const pageCount = bundlePdf.getPageCount();
+    const endNumber = paginate ? startNumber + pageCount - 1 : undefined;
+
+    const clientId = await documentAuditClientId(sourceDocs[0], req);
+    const metadata = {
+      sourceDocumentIds: documentIds,
+      sourceCount: sourceDocs.length,
+      matterId,
+      pageCount,
+      paginate: !!paginate,
+      inputBytes: combinedInputBytes,
+      outputBytes: outputBuffer.length,
+      filename: outputFilename,
+    };
+    if (paginate) {
+      metadata.startNumber = startNumber;
+      metadata.endNumber = endNumber;
+      metadata.position = position;
+    }
+
+    await recordAuditEvent(req, {
+      action: 'document_tool_court_bundle_downloaded',
+      entityType: 'document_tool',
+      entityId: matterId,
+      matterId,
+      clientId,
+      metadata,
+    }).catch(() => {});
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(outputBuffer);
+  } catch {
+    res.status(500).json({ error: 'Unable to create court bundle' });
+  }
+});
+
+app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async (req, res) => {
+  try {
+    const { matterId, documentIds: rawDocumentIds, filename: rawFilename, paginate: rawPaginate, startNumber: rawStart, position: rawPosition } = req.body || {};
+
+    if (!matterId) return res.status(400).json({ error: 'matterId is required' });
+    const matter = await get('SELECT * FROM matters WHERE id=?', [matterId]);
+    if (!matter) return res.status(404).json({ error: 'Matter not found' });
+    if (!(await canAccessMatter(req, matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: matterId, metadata: { reason: 'insufficient permissions', route: 'document_tool_court_bundle_save' } }).catch(() => {});
+      return res.status(403).json({ error: 'Matter access denied' });
+    }
+
+    const documentIds = Array.isArray(rawDocumentIds)
+      ? rawDocumentIds.map(id => String(id || '').trim()).filter(Boolean)
+      : null;
+    if (!documentIds) return res.status(400).json({ error: 'documentIds must be an array' });
+    if (documentIds.length < 2) return res.status(400).json({ error: 'Select at least 2 PDF documents' });
+    if (documentIds.length > MAX_MERGE_PDF_COUNT) return res.status(400).json({ error: `Select no more than ${MAX_MERGE_PDF_COUNT} PDF documents` });
+    if (new Set(documentIds).size !== documentIds.length) return res.status(400).json({ error: 'Duplicate document IDs are not allowed' });
+
+    const paginate = rawPaginate === true;
+    let startNumber = 1;
+    let position = '';
+    if (paginate) {
+      startNumber = rawStart === undefined || rawStart === null || rawStart === '' ? 1 : Number(rawStart);
+      if (!Number.isInteger(startNumber) || startNumber < 1) return res.status(400).json({ error: 'startNumber must be a positive integer' });
+      if (startNumber > 99999) return res.status(400).json({ error: 'startNumber must be 99999 or less' });
+      position = rawPosition || 'bottom-center';
+      if (!VALID_PAGINATE_POSITIONS.has(position)) return res.status(400).json({ error: 'position must be one of: bottom-center, bottom-right, bottom-left' });
+    }
+
+    const outputFilename = cleanPdfDownloadName(rawFilename || 'court-bundle.pdf');
+    const sourceDocs = [];
+    let combinedInputBytes = 0;
+
+    for (const documentId of documentIds) {
+      const doc = await get('SELECT * FROM documents WHERE id=? AND deletedAt IS NULL', [documentId]);
+      if (!doc) return res.status(404).json({ error: 'Document not found' });
+      if (!(await canAccessDocument(req, doc)) || !doc.matterId || !(await canAccessMatter(req, doc.matterId))) {
+        await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: documentId, matterId: doc.matterId || '', clientId: await documentAuditClientId(doc, req), metadata: { reason: 'insufficient permissions', context: documentAuditContext(doc), route: 'document_tool_court_bundle_save' } }).catch(() => {});
+        return res.status(403).json({ error: 'Document access denied' });
+      }
+      if (doc.matterId !== matterId) return res.status(400).json({ error: 'All PDFs must belong to the target matter' });
+      if (doc.mimeType !== 'application/pdf') return res.status(400).json({ error: 'Only PDF documents can be included' });
+
+      const content = Buffer.isBuffer(doc.content) ? doc.content : Buffer.from(doc.content || '');
+      combinedInputBytes += content.length;
+      if (combinedInputBytes > MAX_MERGE_PDF_INPUT_BYTES) return res.status(413).json({ error: 'Selected PDFs exceed the 20 MB input limit' });
+      sourceDocs.push({ ...doc, content });
+    }
+
+    const bundlePdf = await PDFLibDocument.create();
+    try {
+      for (const doc of sourceDocs) {
+        const sourcePdf = await PDFLibDocument.load(doc.content, { ignoreEncryption: false });
+        const copiedPages = await bundlePdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
+        copiedPages.forEach(page => bundlePdf.addPage(page));
+      }
+    } catch {
+      return res.status(400).json({ error: 'One or more selected PDFs could not be read — they may be corrupt or encrypted' });
+    }
+
+    if (paginate) {
+      const font = await bundlePdf.embedFont(StandardFonts.Helvetica);
+      const fontSize = 10;
+      const fontColor = rgb(0, 0, 0);
+      const bottomMargin = 24;
+      const pages = bundlePdf.getPages();
+      for (let i = 0; i < pages.length; i++) {
+        const page = pages[i];
+        const { width, height } = page.getSize();
+        const number = startNumber + i;
+        const text = String(number);
+        const textWidth = font.widthOfTextAtSize(text, fontSize);
+        const x = paginateTextX(width, textWidth, position);
+        const y = bottomMargin + fontSize * 0.35;
+        page.drawText(text, { x, y, size: fontSize, font, color: fontColor });
+      }
+    }
+
+    let outputBuffer;
+    try {
+      outputBuffer = Buffer.from(await bundlePdf.save());
+    } catch {
+      return res.status(400).json({ error: 'Could not generate court bundle PDF' });
+    }
+
+    if (outputBuffer.length > 50 * 1024 * 1024) return res.status(413).json({ error: 'Output PDF exceeds the 50 MB limit' });
+
+    const documentIdNew = genId('DOC');
+    const cleanName = cleanDocumentName(outputFilename);
+    const size = `${Math.max(1, Math.round(outputBuffer.length / 1024))} KB`;
+
+    await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+      documentIdNew,
+      matterId,
+      cleanName,
+      cleanName,
+      'PDF',
+      'application/pdf',
+      today(),
+      size,
+      outputBuffer,
+      'document_tool',
+      null,
+      null,
+      null,
+      0,
+      req.user.userId || '',
+    ]);
+
+    const resultDoc = await get(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=?`, [documentIdNew]);
+
+    const pageCount = bundlePdf.getPageCount();
+    const endNumber = paginate ? startNumber + pageCount - 1 : undefined;
+
+    const metadata = {
+      sourceDocumentIds: documentIds,
+      sourceCount: sourceDocs.length,
+      targetMatterId: matterId,
+      outputDocumentId: documentIdNew,
+      pageCount,
+      paginate: !!paginate,
+      inputBytes: combinedInputBytes,
+      outputBytes: outputBuffer.length,
+      filename: cleanName,
+      clientVisible: false,
+    };
+    if (paginate) {
+      metadata.startNumber = startNumber;
+      metadata.endNumber = endNumber;
+      metadata.position = position;
+    }
+
+    await recordAuditEvent(req, {
+      action: 'document_tool_court_bundle_saved',
+      entityType: 'document_tool',
+      entityId: documentIdNew,
+      matterId,
+      clientId: await documentAuditClientId(resultDoc, req),
+      metadata,
+    }).catch(() => {});
+
+    res.json(publicDocument(resultDoc));
+  } catch {
+    res.status(500).json({ error: 'Unable to save court bundle' });
+  }
+});
+
 app.patch('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
   const doc = await get(`SELECT ${documentMetadataColumns()} FROM documents WHERE id=?`, [req.params.id]);
   if (!doc) return res.status(404).json({ error: 'Document not found' });

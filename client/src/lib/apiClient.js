@@ -328,6 +328,13 @@ export const saveNumberedPdf = (documentId, startNumber, position, filename, mat
     method: 'POST',
     body: { matterId, documentId, startNumber, position, filename, clientVisible: false },
   });
+export const createCourtBundle = (matterId, documentIds, filename, paginate, startNumber, position) =>
+  postDownloadWithAuth('/document-tools/court-bundle', { matterId, documentIds, filename, paginate, startNumber, position }, filename || 'court-bundle.pdf');
+export const saveCourtBundle = (matterId, documentIds, filename, paginate, startNumber, position) =>
+  api('/document-tools/court-bundle/save', {
+    method: 'POST',
+    body: { matterId, documentIds, filename, paginate, startNumber, position },
+  });
 export const moveDocument = (docId, folderId) => api(`/documents/${docId}`, { method: 'PATCH', body: { folderId } });
 export const updateDocument = (docId, data) => api(`/documents/${docId}`, { method: 'PATCH', body: data });
 export const getClientActivity = (clientId, limit = 100) => api(`/clients/${clientId}/activity?limit=${encodeURIComponent(limit)}`);

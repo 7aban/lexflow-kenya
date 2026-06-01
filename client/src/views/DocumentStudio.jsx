@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf, deletePdfPages, saveDeletedPdf, numberPdfPages, saveNumberedPdf } from '../lib/apiClient.js';
+import { api, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf, deletePdfPages, saveDeletedPdf, numberPdfPages, saveNumberedPdf, createCourtBundle, saveCourtBundle } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Skeleton } from '../components/ui.jsx';
 
@@ -30,7 +30,7 @@ const documentToolCards = [
   },
   {
     title: 'Court bundle prep',
-    description: 'Stage indexes, sections, and ordered bundle outputs for court workflows.',
+    description: 'Combine selected matter PDFs into a single court-ready bundle with optional page numbers.',
   },
   {
     title: 'Images to PDF',
@@ -138,12 +138,29 @@ export default function DocumentStudio({ notify }) {
   const [paginateSaveError, setPaginateSaveError] = useState(null);
   const [paginateSaveSuccess, setPaginateSaveSuccess] = useState('');
 
+  const [bundleMatterId, setBundleMatterId] = useState('');
+  const [bundleDocuments, setBundleDocuments] = useState([]);
+  const [bundleDocsLoading, setBundleDocsLoading] = useState(false);
+  const [bundleDocsError, setBundleDocsError] = useState(null);
+  const [selectedBundleDocumentIds, setSelectedBundleDocumentIds] = useState([]);
+  const [bundleFilename, setBundleFilename] = useState('court-bundle.pdf');
+  const [bundlePaginate, setBundlePaginate] = useState(false);
+  const [bundleStartNumber, setBundleStartNumber] = useState(1);
+  const [bundlePosition, setBundlePosition] = useState('bottom-center');
+  const [bundleLoading, setBundleLoading] = useState(false);
+  const [bundleError, setBundleError] = useState(null);
+  const [bundleSuccess, setBundleSuccess] = useState('');
+  const [bundleSaveLoading, setBundleSaveLoading] = useState(false);
+  const [bundleSaveError, setBundleSaveError] = useState(null);
+  const [bundleSaveSuccess, setBundleSaveSuccess] = useState('');
+
   const panelRef = useRef(null);
   const mergePanelRef = useRef(null);
   const rotatePanelRef = useRef(null);
   const extractPanelRef = useRef(null);
   const deletePanelRef = useRef(null);
   const paginatePanelRef = useRef(null);
+  const bundlePanelRef = useRef(null);
 
   useEffect(() => {
     load();
@@ -219,6 +236,20 @@ export default function DocumentStudio({ notify }) {
       setPaginateSaveSuccess('');
     }
   }, [paginateMatterId]);
+
+  useEffect(() => {
+    if (bundleMatterId) {
+      loadBundleDocuments(bundleMatterId);
+    } else {
+      setBundleDocuments([]);
+      setSelectedBundleDocumentIds([]);
+      setBundleDocsError(null);
+      setBundleError(null);
+      setBundleSuccess('');
+      setBundleSaveError(null);
+      setBundleSaveSuccess('');
+    }
+  }, [bundleMatterId]);
 
   async function load() {
     setLoading(true);
@@ -562,6 +593,108 @@ export default function DocumentStudio({ notify }) {
     }
   }
 
+  async function loadBundleDocuments(matterId) {
+    setBundleDocsLoading(true);
+    setBundleDocsError(null);
+    setBundleError(null);
+    setBundleSuccess('');
+    setBundleSaveError(null);
+    setBundleSaveSuccess('');
+    setSelectedBundleDocumentIds([]);
+    try {
+      const docs = await getMatterDocuments(matterId);
+      setBundleDocuments((Array.isArray(docs) ? docs : []).filter(doc => doc.mimeType === 'application/pdf'));
+    } catch (err) {
+      setBundleDocuments([]);
+      setBundleDocsError(err.message || 'Could not load matter documents.');
+    } finally {
+      setBundleDocsLoading(false);
+    }
+  }
+
+  function toggleBundleDocument(documentId) {
+    setBundleError(null);
+    setBundleSuccess('');
+    setSelectedBundleDocumentIds(current => {
+      if (current.includes(documentId)) return current.filter(id => id !== documentId);
+      if (current.length >= 10) {
+        setBundleError('Select no more than 10 PDF documents.');
+        return current;
+      }
+      return [...current, documentId];
+    });
+  }
+
+  function moveBundleDocument(index, direction) {
+    setSelectedBundleDocumentIds(current => {
+      const target = index + direction;
+      if (target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
+  async function runBundleDownload() {
+    setBundleError(null);
+    setBundleSuccess('');
+    setBundleSaveError(null);
+    setBundleSaveSuccess('');
+    if (selectedBundleDocumentIds.length < 2) {
+      setBundleError('Select at least 2 PDF documents.');
+      return;
+    }
+    if (selectedBundleDocumentIds.length > 10) {
+      setBundleError('Select no more than 10 PDF documents.');
+      return;
+    }
+    if (!bundleMatterId) {
+      setBundleError('Select a matter first.');
+      return;
+    }
+    setBundleLoading(true);
+    try {
+      await createCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition);
+      setBundleSuccess('Court bundle downloaded.');
+      notify?.({ type: 'success', message: 'Court bundle downloaded.' });
+    } catch (err) {
+      const message = err.message || 'Could not create court bundle.';
+      setBundleError(message);
+      notify?.({ type: 'danger', message });
+    } finally {
+      setBundleLoading(false);
+    }
+  }
+
+  async function runBundleSave() {
+    setBundleSaveError(null);
+    setBundleSaveSuccess('');
+    if (selectedBundleDocumentIds.length < 2) {
+      setBundleSaveError('Select at least 2 PDF documents.');
+      return;
+    }
+    if (selectedBundleDocumentIds.length > 10) {
+      setBundleSaveError('Select no more than 10 PDF documents.');
+      return;
+    }
+    if (!bundleMatterId) {
+      setBundleSaveError('Select a matter first.');
+      return;
+    }
+    setBundleSaveLoading(true);
+    try {
+      await saveCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition);
+      setBundleSaveSuccess('Saved to matter documents. Open the matter Documents tab to view it.');
+      notify?.({ type: 'success', message: 'Saved to matter documents. Open the matter Documents tab to view it.' });
+    } catch (err) {
+      const message = err.message || 'Could not save court bundle.';
+      setBundleSaveError(message);
+      notify?.({ type: 'danger', message });
+    } finally {
+      setBundleSaveLoading(false);
+    }
+  }
+
   async function loadMergeDocuments(matterId) {
     setMergeDocsLoading(true);
     setMergeDocsError(null);
@@ -687,6 +820,11 @@ export default function DocumentStudio({ notify }) {
     setTimeout(() => paginatePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 40);
   }
 
+  function scrollToBundleTool() {
+    if (!matters.length && !mattersLoading) loadMatters();
+    setTimeout(() => bundlePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 40);
+  }
+
   if (loading) return <Skeleton />;
 
   if (error) return <Alert tone="danger">{error}</Alert>;
@@ -698,7 +836,7 @@ export default function DocumentStudio({ notify }) {
     .filter(Boolean);
   const canMerge = selectedMergeDocumentIds.length >= 2 && selectedMergeDocumentIds.length <= 10 && !mergeLoading && !mergeDocsLoading;
   const canSave = selectedMergeDocumentIds.length >= 2 && selectedMergeDocumentIds.length <= 10 && !saveLoading && !mergeDocsLoading && !!mergeMatterId;
-  const activeToolNames = new Set(['Merge PDFs', 'Rotate pages', 'Extract pages', 'Delete pages', 'Add page numbers / paginate bundle']);
+  const activeToolNames = new Set(['Merge PDFs', 'Rotate pages', 'Extract pages', 'Delete pages', 'Add page numbers / paginate bundle', 'Court bundle prep']);
   const canRotate = !!rotateDocumentId && !rotateLoading && !rotateDocsLoading;
   const canRotateSave = !!rotateDocumentId && !rotateSaveLoading && !rotateDocsLoading && !!rotateMatterId;
   const canExtract = !!extractDocumentId && !!extractRanges.trim() && !extractLoading && !extractDocsLoading;
@@ -707,6 +845,11 @@ export default function DocumentStudio({ notify }) {
   const canDeleteSave = !!deleteDocumentId && !!deletePages.trim() && !deleteSaveLoading && !deleteDocsLoading && !!deleteMatterId;
   const canPaginate = !!paginateDocumentId && !paginateLoading && !paginateDocsLoading;
   const canPaginateSave = !!paginateDocumentId && !paginateSaveLoading && !paginateDocsLoading && !!paginateMatterId;
+  const selectedBundleDocuments = selectedBundleDocumentIds
+    .map(id => bundleDocuments.find(doc => doc.id === id))
+    .filter(Boolean);
+  const canBundle = selectedBundleDocumentIds.length >= 2 && selectedBundleDocumentIds.length <= 10 && !bundleLoading && !bundleDocsLoading && !!bundleMatterId;
+  const canBundleSave = selectedBundleDocumentIds.length >= 2 && selectedBundleDocumentIds.length <= 10 && !bundleSaveLoading && !bundleDocsLoading && !!bundleMatterId;
 
   return (
     <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
@@ -1393,10 +1536,184 @@ export default function DocumentStudio({ notify }) {
             </div>
           </div>
 
+          <div
+            ref={bundlePanelRef}
+            style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 16, display: 'grid', gap: 14, minWidth: 0 }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                <strong style={{ fontSize: 14, color: theme.ink }}>Court bundle prep</strong>
+                <span style={{ fontSize: 12, color: theme.muted }}>Combine selected matter PDFs into a single court-ready bundle</span>
+              </div>
+              <Badge tone="green">Available</Badge>
+            </div>
+
+            <div style={{ border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
+              Bundle Builder combines selected matter PDFs into a single court-ready bundle. Pagination is optional and should be verified before filing.
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, alignItems: 'end', minWidth: 0 }}>
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Matter</span>
+                <select
+                  style={styles.input}
+                  value={bundleMatterId}
+                  onChange={event => setBundleMatterId(event.target.value)}
+                  disabled={mattersLoading || bundleLoading || bundleSaveLoading}
+                >
+                  <option value="">{mattersLoading ? 'Loading matters...' : 'Select a matter'}</option>
+                  {matters.map(m => (
+                    <option key={m.id} value={m.id}>{matterLabel(m)}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Output filename</span>
+                <input
+                  style={styles.input}
+                  value={bundleFilename}
+                  onChange={event => setBundleFilename(event.target.value)}
+                  placeholder="court-bundle.pdf"
+                  disabled={bundleLoading || bundleSaveLoading}
+                />
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0' }}>
+                <input
+                  type="checkbox"
+                  checked={bundlePaginate}
+                  onChange={event => setBundlePaginate(event.target.checked)}
+                  disabled={bundleLoading || bundleSaveLoading}
+                  style={{ margin: 0 }}
+                />
+                <span style={{ fontSize: 12, color: theme.ink }}>Add continuous page numbers</span>
+              </label>
+            </div>
+
+            {bundlePaginate && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, alignItems: 'end', minWidth: 0 }}>
+                <label style={{ ...styles.field, minWidth: 0 }}>
+                  <span style={{ fontSize: 12, color: theme.muted }}>Starting number</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="99999"
+                    style={styles.input}
+                    value={bundleStartNumber}
+                    onChange={event => setBundleStartNumber(Number(event.target.value))}
+                    disabled={bundleLoading || bundleSaveLoading}
+                  />
+                </label>
+                <label style={{ ...styles.field, minWidth: 0 }}>
+                  <span style={{ fontSize: 12, color: theme.muted }}>Position</span>
+                  <select
+                    style={styles.input}
+                    value={bundlePosition}
+                    onChange={event => setBundlePosition(event.target.value)}
+                    disabled={bundleLoading || bundleSaveLoading}
+                  >
+                    <option value="bottom-center">Bottom center</option>
+                    <option value="bottom-right">Bottom right</option>
+                    <option value="bottom-left">Bottom left</option>
+                  </select>
+                </label>
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
+              <button
+                type="button"
+                style={{ ...styles.primaryButton, minHeight: 36, opacity: canBundle ? 1 : 0.65, cursor: canBundle ? 'pointer' : 'not-allowed' }}
+                onClick={runBundleDownload}
+                disabled={!canBundle}
+              >
+                {bundleLoading ? 'Creating bundle...' : 'Bundle and Download'}
+              </button>
+              <button
+                type="button"
+                style={{ ...styles.ghostButton, minHeight: 36, opacity: canBundleSave ? 1 : 0.65, cursor: canBundleSave ? 'pointer' : 'not-allowed' }}
+                onClick={runBundleSave}
+                disabled={!canBundleSave}
+              >
+                {bundleSaveLoading ? 'Saving...' : 'Save to matter documents'}
+              </button>
+            </div>
+
+            {bundleDocsError && <Alert tone="danger">{bundleDocsError}</Alert>}
+            {bundleError && <Alert tone="danger">{bundleError}</Alert>}
+            {bundleSuccess && <Alert tone="success">{bundleSuccess}</Alert>}
+            {bundleSaveError && <Alert tone="danger">{bundleSaveError}</Alert>}
+            {bundleSaveSuccess && <Alert tone="success">{bundleSaveSuccess}</Alert>}
+
+            {bundleMatterId && (
+              <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
+                  <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#FAFAF9', padding: 12, display: 'grid', gap: 10, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                      <strong style={{ fontSize: 13, color: theme.ink }}>Available PDFs</strong>
+                      <span style={{ fontSize: 12, color: theme.muted }}>{bundleDocuments.length} PDF{bundleDocuments.length === 1 ? '' : 's'}</span>
+                    </div>
+                    {bundleDocsLoading ? (
+                      <span style={{ fontSize: 13, color: theme.muted }}>Loading documents...</span>
+                    ) : bundleDocuments.length === 0 ? (
+                      <Empty title="No PDFs found" text="This matter has no existing PDF documents." />
+                    ) : (
+                      <div style={{ display: 'grid', gap: 8, maxHeight: 320, overflowY: 'auto', minWidth: 0 }}>
+                        {bundleDocuments.map(doc => {
+                          const selected = selectedBundleDocumentIds.includes(doc.id);
+                          const disabled = !selected && selectedBundleDocumentIds.length >= 10;
+                          return (
+                            <label key={doc.id} style={{ display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', gap: 10, alignItems: 'start', border: `1px solid ${selected ? theme.blue : theme.line}`, borderRadius: 8, background: selected ? theme.blueBg : '#fff', padding: 10, minWidth: 0 }}>
+                              <input
+                                type="checkbox"
+                                checked={selected}
+                                disabled={disabled || bundleLoading || bundleSaveLoading}
+                                onChange={() => toggleBundleDocument(doc.id)}
+                                style={{ marginTop: 3 }}
+                              />
+                              <span style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                                <span style={{ fontSize: 13, fontWeight: 600, color: theme.ink, overflowWrap: 'anywhere' }}>{doc.displayName || doc.name || doc.id}</span>
+                                <span style={{ fontSize: 12, color: theme.muted }}>{doc.date || 'No date'} | {doc.size || 'Unknown size'}</span>
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#FAFAF9', padding: 12, display: 'grid', gap: 10, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                      <strong style={{ fontSize: 13, color: theme.ink }}>Bundle Order</strong>
+                      <span style={{ fontSize: 12, color: theme.muted }}>{selectedBundleDocuments.length}/10 selected</span>
+                    </div>
+                    {selectedBundleDocuments.length === 0 ? (
+                      <Empty title="No PDFs selected" text="Select PDF documents from this matter." />
+                    ) : (
+                      <div style={{ display: 'grid', gap: 8, minWidth: 0 }}>
+                        {selectedBundleDocuments.map((doc, index) => (
+                          <div key={doc.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 8, alignItems: 'center', border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 10, minWidth: 0 }}>
+                            <span style={{ fontSize: 13, color: theme.ink, overflowWrap: 'anywhere' }}>{index + 1}. {doc.displayName || doc.name || doc.id}</span>
+                            <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                              <button type="button" style={{ ...styles.tinyButton, opacity: index === 0 ? 0.55 : 1 }} onClick={() => moveBundleDocument(index, -1)} disabled={index === 0 || bundleLoading || bundleSaveLoading}>Up</button>
+                              <button type="button" style={{ ...styles.tinyButton, opacity: index === selectedBundleDocuments.length - 1 ? 0.55 : 1 }} onClick={() => moveBundleDocument(index, 1)} disabled={index === selectedBundleDocuments.length - 1 || bundleLoading || bundleSaveLoading}>Down</button>
+                              <button type="button" style={styles.dangerTinyButton} onClick={() => toggleBundleDocument(doc.id)} disabled={bundleLoading || bundleSaveLoading}>Remove</button>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(230px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
             {documentToolCards.map(tool => {
               const active = activeToolNames.has(tool.title);
-              const handler = tool.title === 'Merge PDFs' ? scrollToMergeTool : tool.title === 'Rotate pages' ? scrollToRotateTool : tool.title === 'Extract pages' ? scrollToExtractTool : tool.title === 'Delete pages' ? scrollToDeleteTool : tool.title === 'Add page numbers / paginate bundle' ? scrollToPaginateTool : undefined;
+              const handler = tool.title === 'Merge PDFs' ? scrollToMergeTool : tool.title === 'Rotate pages' ? scrollToRotateTool : tool.title === 'Extract pages' ? scrollToExtractTool : tool.title === 'Delete pages' ? scrollToDeleteTool : tool.title === 'Add page numbers / paginate bundle' ? scrollToPaginateTool : tool.title === 'Court bundle prep' ? scrollToBundleTool : undefined;
               return (
                 <div key={tool.title} style={{ border: `1px solid ${active ? theme.blue : theme.line}`, borderRadius: 8, background: '#fff', padding: '14px 16px', display: 'grid', gap: 10, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
