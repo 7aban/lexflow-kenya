@@ -147,6 +147,8 @@ export default function DocumentStudio({ notify }) {
   const [bundlePaginate, setBundlePaginate] = useState(false);
   const [bundleStartNumber, setBundleStartNumber] = useState(1);
   const [bundlePosition, setBundlePosition] = useState('bottom-center');
+  const [bundleIncludeIndex, setBundleIncludeIndex] = useState(false);
+  const [bundleDocumentLabels, setBundleDocumentLabels] = useState({});
   const [bundleLoading, setBundleLoading] = useState(false);
   const [bundleError, setBundleError] = useState(null);
   const [bundleSuccess, setBundleSuccess] = useState('');
@@ -635,6 +637,10 @@ export default function DocumentStudio({ notify }) {
     });
   }
 
+  function setBundleLabel(documentId, value) {
+    setBundleDocumentLabels(current => ({ ...current, [documentId]: value }));
+  }
+
   async function runBundleDownload() {
     setBundleError(null);
     setBundleSuccess('');
@@ -654,7 +660,7 @@ export default function DocumentStudio({ notify }) {
     }
     setBundleLoading(true);
     try {
-      await createCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition);
+      await createCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined);
       setBundleSuccess('Court bundle downloaded.');
       notify?.({ type: 'success', message: 'Court bundle downloaded.' });
     } catch (err) {
@@ -683,7 +689,7 @@ export default function DocumentStudio({ notify }) {
     }
     setBundleSaveLoading(true);
     try {
-      await saveCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition);
+      await saveCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined);
       setBundleSaveSuccess('Saved to matter documents. Open the matter Documents tab to view it.');
       notify?.({ type: 'success', message: 'Saved to matter documents. Open the matter Documents tab to view it.' });
     } catch (err) {
@@ -1589,6 +1595,17 @@ export default function DocumentStudio({ notify }) {
                 />
                 <span style={{ fontSize: 12, color: theme.ink }}>Add continuous page numbers</span>
               </label>
+
+              <label style={{ ...styles.field, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0' }}>
+                <input
+                  type="checkbox"
+                  checked={bundleIncludeIndex}
+                  onChange={event => setBundleIncludeIndex(event.target.checked)}
+                  disabled={bundleLoading || bundleSaveLoading}
+                  style={{ margin: 0 }}
+                />
+                <span style={{ fontSize: 12, color: theme.ink }}>Add bundle index page</span>
+              </label>
             </div>
 
             {bundlePaginate && (
@@ -1618,6 +1635,13 @@ export default function DocumentStudio({ notify }) {
                     <option value="bottom-left">Bottom left</option>
                   </select>
                 </label>
+              </div>
+            )}
+
+            {bundleIncludeIndex && (
+              <div style={{ border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
+                The index lists selected documents and their starting pages. A single A4 page titled "BUNDLE INDEX" is added as the first page. Edit document labels in the Bundle Order list below; blank labels use the document name.
+                {bundlePaginate ? ' If pagination is enabled, the index page is page 1 and is included in the page count.' : ''}
               </div>
             )}
 
@@ -1693,13 +1717,28 @@ export default function DocumentStudio({ notify }) {
                     ) : (
                       <div style={{ display: 'grid', gap: 8, minWidth: 0 }}>
                         {selectedBundleDocuments.map((doc, index) => (
-                          <div key={doc.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 8, alignItems: 'center', border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 10, minWidth: 0 }}>
-                            <span style={{ fontSize: 13, color: theme.ink, overflowWrap: 'anywhere' }}>{index + 1}. {doc.displayName || doc.name || doc.id}</span>
-                            <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                              <button type="button" style={{ ...styles.tinyButton, opacity: index === 0 ? 0.55 : 1 }} onClick={() => moveBundleDocument(index, -1)} disabled={index === 0 || bundleLoading || bundleSaveLoading}>Up</button>
-                              <button type="button" style={{ ...styles.tinyButton, opacity: index === selectedBundleDocuments.length - 1 ? 0.55 : 1 }} onClick={() => moveBundleDocument(index, 1)} disabled={index === selectedBundleDocuments.length - 1 || bundleLoading || bundleSaveLoading}>Down</button>
-                              <button type="button" style={styles.dangerTinyButton} onClick={() => toggleBundleDocument(doc.id)} disabled={bundleLoading || bundleSaveLoading}>Remove</button>
-                            </span>
+                          <div key={doc.id} style={{ display: 'grid', gap: 8, border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 10, minWidth: 0 }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 8, alignItems: 'center', minWidth: 0 }}>
+                              <span style={{ fontSize: 13, color: theme.ink, overflowWrap: 'anywhere' }}>{index + 1}. {doc.displayName || doc.name || doc.id}</span>
+                              <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                <button type="button" style={{ ...styles.tinyButton, opacity: index === 0 ? 0.55 : 1 }} onClick={() => moveBundleDocument(index, -1)} disabled={index === 0 || bundleLoading || bundleSaveLoading}>Up</button>
+                                <button type="button" style={{ ...styles.tinyButton, opacity: index === selectedBundleDocuments.length - 1 ? 0.55 : 1 }} onClick={() => moveBundleDocument(index, 1)} disabled={index === selectedBundleDocuments.length - 1 || bundleLoading || bundleSaveLoading}>Down</button>
+                                <button type="button" style={styles.dangerTinyButton} onClick={() => toggleBundleDocument(doc.id)} disabled={bundleLoading || bundleSaveLoading}>Remove</button>
+                              </span>
+                            </div>
+                            {bundleIncludeIndex && (
+                              <label style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                                <span style={{ fontSize: 11, color: theme.muted }}>Index label (optional)</span>
+                                <input
+                                  style={{ ...styles.input, fontSize: 13 }}
+                                  value={bundleDocumentLabels[doc.id] ?? ''}
+                                  onChange={event => setBundleLabel(doc.id, event.target.value)}
+                                  placeholder={doc.displayName || doc.name || doc.id}
+                                  maxLength={80}
+                                  disabled={bundleLoading || bundleSaveLoading}
+                                />
+                              </label>
+                            )}
                           </div>
                         ))}
                       </div>

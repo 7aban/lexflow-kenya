@@ -3489,9 +3489,101 @@ app.post('/api/document-tools/number-pdf-pages/save', requireAdvocateOrAdmin, as
   }
 });
 
+// --- Court Bundle index page (PRODUCT-14J) ---
+// The index is always a single A4 portrait page (points) titled "BUNDLE INDEX",
+// inserted as the first page of the bundle. Uses bundled standard fonts only.
+const BUNDLE_INDEX_PAGE_SIZE = [595.28, 841.89];
+const BUNDLE_INDEX_TITLE = 'BUNDLE INDEX';
+const MAX_INDEX_LABEL_LENGTH = 80;
+
+// Reduce a label to WinAnsi-safe printable characters so pdf-lib's standard
+// font encoding can never throw on user-supplied text, then cap its length.
+// Falls back to the document name when the label is empty after sanitizing.
+function sanitizeIndexLabel(raw, fallback) {
+  const clean = value => {
+    const str = String(value == null ? '' : value);
+    let out = '';
+    for (const ch of str) {
+      const code = ch.codePointAt(0);
+      if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) { out += ' '; continue; } // strip control characters
+      if (code > 0xff) { out += '?'; continue; }                                    // map outside-WinAnsi to '?'
+      out += ch;
+    }
+    return out.replace(/\s+/g, ' ').trim();
+  };
+  const safeFallback = clean(fallback) || 'Document';
+  const safeLabel = clean(raw);
+  return (safeLabel || safeFallback).slice(0, MAX_INDEX_LABEL_LENGTH);
+}
+
+// Starting page for each document in the bundle. The index occupies physical
+// page 1, so the first document begins at physical page 2. When pagination is
+// enabled the value honours startNumber so the index matches the printed page
+// numbers; otherwise it is the physical 1-based position.
+function bundleIndexStartingPages(pageCounts, { paginate, startNumber }) {
+  const starts = [];
+  let cumulative = 0;
+  for (const count of pageCounts) {
+    const physicalStart = 2 + cumulative; // index is physical page 1
+    starts.push(paginate ? startNumber + (physicalStart - 1) : physicalStart);
+    cumulative += count;
+  }
+  return starts;
+}
+
+// Truncate text with an ASCII ellipsis so it fits within maxWidth at the given
+// font size.
+function ellipsizeToWidth(text, font, size, maxWidth) {
+  if (font.widthOfTextAtSize(text, size) <= maxWidth) return text;
+  let trimmed = text;
+  while (trimmed.length > 1 && font.widthOfTextAtSize(`${trimmed}...`, size) > maxWidth) {
+    trimmed = trimmed.slice(0, -1);
+  }
+  return `${trimmed}...`;
+}
+
+// Build the single A4 index page and insert it as the first page of bundlePdf.
+// rows: [{ seq, label, startPage }].
+async function prependBundleIndexPage(bundlePdf, rows) {
+  const page = bundlePdf.insertPage(0, BUNDLE_INDEX_PAGE_SIZE);
+  const { width, height } = page.getSize();
+  const helvetica = await bundlePdf.embedFont(StandardFonts.Helvetica);
+  const helveticaBold = await bundlePdf.embedFont(StandardFonts.HelveticaBold);
+  const black = rgb(0, 0, 0);
+  const margin = 56;
+
+  const titleSize = 18;
+  page.drawText(BUNDLE_INDEX_TITLE, { x: margin, y: height - margin - titleSize, size: titleSize, font: helveticaBold, color: black });
+
+  const numX = margin;
+  const labelX = margin + 34;
+  const pageColWidth = 96;
+  const pageX = width - margin - pageColWidth;
+  const labelMaxWidth = pageX - labelX - 12;
+
+  const headerSize = 11;
+  let y = height - margin - titleSize - 30;
+  page.drawText('#', { x: numX, y, size: headerSize, font: helveticaBold, color: black });
+  page.drawText('Document', { x: labelX, y, size: headerSize, font: helveticaBold, color: black });
+  page.drawText('Starting page', { x: pageX, y, size: headerSize, font: helveticaBold, color: black });
+
+  y -= 6;
+  page.drawLine({ start: { x: margin, y }, end: { x: width - margin, y }, thickness: 0.75, color: black });
+
+  const rowSize = 11;
+  const rowGap = 22;
+  y -= rowGap;
+  for (const row of rows) {
+    page.drawText(String(row.seq), { x: numX, y, size: rowSize, font: helvetica, color: black });
+    page.drawText(ellipsizeToWidth(row.label, helvetica, rowSize, labelMaxWidth), { x: labelX, y, size: rowSize, font: helvetica, color: black });
+    page.drawText(String(row.startPage), { x: pageX, y, size: rowSize, font: helvetica, color: black });
+    y -= rowGap;
+  }
+}
+
 app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
   try {
-    const { matterId, documentIds: rawDocumentIds, filename: rawFilename, paginate: rawPaginate, startNumber: rawStart, position: rawPosition } = req.body || {};
+    const { matterId, documentIds: rawDocumentIds, filename: rawFilename, paginate: rawPaginate, startNumber: rawStart, position: rawPosition, includeIndex: rawIncludeIndex, documentLabels: rawDocumentLabels } = req.body || {};
 
     if (!matterId) return res.status(400).json({ error: 'matterId is required' });
     const matter = await get('SELECT * FROM matters WHERE id=?', [matterId]);
@@ -3520,6 +3612,9 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
       if (!VALID_PAGINATE_POSITIONS.has(position)) return res.status(400).json({ error: 'position must be one of: bottom-center, bottom-right, bottom-left' });
     }
 
+    const includeIndex = rawIncludeIndex === true;
+    const documentLabels = rawDocumentLabels && typeof rawDocumentLabels === 'object' && !Array.isArray(rawDocumentLabels) ? rawDocumentLabels : {};
+
     const outputFilename = cleanPdfDownloadName(rawFilename || 'court-bundle.pdf');
     const sourceDocs = [];
     let combinedInputBytes = 0;
@@ -3541,14 +3636,30 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
     }
 
     const bundlePdf = await PDFLibDocument.create();
+    const sourcePageCounts = [];
     try {
       for (const doc of sourceDocs) {
         const sourcePdf = await PDFLibDocument.load(doc.content, { ignoreEncryption: false });
         const copiedPages = await bundlePdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
         copiedPages.forEach(page => bundlePdf.addPage(page));
+        sourcePageCounts.push(copiedPages.length);
       }
     } catch {
       return res.status(400).json({ error: 'One or more selected PDFs could not be read — they may be corrupt or encrypted' });
+    }
+
+    if (includeIndex) {
+      const startingPages = bundleIndexStartingPages(sourcePageCounts, { paginate, startNumber });
+      const indexRows = sourceDocs.map((doc, i) => ({
+        seq: i + 1,
+        label: sanitizeIndexLabel(documentLabels[doc.id], doc.displayName || doc.name || doc.id),
+        startPage: startingPages[i],
+      }));
+      try {
+        await prependBundleIndexPage(bundlePdf, indexRows);
+      } catch {
+        return res.status(400).json({ error: 'Could not generate the bundle index page' });
+      }
     }
 
     if (paginate) {
@@ -3597,6 +3708,11 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
       metadata.endNumber = endNumber;
       metadata.position = position;
     }
+    metadata.includeIndex = includeIndex;
+    if (includeIndex) {
+      metadata.indexPageCount = 1;
+      metadata.labelCount = sourceDocs.filter(doc => Object.prototype.hasOwnProperty.call(documentLabels, doc.id)).length;
+    }
 
     await recordAuditEvent(req, {
       action: 'document_tool_court_bundle_downloaded',
@@ -3618,7 +3734,7 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
 
 app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async (req, res) => {
   try {
-    const { matterId, documentIds: rawDocumentIds, filename: rawFilename, paginate: rawPaginate, startNumber: rawStart, position: rawPosition } = req.body || {};
+    const { matterId, documentIds: rawDocumentIds, filename: rawFilename, paginate: rawPaginate, startNumber: rawStart, position: rawPosition, includeIndex: rawIncludeIndex, documentLabels: rawDocumentLabels } = req.body || {};
 
     if (!matterId) return res.status(400).json({ error: 'matterId is required' });
     const matter = await get('SELECT * FROM matters WHERE id=?', [matterId]);
@@ -3647,6 +3763,9 @@ app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async 
       if (!VALID_PAGINATE_POSITIONS.has(position)) return res.status(400).json({ error: 'position must be one of: bottom-center, bottom-right, bottom-left' });
     }
 
+    const includeIndex = rawIncludeIndex === true;
+    const documentLabels = rawDocumentLabels && typeof rawDocumentLabels === 'object' && !Array.isArray(rawDocumentLabels) ? rawDocumentLabels : {};
+
     const outputFilename = cleanPdfDownloadName(rawFilename || 'court-bundle.pdf');
     const sourceDocs = [];
     let combinedInputBytes = 0;
@@ -3668,14 +3787,30 @@ app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async 
     }
 
     const bundlePdf = await PDFLibDocument.create();
+    const sourcePageCounts = [];
     try {
       for (const doc of sourceDocs) {
         const sourcePdf = await PDFLibDocument.load(doc.content, { ignoreEncryption: false });
         const copiedPages = await bundlePdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
         copiedPages.forEach(page => bundlePdf.addPage(page));
+        sourcePageCounts.push(copiedPages.length);
       }
     } catch {
       return res.status(400).json({ error: 'One or more selected PDFs could not be read — they may be corrupt or encrypted' });
+    }
+
+    if (includeIndex) {
+      const startingPages = bundleIndexStartingPages(sourcePageCounts, { paginate, startNumber });
+      const indexRows = sourceDocs.map((doc, i) => ({
+        seq: i + 1,
+        label: sanitizeIndexLabel(documentLabels[doc.id], doc.displayName || doc.name || doc.id),
+        startPage: startingPages[i],
+      }));
+      try {
+        await prependBundleIndexPage(bundlePdf, indexRows);
+      } catch {
+        return res.status(400).json({ error: 'Could not generate the bundle index page' });
+      }
     }
 
     if (paginate) {
@@ -3749,6 +3884,11 @@ app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async 
       metadata.startNumber = startNumber;
       metadata.endNumber = endNumber;
       metadata.position = position;
+    }
+    metadata.includeIndex = includeIndex;
+    if (includeIndex) {
+      metadata.indexPageCount = 1;
+      metadata.labelCount = sourceDocs.filter(doc => Object.prototype.hasOwnProperty.call(documentLabels, doc.id)).length;
     }
 
     await recordAuditEvent(req, {
