@@ -154,6 +154,7 @@ export default function DocumentStudio({ notify }) {
   const [bundleIncludeDividers, setBundleIncludeDividers] = useState(false);
   const [bundleDividerLabels, setBundleDividerLabels] = useState({});
   const [bundleIncludeBookmarks, setBundleIncludeBookmarks] = useState(false);
+  const [bundleIncludeCertificate, setBundleIncludeCertificate] = useState(false);
   const [firmName, setFirmName] = useState('');
   const [bundleLoading, setBundleLoading] = useState(false);
   const [bundleError, setBundleError] = useState(null);
@@ -696,7 +697,7 @@ export default function DocumentStudio({ notify }) {
     }
     setBundleLoading(true);
     try {
-      await createCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined, bundleIncludeCover, bundleIncludeCover ? bundleCover : undefined, bundleIncludeDividers, bundleIncludeDividers ? bundleDividerLabels : undefined, bundleIncludeBookmarks);
+      await createCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined, bundleIncludeCover, bundleIncludeCover ? bundleCover : undefined, bundleIncludeDividers, bundleIncludeDividers ? bundleDividerLabels : undefined, bundleIncludeBookmarks, bundleIncludeCertificate);
       setBundleSuccess('Court bundle downloaded.');
       notify?.({ type: 'success', message: 'Court bundle downloaded.' });
     } catch (err) {
@@ -725,7 +726,7 @@ export default function DocumentStudio({ notify }) {
     }
     setBundleSaveLoading(true);
     try {
-      await saveCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined, bundleIncludeCover, bundleIncludeCover ? bundleCover : undefined, bundleIncludeDividers, bundleIncludeDividers ? bundleDividerLabels : undefined, bundleIncludeBookmarks);
+      await saveCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined, bundleIncludeCover, bundleIncludeCover ? bundleCover : undefined, bundleIncludeDividers, bundleIncludeDividers ? bundleDividerLabels : undefined, bundleIncludeBookmarks, bundleIncludeCertificate);
       setBundleSaveSuccess('Saved to matter documents. Open the matter Documents tab to view it.');
       notify?.({ type: 'success', message: 'Saved to matter documents. Open the matter Documents tab to view it.' });
     } catch (err) {
@@ -1675,6 +1676,17 @@ export default function DocumentStudio({ notify }) {
                 />
                 <span style={{ fontSize: 12, color: theme.ink }}>Add PDF bookmarks / outline</span>
               </label>
+
+              <label style={{ ...styles.field, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0' }}>
+                <input
+                  type="checkbox"
+                  checked={bundleIncludeCertificate}
+                  onChange={event => setBundleIncludeCertificate(event.target.checked)}
+                  disabled={bundleLoading || bundleSaveLoading}
+                  style={{ margin: 0 }}
+                />
+                <span style={{ fontSize: 12, color: theme.ink }}>Include bundle generation certificate</span>
+              </label>
             </div>
 
             {bundlePaginate && (
@@ -1723,6 +1735,12 @@ export default function DocumentStudio({ notify }) {
             {bundleIncludeBookmarks && (
               <div style={{ border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
                 Adds PDF navigation entries for the cover, index, and each section.
+              </div>
+            )}
+
+            {bundleIncludeCertificate && (
+              <div style={{ border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
+                Adds a final certificate page recording how this bundle was generated.
               </div>
             )}
 
