@@ -149,6 +149,9 @@ export default function DocumentStudio({ notify }) {
   const [bundlePosition, setBundlePosition] = useState('bottom-center');
   const [bundleIncludeIndex, setBundleIncludeIndex] = useState(false);
   const [bundleDocumentLabels, setBundleDocumentLabels] = useState({});
+  const [bundleIncludeCover, setBundleIncludeCover] = useState(false);
+  const [bundleCover, setBundleCover] = useState({ title: 'COURT BUNDLE', court: '', caseNumber: '', caseTitle: '', bundleTitle: '', preparedBy: '', date: '' });
+  const [firmName, setFirmName] = useState('');
   const [bundleLoading, setBundleLoading] = useState(false);
   const [bundleError, setBundleError] = useState(null);
   const [bundleSuccess, setBundleSuccess] = useState('');
@@ -167,6 +170,10 @@ export default function DocumentStudio({ notify }) {
   useEffect(() => {
     load();
     loadMatters();
+    // Best-effort firm name for prefilling the optional cover "prepared by" field.
+    api('/firm-settings').then(settings => {
+      if (settings && typeof settings.name === 'string') setFirmName(settings.name);
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -641,6 +648,28 @@ export default function DocumentStudio({ notify }) {
     setBundleDocumentLabels(current => ({ ...current, [documentId]: value }));
   }
 
+  function setBundleCoverField(field, value) {
+    setBundleCover(current => ({ ...current, [field]: value }));
+  }
+
+  function toggleBundleCover(checked) {
+    setBundleIncludeCover(checked);
+    if (!checked) return;
+    // Prefill blank cover fields from the selected matter, firm name and today.
+    const matter = matters.find(m => m.id === bundleMatterId);
+    const now = new Date();
+    const todayLabel = `${now.getDate()} ${now.toLocaleString('en-GB', { month: 'long' })} ${now.getFullYear()}`;
+    setBundleCover(current => ({
+      title: current.title || 'COURT BUNDLE',
+      court: current.court || (matter?.court || ''),
+      caseNumber: current.caseNumber || (matter?.caseNo || ''),
+      caseTitle: current.caseTitle || (matter?.title || ''),
+      bundleTitle: current.bundleTitle || '',
+      preparedBy: current.preparedBy || (firmName || ''),
+      date: current.date || todayLabel,
+    }));
+  }
+
   async function runBundleDownload() {
     setBundleError(null);
     setBundleSuccess('');
@@ -660,7 +689,7 @@ export default function DocumentStudio({ notify }) {
     }
     setBundleLoading(true);
     try {
-      await createCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined);
+      await createCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined, bundleIncludeCover, bundleIncludeCover ? bundleCover : undefined);
       setBundleSuccess('Court bundle downloaded.');
       notify?.({ type: 'success', message: 'Court bundle downloaded.' });
     } catch (err) {
@@ -689,7 +718,7 @@ export default function DocumentStudio({ notify }) {
     }
     setBundleSaveLoading(true);
     try {
-      await saveCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined);
+      await saveCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined, bundleIncludeCover, bundleIncludeCover ? bundleCover : undefined);
       setBundleSaveSuccess('Saved to matter documents. Open the matter Documents tab to view it.');
       notify?.({ type: 'success', message: 'Saved to matter documents. Open the matter Documents tab to view it.' });
     } catch (err) {
@@ -1606,6 +1635,17 @@ export default function DocumentStudio({ notify }) {
                 />
                 <span style={{ fontSize: 12, color: theme.ink }}>Add bundle index page</span>
               </label>
+
+              <label style={{ ...styles.field, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0' }}>
+                <input
+                  type="checkbox"
+                  checked={bundleIncludeCover}
+                  onChange={event => toggleBundleCover(event.target.checked)}
+                  disabled={bundleLoading || bundleSaveLoading}
+                  style={{ margin: 0 }}
+                />
+                <span style={{ fontSize: 12, color: theme.ink }}>Add cover page</span>
+              </label>
             </div>
 
             {bundlePaginate && (
@@ -1640,8 +1680,49 @@ export default function DocumentStudio({ notify }) {
 
             {bundleIncludeIndex && (
               <div style={{ border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
-                The index lists selected documents and their starting pages. A single A4 page titled "BUNDLE INDEX" is added as the first page. Edit document labels in the Bundle Order list below; blank labels use the document name.
-                {bundlePaginate ? ' If pagination is enabled, the index page is page 1 and is included in the page count.' : ''}
+                The index lists selected documents and their starting pages. A single A4 page titled "BUNDLE INDEX" is added as {bundleIncludeCover ? 'the page after the cover' : 'the first page'}. Edit document labels in the Bundle Order list below; blank labels use the document name.
+                {bundlePaginate ? (bundleIncludeCover ? ' If pagination is enabled, the index follows the cover and is included in the page count.' : ' If pagination is enabled, the index page is page 1 and is included in the page count.') : ''}
+              </div>
+            )}
+
+            {bundleIncludeCover && (
+              <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#FAFAF9', padding: 12, display: 'grid', gap: 12, minWidth: 0 }}>
+                <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                  <strong style={{ fontSize: 13, color: theme.ink }}>Cover page</strong>
+                  <span style={{ fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
+                    A single A4 cover page is added before the {bundleIncludeIndex ? 'index and documents' : 'documents'}. Fields are prefilled from the matter and firm where available and are fully editable. Leave a field blank to omit it. If pagination is enabled, the cover and index pages are included in the page count.
+                  </span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
+                  <label style={{ ...styles.field, minWidth: 0 }}>
+                    <span style={{ fontSize: 12, color: theme.muted }}>Title</span>
+                    <input style={styles.input} value={bundleCover.title} onChange={event => setBundleCoverField('title', event.target.value)} placeholder="COURT BUNDLE" maxLength={120} disabled={bundleLoading || bundleSaveLoading} />
+                  </label>
+                  <label style={{ ...styles.field, minWidth: 0 }}>
+                    <span style={{ fontSize: 12, color: theme.muted }}>Court</span>
+                    <input style={styles.input} value={bundleCover.court} onChange={event => setBundleCoverField('court', event.target.value)} placeholder="HIGH COURT OF KENYA AT NAIROBI" maxLength={120} disabled={bundleLoading || bundleSaveLoading} />
+                  </label>
+                  <label style={{ ...styles.field, minWidth: 0 }}>
+                    <span style={{ fontSize: 12, color: theme.muted }}>Case number</span>
+                    <input style={styles.input} value={bundleCover.caseNumber} onChange={event => setBundleCoverField('caseNumber', event.target.value)} placeholder="HCCC E000 OF 2026" maxLength={120} disabled={bundleLoading || bundleSaveLoading} />
+                  </label>
+                  <label style={{ ...styles.field, minWidth: 0 }}>
+                    <span style={{ fontSize: 12, color: theme.muted }}>Parties / case title</span>
+                    <input style={styles.input} value={bundleCover.caseTitle} onChange={event => setBundleCoverField('caseTitle', event.target.value)} placeholder="A v B" maxLength={200} disabled={bundleLoading || bundleSaveLoading} />
+                  </label>
+                  <label style={{ ...styles.field, minWidth: 0 }}>
+                    <span style={{ fontSize: 12, color: theme.muted }}>Bundle title</span>
+                    <input style={styles.input} value={bundleCover.bundleTitle} onChange={event => setBundleCoverField('bundleTitle', event.target.value)} placeholder="DEFENDANT'S BUNDLE OF DOCUMENTS" maxLength={120} disabled={bundleLoading || bundleSaveLoading} />
+                  </label>
+                  <label style={{ ...styles.field, minWidth: 0 }}>
+                    <span style={{ fontSize: 12, color: theme.muted }}>Prepared by</span>
+                    <input style={styles.input} value={bundleCover.preparedBy} onChange={event => setBundleCoverField('preparedBy', event.target.value)} placeholder="T.K. RUTTO & CO. ADVOCATES" maxLength={120} disabled={bundleLoading || bundleSaveLoading} />
+                  </label>
+                  <label style={{ ...styles.field, minWidth: 0 }}>
+                    <span style={{ fontSize: 12, color: theme.muted }}>Date</span>
+                    <input style={styles.input} value={bundleCover.date} onChange={event => setBundleCoverField('date', event.target.value)} placeholder="1 June 2026" maxLength={80} disabled={bundleLoading || bundleSaveLoading} />
+                  </label>
+                </div>
               </div>
             )}
 

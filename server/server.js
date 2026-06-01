@@ -3516,15 +3516,18 @@ function sanitizeIndexLabel(raw, fallback) {
   return (safeLabel || safeFallback).slice(0, MAX_INDEX_LABEL_LENGTH);
 }
 
-// Starting page for each document in the bundle. The index occupies physical
-// page 1, so the first document begins at physical page 2. When pagination is
-// enabled the value honours startNumber so the index matches the printed page
-// numbers; otherwise it is the physical 1-based position.
-function bundleIndexStartingPages(pageCounts, { paginate, startNumber }) {
+// Starting page for each document in the bundle. Front matter precedes the
+// documents: an optional cover page (coverPages) followed by the index page.
+// With no cover the index occupies physical page 1, so the first document
+// begins at physical page 2 (the original behaviour). With a cover the index is
+// physical page 2 and the first document begins at physical page 3. When
+// pagination is enabled the value honours startNumber so the printed numbers
+// match; otherwise it is the physical 1-based position.
+function bundleIndexStartingPages(pageCounts, { paginate, startNumber, coverPages = 0 }) {
   const starts = [];
   let cumulative = 0;
   for (const count of pageCounts) {
-    const physicalStart = 2 + cumulative; // index is physical page 1
+    const physicalStart = 2 + coverPages + cumulative; // index sits after any cover page
     starts.push(paginate ? startNumber + (physicalStart - 1) : physicalStart);
     cumulative += count;
   }
@@ -3581,9 +3584,111 @@ async function prependBundleIndexPage(bundlePdf, rows) {
   }
 }
 
+// --- Court Bundle cover page (PRODUCT-14K) ---
+// Optional single A4 portrait cover page generated from editable free-text
+// fields and inserted before the index/documents. Uses bundled standard fonts
+// only (Helvetica / Helvetica-Bold), black text, no logo and no template system.
+const BUNDLE_COVER_DEFAULT_TITLE = 'COURT BUNDLE';
+const COVER_FIELD_CAPS = {
+  title: 120,
+  court: 120,
+  caseNumber: 120,
+  caseTitle: 200,
+  bundleTitle: 120,
+  preparedBy: 120,
+  date: 80,
+};
+
+// Reduce a cover field to WinAnsi-safe printable characters (mirrors the index
+// label sanitizer): strip control characters and newlines, map outside-WinAnsi
+// code points to '?', collapse whitespace and hard-cap the length. Never throws.
+function sanitizeCoverField(raw, maxLength) {
+  const str = String(raw == null ? '' : raw);
+  let out = '';
+  for (const ch of str) {
+    const code = ch.codePointAt(0);
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) { out += ' '; continue; } // strip control characters / newlines
+    if (code > 0xff) { out += '?'; continue; }                                    // map outside-WinAnsi to '?'
+    out += ch;
+  }
+  return out.replace(/\s+/g, ' ').trim().slice(0, Math.max(0, maxLength));
+}
+
+// Build the sanitized cover field set from an untrusted request value. A missing,
+// null, array or non-object cover is treated as {}. All fields are optional.
+function buildCoverFields(rawCover) {
+  const src = rawCover && typeof rawCover === 'object' && !Array.isArray(rawCover) ? rawCover : {};
+  const fields = {};
+  for (const [key, cap] of Object.entries(COVER_FIELD_CAPS)) {
+    fields[key] = sanitizeCoverField(src[key], cap);
+  }
+  return fields;
+}
+
+// Wrap text into at most maxLines lines that each fit maxWidth at the given
+// font size. Overflow beyond maxLines is folded into the final line and
+// ellipsized; a single over-long word is ellipsized by ellipsizeToWidth.
+function wrapCoverText(text, font, size, maxWidth, maxLines) {
+  const words = String(text).split(' ').filter(Boolean);
+  if (!words.length) return [];
+  const lines = [];
+  let current = '';
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (!current || font.widthOfTextAtSize(candidate, size) <= maxWidth) {
+      current = candidate;
+    } else {
+      lines.push(current);
+      current = word;
+    }
+  }
+  if (current) lines.push(current);
+  if (lines.length <= maxLines) {
+    return lines.map(line => ellipsizeToWidth(line, font, size, maxWidth));
+  }
+  const kept = lines.slice(0, maxLines - 1).map(line => ellipsizeToWidth(line, font, size, maxWidth));
+  kept.push(ellipsizeToWidth(lines.slice(maxLines - 1).join(' '), font, size, maxWidth));
+  return kept;
+}
+
+// Build the single A4 cover page and insert it as the first page of bundlePdf.
+// Fields are already sanitized; the title falls back to COURT BUNDLE when blank.
+async function prependBundleCoverPage(bundlePdf, cover) {
+  const page = bundlePdf.insertPage(0, BUNDLE_INDEX_PAGE_SIZE);
+  const { width, height } = page.getSize();
+  const helvetica = await bundlePdf.embedFont(StandardFonts.Helvetica);
+  const helveticaBold = await bundlePdf.embedFont(StandardFonts.HelveticaBold);
+  const black = rgb(0, 0, 0);
+  const margin = 64;
+  const maxWidth = width - margin * 2;
+  let y = height - 120;
+
+  const drawCentered = (text, size, font, gapAfter, maxLines = 1) => {
+    const lines = maxLines > 1
+      ? wrapCoverText(text, font, size, maxWidth, maxLines)
+      : [ellipsizeToWidth(text, font, size, maxWidth)];
+    for (const line of lines) {
+      if (!line) continue;
+      const textWidth = font.widthOfTextAtSize(line, size);
+      page.drawText(line, { x: Math.max(margin, (width - textWidth) / 2), y, size, font, color: black });
+      y -= size + 6;
+    }
+    y -= gapAfter;
+  };
+
+  const title = cover.title || BUNDLE_COVER_DEFAULT_TITLE;
+  if (cover.court) drawCentered(cover.court, 13, helveticaBold, 8, 2);
+  if (cover.caseNumber) drawCentered(cover.caseNumber, 12, helvetica, 24, 1);
+  if (cover.caseTitle) drawCentered(cover.caseTitle, 14, helveticaBold, 30, 3);
+  drawCentered(title, 26, helveticaBold, 16, 1);
+  if (cover.bundleTitle) drawCentered(cover.bundleTitle, 16, helveticaBold, 30, 2);
+  if (cover.preparedBy) drawCentered(cover.preparedBy, 12, helvetica, 6, 2);
+  if (cover.date) drawCentered(cover.date, 12, helvetica, 0, 1);
+}
+
 app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
   try {
-    const { matterId, documentIds: rawDocumentIds, filename: rawFilename, paginate: rawPaginate, startNumber: rawStart, position: rawPosition, includeIndex: rawIncludeIndex, documentLabels: rawDocumentLabels } = req.body || {};
+    const { matterId, documentIds: rawDocumentIds, filename: rawFilename, paginate: rawPaginate, startNumber: rawStart, position: rawPosition, includeIndex: rawIncludeIndex, documentLabels: rawDocumentLabels, includeCover: rawIncludeCover, cover: rawCover } = req.body || {};
 
     if (!matterId) return res.status(400).json({ error: 'matterId is required' });
     const matter = await get('SELECT * FROM matters WHERE id=?', [matterId]);
@@ -3614,6 +3719,9 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
 
     const includeIndex = rawIncludeIndex === true;
     const documentLabels = rawDocumentLabels && typeof rawDocumentLabels === 'object' && !Array.isArray(rawDocumentLabels) ? rawDocumentLabels : {};
+    const includeCover = rawIncludeCover === true;
+    const coverFields = buildCoverFields(rawCover);
+    const coverFieldCount = Object.values(coverFields).filter(Boolean).length;
 
     const outputFilename = cleanPdfDownloadName(rawFilename || 'court-bundle.pdf');
     const sourceDocs = [];
@@ -3648,8 +3756,10 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
       return res.status(400).json({ error: 'One or more selected PDFs could not be read — they may be corrupt or encrypted' });
     }
 
+    // Insert front matter so the cover is physical page 1 and the index follows
+    // it: add the index at position 0 first, then the cover at position 0.
     if (includeIndex) {
-      const startingPages = bundleIndexStartingPages(sourcePageCounts, { paginate, startNumber });
+      const startingPages = bundleIndexStartingPages(sourcePageCounts, { paginate, startNumber, coverPages: includeCover ? 1 : 0 });
       const indexRows = sourceDocs.map((doc, i) => ({
         seq: i + 1,
         label: sanitizeIndexLabel(documentLabels[doc.id], doc.displayName || doc.name || doc.id),
@@ -3659,6 +3769,14 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
         await prependBundleIndexPage(bundlePdf, indexRows);
       } catch {
         return res.status(400).json({ error: 'Could not generate the bundle index page' });
+      }
+    }
+
+    if (includeCover) {
+      try {
+        await prependBundleCoverPage(bundlePdf, coverFields);
+      } catch {
+        return res.status(400).json({ error: 'Could not generate the bundle cover page' });
       }
     }
 
@@ -3713,6 +3831,8 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
       metadata.indexPageCount = 1;
       metadata.labelCount = sourceDocs.filter(doc => Object.prototype.hasOwnProperty.call(documentLabels, doc.id)).length;
     }
+    metadata.includeCover = includeCover;
+    metadata.coverFieldCount = includeCover ? coverFieldCount : 0;
 
     await recordAuditEvent(req, {
       action: 'document_tool_court_bundle_downloaded',
@@ -3734,7 +3854,7 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
 
 app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async (req, res) => {
   try {
-    const { matterId, documentIds: rawDocumentIds, filename: rawFilename, paginate: rawPaginate, startNumber: rawStart, position: rawPosition, includeIndex: rawIncludeIndex, documentLabels: rawDocumentLabels } = req.body || {};
+    const { matterId, documentIds: rawDocumentIds, filename: rawFilename, paginate: rawPaginate, startNumber: rawStart, position: rawPosition, includeIndex: rawIncludeIndex, documentLabels: rawDocumentLabels, includeCover: rawIncludeCover, cover: rawCover } = req.body || {};
 
     if (!matterId) return res.status(400).json({ error: 'matterId is required' });
     const matter = await get('SELECT * FROM matters WHERE id=?', [matterId]);
@@ -3765,6 +3885,9 @@ app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async 
 
     const includeIndex = rawIncludeIndex === true;
     const documentLabels = rawDocumentLabels && typeof rawDocumentLabels === 'object' && !Array.isArray(rawDocumentLabels) ? rawDocumentLabels : {};
+    const includeCover = rawIncludeCover === true;
+    const coverFields = buildCoverFields(rawCover);
+    const coverFieldCount = Object.values(coverFields).filter(Boolean).length;
 
     const outputFilename = cleanPdfDownloadName(rawFilename || 'court-bundle.pdf');
     const sourceDocs = [];
@@ -3799,8 +3922,10 @@ app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async 
       return res.status(400).json({ error: 'One or more selected PDFs could not be read — they may be corrupt or encrypted' });
     }
 
+    // Insert front matter so the cover is physical page 1 and the index follows
+    // it: add the index at position 0 first, then the cover at position 0.
     if (includeIndex) {
-      const startingPages = bundleIndexStartingPages(sourcePageCounts, { paginate, startNumber });
+      const startingPages = bundleIndexStartingPages(sourcePageCounts, { paginate, startNumber, coverPages: includeCover ? 1 : 0 });
       const indexRows = sourceDocs.map((doc, i) => ({
         seq: i + 1,
         label: sanitizeIndexLabel(documentLabels[doc.id], doc.displayName || doc.name || doc.id),
@@ -3810,6 +3935,14 @@ app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async 
         await prependBundleIndexPage(bundlePdf, indexRows);
       } catch {
         return res.status(400).json({ error: 'Could not generate the bundle index page' });
+      }
+    }
+
+    if (includeCover) {
+      try {
+        await prependBundleCoverPage(bundlePdf, coverFields);
+      } catch {
+        return res.status(400).json({ error: 'Could not generate the bundle cover page' });
       }
     }
 
@@ -3890,6 +4023,8 @@ app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async 
       metadata.indexPageCount = 1;
       metadata.labelCount = sourceDocs.filter(doc => Object.prototype.hasOwnProperty.call(documentLabels, doc.id)).length;
     }
+    metadata.includeCover = includeCover;
+    metadata.coverFieldCount = includeCover ? coverFieldCount : 0;
 
     await recordAuditEvent(req, {
       action: 'document_tool_court_bundle_saved',
