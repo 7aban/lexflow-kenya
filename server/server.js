@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const { hashPassword, verifyPassword } = require('./lib/passwords');
 const jwt = require('jsonwebtoken');
 const PDFDocument = require('pdfkit');
-const { PDFDocument: PDFLibDocument, degrees, StandardFonts, rgb } = require('pdf-lib');
+const { PDFDocument: PDFLibDocument, degrees, StandardFonts, rgb, PDFName, PDFString } = require('pdf-lib');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { authenticate, requireAdmin, requireAdvocateOrAdmin, requireStaff } = require('./middleware');
@@ -3735,9 +3735,102 @@ async function insertDividerPage(bundlePdf, position, label, seq) {
   });
 }
 
+// --- Court Bundle PDF bookmarks / outlines (PRODUCT-14M) ---
+// Optional top-level PDF navigation entries (no nesting in v1) for the cover,
+// index and each selected source document / divider section. Labels are reduced
+// to WinAnsi-safe printable text and length-capped, mirroring the index/divider
+// sanitizers, so PDFString.of() can never throw on user-supplied text.
+const MAX_BOOKMARK_LABEL_LENGTH = 120;
+function sanitizeBookmarkLabel(raw, fallback) {
+  const clean = value => {
+    const str = String(value == null ? '' : value);
+    let out = '';
+    for (const ch of str) {
+      const code = ch.codePointAt(0);
+      if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) { out += ' '; continue; } // strip control characters
+      if (code > 0xff) { out += '?'; continue; }                                    // map outside-WinAnsi to '?'
+      out += ch;
+    }
+    return out.replace(/\s+/g, ' ').trim();
+  };
+  const safeFallback = clean(fallback) || 'Document';
+  const safeLabel = clean(raw);
+  return (safeLabel || safeFallback).slice(0, MAX_BOOKMARK_LABEL_LENGTH);
+}
+
+// Section bookmark label, preferring dividerLabels[doc.id], then
+// documentLabels[doc.id], then doc.displayName / doc.name, then 'Document'.
+function buildBookmarkLabel(doc, dividerLabels, documentLabels) {
+  const fallback = doc.displayName || doc.name || 'Document';
+  const labels1 = dividerLabels && typeof dividerLabels === 'object' && !Array.isArray(dividerLabels) ? dividerLabels : {};
+  const labels2 = documentLabels && typeof documentLabels === 'object' && !Array.isArray(documentLabels) ? documentLabels : {};
+  const fromDivider = labels1[doc.id];
+  if (fromDivider !== undefined && String(fromDivider).trim()) return sanitizeBookmarkLabel(fromDivider, fallback);
+  const fromDocument = labels2[doc.id];
+  if (fromDocument !== undefined && String(fromDocument).trim()) return sanitizeBookmarkLabel(fromDocument, fallback);
+  return sanitizeBookmarkLabel('', fallback);
+}
+
+// Build the ordered v1 bookmark entries against the final assembled layout:
+// optional cover (physical page 1), optional index, then one entry per source
+// document pointing at its divider page (when dividers are enabled) or otherwise
+// the first page of that source document. Page indices are 0-based.
+function buildBundleBookmarkEntries({ includeCover, includeIndex, includeDividers, sourceDocs, sourcePageCounts, dividerLabels, documentLabels }) {
+  const entries = [];
+  const coverPages = includeCover ? 1 : 0;
+  const indexPages = includeIndex ? 1 : 0;
+  if (includeCover) entries.push({ title: 'Cover Page', pageIndex: 0 });
+  if (includeIndex) entries.push({ title: 'Index', pageIndex: coverPages });
+  let offset = coverPages + indexPages;
+  for (let i = 0; i < sourceDocs.length; i++) {
+    entries.push({ title: buildBookmarkLabel(sourceDocs[i], dividerLabels, documentLabels), pageIndex: offset });
+    offset += (includeDividers ? 1 : 0) + sourcePageCounts[i];
+  }
+  return entries;
+}
+
+// Attach a flat /Outlines tree to pdfDoc using pdf-lib low-level objects. Each
+// entry may carry a pageRef or a 0-based pageIndex (resolved against the final
+// document). Titles use PDFString.of so they serialize as strings, not names.
+// Returns the number of bookmarks written. Never throws on its own callers wrap
+// it defensively, but invalid entries are simply skipped.
+function addPdfOutlines(pdfDoc, bookmarkEntries) {
+  if (!Array.isArray(bookmarkEntries) || bookmarkEntries.length === 0) return 0;
+  const ctx = pdfDoc.context;
+  const pageCount = pdfDoc.getPageCount();
+  if (pageCount === 0) return 0;
+  const entries = [];
+  for (const entry of bookmarkEntries) {
+    if (!entry || typeof entry.title !== 'string' || !entry.title) continue;
+    let pageRef = entry.pageRef || null;
+    if (!pageRef && Number.isInteger(entry.pageIndex)) {
+      const idx = Math.min(Math.max(entry.pageIndex, 0), pageCount - 1);
+      pageRef = pdfDoc.getPage(idx).ref;
+    }
+    if (pageRef) entries.push({ title: entry.title, pageRef });
+  }
+  if (entries.length === 0) return 0;
+
+  // Reserve refs up front so items can reference the root as their /Parent and
+  // each other via /Prev and /Next.
+  const rootRef = ctx.nextRef();
+  const itemRefs = entries.map(() => ctx.nextRef());
+  entries.forEach((entry, i) => {
+    const dict = ctx.obj({ Parent: rootRef, Dest: [entry.pageRef, 'XYZ', null, null, null] });
+    dict.set(PDFName.of('Title'), PDFString.of(entry.title));
+    if (i > 0) dict.set(PDFName.of('Prev'), itemRefs[i - 1]);
+    if (i < entries.length - 1) dict.set(PDFName.of('Next'), itemRefs[i + 1]);
+    ctx.assign(itemRefs[i], dict);
+  });
+  const root = ctx.obj({ Type: 'Outlines', First: itemRefs[0], Last: itemRefs[itemRefs.length - 1], Count: entries.length });
+  ctx.assign(rootRef, root);
+  pdfDoc.catalog.set(PDFName.of('Outlines'), rootRef);
+  return entries.length;
+}
+
 app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
   try {
-    const { matterId, documentIds: rawDocumentIds, filename: rawFilename, paginate: rawPaginate, startNumber: rawStart, position: rawPosition, includeIndex: rawIncludeIndex, documentLabels: rawDocumentLabels, includeCover: rawIncludeCover, cover: rawCover, includeDividers: rawIncludeDividers, dividerLabels: rawDividerLabels } = req.body || {};
+    const { matterId, documentIds: rawDocumentIds, filename: rawFilename, paginate: rawPaginate, startNumber: rawStart, position: rawPosition, includeIndex: rawIncludeIndex, documentLabels: rawDocumentLabels, includeCover: rawIncludeCover, cover: rawCover, includeDividers: rawIncludeDividers, dividerLabels: rawDividerLabels, includeBookmarks: rawIncludeBookmarks } = req.body || {};
 
     if (!matterId) return res.status(400).json({ error: 'matterId is required' });
     const matter = await get('SELECT * FROM matters WHERE id=?', [matterId]);
@@ -3773,6 +3866,7 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
     const coverFieldCount = Object.values(coverFields).filter(Boolean).length;
     const includeDividers = rawIncludeDividers === true;
     const dividerLabels = rawDividerLabels && typeof rawDividerLabels === 'object' && !Array.isArray(rawDividerLabels) ? rawDividerLabels : {};
+    const includeBookmarks = rawIncludeBookmarks === true;
 
     const outputFilename = cleanPdfDownloadName(rawFilename || 'court-bundle.pdf');
     const sourceDocs = [];
@@ -3865,6 +3959,20 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
       }
     }
 
+    // Optional PDF bookmarks / outline. Built against the final assembled layout
+    // (cover, index and divider front/section matter already in place). Outline
+    // construction never aborts bundle generation: on failure we fall back to a
+    // valid PDF with no bookmarks (bookmarkCount stays 0).
+    let bookmarkCount = 0;
+    if (includeBookmarks) {
+      try {
+        const bookmarkEntries = buildBundleBookmarkEntries({ includeCover, includeIndex, includeDividers, sourceDocs, sourcePageCounts, dividerLabels, documentLabels });
+        bookmarkCount = addPdfOutlines(bundlePdf, bookmarkEntries);
+      } catch {
+        bookmarkCount = 0;
+      }
+    }
+
     let outputBuffer;
     try {
       outputBuffer = Buffer.from(await bundlePdf.save());
@@ -3902,6 +4010,8 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
     metadata.coverFieldCount = includeCover ? coverFieldCount : 0;
     metadata.includeDividers = includeDividers;
     metadata.dividerCount = includeDividers ? sourceDocs.length : 0;
+    metadata.includeBookmarks = includeBookmarks;
+    if (includeBookmarks) metadata.bookmarkCount = bookmarkCount;
 
     await recordAuditEvent(req, {
       action: 'document_tool_court_bundle_downloaded',
@@ -3923,7 +4033,7 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
 
 app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async (req, res) => {
   try {
-    const { matterId, documentIds: rawDocumentIds, filename: rawFilename, paginate: rawPaginate, startNumber: rawStart, position: rawPosition, includeIndex: rawIncludeIndex, documentLabels: rawDocumentLabels, includeCover: rawIncludeCover, cover: rawCover, includeDividers: rawIncludeDividers, dividerLabels: rawDividerLabels } = req.body || {};
+    const { matterId, documentIds: rawDocumentIds, filename: rawFilename, paginate: rawPaginate, startNumber: rawStart, position: rawPosition, includeIndex: rawIncludeIndex, documentLabels: rawDocumentLabels, includeCover: rawIncludeCover, cover: rawCover, includeDividers: rawIncludeDividers, dividerLabels: rawDividerLabels, includeBookmarks: rawIncludeBookmarks } = req.body || {};
 
     if (!matterId) return res.status(400).json({ error: 'matterId is required' });
     const matter = await get('SELECT * FROM matters WHERE id=?', [matterId]);
@@ -3959,6 +4069,7 @@ app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async 
     const coverFieldCount = Object.values(coverFields).filter(Boolean).length;
     const includeDividers = rawIncludeDividers === true;
     const dividerLabels = rawDividerLabels && typeof rawDividerLabels === 'object' && !Array.isArray(rawDividerLabels) ? rawDividerLabels : {};
+    const includeBookmarks = rawIncludeBookmarks === true;
 
     const outputFilename = cleanPdfDownloadName(rawFilename || 'court-bundle.pdf');
     const sourceDocs = [];
@@ -4051,6 +4162,20 @@ app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async 
       }
     }
 
+    // Optional PDF bookmarks / outline. Built against the final assembled layout
+    // (cover, index and divider front/section matter already in place). Outline
+    // construction never aborts bundle generation: on failure we fall back to a
+    // valid PDF with no bookmarks (bookmarkCount stays 0).
+    let bookmarkCount = 0;
+    if (includeBookmarks) {
+      try {
+        const bookmarkEntries = buildBundleBookmarkEntries({ includeCover, includeIndex, includeDividers, sourceDocs, sourcePageCounts, dividerLabels, documentLabels });
+        bookmarkCount = addPdfOutlines(bundlePdf, bookmarkEntries);
+      } catch {
+        bookmarkCount = 0;
+      }
+    }
+
     let outputBuffer;
     try {
       outputBuffer = Buffer.from(await bundlePdf.save());
@@ -4114,6 +4239,8 @@ app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async 
     metadata.coverFieldCount = includeCover ? coverFieldCount : 0;
     metadata.includeDividers = includeDividers;
     metadata.dividerCount = includeDividers ? sourceDocs.length : 0;
+    metadata.includeBookmarks = includeBookmarks;
+    if (includeBookmarks) metadata.bookmarkCount = bookmarkCount;
 
     await recordAuditEvent(req, {
       action: 'document_tool_court_bundle_saved',

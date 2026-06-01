@@ -328,12 +328,12 @@ export const saveNumberedPdf = (documentId, startNumber, position, filename, mat
     method: 'POST',
     body: { matterId, documentId, startNumber, position, filename, clientVisible: false },
   });
-export const createCourtBundle = (matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, includeCover, cover, includeDividers, dividerLabels) =>
-  postDownloadWithAuth('/document-tools/court-bundle', { matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, ...(includeCover ? { includeCover: true, cover } : {}), ...(includeDividers ? { includeDividers: true, dividerLabels: dividerLabels || {} } : {}) }, filename || 'court-bundle.pdf');
-export const saveCourtBundle = (matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, includeCover, cover, includeDividers, dividerLabels) =>
+export const createCourtBundle = (matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, includeCover, cover, includeDividers, dividerLabels, includeBookmarks) =>
+  postDownloadWithAuth('/document-tools/court-bundle', { matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, ...(includeCover ? { includeCover: true, cover } : {}), ...(includeDividers ? { includeDividers: true, dividerLabels: dividerLabels || {} } : {}), ...(includeBookmarks ? { includeBookmarks: true } : {}) }, filename || 'court-bundle.pdf');
+export const saveCourtBundle = (matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, includeCover, cover, includeDividers, dividerLabels, includeBookmarks) =>
   api('/document-tools/court-bundle/save', {
     method: 'POST',
-    body: { matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, ...(includeCover ? { includeCover: true, cover } : {}), ...(includeDividers ? { includeDividers: true, dividerLabels: dividerLabels || {} } : {}) },
+    body: { matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, ...(includeCover ? { includeCover: true, cover } : {}), ...(includeDividers ? { includeDividers: true, dividerLabels: dividerLabels || {} } : {}), ...(includeBookmarks ? { includeBookmarks: true } : {}) },
   });
 export const moveDocument = (docId, folderId) => api(`/documents/${docId}`, { method: 'PATCH', body: { folderId } });
 export const updateDocument = (docId, data) => api(`/documents/${docId}`, { method: 'PATCH', body: data });

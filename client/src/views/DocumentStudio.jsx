@@ -153,6 +153,7 @@ export default function DocumentStudio({ notify }) {
   const [bundleCover, setBundleCover] = useState({ title: 'COURT BUNDLE', court: '', caseNumber: '', caseTitle: '', bundleTitle: '', preparedBy: '', date: '' });
   const [bundleIncludeDividers, setBundleIncludeDividers] = useState(false);
   const [bundleDividerLabels, setBundleDividerLabels] = useState({});
+  const [bundleIncludeBookmarks, setBundleIncludeBookmarks] = useState(false);
   const [firmName, setFirmName] = useState('');
   const [bundleLoading, setBundleLoading] = useState(false);
   const [bundleError, setBundleError] = useState(null);
@@ -695,7 +696,7 @@ export default function DocumentStudio({ notify }) {
     }
     setBundleLoading(true);
     try {
-      await createCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined, bundleIncludeCover, bundleIncludeCover ? bundleCover : undefined, bundleIncludeDividers, bundleIncludeDividers ? bundleDividerLabels : undefined);
+      await createCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined, bundleIncludeCover, bundleIncludeCover ? bundleCover : undefined, bundleIncludeDividers, bundleIncludeDividers ? bundleDividerLabels : undefined, bundleIncludeBookmarks);
       setBundleSuccess('Court bundle downloaded.');
       notify?.({ type: 'success', message: 'Court bundle downloaded.' });
     } catch (err) {
@@ -724,7 +725,7 @@ export default function DocumentStudio({ notify }) {
     }
     setBundleSaveLoading(true);
     try {
-      await saveCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined, bundleIncludeCover, bundleIncludeCover ? bundleCover : undefined, bundleIncludeDividers, bundleIncludeDividers ? bundleDividerLabels : undefined);
+      await saveCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined, bundleIncludeCover, bundleIncludeCover ? bundleCover : undefined, bundleIncludeDividers, bundleIncludeDividers ? bundleDividerLabels : undefined, bundleIncludeBookmarks);
       setBundleSaveSuccess('Saved to matter documents. Open the matter Documents tab to view it.');
       notify?.({ type: 'success', message: 'Saved to matter documents. Open the matter Documents tab to view it.' });
     } catch (err) {
@@ -1663,6 +1664,17 @@ export default function DocumentStudio({ notify }) {
                 />
                 <span style={{ fontSize: 12, color: theme.ink }}>Add section dividers</span>
               </label>
+
+              <label style={{ ...styles.field, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0' }}>
+                <input
+                  type="checkbox"
+                  checked={bundleIncludeBookmarks}
+                  onChange={event => setBundleIncludeBookmarks(event.target.checked)}
+                  disabled={bundleLoading || bundleSaveLoading}
+                  style={{ margin: 0 }}
+                />
+                <span style={{ fontSize: 12, color: theme.ink }}>Add PDF bookmarks / outline</span>
+              </label>
             </div>
 
             {bundlePaginate && (
@@ -1705,6 +1717,12 @@ export default function DocumentStudio({ notify }) {
             {bundleIncludeDividers && (
               <div style={{ border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
                 Dividers are inserted before each selected PDF. {bundlePaginate ? 'If pagination is enabled, cover, index, and dividers are included in the page count.' : ''}
+              </div>
+            )}
+
+            {bundleIncludeBookmarks && (
+              <div style={{ border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
+                Adds PDF navigation entries for the cover, index, and each section.
               </div>
             )}
 
