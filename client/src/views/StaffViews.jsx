@@ -57,6 +57,10 @@ function isoDateOnly() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function addDaysIso(days) {
+  return new Date(Date.now() + Number(days || 0) * 86400000).toISOString().slice(0, 10);
+}
+
 function formatTimelineDate(value) {
   const parsed = parseDateValue(value);
   if (!parsed) return 'Date not recorded';
@@ -79,6 +83,11 @@ function formatDayDistance(days) {
   if (days > 0) return `in ${days} days`;
   const overdueDays = Math.abs(days);
   return `${overdueDays} day${overdueDays === 1 ? '' : 's'} overdue`;
+}
+
+function invoiceDueDaysSetting(settings) {
+  const days = Number(settings?.defaultInvoiceDueDays);
+  return [7, 14, 30, 45].includes(days) ? days : 30;
 }
 
 function buildMatterNextActionHints(detail) {
@@ -776,6 +785,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   const emptyEventForm = { title: '', date: '', time: '9:00 AM', type: 'Hearing', location: '', meetingLink: '', attorney: '', prepNote: '' };
   const [eventForm, setEventForm] = useState(emptyEventForm);
   const [note, setNote] = useState('');
+  const [invoiceDueDateOverride, setInvoiceDueDateOverride] = useState('');
   const [taskTimer, setTaskTimer] = useState(null);
   const [advocates, setAdvocates] = useState([]);
   const [reassignTo, setReassignTo] = useState('');
@@ -797,6 +807,8 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   const canApplyChecklistTemplate = userRole === 'admin' || userRole === 'advocate';
   const activeChecklistTemplates = checklistTemplates.filter(template => Number(template.active || 0) === 1);
   const canViewBilling = isAdmin || session?.user?.role !== 'advocate' || Number(data.firmSettings?.advocateBillingVisibility ?? 1) !== 0;
+  const defaultInvoiceDueDays = invoiceDueDaysSetting(data.firmSettings);
+  const defaultInvoiceDueDate = addDaysIso(defaultInvoiceDueDays);
   const selected = data.matters.find(m => m.id === selectedId) || data.matters[0];
   const nextActionHints = useMemo(() => buildMatterNextActionHints(detail), [detail]);
 
@@ -904,7 +916,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   async function addNote(event) { event.preventDefault(); if (!detail || !note.trim()) return; try { await api(`/matters/${detail.id}/notes`, { method: 'POST', body: { content: note } }); setNote(''); notify({ type: 'success', message: 'Case note saved.' }); await loadDetail(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function createEvent(event) { event.preventDefault(); if (!detail) return; try { await api('/appearances', { method: 'POST', body: { ...eventForm, matterId: detail.id } }); setEventForm(emptyEventForm); notify({ type: 'success', message: 'Court appearance scheduled.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function uploadDoc(event) { const file = event.target.files?.[0]; if (!file || !detail) return; try { await api(`/matters/${detail.id}/documents`, { method: 'POST', body: { name: file.name, mimeType: file.type || 'application/octet-stream', data: await fileToDataUrl(file) } }); notify({ type: 'success', message: 'Document uploaded.' }); event.target.value = ''; await loadDetail(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
-  async function generateInvoice() { if (!detail) return; try { await api('/invoices/generate', { method: 'POST', body: { matterId: detail.id } }); notify({ type: 'success', message: 'Invoice generated.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
+  async function generateInvoice() { if (!detail) return; try { const body = { matterId: detail.id }; if (invoiceDueDateOverride) body.dueDate = invoiceDueDateOverride; await api('/invoices/generate', { method: 'POST', body }); setInvoiceDueDateOverride(''); notify({ type: 'success', message: 'Invoice generated.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   function startMatterEdit() { if (!detail) return; setEditingMatter(true); setForm({ ...emptyMatterForm, ...detail }); }
   async function archiveMatter() { if (!detail) return; try { await api(`/matters/${detail.id}/status`, { method: 'PATCH', body: { stage: 'Closed' } }); notify({ type: 'success', message: 'Matter archived.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteMatterRecord() { if (!detail) return; try { const id = detail.id; await api(`/matters/${id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Matter deleted.' }); setDetail(null); setSelectedId(''); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
@@ -1005,7 +1017,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
             confirmDelete={template => setConfirm({ title: 'Deactivate checklist template?', message: 'Deactivate this template? Already-applied matter checklist items will remain unchanged.', onConfirm: () => deactivateChecklistTemplate(template) })}
           />
         )}
-        <Card title={detail?.title || 'Matter detail'} hint={detail?.reference || 'Select a file'} action={detail && canManage ? <ActionGroup actions={[['Edit', startMatterEdit], ['Archive', () => setConfirm({ title: 'Archive matter?', message: 'Archive this matter by setting the stage to Closed?', onConfirm: archiveMatter })], ['Delete', () => setConfirm({ title: 'Delete matter?', message: 'Delete this matter and all associated data?', onConfirm: deleteMatterRecord })], ['Invoice', generateInvoice]]} /> : null}>
+        <Card title={detail?.title || 'Matter detail'} hint={detail?.reference || 'Select a file'} action={detail && canManage ? <ActionGroup actions={[['Edit', startMatterEdit], ['Archive', () => setConfirm({ title: 'Archive matter?', message: 'Archive this matter by setting the stage to Closed?', onConfirm: archiveMatter })], ['Delete', () => setConfirm({ title: 'Delete matter?', message: 'Delete this matter and all associated data?', onConfirm: deleteMatterRecord })]]} /> : null}>
           {loading && <Skeleton rows={2} />}
           {!loading && detail && (
             <div className="lf-matter-detail-workspace" style={{ ...styles.detailStack, minWidth: 0 }}>
@@ -1075,7 +1087,23 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
                   <div id="matter-section-court"><Sub title="Court appearances">{canManage && <form onSubmit={createEvent} style={{ ...styles.formGrid, marginBottom: 12 }}><Field label="Title"><input required style={styles.input} value={eventForm.title} onChange={e => setEventForm({ ...eventForm, title: e.target.value })} /></Field><Field label="Date"><input required type="date" style={styles.input} value={eventForm.date} onChange={e => setEventForm({ ...eventForm, date: e.target.value })} /></Field><Field label="Time"><input style={styles.input} value={eventForm.time} onChange={e => setEventForm({ ...eventForm, time: e.target.value })} /></Field><Field label="Type"><input style={styles.input} value={eventForm.type} onChange={e => setEventForm({ ...eventForm, type: e.target.value })} /></Field><Field label="Location"><input style={styles.input} value={eventForm.location} onChange={e => setEventForm({ ...eventForm, location: e.target.value })} /></Field><Field label="Meeting Link"><input type="url" placeholder="https://..." style={styles.input} value={eventForm.meetingLink} onChange={e => setEventForm({ ...eventForm, meetingLink: e.target.value })} /></Field><button style={styles.ghostButton}>Schedule event</button></form>}<AppearanceEditorList events={detail.appearances || []} canManage={canManage} editingEvent={editingEvent} setEditingEvent={setEditingEvent} saveEvent={saveEvent} confirmDelete={event => setConfirm({ title: 'Delete appearance?', message: 'Delete this court appearance?', onConfirm: () => deleteEventRecord(event) })} /></Sub></div>
                   <div id="matter-section-documents"><Sub title="Documents"><MatterDocuments matterId={detail.id} canManage={canManage} notify={notify} /></Sub></div>
                   <div id="matter-section-notes"><Sub title="Case notes"><form onSubmit={addNote} style={styles.noteForm}><input style={styles.input} value={note} onChange={e => setNote(e.target.value)} placeholder="Add a note" /><button style={styles.ghostButton}>Save note</button></form><div className="lf-matter-notes-cards"><Table columns={['Note', 'Author', 'Created']} rows={(detail.notes || []).map(n => [n.content, n.author || '-', n.createdAt ? new Date(n.createdAt).toLocaleString() : '-'])} empty="No notes yet." /></div></Sub></div>
-                  <div id="matter-section-invoices"><Sub title="Invoices"><div className="lf-invoice-cards"><Table columns={['Invoice', 'Amount', 'Paid', 'Balance', 'Status', 'PDF', 'Actions']} rows={(detail.invoices || []).map(i => [i.number || i.id, kes(i.amount), kes(i.amountPaid), kes(i.balance), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <DownloadButton key={`${i.id}-pdf`} label="PDF" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />, canManage && i.status !== 'Paid' ? <ActionGroup key={`${i.id}-actions`} actions={[['Delete', () => setConfirm({ title: 'Delete invoice?', message: 'Delete this invoice?', onConfirm: () => deleteInvoiceRecord(i) })]]} /> : '-'])} empty="No invoices yet." /></div></Sub></div>
+                  <div id="matter-section-invoices">
+                    <Sub title="Invoices">
+                      {canManage && (
+                        <div style={{ ...styles.formGrid, marginBottom: 12, alignItems: 'end' }}>
+                          <Field label="Default due">
+                            <div style={{ ...styles.input, background: '#F9FAFB', color: theme.muted }}>{defaultInvoiceDueDays} days ({formatTimelineDate(defaultInvoiceDueDate)})</div>
+                          </Field>
+                          <Field label="Due-date override">
+                            <input type="date" style={styles.input} value={invoiceDueDateOverride} onChange={e => setInvoiceDueDateOverride(e.target.value)} />
+                            <div style={styles.formHelper}>Leave blank to use the firm default.</div>
+                          </Field>
+                          <button type="button" style={styles.primaryButton} onClick={generateInvoice}>Generate invoice</button>
+                        </div>
+                      )}
+                      <div className="lf-invoice-cards"><Table columns={['Invoice', 'Amount', 'Paid', 'Balance', 'Status', 'PDF', 'Actions']} rows={(detail.invoices || []).map(i => [i.number || i.id, kes(i.amount), kes(i.amountPaid), kes(i.balance), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <DownloadButton key={`${i.id}-pdf`} label="PDF" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />, canManage && i.status !== 'Paid' ? <ActionGroup key={`${i.id}-actions`} actions={[['Delete', () => setConfirm({ title: 'Delete invoice?', message: 'Delete this invoice?', onConfirm: () => deleteInvoiceRecord(i) })]]} /> : '-'])} empty="No invoices yet." /></div>
+                    </Sub>
+                  </div>
                 </>
               )}
             </div>
@@ -1199,6 +1227,8 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
     const vat = subtotal * vatRate;
     const total = subtotal + vat;
     const items = Array.isArray(detail.items) ? detail.items : [];
+    const dueDistance = detail.dueDate ? daysFromToday(detail.dueDate) : null;
+    const paymentTerms = detail.dueDate ? `Payment due by ${new Date(detail.dueDate).toLocaleDateString('en-KE')}${dueDistance !== null ? ` (${formatDayDistance(dueDistance)})` : ''}.` : 'Payment due date not recorded.';
     const billingFields = [
       firmSettings.kraPin ? ['KRA PIN', firmSettings.kraPin] : null,
       firmSettings.vatNumber ? ['VAT registration number', firmSettings.vatNumber] : null,
@@ -1233,6 +1263,10 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
           <div>
             <div style={{ fontSize: 11, color: '#697386', fontWeight: 500, marginBottom: 2 }}>Due Date</div>
             <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>{detail.dueDate ? new Date(detail.dueDate).toLocaleDateString('en-KE') : '-'}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: '#697386', fontWeight: 500, marginBottom: 2 }}>Payment Terms</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: dueDistance !== null && dueDistance < 0 && detail.status !== 'Paid' ? '#991B1B' : '#111827' }}>{paymentTerms}</div>
           </div>
           <div>
             <div style={{ fontSize: 11, color: '#697386', fontWeight: 500, marginBottom: 2 }}>Status</div>
@@ -1612,6 +1646,15 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
           <div style={{ gridColumn: '1 / -1', borderTop: '1px solid #E5E7EB', paddingTop: 14, marginTop: 4 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: theme.ink }}>Billing & payment</div>
           </div>
+          <Field label="Default invoice due period">
+            <select style={styles.input} value={String(invoiceDueDaysSetting(form))} onChange={e => setForm({ ...form, defaultInvoiceDueDays: Number(e.target.value) })}>
+              <option value="7">7 days</option>
+              <option value="14">14 days</option>
+              <option value="30">30 days</option>
+              <option value="45">45 days</option>
+            </select>
+            <div style={styles.formHelper}>Used when invoice generation has no due-date override.</div>
+          </Field>
           <Field label="Payment instructions">
             <textarea style={{ ...styles.input, minHeight: 84, resize: 'vertical' }} maxLength={800} value={form.paymentInstructions || ''} onChange={e => setForm({ ...form, paymentInstructions: e.target.value })} />
             <div style={styles.formHelper}>Shown on invoice and receipt PDFs when populated.</div>

@@ -115,6 +115,7 @@ const defaultFirmSettings = {
   kraPin: '',
   vatNumber: '',
   invoiceFooterNote: '',
+  defaultInvoiceDueDays: 30,
 };
 
 const {
@@ -175,7 +176,9 @@ async function getFirmSettings() {
       theme = null;
     }
   }
-  return { ...defaultFirmSettings, ...(settings || {}), reminderSettings, theme: theme || null };
+  const normalized = { ...defaultFirmSettings, ...(settings || {}) };
+  normalized.defaultInvoiceDueDays = normalizeDefaultInvoiceDueDays(normalized.defaultInvoiceDueDays);
+  return { ...normalized, reminderSettings, theme: theme || null };
 }
 
 async function initDb() {
@@ -258,6 +261,8 @@ async function initDb() {
   await ensureColumn('firm_settings', 'kraPin', "TEXT DEFAULT ''");
   await ensureColumn('firm_settings', 'vatNumber', "TEXT DEFAULT ''");
   await ensureColumn('firm_settings', 'invoiceFooterNote', "TEXT DEFAULT ''");
+  await ensureColumn('firm_settings', 'defaultInvoiceDueDays', 'INTEGER DEFAULT 30');
+  await run('UPDATE firm_settings SET defaultInvoiceDueDays=30 WHERE defaultInvoiceDueDays NOT IN (7,14,30,45) OR defaultInvoiceDueDays IS NULL');
   await ensureColumn('payments', 'proofId', 'TEXT');
   await ensureColumn('payments', 'createdBy', 'TEXT');
   await ensureColumn('payments', 'createdAt', 'TEXT');
@@ -607,6 +612,25 @@ function normalizeFirmBillingField(value, maxLength) {
   return String(value).trim().slice(0, maxLength);
 }
 
+const ALLOWED_INVOICE_DUE_DAYS = new Set([7, 14, 30, 45]);
+
+function normalizeDefaultInvoiceDueDays(value) {
+  const days = Number(value);
+  return Number.isInteger(days) && ALLOWED_INVOICE_DUE_DAYS.has(days) ? days : 30;
+}
+
+function validIsoDateOnly(value) {
+  const text = String(value || '').trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (!match) return '';
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return '';
+  return text;
+}
+
 // Normalized firm tax / payment-instruction / footer-note fields used by the
 // invoice and receipt PDFs (PRODUCT-15B).
 function firmBillingFields(firm) {
@@ -658,10 +682,11 @@ app.put('/api/firm-settings', authenticate, requireAdmin, async (req, res) => {
   settings.kraPin = normalizeFirmBillingField(settings.kraPin, 80);
   settings.vatNumber = normalizeFirmBillingField(settings.vatNumber, 80);
   settings.invoiceFooterNote = normalizeFirmBillingField(settings.invoiceFooterNote, 500);
-  await run(`INSERT INTO firm_settings (id,name,logo,primaryColor,accentColor,websiteURL,email,phone,address,paymentInstructions,kraPin,vatNumber,invoiceFooterNote)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-    ON CONFLICT(id) DO UPDATE SET name=excluded.name, logo=excluded.logo, primaryColor=excluded.primaryColor, accentColor=excluded.accentColor, websiteURL=excluded.websiteURL, email=excluded.email, phone=excluded.phone, address=excluded.address, paymentInstructions=excluded.paymentInstructions, kraPin=excluded.kraPin, vatNumber=excluded.vatNumber, invoiceFooterNote=excluded.invoiceFooterNote`,
-    [settings.id, settings.name, settings.logo, settings.primaryColor, settings.accentColor, settings.websiteURL, settings.email, settings.phone, settings.address, settings.paymentInstructions, settings.kraPin, settings.vatNumber, settings.invoiceFooterNote]);
+  settings.defaultInvoiceDueDays = normalizeDefaultInvoiceDueDays(settings.defaultInvoiceDueDays);
+  await run(`INSERT INTO firm_settings (id,name,logo,primaryColor,accentColor,websiteURL,email,phone,address,paymentInstructions,kraPin,vatNumber,invoiceFooterNote,defaultInvoiceDueDays)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(id) DO UPDATE SET name=excluded.name, logo=excluded.logo, primaryColor=excluded.primaryColor, accentColor=excluded.accentColor, websiteURL=excluded.websiteURL, email=excluded.email, phone=excluded.phone, address=excluded.address, paymentInstructions=excluded.paymentInstructions, kraPin=excluded.kraPin, vatNumber=excluded.vatNumber, invoiceFooterNote=excluded.invoiceFooterNote, defaultInvoiceDueDays=excluded.defaultInvoiceDueDays`,
+    [settings.id, settings.name, settings.logo, settings.primaryColor, settings.accentColor, settings.websiteURL, settings.email, settings.phone, settings.address, settings.paymentInstructions, settings.kraPin, settings.vatNumber, settings.invoiceFooterNote, settings.defaultInvoiceDueDays]);
   if (req.body.reminderSettings) {
     await saveReminderSettings(req.body.reminderSettings);
     await logAudit(req, 'update', 'reminder_settings', 'default', 'Updated reminder channel settings');
@@ -4672,7 +4697,16 @@ app.post('/api/invoices/generate', requireAdvocateOrAdmin, validate(generateInvo
       return res.status(403).json({ error: 'Matter access denied' });
     }
     const date = today();
-    const dueDate = req.body.dueDate || addDays(30);
+    const firmSettings = await getFirmSettings();
+    const defaultInvoiceDueDays = normalizeDefaultInvoiceDueDays(firmSettings.defaultInvoiceDueDays);
+    const dueDateOverrideProvided = Object.prototype.hasOwnProperty.call(req.body || {}, 'dueDate');
+    let dueDate = addDays(defaultInvoiceDueDays);
+    if (dueDateOverrideProvided) {
+      const requestedDueDate = validIsoDateOnly(req.body.dueDate);
+      if (!requestedDueDate) return res.status(400).json({ error: 'dueDate must be a valid YYYY-MM-DD date' });
+      if (requestedDueDate < date) return res.status(400).json({ error: 'dueDate cannot be in the past' });
+      dueDate = requestedDueDate;
+    }
     const id = genId('INV');
     const number = invoiceNumber();
     let amount = 0;
@@ -4693,7 +4727,7 @@ app.post('/api/invoices/generate', requireAdvocateOrAdmin, validate(generateInvo
     if (source === 'hourly' && items.length) await run(`UPDATE time_entries SET billed=1 WHERE id IN (${items.map(() => '?').join(',')})`, items.map(i => i.timeEntryId));
     await run('UPDATE matters SET totalBilled=COALESCE(totalBilled,0)+? WHERE id=?', [amount, matter.id]);
     await logAudit(req, 'generate', 'invoice', id, `Generated invoice ${number} for matter ${matter.title}`);
-    await recordAuditEvent(req, { action: 'invoice_generated', entityType: 'invoice', entityId: id, matterId: matter.id, clientId: matter.clientId, metadata: { invoiceId: id, number, amount, source, matterId: matter.id, clientId: matter.clientId } }).catch(() => {});
+    await recordAuditEvent(req, { action: 'invoice_generated', entityType: 'invoice', entityId: id, matterId: matter.id, clientId: matter.clientId, metadata: { invoiceId: id, number, amount, source, matterId: matter.id, clientId: matter.clientId, dueDate, defaultInvoiceDueDays, dueDateOverrideUsed: dueDateOverrideProvided } }).catch(() => {});
     res.json(await invoiceWithDetails(id));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -4858,6 +4892,7 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
   doc.fillColor('#111827').fontSize(10).font('Helvetica-Bold').text('Bill To', 48, 132);
   doc.font('Helvetica').fillColor('#374151').text(invoice.clientName || 'Client', 48, 150).text(invoice.clientAddress || invoice.clientEmail || invoice.clientPhone || 'Address on file', 48, 166, { width: 230 });
   [['Invoice #', invoice.number], ['Date', invoice.date], ['Due Date', invoice.dueDate], ['Status', invoice.status]].forEach(([label, value], i) => { const y = 132 + i * 18; doc.font('Helvetica-Bold').fillColor('#6B7280').text(label, 350, y); doc.font('Helvetica').fillColor('#111827').text(String(value || ''), 440, y, { width: 105, align: 'right' }); });
+  if (invoice.dueDate) doc.font('Helvetica').fontSize(8).fillColor('#6B7280').text(`Payment due by ${invoice.dueDate}.`, 350, 204, { width: 195, align: 'right' });
   doc.font('Helvetica-Bold').fillColor('#111827').fontSize(11).text('Matter', 48, 220); doc.font('Helvetica').fontSize(10).text(`${invoice.reference || ''} ${invoice.matterTitle || ''}`.trim(), 48, 238, { width: 460 });
   const top = 282; doc.rect(48, top, 499, 24).fill('#F3F4F6'); doc.fillColor('#374151').font('Helvetica-Bold').fontSize(9); doc.text('Date', 56, top + 8); doc.text('Description', 132, top + 8); doc.text('Hours', 330, top + 8, { width: 42, align: 'right' }); doc.text('Rate', 382, top + 8, { width: 70, align: 'right' }); doc.text('Amount', 465, top + 8, { width: 70, align: 'right' });
   let y = top + 36; doc.font('Helvetica').fontSize(9).fillColor('#111827'); for (const item of invoice.items || []) { if (y > 690) { doc.addPage(); y = 60; } doc.text(item.date || invoice.date, 56, y); doc.text(item.description || 'Legal Services', 132, y, { width: 185 }); doc.text(Number(item.hours || 0).toFixed(item.hours ? 2 : 0), 330, y, { width: 42, align: 'right' }); doc.text(money(item.rate), 382, y, { width: 70, align: 'right' }); doc.text(money(item.amount), 465, y, { width: 70, align: 'right' }); y += 24; }
