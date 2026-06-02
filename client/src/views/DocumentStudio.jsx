@@ -2,52 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf, deletePdfPages, saveDeletedPdf, numberPdfPages, saveNumberedPdf, createCourtBundle, saveCourtBundle } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Skeleton } from '../components/ui.jsx';
-
-const documentToolCards = [
-  {
-    title: 'Merge PDFs',
-    description: 'Combine pleadings, exhibits, and annexures into one staged court bundle.',
-  },
-  {
-    title: 'Extract pages',
-    description: 'Pull selected page ranges from one matter PDF into a new document.',
-  },
-  {
-    title: 'Split / reorder pages',
-    description: 'Prepare page ranges and reorder scanned bundles before final export.',
-  },
-  {
-    title: 'Delete pages',
-    description: 'Remove duplicate, blank, or incorrectly scanned pages during review.',
-  },
-  {
-    title: 'Rotate pages',
-    description: 'Correct sideways pages in affidavits, exhibits, and annexures.',
-  },
-  {
-    title: 'Add page numbers / paginate bundle',
-    description: 'Apply court-ready pagination before filing or service.',
-  },
-  {
-    title: 'Court bundle prep',
-    description: 'Combine selected matter PDFs into a single court-ready bundle with optional page numbers.',
-  },
-  {
-    title: 'Images to PDF',
-    description: 'Convert evidence images and scanned pages into PDF output.',
-  },
-  {
-    title: 'Tenth-lining / appellate formatting',
-    description: 'Prepare legal-document formatting helpers for appellate practice.',
-  },
-];
-
-const workflowPrinciples = [
-  'First outputs will use temporary preview/download before any matter record is created.',
-  'Saving to matter documents will be an explicit later action with audit history.',
-  'Client access will be considered later only where the workflow is appropriate.',
-  'Current matter, document, and client visibility controls remain unchanged.',
-];
+import DocumentToolCards from './document-studio/DocumentToolCards.jsx';
 
 function matterLabel(matter = {}) {
   const base = matter.title || matter.reference || matter.caseNumber || `Matter ${matter.id}`;
@@ -881,7 +836,6 @@ export default function DocumentStudio({ notify }) {
     .filter(Boolean);
   const canMerge = selectedMergeDocumentIds.length >= 2 && selectedMergeDocumentIds.length <= 10 && !mergeLoading && !mergeDocsLoading;
   const canSave = selectedMergeDocumentIds.length >= 2 && selectedMergeDocumentIds.length <= 10 && !saveLoading && !mergeDocsLoading && !!mergeMatterId;
-  const activeToolNames = new Set(['Merge PDFs', 'Rotate pages', 'Extract pages', 'Delete pages', 'Add page numbers / paginate bundle', 'Court bundle prep']);
   const canRotate = !!rotateDocumentId && !rotateLoading && !rotateDocsLoading;
   const canRotateSave = !!rotateDocumentId && !rotateSaveLoading && !rotateDocsLoading && !!rotateMatterId;
   const canExtract = !!extractDocumentId && !!extractRanges.trim() && !extractLoading && !extractDocsLoading;
@@ -1924,53 +1878,14 @@ export default function DocumentStudio({ notify }) {
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(230px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
-            {documentToolCards.map(tool => {
-              const active = activeToolNames.has(tool.title);
-              const handler = tool.title === 'Merge PDFs' ? scrollToMergeTool : tool.title === 'Rotate pages' ? scrollToRotateTool : tool.title === 'Extract pages' ? scrollToExtractTool : tool.title === 'Delete pages' ? scrollToDeleteTool : tool.title === 'Add page numbers / paginate bundle' ? scrollToPaginateTool : tool.title === 'Court bundle prep' ? scrollToBundleTool : undefined;
-              return (
-                <div key={tool.title} style={{ border: `1px solid ${active ? theme.blue : theme.line}`, borderRadius: 8, background: '#fff', padding: '14px 16px', display: 'grid', gap: 10, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-                    <strong style={{ fontSize: 14, color: theme.ink, lineHeight: 1.35, wordBreak: 'break-word' }}>{tool.title}</strong>
-                    <Badge tone={active ? 'green' : 'amber'}>{active ? 'Available' : 'Coming soon'}</Badge>
-                  </div>
-                  <span style={{ fontSize: 13, color: theme.muted, lineHeight: 1.5 }}>{tool.description}</span>
-                  <button
-                    type="button"
-                    disabled={!active}
-                    onClick={handler}
-                    style={{
-                      ...styles.ghostButton,
-                      justifySelf: 'start',
-                      fontSize: 12,
-                      padding: '5px 12px',
-                      color: active ? 'var(--lf-primary, #1B3A5C)' : theme.muted,
-                      borderColor: active ? theme.blue : theme.line,
-                      cursor: active ? 'pointer' : 'not-allowed',
-                      opacity: active ? 1 : 0.75,
-                    }}
-                  >
-                    {active ? 'Open Tool' : 'Not available yet'}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-
-          <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#F8FAFC', padding: '14px 16px', display: 'grid', gap: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-              <strong style={{ fontSize: 14, color: theme.ink }}>Planned workflow</strong>
-              <Badge tone="blue">Design principle</Badge>
-            </div>
-            <div style={{ display: 'grid', gap: 7 }}>
-              {workflowPrinciples.map(item => (
-                <div key={item} style={{ display: 'grid', gridTemplateColumns: '8px minmax(0, 1fr)', gap: 8, alignItems: 'start', fontSize: 13, color: theme.muted, lineHeight: 1.5 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: 999, background: theme.blue, marginTop: 6 }} />
-                  <span>{item}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+          <DocumentToolCards
+            onOpenMerge={scrollToMergeTool}
+            onOpenRotate={scrollToRotateTool}
+            onOpenExtract={scrollToExtractTool}
+            onOpenDelete={scrollToDeleteTool}
+            onOpenPaginate={scrollToPaginateTool}
+            onOpenBundle={scrollToBundleTool}
+          />
         </div>
       </Card>
     </div>
