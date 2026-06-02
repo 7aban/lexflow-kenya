@@ -637,7 +637,7 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
     <div className="lf-matter-grid lf-client-matter-grid" style={styles.matterGrid}>
       <Card title="My matters" hint={`${matters.length} file(s)`}>
         <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-          <input type="search" placeholder="Find a matter\u2026" value={search} onChange={e => setSearch(e.target.value)} style={{ flex: 1, minWidth: 140, padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }} />
+          <input type="search" placeholder="Find a matter…" value={search} onChange={e => setSearch(e.target.value)} style={{ flex: 1, minWidth: 140, padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }} />
           {statusOptions.length > 0 && (
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}>
               <option value="">All matters</option>
@@ -738,7 +738,7 @@ function Notices({ notices, matters, notify }) {
       <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         <input
           type="search"
-          placeholder="Find an update\u2026"
+          placeholder="Find an update…"
           value={search}
           onChange={e => setSearch(e.target.value)}
           style={{ flex: 1, minWidth: 160, padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}
@@ -850,7 +850,7 @@ function Documents({ documents, matters, notify }) {
       <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         <input
           type="search"
-          placeholder="Find a document\u2026"
+          placeholder="Find a document…"
           value={search}
           onChange={e => setSearch(e.target.value)}
           style={{ flex: 1, minWidth: 160, padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}
@@ -1047,7 +1047,7 @@ function CourtDates({ appearances, matters }) {
       <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         <input
           type="search"
-          placeholder="Find a court date\u2026"
+          placeholder="Find a court date…"
           value={search}
           onChange={e => setSearch(e.target.value)}
           style={{ flex: 1, minWidth: 160, padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}
@@ -1215,7 +1215,7 @@ function BillingInvoices({ data, matters, notify }) {
       <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         <input
           type="search"
-          placeholder="Find an invoice\u2026"
+          placeholder="Find an invoice…"
           value={search}
           onChange={e => setSearch(e.target.value)}
           style={{ flex: 1, minWidth: 160, padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}
