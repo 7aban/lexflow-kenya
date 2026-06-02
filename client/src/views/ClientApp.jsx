@@ -678,7 +678,14 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
             <Field label="Note"><input style={styles.input} value={payment.note} onChange={e => setPayment({ ...payment, note: e.target.value })} placeholder="Optional note" /></Field>
             <button style={styles.primaryButton}>Upload proof</button>
           </form>
-          <div className="lf-client-proofs-cards"><Table columns={['Reference', 'Method', 'Amount', 'Uploaded']} rows={proofs.map(p => [p.reference, p.method, kes(p.amount), p.createdAt ? new Date(p.createdAt).toLocaleString() : '-'])} empty="No payment proof uploaded yet." /></div>
+          <div className="lf-client-proofs-cards"><Table columns={['Reference', 'Method', 'Amount', 'Uploaded', 'Status', 'Review']} rows={proofs.map(p => [
+            p.reference,
+            p.method,
+            kes(p.amount),
+            p.createdAt ? new Date(p.createdAt).toLocaleString() : '-',
+            <div key={`${p.id}-st`} style={{ display: 'grid', gap: 3 }}><Badge tone={p.status === 'Accepted' ? 'green' : p.status === 'Rejected' ? 'red' : 'amber'}>{p.status || 'Pending'}</Badge>{p.reviewedAt ? <span style={{ fontSize: 11, color: '#6B7280' }}>{new Date(p.reviewedAt).toLocaleDateString()}</span> : null}</div>,
+            <div key={`${p.id}-rv`} style={{ display: 'grid', gap: 3 }}>{p.reviewNote ? <span style={{ fontSize: 12 }}>{p.reviewNote}</span> : <span style={{ fontSize: 11, color: '#6B7280' }}>{(p.status || 'Pending') === 'Pending' ? 'Awaiting review' : '—'}</span>}{p.paymentId ? <span style={{ fontSize: 11, color: '#16A34A' }}>Payment recorded</span> : null}</div>,
+          ])} empty="No payment proof uploaded yet." /></div>
         </Card>
       </div>
     </div>

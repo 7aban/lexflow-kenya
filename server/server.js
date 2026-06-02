@@ -269,6 +269,13 @@ async function initDb() {
   await run("UPDATE payments SET createdAt=COALESCE(NULLIF(createdAt,''), COALESCE(NULLIF(date,''), CURRENT_TIMESTAMP)) WHERE createdAt IS NULL OR createdAt=''");
   await ensureColumn('payments', 'receiptNumber', 'TEXT');
   await ensureColumn('payments', 'receiptIssuedAt', 'TEXT');
+  // PRODUCT-15I: payment-proof review lifecycle. Existing rows default to Pending.
+  await ensureColumn('payment_proofs', 'status', "TEXT DEFAULT 'Pending'");
+  await ensureColumn('payment_proofs', 'reviewedBy', 'TEXT');
+  await ensureColumn('payment_proofs', 'reviewedAt', 'TEXT');
+  await ensureColumn('payment_proofs', 'reviewNote', 'TEXT');
+  await ensureColumn('payment_proofs', 'paymentId', 'TEXT');
+  await run("UPDATE payment_proofs SET status='Pending' WHERE status IS NULL OR status=''");
   await run(`CREATE TABLE IF NOT EXISTS receipt_sequences (year TEXT PRIMARY KEY, lastSeq INTEGER NOT NULL DEFAULT 0)`);
   await run('CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_receiptNumber ON payments(receiptNumber) WHERE receiptNumber IS NOT NULL AND receiptNumber<>""');
   await run('CREATE INDEX IF NOT EXISTS idx_audit_events_timestamp ON audit_events(timestamp)');
@@ -304,6 +311,8 @@ async function initDb() {
   await run('CREATE INDEX IF NOT EXISTS idx_notifications_userId_readAt_createdAt ON notifications(userId, readAt, createdAt)');
   await run('CREATE INDEX IF NOT EXISTS idx_payments_invoiceId_date_createdAt ON payments(invoiceId, date, createdAt)');
   await run('CREATE INDEX IF NOT EXISTS idx_payments_clientId_date_createdAt ON payments(clientId, date, createdAt)');
+  await run('CREATE INDEX IF NOT EXISTS idx_payment_proofs_status_createdAt ON payment_proofs(status, createdAt)');
+  await run('CREATE INDEX IF NOT EXISTS idx_payment_proofs_matterId ON payment_proofs(matterId)');
   await backfillSeededReceiptNumbers();
   await seedReminderTemplates();
 
@@ -4768,8 +4777,10 @@ app.post('/api/invoices/:id/payments', async (req, res) => {
   const note = String(req.body.note || '').trim().slice(0, 500);
   const proofId = String(req.body.proofId || '').trim();
   if (proofId) {
-    const proof = await get('SELECT id,invoiceId,matterId,clientId FROM payment_proofs WHERE id=?', [proofId]);
+    const proof = await get('SELECT id,invoiceId,matterId,clientId,status FROM payment_proofs WHERE id=?', [proofId]);
     if (!proof || proof.invoiceId !== invoice.id || proof.matterId !== invoice.matterId || proof.clientId !== invoice.clientId) return res.status(400).json({ error: 'Payment proof does not match this invoice' });
+    // PRODUCT-15I: a rejected proof must not be used to settle. Pending/Accepted may be used; payment recording itself remains deliberate.
+    if (proof.status === 'Rejected') return res.status(400).json({ error: 'Rejected payment proof cannot be used to record a payment' });
   }
   const id = genId('PAY');
   const createdAt = new Date().toISOString();
@@ -4792,6 +4803,8 @@ app.post('/api/invoices/:id/payments', async (req, res) => {
     receiptNumber,
     receiptIssuedAt,
   ]);
+  // PRODUCT-15I: link the proof back to the recorded payment (no status/balance mutation here).
+  if (proofId) await run('UPDATE payment_proofs SET paymentId=? WHERE id=?', [id, proofId]);
   const updatedSummary = await invoicePaymentSummary(invoice.id, invoice.amount);
   const oldStatus = invoice.status || 'Outstanding';
   let newStatus = oldStatus;
@@ -5013,7 +5026,116 @@ app.post('/api/payment-proofs', async (req, res) => {
   ]);
   await logAudit(req, 'upload', 'payment_proof', id, `Uploaded payment proof ${reference} for matter ${matterId}`);
   await recordAuditEvent(req, { action: 'payment_proof_uploaded', entityType: 'payment_proof', entityId: id, matterId, clientId: req.user.clientId || '', metadata: { paymentProofId: id, invoiceId: invoiceId || '', matterId, method, reference, amount: Number(amount || 0) } }).catch(() => {});
-  res.json(await get('SELECT id,invoiceId,matterId,clientId,method,reference,amount,note,fileName,mimeType,size,createdAt FROM payment_proofs WHERE id=?', [id]));
+  res.json(await get('SELECT id,invoiceId,matterId,clientId,method,reference,amount,note,fileName,mimeType,size,createdAt,status,reviewedAt,reviewNote,paymentId FROM payment_proofs WHERE id=?', [id]));
+});
+
+// PRODUCT-15I: payment-proof review queue + safe attachment download + accept/reject review.
+const PAYMENT_PROOF_REVIEW_STATUSES = ['Accepted', 'Rejected'];
+const PAYMENT_PROOF_FILTER_STATUSES = ['Pending', 'Accepted', 'Rejected'];
+const SAFE_PROOF_DOWNLOAD_MIME = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'application/pdf']);
+
+app.get('/api/payment-proofs', requireStaff, async (req, res) => {
+  if (req.user.role === 'advocate' && !(await isBillingVisibleFor(req))) {
+    await recordAuditEvent(req, { action: 'forbidden_payment_proof_queue', entityType: 'payment_proof', metadata: { reason: 'billing_visibility_disabled' } }).catch(() => {});
+    return res.status(403).json({ error: 'Billing access restricted' });
+  }
+  const requested = String(req.query.status || 'All').trim();
+  const statusFilter = requested === 'All' ? null : (PAYMENT_PROOF_FILTER_STATUSES.includes(requested) ? requested : null);
+  if (requested !== 'All' && !statusFilter) return res.status(400).json({ error: 'Invalid status filter' });
+  const conditions = [];
+  const params = [];
+  if (statusFilter) { conditions.push('pp.status=?'); params.push(statusFilter); }
+  // Advocates only see proofs for matters assigned to them; admin/assistant see all.
+  if (req.user.role === 'advocate') { conditions.push('m.assignedTo=?'); params.push(req.user.fullName || ''); }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const rows = await all(`SELECT pp.id, pp.invoiceId, pp.matterId, pp.clientId, pp.method, pp.reference, pp.amount, pp.note, pp.fileName, pp.mimeType, pp.size, pp.createdAt, pp.status, pp.reviewedBy, pp.reviewedAt, pp.reviewNote, pp.paymentId,
+      i.number invoiceNumber, i.status invoiceStatus, i.dueDate invoiceDueDate, i.amount invoiceAmount,
+      m.title matterTitle, m.reference matterReference,
+      c.name clientName,
+      (SELECT u.fullName FROM users u WHERE u.id=pp.reviewedBy) reviewedByName,
+      COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.invoiceId=pp.invoiceId),0) invoiceAmountPaid,
+      CASE WHEN pp.content IS NULL THEN 0 ELSE 1 END hasAttachment
+    FROM payment_proofs pp
+    LEFT JOIN invoices i ON i.id=pp.invoiceId
+    LEFT JOIN matters m ON m.id=pp.matterId
+    LEFT JOIN clients c ON c.id=pp.clientId
+    ${where}
+    ORDER BY pp.createdAt DESC`, params);
+  // Never return BLOB content; expose only review-relevant metadata.
+  const proofs = rows.map(row => {
+    const invoiceAmount = Number(row.invoiceAmount || 0);
+    const invoiceAmountPaid = Number(row.invoiceAmountPaid || 0);
+    return {
+      id: row.id,
+      invoiceId: row.invoiceId || '',
+      invoiceNumber: row.invoiceNumber || '',
+      invoiceStatus: row.invoiceStatus || '',
+      invoiceDueDate: row.invoiceDueDate || '',
+      invoiceAmount,
+      invoiceAmountPaid,
+      invoiceBalance: row.invoiceId ? Math.max(invoiceAmount - invoiceAmountPaid, 0) : 0,
+      matterId: row.matterId || '',
+      matterTitle: row.matterTitle || '',
+      matterReference: row.matterReference || '',
+      clientId: row.clientId || '',
+      clientName: row.clientName || '',
+      method: row.method || '',
+      reference: row.reference || '',
+      amount: Number(row.amount || 0),
+      note: row.note || '',
+      fileName: row.fileName || '',
+      mimeType: row.mimeType || '',
+      size: row.size || '',
+      hasAttachment: Number(row.hasAttachment || 0) === 1,
+      createdAt: row.createdAt || '',
+      status: row.status || 'Pending',
+      reviewedBy: row.reviewedBy || '',
+      reviewedByName: row.reviewedByName || '',
+      reviewedAt: row.reviewedAt || '',
+      reviewNote: row.reviewNote || '',
+      paymentId: row.paymentId || '',
+    };
+  });
+  const pendingCount = (statusFilter && statusFilter !== 'Pending') ? null : proofs.filter(p => p.status === 'Pending').length;
+  res.json({ proofs, pendingCount });
+});
+
+app.get('/api/payment-proofs/:id/attachment', requireStaff, async (req, res) => {
+  const proof = await get('SELECT id,matterId,clientId,fileName,mimeType,content FROM payment_proofs WHERE id=?', [req.params.id]);
+  if (!proof) return res.status(404).json({ error: 'Payment proof not found' });
+  if (req.user.role === 'advocate' && !(await isBillingVisibleFor(req))) {
+    await recordAuditEvent(req, { action: 'forbidden_payment_proof_attachment', entityType: 'payment_proof', entityId: proof.id, matterId: proof.matterId || '', clientId: proof.clientId || '', metadata: { reason: 'billing_visibility_disabled' } }).catch(() => {});
+    return res.status(403).json({ error: 'Billing access restricted' });
+  }
+  if (!(await canAccessMatter(req, proof.matterId))) {
+    await recordAuditEvent(req, { action: 'forbidden_payment_proof_attachment', entityType: 'payment_proof', entityId: proof.id, matterId: proof.matterId || '', clientId: proof.clientId || '', metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Payment proof access denied' });
+  }
+  if (!proof.content) return res.status(404).json({ error: 'No attachment for this payment proof' });
+  // Do not trust the uploaded MIME blindly: only serve a known-safe content type, else octet-stream.
+  const declared = String(proof.mimeType || '').toLowerCase();
+  const contentType = SAFE_PROOF_DOWNLOAD_MIME.has(declared) ? declared : 'application/octet-stream';
+  const safeName = (proof.fileName ? String(proof.fileName).replace(/[^\w .-]/g, '_') : '') || `payment-proof-${proof.id}`;
+  await recordAuditEvent(req, { action: 'payment_proof_attachment_downloaded', entityType: 'payment_proof', entityId: proof.id, matterId: proof.matterId || '', clientId: proof.clientId || '', metadata: { paymentProofId: proof.id, matterId: proof.matterId || '', clientId: proof.clientId || '', fileName: safeName } }).catch(() => {});
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Disposition', `attachment; filename="${safeName}"`);
+  res.send(Buffer.isBuffer(proof.content) ? proof.content : Buffer.from(proof.content || ''));
+});
+
+app.patch('/api/payment-proofs/:id/review', async (req, res) => {
+  if (!['admin', 'assistant'].includes(req.user.role)) return res.status(403).json({ error: 'Admin or assistant access required' });
+  const status = String(req.body.status || '').trim();
+  if (!PAYMENT_PROOF_REVIEW_STATUSES.includes(status)) return res.status(400).json({ error: 'status must be Accepted or Rejected' });
+  const reviewNote = String(req.body.reviewNote || '').trim().slice(0, 500);
+  const proof = await get('SELECT id,invoiceId,matterId,clientId,status FROM payment_proofs WHERE id=?', [req.params.id]);
+  if (!proof) return res.status(404).json({ error: 'Payment proof not found' });
+  const reviewedAt = new Date().toISOString();
+  // Review only: no payment is created and no invoice.status/balance is mutated here.
+  await run('UPDATE payment_proofs SET status=?, reviewedBy=?, reviewedAt=?, reviewNote=? WHERE id=?', [status, req.user.userId || '', reviewedAt, reviewNote, proof.id]);
+  await logAudit(req, 'review', 'payment_proof', proof.id, `Marked payment proof ${status}`);
+  await recordAuditEvent(req, { action: 'payment_proof_reviewed', entityType: 'payment_proof', entityId: proof.id, matterId: proof.matterId || '', clientId: proof.clientId || '', metadata: { paymentProofId: proof.id, invoiceId: proof.invoiceId || '', matterId: proof.matterId || '', clientId: proof.clientId || '', status, previousStatus: proof.status || 'Pending', reviewNote } }).catch(() => {});
+  res.json(await get('SELECT id,invoiceId,matterId,clientId,method,reference,amount,note,fileName,mimeType,size,createdAt,status,reviewedBy,reviewedAt,reviewNote,paymentId FROM payment_proofs WHERE id=?', [proof.id]));
 });
 
 app.get('/api/search', requireStaff, async (req, res) => {

@@ -17,6 +17,9 @@ function listFromResponse(response, key) {
   return [];
 }
 
+// PRODUCT-15I: staff payment-proof queue endpoint (optional status filter; 'All' omits it).
+const paymentProofsPath = status => `/payment-proofs${status && status !== 'All' ? `?status=${encodeURIComponent(status)}` : ''}`;
+
 function isBillableValue(value) {
   if (value === undefined || value === null) return true;
   return value === true || value === 1 || value === '1' || value === 'true';
@@ -1145,10 +1148,15 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
   const [selectedInvoiceId, setSelectedInvoiceId] = useState('');
   const [invoiceDetails, setInvoiceDetails] = useState(null);
   const [payments, setPayments] = useState([]);
-  const [paymentForm, setPaymentForm] = useState({ amount: '', method: 'Bank Transfer', reference: '', date: new Date().toISOString().slice(0, 10), note: '' });
+  const [paymentForm, setPaymentForm] = useState({ amount: '', method: 'Bank Transfer', reference: '', date: new Date().toISOString().slice(0, 10), note: '', proofId: '' });
   const [firmSettings, setFirmSettings] = useState({ ...defaultFirmSettings, ...(providedFirmSettings || {}) });
+  const [proofs, setProofs] = useState([]);
+  const [proofFilter, setProofFilter] = useState('Pending');
+  const [pendingProofCount, setPendingProofCount] = useState(0);
+  const [proofNotes, setProofNotes] = useState({});
   const session = readSession();
   const canRecordPayment = ['admin', 'assistant'].includes(session?.user?.role);
+  const canReviewProof = ['admin', 'assistant'].includes(session?.user?.role);
   const selectedInvoice = invoices.find(invoice => invoice.id === selectedInvoiceId);
 
   useEffect(() => {
@@ -1178,6 +1186,22 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
     }
     loadDetails();
   }, [selectedInvoiceId]);
+  async function loadProofs() {
+    try {
+      const data = await api(paymentProofsPath(proofFilter));
+      setProofs(Array.isArray(data?.proofs) ? data.proofs : []);
+      if (typeof data?.pendingCount === 'number') setPendingProofCount(data.pendingCount);
+    } catch (err) {
+      notify({ type: 'danger', message: err.message });
+    }
+  }
+  useEffect(() => {
+    let active = true;
+    api(paymentProofsPath(proofFilter))
+      .then(data => { if (!active) return; setProofs(Array.isArray(data?.proofs) ? data.proofs : []); if (typeof data?.pendingCount === 'number') setPendingProofCount(data.pendingCount); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [proofFilter]);
   const invoiceSummary = useMemo(() => {
     const total = invoices.length;
     const paid = invoices.filter(i => i.status === 'Paid').length;
@@ -1216,7 +1240,7 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
       setSelectedInvoiceId(invoice.id);
       const data = await listInvoicePayments(invoice.id);
       setPayments(data.payments || []);
-      setPaymentForm(form => ({ ...form, amount: invoice.balance ? String(invoice.balance) : '', date: new Date().toISOString().slice(0, 10) }));
+      setPaymentForm(form => ({ ...form, amount: invoice.balance ? String(invoice.balance) : '', date: new Date().toISOString().slice(0, 10), proofId: '' }));
     } catch (err) {
       notify({ type: 'danger', message: err.message });
     }
@@ -1228,11 +1252,49 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
       const data = await recordInvoicePayment(selectedInvoice.id, paymentForm);
       notify({ type: 'success', message: 'Payment recorded.' });
       setPayments(current => [data.payment, ...current]);
-      setPaymentForm({ amount: '', method: 'Bank Transfer', reference: '', date: new Date().toISOString().slice(0, 10), note: '' });
+      const settledProof = paymentForm.proofId;
+      setPaymentForm({ amount: '', method: 'Bank Transfer', reference: '', date: new Date().toISOString().slice(0, 10), note: '', proofId: '' });
       await reload();
+      // Refresh the proof queue so a proof that was just settled shows its linked payment.
+      if (settledProof) await loadProofs();
     } catch (err) {
       notify({ type: 'danger', message: err.message });
     }
+  }
+  // PRODUCT-15I: review-only decision; never creates a payment or mutates the invoice.
+  async function reviewProof(proof, status) {
+    try {
+      await api(`/payment-proofs/${proof.id}/review`, { method: 'PATCH', body: { status, reviewNote: proofNotes[proof.id] || '' } });
+      notify({ type: 'success', message: `Payment proof ${status.toLowerCase()}.` });
+      setProofNotes(current => { const next = { ...current }; delete next[proof.id]; return next; });
+      await loadProofs();
+    } catch (err) {
+      notify({ type: 'danger', message: err.message });
+    }
+  }
+  async function downloadProof(proof) {
+    try {
+      await downloadWithAuth(`/api/payment-proofs/${proof.id}/attachment`, proof.fileName || `payment-proof-${proof.id}`);
+    } catch (err) {
+      notify({ type: 'danger', message: err.message });
+    }
+  }
+  // PRODUCT-15I: pre-fill the EXISTING manual record-payment flow from an accepted proof.
+  // Staff still confirm amount/date/method/reference; backend enforces amount <= balance.
+  function recordPaymentFromProof(proof) {
+    if (!proof.invoiceId) { notify({ type: 'danger', message: 'This proof is not linked to an invoice. Open the invoice and record payment manually.' }); return; }
+    const invoice = invoices.find(i => i.id === proof.invoiceId);
+    if (!invoice) { notify({ type: 'danger', message: 'Invoice not found for this proof.' }); return; }
+    setSelectedInvoiceId(invoice.id);
+    listInvoicePayments(invoice.id)
+      .then(data => setPayments(data.payments || []))
+      .catch(err => notify({ type: 'danger', message: err.message }));
+    const balance = Number(invoice.balance || 0);
+    const proofAmount = Number(proof.amount || 0);
+    const suggested = proofAmount > 0 && proofAmount <= balance ? String(proofAmount) : (balance ? String(balance) : '');
+    setPaymentForm({ amount: suggested, method: proof.method || 'Bank Transfer', reference: proof.reference || '', date: new Date().toISOString().slice(0, 10), note: '', proofId: proof.id });
+    notify({ type: 'info', message: 'Review the pre-filled payment details below, then confirm to record.' });
+    scrollToSection('invoice-register');
   }
 
   function InvoicePreviewCard() {
@@ -1463,6 +1525,13 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
             <Sub title={`Payments - ${selectedInvoice.number || selectedInvoice.id}`}>
               <div className="lf-payment-cards"><Table columns={['Date', 'Receipt', 'Method', 'Reference', 'Amount', 'Receipt PDF']} rows={payments.map(payment => [payment.date || '-', payment.receiptNumber || '-', payment.method || '-', payment.reference || '-', kes(payment.amount), payment.receiptNumber ? <DownloadButton key={`${payment.id}-receipt`} label="Download" path={`/api/invoices/${selectedInvoice.id}/payments/${payment.id}/receipt.pdf`} filename={`${payment.receiptNumber}.pdf`} notify={notify} /> : '-'])} empty="No payments recorded yet." /></div>
               {canRecordPayment && Number(selectedInvoice.balance || 0) > 0 && (
+                <>
+                {paymentForm.proofId && (
+                  <div style={{ marginTop: 12, padding: '8px 10px', background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 6, fontSize: 12, color: '#1E3A8A', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <span>Recording against payment proof — review the details below, then confirm.</span>
+                    <button type="button" style={{ ...styles.link, border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }} onClick={() => setPaymentForm({ ...paymentForm, proofId: '' })}>Clear link</button>
+                  </div>
+                )}
                 <form onSubmit={submitPayment} style={{ ...styles.formGrid, marginTop: 12 }}>
                   <Field label="Amount"><input required type="number" min="0.01" step="0.01" style={styles.input} value={paymentForm.amount} onChange={e => setPaymentForm({ ...paymentForm, amount: e.target.value })} /></Field>
                   <Field label="Method"><select style={styles.input} value={paymentForm.method} onChange={e => setPaymentForm({ ...paymentForm, method: e.target.value })}><option>Bank Transfer</option><option>M-PESA</option><option>Cash Deposit</option><option>Cheque</option></select></Field>
@@ -1471,14 +1540,90 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
                   <Field label="Note"><input style={styles.input} value={paymentForm.note} onChange={e => setPaymentForm({ ...paymentForm, note: e.target.value })} /></Field>
                   <button style={styles.primaryButton}>Record payment</button>
                 </form>
+                </>
               )}
             </Sub>
           </div>
         )}
       </Card>
     </div>
+    <PaymentProofQueue
+      proofs={proofs}
+      proofFilter={proofFilter}
+      setProofFilter={setProofFilter}
+      pendingProofCount={pendingProofCount}
+      proofNotes={proofNotes}
+      setProofNotes={setProofNotes}
+      canReviewProof={canReviewProof}
+      canRecordPayment={canRecordPayment}
+      onDownload={downloadProof}
+      onReview={reviewProof}
+      onRecordPayment={recordPaymentFromProof}
+      notify={notify}
+    />
     <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
   </>;
+}
+
+function proofStatusTone(status) {
+  if (status === 'Accepted') return 'green';
+  if (status === 'Rejected') return 'red';
+  return 'amber';
+}
+
+// PRODUCT-15I: staff/admin payment-proof review queue. Review is decision-only (no settlement);
+// "Record payment" routes into the existing manual record-payment flow above.
+function PaymentProofQueue({ proofs, proofFilter, setProofFilter, pendingProofCount, proofNotes, setProofNotes, canReviewProof, canRecordPayment, onDownload, onReview, onRecordPayment }) {
+  const rows = proofs.map(proof => {
+    const actions = [];
+    if (proof.hasAttachment) {
+      actions.push(
+        <button key={`${proof.id}-dl`} type="button" style={{ ...styles.link, border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }} onClick={() => onDownload(proof)}>Download</button>
+      );
+    }
+    if (canReviewProof && proof.status === 'Pending') {
+      actions.push(
+        <button key={`${proof.id}-acc`} type="button" style={{ ...styles.ghostButton, padding: '4px 10px' }} onClick={() => onReview(proof, 'Accepted')}>Accept</button>,
+        <button key={`${proof.id}-rej`} type="button" style={{ ...styles.ghostButton, padding: '4px 10px', color: '#991B1B', borderColor: '#FCA5A5' }} onClick={() => onReview(proof, 'Rejected')}>Reject</button>
+      );
+    }
+    if (canRecordPayment && proof.status === 'Accepted' && proof.invoiceId && Number(proof.invoiceBalance || 0) > 0 && !proof.paymentId) {
+      actions.push(
+        <button key={`${proof.id}-pay`} type="button" style={{ ...styles.ghostButton, padding: '4px 10px' }} onClick={() => onRecordPayment(proof)}>Record payment</button>
+      );
+    }
+    const noteCell = canReviewProof && proof.status === 'Pending'
+      ? <input style={{ ...styles.input, minWidth: 140 }} placeholder="Optional review note" value={proofNotes[proof.id] || ''} onChange={e => setProofNotes(current => ({ ...current, [proof.id]: e.target.value }))} maxLength={500} />
+      : (proof.reviewNote || (proof.reviewedAt ? '-' : ''));
+    return [
+      proof.invoiceNumber || (proof.invoiceId ? proof.invoiceId : 'General payment'),
+      <div key={`${proof.id}-cm`} style={{ display: 'grid', gap: 2 }}><span>{proof.clientName || '-'}</span><span style={{ fontSize: 11, color: '#697386' }}>{proof.matterTitle || proof.matterReference || '-'}</span></div>,
+      <div key={`${proof.id}-mr`} style={{ display: 'grid', gap: 2 }}><span>{proof.method || '-'}</span><span style={{ fontSize: 11, color: '#697386' }}>{proof.reference || '-'}</span></div>,
+      kes(proof.amount),
+      proof.createdAt ? new Date(proof.createdAt).toLocaleString('en-KE') : '-',
+      <div key={`${proof.id}-st`} style={{ display: 'grid', gap: 3 }}><Badge tone={proofStatusTone(proof.status)}>{proof.status}</Badge>{proof.paymentId ? <span style={{ fontSize: 11, color: '#16A34A' }}>Payment recorded</span> : null}{proof.reviewedAt ? <span style={{ fontSize: 11, color: '#697386' }}>{new Date(proof.reviewedAt).toLocaleDateString('en-KE')}{proof.reviewedByName ? ` · ${proof.reviewedByName}` : ''}</span> : null}</div>,
+      proof.fileName ? <div key={`${proof.id}-fn`} style={{ display: 'grid', gap: 2 }}><span style={{ fontSize: 12 }}>{proof.fileName}</span><span style={{ fontSize: 11, color: '#697386' }}>{proof.size || ''}</span></div> : <span style={{ fontSize: 11, color: '#697386' }}>No file</span>,
+      noteCell,
+      <div key={`${proof.id}-act`} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{actions.length ? actions : <span style={{ fontSize: 11, color: '#697386' }}>—</span>}</div>,
+    ];
+  });
+  return (
+    <div id="payment-proof-queue" style={{ marginTop: 16 }}>
+      <Card title="Payment proof review" hint={canReviewProof ? 'Review client-submitted proofs, then record payment manually' : 'Client-submitted payment proofs (view only)'}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <label htmlFor="proof-filter" style={{ fontSize: 12, color: '#697386' }}>Status</label>
+          <select id="proof-filter" style={styles.tableSelect} value={proofFilter} onChange={e => setProofFilter(e.target.value)}>
+            <option value="Pending">Pending</option>
+            <option value="Accepted">Accepted</option>
+            <option value="Rejected">Rejected</option>
+            <option value="All">All</option>
+          </select>
+          <Badge tone={pendingProofCount > 0 ? 'amber' : 'green'}>{pendingProofCount} pending</Badge>
+        </div>
+        <div className="lf-payment-proof-cards"><Table columns={['Invoice', 'Client / Matter', 'Method / Ref', 'Amount', 'Uploaded', 'Status', 'File', 'Review note', 'Actions']} rows={rows} empty="No payment proofs in this view." /></div>
+      </Card>
+    </div>
+  );
 }
 
 async function downloadWithNotify(path, filename, notify) {
