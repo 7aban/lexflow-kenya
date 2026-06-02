@@ -162,6 +162,8 @@ export default function DocumentStudio({ notify }) {
   const [bundleSaveLoading, setBundleSaveLoading] = useState(false);
   const [bundleSaveError, setBundleSaveError] = useState(null);
   const [bundleSaveSuccess, setBundleSaveSuccess] = useState('');
+  // UI-only: optional Court Bundle features start collapsed (progressive disclosure).
+  const [bundleOptionsOpen, setBundleOptionsOpen] = useState(false);
 
   const panelRef = useRef(null);
   const mergePanelRef = useRef(null);
@@ -893,6 +895,9 @@ export default function DocumentStudio({ notify }) {
     .filter(Boolean);
   const canBundle = selectedBundleDocumentIds.length >= 2 && selectedBundleDocumentIds.length <= 10 && !bundleLoading && !bundleDocsLoading && !!bundleMatterId;
   const canBundleSave = selectedBundleDocumentIds.length >= 2 && selectedBundleDocumentIds.length <= 10 && !bundleSaveLoading && !bundleDocsLoading && !!bundleMatterId;
+  const activeBundleOptionCount = [bundlePaginate, bundleIncludeIndex, bundleIncludeCover, bundleIncludeDividers, bundleIncludeBookmarks, bundleIncludeCertificate].filter(Boolean).length;
+  const bundleSectionLabelStyle = { fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', color: theme.muted };
+  const bundleHelperStyle = { border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 };
 
   return (
     <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
@@ -1591,224 +1596,24 @@ export default function DocumentStudio({ notify }) {
               <Badge tone="green">Available</Badge>
             </div>
 
-            <div style={{ border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
-              Bundle Builder combines selected matter PDFs into a single court-ready bundle. Pagination is optional and should be verified before filing.
+            <div style={bundleHelperStyle}>
+              Combine selected matter PDFs into a single court-ready bundle. Optional cover, index, dividers, page numbers, bookmarks, and a generation certificate are available under Bundle options below.
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, alignItems: 'end', minWidth: 0 }}>
-              <label style={{ ...styles.field, minWidth: 0 }}>
-                <span style={{ fontSize: 12, color: theme.muted }}>Matter</span>
-                <select
-                  style={styles.input}
-                  value={bundleMatterId}
-                  onChange={event => setBundleMatterId(event.target.value)}
-                  disabled={mattersLoading || bundleLoading || bundleSaveLoading}
-                >
-                  <option value="">{mattersLoading ? 'Loading matters...' : 'Select a matter'}</option>
-                  {matters.map(m => (
-                    <option key={m.id} value={m.id}>{matterLabel(m)}</option>
-                  ))}
-                </select>
-              </label>
-
-              <label style={{ ...styles.field, minWidth: 0 }}>
-                <span style={{ fontSize: 12, color: theme.muted }}>Output filename</span>
-                <input
-                  style={styles.input}
-                  value={bundleFilename}
-                  onChange={event => setBundleFilename(event.target.value)}
-                  placeholder="court-bundle.pdf"
-                  disabled={bundleLoading || bundleSaveLoading}
-                />
-              </label>
-
-              <label style={{ ...styles.field, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0' }}>
-                <input
-                  type="checkbox"
-                  checked={bundlePaginate}
-                  onChange={event => setBundlePaginate(event.target.checked)}
-                  disabled={bundleLoading || bundleSaveLoading}
-                  style={{ margin: 0 }}
-                />
-                <span style={{ fontSize: 12, color: theme.ink }}>Add continuous page numbers</span>
-              </label>
-
-              <label style={{ ...styles.field, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0' }}>
-                <input
-                  type="checkbox"
-                  checked={bundleIncludeIndex}
-                  onChange={event => setBundleIncludeIndex(event.target.checked)}
-                  disabled={bundleLoading || bundleSaveLoading}
-                  style={{ margin: 0 }}
-                />
-                <span style={{ fontSize: 12, color: theme.ink }}>Add bundle index page</span>
-              </label>
-
-              <label style={{ ...styles.field, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0' }}>
-                <input
-                  type="checkbox"
-                  checked={bundleIncludeCover}
-                  onChange={event => toggleBundleCover(event.target.checked)}
-                  disabled={bundleLoading || bundleSaveLoading}
-                  style={{ margin: 0 }}
-                />
-                <span style={{ fontSize: 12, color: theme.ink }}>Add cover page</span>
-              </label>
-
-              <label style={{ ...styles.field, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0' }}>
-                <input
-                  type="checkbox"
-                  checked={bundleIncludeDividers}
-                  onChange={event => setBundleIncludeDividers(event.target.checked)}
-                  disabled={bundleLoading || bundleSaveLoading}
-                  style={{ margin: 0 }}
-                />
-                <span style={{ fontSize: 12, color: theme.ink }}>Add section dividers</span>
-              </label>
-
-              <label style={{ ...styles.field, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0' }}>
-                <input
-                  type="checkbox"
-                  checked={bundleIncludeBookmarks}
-                  onChange={event => setBundleIncludeBookmarks(event.target.checked)}
-                  disabled={bundleLoading || bundleSaveLoading}
-                  style={{ margin: 0 }}
-                />
-                <span style={{ fontSize: 12, color: theme.ink }}>Add PDF bookmarks / outline</span>
-              </label>
-
-              <label style={{ ...styles.field, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0' }}>
-                <input
-                  type="checkbox"
-                  checked={bundleIncludeCertificate}
-                  onChange={event => setBundleIncludeCertificate(event.target.checked)}
-                  disabled={bundleLoading || bundleSaveLoading}
-                  style={{ margin: 0 }}
-                />
-                <span style={{ fontSize: 12, color: theme.ink }}>Include bundle generation certificate</span>
-              </label>
-            </div>
-
-            {bundlePaginate && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, alignItems: 'end', minWidth: 0 }}>
-                <label style={{ ...styles.field, minWidth: 0 }}>
-                  <span style={{ fontSize: 12, color: theme.muted }}>Starting number</span>
-                  <input
-                    type="number"
-                    min="1"
-                    max="99999"
-                    style={styles.input}
-                    value={bundleStartNumber}
-                    onChange={event => setBundleStartNumber(Number(event.target.value))}
-                    disabled={bundleLoading || bundleSaveLoading}
-                  />
-                </label>
-                <label style={{ ...styles.field, minWidth: 0 }}>
-                  <span style={{ fontSize: 12, color: theme.muted }}>Position</span>
-                  <select
-                    style={styles.input}
-                    value={bundlePosition}
-                    onChange={event => setBundlePosition(event.target.value)}
-                    disabled={bundleLoading || bundleSaveLoading}
-                  >
-                    <option value="bottom-center">Bottom center</option>
-                    <option value="bottom-right">Bottom right</option>
-                    <option value="bottom-left">Bottom left</option>
-                  </select>
-                </label>
-              </div>
-            )}
-
-            {bundleIncludeIndex && (
-              <div style={{ border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
-                The index lists selected documents and their starting pages. A single A4 page titled "BUNDLE INDEX" is added as {bundleIncludeCover ? 'the page after the cover' : 'the first page'}. Edit document labels in the Bundle Order list below; blank labels use the document name.
-                {bundlePaginate ? (bundleIncludeCover ? ' If pagination is enabled, the index follows the cover and is included in the page count.' : ' If pagination is enabled, the index page is page 1 and is included in the page count.') : ''}
-              </div>
-            )}
-
-            {bundleIncludeDividers && (
-              <div style={{ border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
-                Dividers are inserted before each selected PDF. {bundlePaginate ? 'If pagination is enabled, cover, index, and dividers are included in the page count.' : ''}
-              </div>
-            )}
-
-            {bundleIncludeBookmarks && (
-              <div style={{ border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
-                Adds PDF navigation entries for the cover, index, and each section.
-              </div>
-            )}
-
-            {bundleIncludeCertificate && (
-              <div style={{ border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
-                Adds a final certificate page recording how this bundle was generated.
-              </div>
-            )}
-
-            {bundleIncludeCover && (
-              <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#FAFAF9', padding: 12, display: 'grid', gap: 12, minWidth: 0 }}>
-                <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
-                  <strong style={{ fontSize: 13, color: theme.ink }}>Cover page</strong>
-                  <span style={{ fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
-                    A single A4 cover page is added before the {bundleIncludeIndex ? 'index and documents' : 'documents'}. Fields are prefilled from the matter and firm where available and are fully editable. Leave a field blank to omit it. If pagination is enabled, the cover and index pages are included in the page count.
-                  </span>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
-                  <label style={{ ...styles.field, minWidth: 0 }}>
-                    <span style={{ fontSize: 12, color: theme.muted }}>Title</span>
-                    <input style={styles.input} value={bundleCover.title} onChange={event => setBundleCoverField('title', event.target.value)} placeholder="COURT BUNDLE" maxLength={120} disabled={bundleLoading || bundleSaveLoading} />
-                  </label>
-                  <label style={{ ...styles.field, minWidth: 0 }}>
-                    <span style={{ fontSize: 12, color: theme.muted }}>Court</span>
-                    <input style={styles.input} value={bundleCover.court} onChange={event => setBundleCoverField('court', event.target.value)} placeholder="HIGH COURT OF KENYA AT NAIROBI" maxLength={120} disabled={bundleLoading || bundleSaveLoading} />
-                  </label>
-                  <label style={{ ...styles.field, minWidth: 0 }}>
-                    <span style={{ fontSize: 12, color: theme.muted }}>Case number</span>
-                    <input style={styles.input} value={bundleCover.caseNumber} onChange={event => setBundleCoverField('caseNumber', event.target.value)} placeholder="HCCC E000 OF 2026" maxLength={120} disabled={bundleLoading || bundleSaveLoading} />
-                  </label>
-                  <label style={{ ...styles.field, minWidth: 0 }}>
-                    <span style={{ fontSize: 12, color: theme.muted }}>Parties / case title</span>
-                    <input style={styles.input} value={bundleCover.caseTitle} onChange={event => setBundleCoverField('caseTitle', event.target.value)} placeholder="A v B" maxLength={200} disabled={bundleLoading || bundleSaveLoading} />
-                  </label>
-                  <label style={{ ...styles.field, minWidth: 0 }}>
-                    <span style={{ fontSize: 12, color: theme.muted }}>Bundle title</span>
-                    <input style={styles.input} value={bundleCover.bundleTitle} onChange={event => setBundleCoverField('bundleTitle', event.target.value)} placeholder="DEFENDANT'S BUNDLE OF DOCUMENTS" maxLength={120} disabled={bundleLoading || bundleSaveLoading} />
-                  </label>
-                  <label style={{ ...styles.field, minWidth: 0 }}>
-                    <span style={{ fontSize: 12, color: theme.muted }}>Prepared by</span>
-                    <input style={styles.input} value={bundleCover.preparedBy} onChange={event => setBundleCoverField('preparedBy', event.target.value)} placeholder="T.K. RUTTO & CO. ADVOCATES" maxLength={120} disabled={bundleLoading || bundleSaveLoading} />
-                  </label>
-                  <label style={{ ...styles.field, minWidth: 0 }}>
-                    <span style={{ fontSize: 12, color: theme.muted }}>Date</span>
-                    <input style={styles.input} value={bundleCover.date} onChange={event => setBundleCoverField('date', event.target.value)} placeholder="1 June 2026" maxLength={80} disabled={bundleLoading || bundleSaveLoading} />
-                  </label>
-                </div>
-              </div>
-            )}
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
-              <button
-                type="button"
-                style={{ ...styles.primaryButton, minHeight: 36, opacity: canBundle ? 1 : 0.65, cursor: canBundle ? 'pointer' : 'not-allowed' }}
-                onClick={runBundleDownload}
-                disabled={!canBundle}
+            <label style={{ ...styles.field, minWidth: 0, maxWidth: 420 }}>
+              <span style={{ fontSize: 12, color: theme.muted }}>Matter</span>
+              <select
+                style={styles.input}
+                value={bundleMatterId}
+                onChange={event => setBundleMatterId(event.target.value)}
+                disabled={mattersLoading || bundleLoading || bundleSaveLoading}
               >
-                {bundleLoading ? 'Creating bundle...' : 'Bundle and Download'}
-              </button>
-              <button
-                type="button"
-                style={{ ...styles.ghostButton, minHeight: 36, opacity: canBundleSave ? 1 : 0.65, cursor: canBundleSave ? 'pointer' : 'not-allowed' }}
-                onClick={runBundleSave}
-                disabled={!canBundleSave}
-              >
-                {bundleSaveLoading ? 'Saving...' : 'Save to matter documents'}
-              </button>
-            </div>
-
-            {bundleDocsError && <Alert tone="danger">{bundleDocsError}</Alert>}
-            {bundleError && <Alert tone="danger">{bundleError}</Alert>}
-            {bundleSuccess && <Alert tone="success">{bundleSuccess}</Alert>}
-            {bundleSaveError && <Alert tone="danger">{bundleSaveError}</Alert>}
-            {bundleSaveSuccess && <Alert tone="success">{bundleSaveSuccess}</Alert>}
+                <option value="">{mattersLoading ? 'Loading matters...' : 'Select a matter'}</option>
+                {matters.map(m => (
+                  <option key={m.id} value={m.id}>{matterLabel(m)}</option>
+                ))}
+              </select>
+            </label>
 
             {bundleMatterId && (
               <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
@@ -1887,6 +1692,236 @@ export default function DocumentStudio({ notify }) {
                 </div>
               </div>
             )}
+
+            <label style={{ ...styles.field, minWidth: 0, maxWidth: 420 }}>
+              <span style={{ fontSize: 12, color: theme.muted }}>Output filename</span>
+              <input
+                style={styles.input}
+                value={bundleFilename}
+                onChange={event => setBundleFilename(event.target.value)}
+                placeholder="court-bundle.pdf"
+                disabled={bundleLoading || bundleSaveLoading}
+              />
+            </label>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
+              <button
+                type="button"
+                style={{ ...styles.primaryButton, minHeight: 36, opacity: canBundle ? 1 : 0.65, cursor: canBundle ? 'pointer' : 'not-allowed' }}
+                onClick={runBundleDownload}
+                disabled={!canBundle}
+              >
+                {bundleLoading ? 'Creating bundle...' : 'Bundle and Download'}
+              </button>
+              <button
+                type="button"
+                style={{ ...styles.ghostButton, minHeight: 36, opacity: canBundleSave ? 1 : 0.65, cursor: canBundleSave ? 'pointer' : 'not-allowed' }}
+                onClick={runBundleSave}
+                disabled={!canBundleSave}
+              >
+                {bundleSaveLoading ? 'Saving...' : 'Save to matter documents'}
+              </button>
+            </div>
+
+            {bundleDocsError && <Alert tone="danger">{bundleDocsError}</Alert>}
+            {bundleError && <Alert tone="danger">{bundleError}</Alert>}
+            {bundleSuccess && <Alert tone="success">{bundleSuccess}</Alert>}
+            {bundleSaveError && <Alert tone="danger">{bundleSaveError}</Alert>}
+            {bundleSaveSuccess && <Alert tone="success">{bundleSaveSuccess}</Alert>}
+
+            <div style={{ borderTop: `1px solid ${theme.line}`, paddingTop: 14, display: 'grid', gap: 12, minWidth: 0 }}>
+              <button
+                type="button"
+                onClick={() => setBundleOptionsOpen(open => !open)}
+                aria-expanded={bundleOptionsOpen}
+                aria-controls="court-bundle-options"
+                style={{ ...styles.ghostButton, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, width: '100%', textAlign: 'left', minHeight: 40 }}
+              >
+                <span style={{ display: 'grid', gap: 2, minWidth: 0 }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 600, fontSize: 13, color: theme.ink }}>Bundle options</span>
+                    {activeBundleOptionCount > 0 && <Badge tone="blue">{activeBundleOptionCount} on</Badge>}
+                  </span>
+                  <span style={{ fontSize: 12, color: theme.muted, lineHeight: 1.45 }}>Configure cover, index, dividers, page numbers, bookmarks, and certificate.</span>
+                </span>
+                <span aria-hidden="true" style={{ fontSize: 11, color: theme.muted, flexShrink: 0 }}>{bundleOptionsOpen ? 'Hide ▲' : 'Show ▼'}</span>
+              </button>
+
+              {bundleOptionsOpen && (
+                <div id="court-bundle-options" style={{ display: 'grid', gap: 16, minWidth: 0 }}>
+                  <div style={{ display: 'grid', gap: 10, minWidth: 0 }}>
+                    <strong style={bundleSectionLabelStyle}>Front matter</strong>
+                    <label style={{ ...styles.field, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+                      <input
+                        type="checkbox"
+                        checked={bundleIncludeCover}
+                        onChange={event => toggleBundleCover(event.target.checked)}
+                        disabled={bundleLoading || bundleSaveLoading}
+                        style={{ margin: 0 }}
+                      />
+                      <span style={{ fontSize: 12, color: theme.ink }}>Add cover page</span>
+                    </label>
+                    {bundleIncludeCover && (
+                      <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#FAFAF9', padding: 12, display: 'grid', gap: 12, minWidth: 0 }}>
+                        <span style={{ fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
+                          A single A4 cover page is added before the {bundleIncludeIndex ? 'index and documents' : 'documents'}. Fields prefill from the matter and firm where available and stay editable — leave a field blank to omit it.
+                        </span>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
+                          <label style={{ ...styles.field, minWidth: 0 }}>
+                            <span style={{ fontSize: 12, color: theme.muted }}>Title</span>
+                            <input style={styles.input} value={bundleCover.title} onChange={event => setBundleCoverField('title', event.target.value)} placeholder="COURT BUNDLE" maxLength={120} disabled={bundleLoading || bundleSaveLoading} />
+                          </label>
+                          <label style={{ ...styles.field, minWidth: 0 }}>
+                            <span style={{ fontSize: 12, color: theme.muted }}>Court</span>
+                            <input style={styles.input} value={bundleCover.court} onChange={event => setBundleCoverField('court', event.target.value)} placeholder="HIGH COURT OF KENYA AT NAIROBI" maxLength={120} disabled={bundleLoading || bundleSaveLoading} />
+                          </label>
+                          <label style={{ ...styles.field, minWidth: 0 }}>
+                            <span style={{ fontSize: 12, color: theme.muted }}>Case number</span>
+                            <input style={styles.input} value={bundleCover.caseNumber} onChange={event => setBundleCoverField('caseNumber', event.target.value)} placeholder="HCCC E000 OF 2026" maxLength={120} disabled={bundleLoading || bundleSaveLoading} />
+                          </label>
+                          <label style={{ ...styles.field, minWidth: 0 }}>
+                            <span style={{ fontSize: 12, color: theme.muted }}>Parties / case title</span>
+                            <input style={styles.input} value={bundleCover.caseTitle} onChange={event => setBundleCoverField('caseTitle', event.target.value)} placeholder="A v B" maxLength={200} disabled={bundleLoading || bundleSaveLoading} />
+                          </label>
+                          <label style={{ ...styles.field, minWidth: 0 }}>
+                            <span style={{ fontSize: 12, color: theme.muted }}>Bundle title</span>
+                            <input style={styles.input} value={bundleCover.bundleTitle} onChange={event => setBundleCoverField('bundleTitle', event.target.value)} placeholder="DEFENDANT'S BUNDLE OF DOCUMENTS" maxLength={120} disabled={bundleLoading || bundleSaveLoading} />
+                          </label>
+                          <label style={{ ...styles.field, minWidth: 0 }}>
+                            <span style={{ fontSize: 12, color: theme.muted }}>Prepared by</span>
+                            <input style={styles.input} value={bundleCover.preparedBy} onChange={event => setBundleCoverField('preparedBy', event.target.value)} placeholder="T.K. RUTTO & CO. ADVOCATES" maxLength={120} disabled={bundleLoading || bundleSaveLoading} />
+                          </label>
+                          <label style={{ ...styles.field, minWidth: 0 }}>
+                            <span style={{ fontSize: 12, color: theme.muted }}>Date</span>
+                            <input style={styles.input} value={bundleCover.date} onChange={event => setBundleCoverField('date', event.target.value)} placeholder="1 June 2026" maxLength={80} disabled={bundleLoading || bundleSaveLoading} />
+                          </label>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'grid', gap: 10, minWidth: 0 }}>
+                    <strong style={bundleSectionLabelStyle}>Organization</strong>
+                    <label style={{ ...styles.field, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+                      <input
+                        type="checkbox"
+                        checked={bundleIncludeIndex}
+                        onChange={event => setBundleIncludeIndex(event.target.checked)}
+                        disabled={bundleLoading || bundleSaveLoading}
+                        style={{ margin: 0 }}
+                      />
+                      <span style={{ fontSize: 12, color: theme.ink }}>Add bundle index page</span>
+                    </label>
+                    {bundleIncludeIndex && (
+                      <div style={bundleHelperStyle}>
+                        Lists the selected documents and their starting pages on a "BUNDLE INDEX" page, added {bundleIncludeCover ? 'after the cover' : 'as the first page'}. Edit document labels in the Bundle Order list above; blank labels use the document name.
+                      </div>
+                    )}
+                    <label style={{ ...styles.field, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+                      <input
+                        type="checkbox"
+                        checked={bundleIncludeDividers}
+                        onChange={event => setBundleIncludeDividers(event.target.checked)}
+                        disabled={bundleLoading || bundleSaveLoading}
+                        style={{ margin: 0 }}
+                      />
+                      <span style={{ fontSize: 12, color: theme.ink }}>Add section dividers</span>
+                    </label>
+                    {bundleIncludeDividers && (
+                      <div style={bundleHelperStyle}>
+                        A divider page is inserted before each selected PDF. Edit divider labels in the Bundle Order list above.
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'grid', gap: 10, minWidth: 0 }}>
+                    <strong style={bundleSectionLabelStyle}>Navigation</strong>
+                    <label style={{ ...styles.field, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+                      <input
+                        type="checkbox"
+                        checked={bundleIncludeBookmarks}
+                        onChange={event => setBundleIncludeBookmarks(event.target.checked)}
+                        disabled={bundleLoading || bundleSaveLoading}
+                        style={{ margin: 0 }}
+                      />
+                      <span style={{ fontSize: 12, color: theme.ink }}>Add PDF bookmarks / outline</span>
+                    </label>
+                    {bundleIncludeBookmarks && (
+                      <div style={bundleHelperStyle}>
+                        Adds PDF navigation entries for the cover, index, and each section.
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'grid', gap: 10, minWidth: 0 }}>
+                    <strong style={bundleSectionLabelStyle}>Page numbering</strong>
+                    <label style={{ ...styles.field, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+                      <input
+                        type="checkbox"
+                        checked={bundlePaginate}
+                        onChange={event => setBundlePaginate(event.target.checked)}
+                        disabled={bundleLoading || bundleSaveLoading}
+                        style={{ margin: 0 }}
+                      />
+                      <span style={{ fontSize: 12, color: theme.ink }}>Add continuous page numbers</span>
+                    </label>
+                    {bundlePaginate && (
+                      <>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, alignItems: 'end', minWidth: 0 }}>
+                          <label style={{ ...styles.field, minWidth: 0 }}>
+                            <span style={{ fontSize: 12, color: theme.muted }}>Starting number</span>
+                            <input
+                              type="number"
+                              min="1"
+                              max="99999"
+                              style={styles.input}
+                              value={bundleStartNumber}
+                              onChange={event => setBundleStartNumber(Number(event.target.value))}
+                              disabled={bundleLoading || bundleSaveLoading}
+                            />
+                          </label>
+                          <label style={{ ...styles.field, minWidth: 0 }}>
+                            <span style={{ fontSize: 12, color: theme.muted }}>Position</span>
+                            <select
+                              style={styles.input}
+                              value={bundlePosition}
+                              onChange={event => setBundlePosition(event.target.value)}
+                              disabled={bundleLoading || bundleSaveLoading}
+                            >
+                              <option value="bottom-center">Bottom center</option>
+                              <option value="bottom-right">Bottom right</option>
+                              <option value="bottom-left">Bottom left</option>
+                            </select>
+                          </label>
+                        </div>
+                        <div style={bundleHelperStyle}>
+                          Numbers every page. The cover, index, and dividers are included in the count. Verify pagination before filing.
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'grid', gap: 10, minWidth: 0 }}>
+                    <strong style={bundleSectionLabelStyle}>Filing record</strong>
+                    <label style={{ ...styles.field, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
+                      <input
+                        type="checkbox"
+                        checked={bundleIncludeCertificate}
+                        onChange={event => setBundleIncludeCertificate(event.target.checked)}
+                        disabled={bundleLoading || bundleSaveLoading}
+                        style={{ margin: 0 }}
+                      />
+                      <span style={{ fontSize: 12, color: theme.ink }}>Include bundle generation certificate</span>
+                    </label>
+                    {bundleIncludeCertificate && (
+                      <div style={bundleHelperStyle}>
+                        Adds a final certificate page recording how this bundle was generated.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(230px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
