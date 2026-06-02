@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconLayoutDashboard, IconBriefcase, IconBell, IconFile, IconInvoice, IconUserCircle, IconCalendarEvent } from '@tabler/icons-react';
 import { api, deleteMyAvatar, downloadWithAuth, fileToDataUrl, getMyAvatar, uploadMyAvatar } from '../lib/apiClient.js';
 import { styles, StyleTag, theme, loadAndApplyFirmTheme } from '../theme.jsx';
-import { Badge, Card, Empty, Field, kes, Logo, MeetingLink, Skeleton, statusTone, Table, Toast } from '../components/ui.jsx';
+import { Badge, Card, Empty, Field, kes, Logo, MeetingLink, Skeleton, statusTone, Table, Toast, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText } from '../components/ui.jsx';
 import ClientChatWidget from '../components/ClientChatWidget.jsx';
 import MatterDocuments from '../components/MatterDocuments.jsx';
 
@@ -667,7 +667,7 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
         </Card>
         <MatterDocuments matterId={selected.id} clientMode notify={notify} />
         <Card title="Invoices and payment proof" hint="Upload M-PESA or bank transfer confirmation">
-          <div className="lf-client-invoices-cards"><Table columns={['Invoice', 'Amount', 'Paid', 'Balance', 'Status', 'PDF']} rows={invoices.map(i => [i.number || i.id, kes(i.amount), kes(i.amountPaid), kes(i.balance), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <DownloadButton key={`${i.id}-pdf`} label="PDF" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />])} empty="No invoices shared yet." /></div>
+          <div className="lf-client-invoices-cards"><Table columns={['Invoice', 'Amount', 'Paid', 'Balance', 'Status', 'PDF']} rows={invoices.map(i => [i.number || i.id, kes(i.amount), kes(i.amountPaid), kes(i.balance), <div key={`${i.id}-status`} style={{ display: 'grid', gap: 3 }}><Badge tone={statusTone(invoiceDisplayStatus(i))}>{invoiceDisplayStatus(i)}</Badge>{invoiceDueDistanceText(i) ? <span style={{ fontSize: 11, color: isInvoiceOverdue(i) ? '#DC2626' : '#6B7280' }}>{invoiceDueDistanceText(i)}</span> : null}</div>, <DownloadButton key={`${i.id}-pdf`} label="PDF" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />])} empty="No invoices shared yet." /></div>
           <div className="lf-client-invoice-payments-cards"><Table columns={['Invoice', 'Date', 'Receipt', 'Method', 'Reference', 'Amount']} rows={paymentRows} empty="No payments recorded yet." /></div>
           <form onSubmit={submitPayment} style={{ ...styles.formGrid, marginTop: 14 }}>
             <Field label="Invoice"><select style={styles.input} value={payment.invoiceId} onChange={e => setPayment({ ...payment, invoiceId: e.target.value })}><option value="">General payment</option>{invoices.map(i => <option key={i.id} value={i.id}>{i.number || i.id}</option>)}</select></Field>
@@ -1138,7 +1138,8 @@ function BillingInvoices({ data, matters, notify }) {
         const st = (i.status || '').toLowerCase();
         if (s === 'needs-payment') return st !== 'paid' && st !== 'cancelled' && st !== '';
         if (s === 'paid') return st === 'paid';
-        if (s === 'overdue') return st === 'overdue';
+        // PRODUCT-15F: derived-overdue (unpaid + past due) counts as Overdue here too.
+        if (s === 'overdue') return st === 'overdue' || isInvoiceOverdue(i);
         return true;
       });
     }
@@ -1181,7 +1182,8 @@ function BillingInvoices({ data, matters, notify }) {
   const summary = useMemo(() => {
     const paid = invoices.filter(i => i.status === 'Paid');
     const unpaid = invoices.filter(i => i.status !== 'Paid');
-    const overdue = invoices.filter(i => i.status === 'Overdue');
+    // PRODUCT-15F: count stored Overdue plus derived-overdue (unpaid + past due).
+    const overdue = invoices.filter(i => i.status === 'Overdue' || isInvoiceOverdue(i));
     const totalOutstanding = unpaid.reduce((sum, i) => sum + (Number(i.balance) || Number(i.amount) || 0), 0);
     return { total: invoices.length, paidCount: paid.length, unpaidCount: unpaid.length, overdueCount: overdue.length, totalOutstanding };
   }, [invoices]);
@@ -1263,7 +1265,7 @@ function BillingInvoices({ data, matters, notify }) {
             kes(i.amount),
             kes(i.amountPaid),
             kes(i.balance),
-            <Badge key={`${i.id}-status`} tone={statusTone(i.status)}>{i.status}</Badge>,
+            <div key={`${i.id}-status`} style={{ display: 'grid', gap: 3 }}><Badge tone={statusTone(invoiceDisplayStatus(i))}>{invoiceDisplayStatus(i)}</Badge>{invoiceDueDistanceText(i) ? <span style={{ fontSize: 11, color: isInvoiceOverdue(i) ? '#DC2626' : '#6B7280' }}>{invoiceDueDistanceText(i)}</span> : null}</div>,
             <DownloadButton key={`${i.id}-pdf`} label="PDF" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />
           ])}
           empty={emptyText}

@@ -3,7 +3,7 @@ import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconCl
 import { api, applyChecklistTemplate, createChecklistTemplate, createMatterChecklistItem, deleteChecklistTemplate, deleteClientAvatar, deleteUserAvatar, deleteMatterChecklistItem, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getInvoiceDetails, listChecklistTemplates, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, updateChecklistTemplate, updateMatterChecklistItem, uploadClientAvatar, uploadUserAvatar } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
-import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, Skeleton, statusTone, Sub, Table } from '../components/ui.jsx';
+import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText } from '../components/ui.jsx';
 import MatterDocuments from '../components/MatterDocuments.jsx';
 import TaskTimer, { taskTimerActive } from '../components/TaskTimer.jsx';
 
@@ -1141,6 +1141,7 @@ export function Tasks({ data, canManage, reload, notify, focus }) {
 
 export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSettings: providedFirmSettings }) {
   const [confirm, setConfirm] = useState(null);
+  const [registerFilter, setRegisterFilter] = useState('all');
   const [selectedInvoiceId, setSelectedInvoiceId] = useState('');
   const [invoiceDetails, setInvoiceDetails] = useState(null);
   const [payments, setPayments] = useState([]);
@@ -1193,6 +1194,21 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
       })
       .slice(0, 5);
   }, [invoices]);
+  // PRODUCT-15F: filter the register by display status (derived overdue included),
+  // then surface overdue-first for quicker follow-up. Stored status is untouched.
+  const registerInvoices = useMemo(() => {
+    const matchesFilter = invoice => registerFilter === 'all' || invoiceDisplayStatus(invoice) === registerFilter;
+    const rank = { Overdue: 0, Outstanding: 1, Paid: 2 };
+    return invoices
+      .filter(matchesFilter)
+      .map((invoice, index) => ({ invoice, index }))
+      .sort((a, b) => {
+        const ra = rank[invoiceDisplayStatus(a.invoice)] ?? 3;
+        const rb = rank[invoiceDisplayStatus(b.invoice)] ?? 3;
+        return ra === rb ? a.index - b.index : ra - rb;
+      })
+      .map(entry => entry.invoice);
+  }, [invoices, registerFilter]);
   async function setStatus(id, status) { try { await api(`/invoices/${id}/status`, { method: 'PATCH', body: { status } }); notify({ type: 'success', message: 'Invoice updated.' }); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteInvoiceRecord(invoice) { try { await api(`/invoices/${invoice.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Invoice deleted.' }); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function openPayments(invoice) {
@@ -1422,7 +1438,26 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
     <InvoicePreviewCard />
     <div id="invoice-register">
       <Card title="Invoice register" hint="Receivables">
-        <div className="lf-invoice-cards"><Table columns={['Invoice', 'Client', 'Matter', 'Amount', 'Paid', 'Balance', 'Status', 'PDF', 'Actions']} rows={invoices.map(i => [i.number || i.id, i.clientName || '-', i.matterTitle || '-', kes(i.amount), kes(i.amountPaid), kes(i.balance), isAdmin ? <select key={i.id} style={styles.tableSelect} value={i.status} onChange={e => setStatus(i.id, e.target.value)}><option>Outstanding</option><option>Paid</option><option>Overdue</option></select> : <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <DownloadButton key={`${i.id}-pdf`} label="Download" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />, <ActionGroup key={`${i.id}-actions`} actions={[['Payments', () => openPayments(i)], ...(canManage && i.status !== 'Paid' ? [['Delete', () => setConfirm({ title: 'Delete invoice?', message: 'Delete this invoice?', onConfirm: () => deleteInvoiceRecord(i) })]] : [])]} />])} empty="No invoices yet." /></div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <label htmlFor="invoice-register-filter" style={{ fontSize: 12, color: '#697386' }}>Filter</label>
+          <select id="invoice-register-filter" style={styles.tableSelect} value={registerFilter} onChange={e => setRegisterFilter(e.target.value)}>
+            <option value="all">All</option>
+            <option value="Outstanding">Outstanding</option>
+            <option value="Overdue">Overdue</option>
+            <option value="Paid">Paid</option>
+          </select>
+          <span style={{ fontSize: 12, color: '#697386' }}>{registerInvoices.length} of {invoices.length}</span>
+        </div>
+        <div className="lf-invoice-cards"><Table columns={['Invoice', 'Client', 'Matter', 'Amount', 'Paid', 'Balance', 'Status', 'PDF', 'Actions']} rows={registerInvoices.map(i => {
+          const distance = invoiceDueDistanceText(i);
+          const overdue = isInvoiceOverdue(i);
+          // Admin keeps a select bound to the STORED status (never the derived label);
+          // the derived overdue signal is shown as a separate badge/helper line only.
+          const statusCell = isAdmin
+            ? <div key={`${i.id}-status`} style={{ display: 'grid', gap: 3 }}><select style={styles.tableSelect} value={i.status} onChange={e => setStatus(i.id, e.target.value)}><option>Outstanding</option><option>Paid</option><option>Overdue</option></select>{overdue && i.status !== 'Overdue' ? <Badge tone="red">Overdue</Badge> : null}{distance ? <span style={{ fontSize: 11, color: overdue ? '#991B1B' : '#697386' }}>{distance}</span> : null}</div>
+            : <div key={`${i.id}-status`} style={{ display: 'grid', gap: 3 }}><Badge tone={statusTone(invoiceDisplayStatus(i))}>{invoiceDisplayStatus(i)}</Badge>{distance ? <span style={{ fontSize: 11, color: overdue ? '#991B1B' : '#697386' }}>{distance}</span> : null}</div>;
+          return [i.number || i.id, i.clientName || '-', i.matterTitle || '-', kes(i.amount), kes(i.amountPaid), kes(i.balance), statusCell, <DownloadButton key={`${i.id}-pdf`} label="Download" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />, <ActionGroup key={`${i.id}-actions`} actions={[['Payments', () => openPayments(i)], ...(canManage && i.status !== 'Paid' ? [['Delete', () => setConfirm({ title: 'Delete invoice?', message: 'Delete this invoice?', onConfirm: () => deleteInvoiceRecord(i) })]] : [])]} />];
+        })} empty={invoices.length === 0 ? 'No invoices yet.' : 'No invoices match this filter.'} /></div>
         {selectedInvoice && (
           <div style={{ ...styles.pageStack, marginTop: 16 }}>
             <Sub title={`Payments - ${selectedInvoice.number || selectedInvoice.id}`}>

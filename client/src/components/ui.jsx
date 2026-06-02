@@ -139,6 +139,44 @@ export function Empty({ title, text }) { return <div style={styles.empty}><div s
 export function Skeleton({ rows = 4 }) { return <div style={styles.skeletonGrid}>{Array.from({ length: rows }).map((_, index) => <div key={index} style={styles.skeleton}><span style={styles.skeletonLineLarge} /><span style={styles.skeletonLine} /><span style={styles.skeletonLineShort} /></div>)}</div>; }
 export function Table({ columns, rows, empty, rowIds }) { if (!rows.length) return <Empty title={empty} text="Once records exist, they will appear here." />; return <div style={styles.tableWrap}><table style={styles.table}><thead><tr>{columns.map(c => <th key={c}>{c}</th>)}</tr></thead><tbody>{rows.map((row, i) => <tr key={i} id={rowIds?.[i]}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>)}</tbody></table></div>; }
 export function statusTone(status) { return status === 'Paid' ? 'green' : status === 'Overdue' ? 'red' : 'amber'; }
+// PRODUCT-15F display-only overdue helpers. These never mutate invoice.status and
+// must not be used to build admin status PATCH payloads; they exist purely for
+// badges, helper text, filtering and counts in the staff register and client portal.
+// Returns whole days between today and dueDate: negative = overdue, 0 = due today,
+// positive = due in future; null when dueDate is missing/unparseable.
+export function invoiceDueDistanceDays(invoice) {
+  const raw = invoice && invoice.dueDate ? String(invoice.dueDate).slice(0, 10) : '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  const [y, m, d] = raw.split('-').map(Number);
+  const due = new Date(y, m - 1, d);
+  if (Number.isNaN(due.getTime())) return null;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((due.getTime() - today.getTime()) / 86400000);
+}
+// Derived overdue: unpaid (stored status not Paid) AND dueDate is before today.
+export function isInvoiceOverdue(invoice) {
+  if (!invoice || invoice.status === 'Paid') return false;
+  const days = invoiceDueDistanceDays(invoice);
+  return days !== null && days < 0;
+}
+// Display label for badges only — 'Overdue' when derived-overdue, else stored status.
+export function invoiceDisplayStatus(invoice) {
+  if (!invoice) return '';
+  if (isInvoiceOverdue(invoice)) return 'Overdue';
+  return invoice.status || '';
+}
+// Helper text for unpaid invoices ('' for Paid or undated): due today / due in X days / X days overdue.
+export function invoiceDueDistanceText(invoice) {
+  if (!invoice || invoice.status === 'Paid') return '';
+  const days = invoiceDueDistanceDays(invoice);
+  if (days === null) return '';
+  if (days === 0) return 'due today';
+  if (days === 1) return 'due tomorrow';
+  if (days > 0) return `due in ${days} days`;
+  const overdue = Math.abs(days);
+  return `${overdue} day${overdue === 1 ? '' : 's'} overdue`;
+}
 export function kes(value) { return `KSh ${Number(value || 0).toLocaleString('en-KE')}`; }
 export function todayIso() { return new Date().toISOString().slice(0, 10); }
 export function isToday(date) { return Boolean(date) && date === todayIso(); }
