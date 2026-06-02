@@ -1111,15 +1111,28 @@ export function Tasks({ data, canManage, reload, notify, focus }) {
   return <div className="lf-split-grid lf-task-split-grid" style={styles.splitGrid}><Card title="New task" hint="Deadline control"><form onSubmit={submit} style={styles.formGrid}><Field label="Matter"><select required style={styles.input} value={form.matterId} onChange={e => setForm({ ...form, matterId: e.target.value })}><option value="">Select matter</option>{data.matters.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}</select></Field><Field label="Task"><input required style={styles.input} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></Field><Field label="Due"><input type="date" style={styles.input} value={form.dueDate} onChange={e => setForm({ ...form, dueDate: e.target.value })} /></Field><button style={styles.primaryButton}>Create task</button></form></Card><Card title="Task board" hint={`${data.tasks.length} tasks`}><TaskEditorList tasks={data.tasks} canManage={canManage} editingTask={editingTask} setEditingTask={setEditingTask} saveTask={saveTask} toggle={toggle} confirmDelete={task => setConfirm({ title: 'Delete task?', message: 'Delete this task?', onConfirm: () => deleteTaskRecord(task) })} /></Card><ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} /></div>;
 }
 
-export function Invoices({ invoices, isAdmin, canManage, reload, notify }) {
+export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSettings: providedFirmSettings }) {
   const [confirm, setConfirm] = useState(null);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState('');
   const [invoiceDetails, setInvoiceDetails] = useState(null);
   const [payments, setPayments] = useState([]);
   const [paymentForm, setPaymentForm] = useState({ amount: '', method: 'Bank Transfer', reference: '', date: new Date().toISOString().slice(0, 10), note: '' });
+  const [firmSettings, setFirmSettings] = useState({ ...defaultFirmSettings, ...(providedFirmSettings || {}) });
   const session = readSession();
   const canRecordPayment = ['admin', 'assistant'].includes(session?.user?.role);
   const selectedInvoice = invoices.find(invoice => invoice.id === selectedInvoiceId);
+
+  useEffect(() => {
+    if (providedFirmSettings) {
+      setFirmSettings({ ...defaultFirmSettings, ...providedFirmSettings });
+      return;
+    }
+    let active = true;
+    api('/firm-settings')
+      .then(settings => { if (active) setFirmSettings({ ...defaultFirmSettings, ...(settings || {}) }); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [providedFirmSettings]);
 
   useEffect(() => {
     if (!selectedInvoiceId) {
@@ -1186,6 +1199,12 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify }) {
     const vat = subtotal * vatRate;
     const total = subtotal + vat;
     const items = Array.isArray(detail.items) ? detail.items : [];
+    const billingFields = [
+      firmSettings.kraPin ? ['KRA PIN', firmSettings.kraPin] : null,
+      firmSettings.vatNumber ? ['VAT registration number', firmSettings.vatNumber] : null,
+      firmSettings.paymentInstructions ? ['Payment instructions', firmSettings.paymentInstructions] : null,
+      firmSettings.invoiceFooterNote ? ['Invoice footer note / payment terms', firmSettings.invoiceFooterNote] : null,
+    ].filter(Boolean);
     return (
       <div style={{ marginBottom: 16, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
         <div style={{ marginBottom: 12 }}>
@@ -1254,6 +1273,19 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify }) {
         ) : (
           <div style={{ fontSize: 12, color: '#697386', fontStyle: 'italic', marginBottom: 12, padding: 8, background: '#F9FAFB', borderRadius: 4 }}>
             Line items are not available in this preview yet. The PDF download remains the source for the current invoice layout.
+          </div>
+        )}
+        {billingFields.length > 0 && (
+          <div style={{ marginBottom: 12, padding: 12, border: '1px solid #E5E7EB', borderRadius: 8, background: '#F9FAFB' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', marginBottom: 8 }}>Firm billing & footer details</div>
+            <div style={{ display: 'grid', gap: 8 }}>
+              {billingFields.map(([label, value]) => (
+                <div key={label} style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 180px) 1fr', gap: 10, fontSize: 12 }}>
+                  <div style={{ color: '#697386', fontWeight: 500 }}>{label}</div>
+                  <div style={{ color: '#111827', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>{value}</div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
         <div style={{ borderTop: '1px solid #E5E7EB', paddingTop: 12 }}>
@@ -1577,6 +1609,18 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
             {form.logo ? <img src={form.logo} alt="Firm logo preview" /> : <span>LF</span>}
             <button type="button" style={styles.tinyButton} onClick={() => setForm({ ...form, logo: '' })}>Clear logo</button>
           </div>
+          <div style={{ gridColumn: '1 / -1', borderTop: '1px solid #E5E7EB', paddingTop: 14, marginTop: 4 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: theme.ink }}>Billing & payment</div>
+          </div>
+          <Field label="Payment instructions">
+            <textarea style={{ ...styles.input, minHeight: 84, resize: 'vertical' }} maxLength={800} value={form.paymentInstructions || ''} onChange={e => setForm({ ...form, paymentInstructions: e.target.value })} />
+            <div style={styles.formHelper}>Shown on invoice and receipt PDFs when populated.</div>
+          </Field>
+          <Field label="KRA PIN"><input style={styles.input} maxLength={80} value={form.kraPin || ''} onChange={e => setForm({ ...form, kraPin: e.target.value })} /></Field>
+          <Field label="VAT registration number"><input style={styles.input} maxLength={80} value={form.vatNumber || ''} onChange={e => setForm({ ...form, vatNumber: e.target.value })} /></Field>
+          <Field label="Invoice footer note / payment terms">
+            <textarea style={{ ...styles.input, minHeight: 68, resize: 'vertical' }} maxLength={500} value={form.invoiceFooterNote || ''} onChange={e => setForm({ ...form, invoiceFooterNote: e.target.value })} />
+          </Field>
           <Field label="Allow advocates to see billing information">
             <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <input type="checkbox" checked={Number(form.advocateBillingVisibility ?? 1) !== 0} onChange={e => setForm({ ...form, advocateBillingVisibility: e.target.checked ? 1 : 0 })} />

@@ -111,6 +111,10 @@ const defaultFirmSettings = {
   email: 'accounts@lexflow.co.ke',
   phone: '+254 700 123456',
   address: 'Nairobi, Kenya',
+  paymentInstructions: '',
+  kraPin: '',
+  vatNumber: '',
+  invoiceFooterNote: '',
 };
 
 const {
@@ -250,6 +254,10 @@ async function initDb() {
   await ensureColumn('users', 'avatarMimeType', "TEXT DEFAULT ''");
   await ensureColumn('firm_settings', 'themeJson', 'TEXT');
   await ensureColumn('firm_settings', 'advocateBillingVisibility', 'INTEGER DEFAULT 1');
+  await ensureColumn('firm_settings', 'paymentInstructions', "TEXT DEFAULT ''");
+  await ensureColumn('firm_settings', 'kraPin', "TEXT DEFAULT ''");
+  await ensureColumn('firm_settings', 'vatNumber', "TEXT DEFAULT ''");
+  await ensureColumn('firm_settings', 'invoiceFooterNote', "TEXT DEFAULT ''");
   await ensureColumn('payments', 'proofId', 'TEXT');
   await ensureColumn('payments', 'createdBy', 'TEXT');
   await ensureColumn('payments', 'createdAt', 'TEXT');
@@ -592,14 +600,68 @@ app.post('/api/invitations/:token/accept', async (req, res) => {
   const token = signAccessToken({ id, role: 'client', fullName: name, clientId: invitation.clientId || '', email: invitation.email, tokenVersion: 1 });
   res.json({ message: 'Client portal account created.', token, user: { id, email: invitation.email, fullName: name, name, role: 'client', clientId: invitation.clientId || '' } });
 });
+// Trim and length-cap a firm billing/tax display field so user input cannot
+// bloat invoice/receipt PDFs or the firm_settings row. Returns '' for blanks.
+function normalizeFirmBillingField(value, maxLength) {
+  if (value === undefined || value === null) return '';
+  return String(value).trim().slice(0, maxLength);
+}
+
+// Normalized firm tax / payment-instruction / footer-note fields used by the
+// invoice and receipt PDFs (PRODUCT-15B).
+function firmBillingFields(firm) {
+  return {
+    kraPin: normalizeFirmBillingField(firm?.kraPin, 80),
+    vatNumber: normalizeFirmBillingField(firm?.vatNumber, 80),
+    paymentInstructions: normalizeFirmBillingField(firm?.paymentInstructions, 800),
+    invoiceFooterNote: normalizeFirmBillingField(firm?.invoiceFooterNote, 500),
+  };
+}
+
+// Draw the optional firm tax / payment-instruction / footer-note block used by
+// invoice and receipt PDFs. Returns the y after the block. Renders nothing (and
+// returns the incoming y) when every field is blank, so blank-firm layouts stay
+// unchanged. Breaks to a new page if the block would collide with the footer.
+function drawFirmBillingBlock(doc, firm, x, startY, width) {
+  const { kraPin, vatNumber, paymentInstructions, invoiceFooterNote } = firmBillingFields(firm);
+  if (!kraPin && !vatNumber && !paymentInstructions && !invoiceFooterNote) return startY;
+  let estimate = 0;
+  if (kraPin || vatNumber) estimate += 14 + (kraPin ? 13 : 0) + (vatNumber ? 13 : 0) + 6;
+  if (paymentInstructions) { doc.font('Helvetica').fontSize(9); estimate += 14 + doc.heightOfString(paymentInstructions, { width }) + 6; }
+  if (invoiceFooterNote) { doc.font('Helvetica').fontSize(8); estimate += doc.heightOfString(invoiceFooterNote, { width }) + 4; }
+  let y = startY;
+  if (y + estimate > 745) { doc.addPage(); y = 60; }
+  if (kraPin || vatNumber) {
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('#374151').text('Tax Details', x, y); y += 14;
+    doc.font('Helvetica').fontSize(9).fillColor('#111827');
+    if (kraPin) { doc.text(`KRA PIN: ${kraPin}`, x, y, { width }); y += 13; }
+    if (vatNumber) { doc.text(`VAT No: ${vatNumber}`, x, y, { width }); y += 13; }
+    y += 6;
+  }
+  if (paymentInstructions) {
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('#374151').text('Payment Instructions', x, y); y += 14;
+    doc.font('Helvetica').fontSize(9).fillColor('#111827').text(paymentInstructions, x, y, { width });
+    y = doc.y + 6;
+  }
+  if (invoiceFooterNote) {
+    doc.font('Helvetica').fontSize(8).fillColor('#6B7280').text(invoiceFooterNote, x, y, { width });
+    y = doc.y + 4;
+  }
+  return y;
+}
+
 app.put('/api/firm-settings', authenticate, requireAdmin, async (req, res) => {
   const existing = await get('SELECT * FROM firm_settings WHERE id=?', ['default']);
   const oldBillingVisibility = existing ? Number(existing.advocateBillingVisibility) : 1;
   const settings = { ...defaultFirmSettings, ...req.body, id: 'default' };
-  await run(`INSERT INTO firm_settings (id,name,logo,primaryColor,accentColor,websiteURL,email,phone,address)
-    VALUES (?,?,?,?,?,?,?,?,?)
-    ON CONFLICT(id) DO UPDATE SET name=excluded.name, logo=excluded.logo, primaryColor=excluded.primaryColor, accentColor=excluded.accentColor, websiteURL=excluded.websiteURL, email=excluded.email, phone=excluded.phone, address=excluded.address`,
-    [settings.id, settings.name, settings.logo, settings.primaryColor, settings.accentColor, settings.websiteURL, settings.email, settings.phone, settings.address]);
+  settings.paymentInstructions = normalizeFirmBillingField(settings.paymentInstructions, 800);
+  settings.kraPin = normalizeFirmBillingField(settings.kraPin, 80);
+  settings.vatNumber = normalizeFirmBillingField(settings.vatNumber, 80);
+  settings.invoiceFooterNote = normalizeFirmBillingField(settings.invoiceFooterNote, 500);
+  await run(`INSERT INTO firm_settings (id,name,logo,primaryColor,accentColor,websiteURL,email,phone,address,paymentInstructions,kraPin,vatNumber,invoiceFooterNote)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(id) DO UPDATE SET name=excluded.name, logo=excluded.logo, primaryColor=excluded.primaryColor, accentColor=excluded.accentColor, websiteURL=excluded.websiteURL, email=excluded.email, phone=excluded.phone, address=excluded.address, paymentInstructions=excluded.paymentInstructions, kraPin=excluded.kraPin, vatNumber=excluded.vatNumber, invoiceFooterNote=excluded.invoiceFooterNote`,
+    [settings.id, settings.name, settings.logo, settings.primaryColor, settings.accentColor, settings.websiteURL, settings.email, settings.phone, settings.address, settings.paymentInstructions, settings.kraPin, settings.vatNumber, settings.invoiceFooterNote]);
   if (req.body.reminderSettings) {
     await saveReminderSettings(req.body.reminderSettings);
     await logAudit(req, 'update', 'reminder_settings', 'default', 'Updated reminder channel settings');
@@ -4800,6 +4862,9 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
   const top = 282; doc.rect(48, top, 499, 24).fill('#F3F4F6'); doc.fillColor('#374151').font('Helvetica-Bold').fontSize(9); doc.text('Date', 56, top + 8); doc.text('Description', 132, top + 8); doc.text('Hours', 330, top + 8, { width: 42, align: 'right' }); doc.text('Rate', 382, top + 8, { width: 70, align: 'right' }); doc.text('Amount', 465, top + 8, { width: 70, align: 'right' });
   let y = top + 36; doc.font('Helvetica').fontSize(9).fillColor('#111827'); for (const item of invoice.items || []) { if (y > 690) { doc.addPage(); y = 60; } doc.text(item.date || invoice.date, 56, y); doc.text(item.description || 'Legal Services', 132, y, { width: 185 }); doc.text(Number(item.hours || 0).toFixed(item.hours ? 2 : 0), 330, y, { width: 42, align: 'right' }); doc.text(money(item.rate), 382, y, { width: 70, align: 'right' }); doc.text(money(item.amount), 465, y, { width: 70, align: 'right' }); y += 24; }
   y = Math.max(y + 24, 610); [['Subtotal', subtotal], ['VAT (16%)', vat], ['Total', total]].forEach(([label, value], i) => { doc.font(i === 2 ? 'Helvetica-Bold' : 'Helvetica').fontSize(i === 2 ? 12 : 10).fillColor(i === 2 ? '#1B3A5C' : '#374151'); doc.text(label, 350, y + i * 22); doc.text(money(value), 440, y + i * 22, { width: 105, align: 'right' }); });
+  // Optional firm tax / payment / footer-note block on the left column so it
+  // clears the right-aligned totals; nothing renders when all fields are blank.
+  drawFirmBillingBlock(doc, firm, 48, y, 288);
   doc.font('Helvetica').fontSize(9).fillColor('#6B7280').text(`${firm.name || 'LexFlow Kenya'} | ${firm.address || 'Nairobi, Kenya'} | ${firm.email || 'accounts@lexflow.co.ke'} | ${firm.phone || '+254 700 123456'}`, 48, 760, { align: 'center', width: 499 });
   doc.end();
 });
@@ -4872,6 +4937,7 @@ app.get('/api/invoices/:invoiceId/payments/:paymentId/receipt.pdf', async (req, 
   doc.font('Helvetica').fontSize(10).fillColor('#111827').text(`Payment against invoice ${invoice.number || invoice.id}`, 56, summaryTop + 36, { width: 320 });
   doc.font('Helvetica-Bold').fontSize(12).fillColor('#1B3A5C').text(money(Number(payment.amount || 0)), 380, summaryTop + 36, { width: 160, align: 'right' });
   doc.font('Helvetica').fontSize(10).fillColor('#374151').text('This is a payment receipt issued against the invoice referenced above. It does not replace or alter the invoice tax treatment.', 48, summaryTop + 90, { width: 499 });
+  drawFirmBillingBlock(doc, firm, 48, summaryTop + 126, 499);
   doc.font('Helvetica').fontSize(9).fillColor('#6B7280').text(`${firm.name || 'LexFlow Kenya'} | ${firm.address || 'Nairobi, Kenya'} | ${firm.email || 'accounts@lexflow.co.ke'} | ${firm.phone || '+254 700 123456'}`, 48, 760, { align: 'center', width: 499 });
   doc.end();
 });
