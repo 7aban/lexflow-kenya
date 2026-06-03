@@ -78,6 +78,95 @@ function getProofPrompt(proof) {
   return { title: 'Awaiting review', tone: 'amber', body: 'Proof uploaded — awaiting firm review.' };
 }
 
+const clientInvoiceMobilePolishCss = `
+  .ux2-client-mobile-stack { display: none; }
+  @media (max-width: 767px) {
+    .ux2-client-desktop-table { display: none !important; }
+    .ux2-client-mobile-stack { display: grid; gap: 10px; }
+    .ux2-client-mobile-card {
+      border: 1px solid #E5E7EB;
+      border-radius: 8px;
+      background: #fff;
+      padding: 10px;
+      display: grid;
+      gap: 9px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    }
+    .ux2-client-mobile-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .ux2-client-mobile-title {
+      color: #111827;
+      font-size: 14px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .ux2-client-mobile-subtitle {
+      color: #6B7280;
+      font-size: 12px;
+      line-height: 1.4;
+      overflow-wrap: anywhere;
+    }
+    .ux2-client-mobile-kv {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .ux2-client-mobile-field {
+      min-width: 0;
+      border: 1px solid #F3F4F6;
+      border-radius: 6px;
+      padding: 7px 8px;
+      background: #F9FAFB;
+    }
+    .ux2-client-mobile-field-wide { grid-column: 1 / -1; }
+    .ux2-client-mobile-label {
+      display: block;
+      color: #6B7280;
+      font-size: 11px;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    .ux2-client-mobile-value {
+      color: #111827;
+      font-size: 13px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+    .ux2-client-mobile-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .ux2-client-mobile-empty {
+      border: 1px dashed #D1D5DB;
+      border-radius: 8px;
+      padding: 10px;
+      color: #6B7280;
+      font-size: 13px;
+      background: #F9FAFB;
+    }
+  }
+`;
+
+function ClientMobileField({ label, children, wide = false }) {
+  return (
+    <div className={`ux2-client-mobile-field${wide ? ' ux2-client-mobile-field-wide' : ''}`}>
+      <span className="ux2-client-mobile-label">{label}</span>
+      <div className="ux2-client-mobile-value">{children}</div>
+    </div>
+  );
+}
+
+function ClientMobileEmpty({ children }) {
+  return <div className="ux2-client-mobile-empty">{children}</div>;
+}
+
 export default function ClientApp({ user, firm, logout, notify, toast, setToast }) {
   const [view, setView] = useState('Dashboard');
   const [dashboard, setDashboard] = useState({ client: null, matters: [], documents: [], invoices: [], appearances: [], notices: [], paymentProofs: [], invoicePayments: [] });
@@ -639,17 +728,44 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
   }, [matters, search, statusFilter, sortOrder]);
 
   if (!selected) return <Empty title="No matter selected" text="Your matter details will appear here once the firm shares a file." />;
+  function clientInvoiceLabel(invoice) {
+    return invoice.number || invoice.id;
+  }
+
+  function renderClientInvoiceStatus(invoice) {
+    return (
+      <div style={{ display: 'grid', gap: 3 }}>
+        <Badge tone={statusTone(invoiceDisplayStatus(invoice))}>{invoiceDisplayStatus(invoice)}</Badge>
+        {invoiceDueDistanceText(invoice) ? <span style={{ fontSize: 11, color: isInvoiceOverdue(invoice) ? '#DC2626' : '#6B7280' }}>{invoiceDueDistanceText(invoice)}</span> : null}
+      </div>
+    );
+  }
+
+  function renderClientPaymentStatus(payment) {
+    return payment.voided ? <Badge tone="red">Payment voided</Badge> : <Badge tone="green">Recorded</Badge>;
+  }
+
+  function renderClientPaymentReceipt(payment) {
+    if (payment.voided) {
+      return (
+        <div style={{ display: 'grid', gap: 3 }}>
+          <span>{payment.receiptNumber || '-'}</span>
+          <span style={{ fontSize: 11, color: '#DC2626' }}>Receipt voided - not downloadable as a valid receipt.</span>
+        </div>
+      );
+    }
+    return payment.receiptNumber && payment.invoiceId
+      ? <DownloadButton label={payment.receiptNumber} ariaLabel={`Download receipt ${payment.receiptNumber}`} path={`/api/invoices/${payment.invoiceId}/payments/${payment.id}/receipt.pdf`} filename={`${payment.receiptNumber}.pdf`} notify={notify} />
+      : (payment.receiptNumber || '-');
+  }
+
   const paymentRows = invoicePayments.map(payment => {
     const invoice = invoices.find(item => item.id === payment.invoiceId);
-    const receiptCell = payment.voided
-      ? (payment.receiptNumber || '-')
-      : payment.receiptNumber && payment.invoiceId
-      ? <DownloadButton key={`${payment.id}-receipt`} label={payment.receiptNumber} path={`/api/invoices/${payment.invoiceId}/payments/${payment.id}/receipt.pdf`} filename={`${payment.receiptNumber}.pdf`} notify={notify} />
-      : (payment.receiptNumber || '-');
-    const statusCell = payment.voided ? <Badge key={`${payment.id}-voided`} tone="red">Payment voided</Badge> : <Badge key={`${payment.id}-active`} tone="green">Recorded</Badge>;
-    return [invoice?.number || payment.invoiceId || '-', payment.date || '-', receiptCell, payment.method || '-', payment.reference || '-', kes(payment.amount), statusCell];
+    return [invoice?.number || payment.invoiceId || '-', payment.date || '-', renderClientPaymentReceipt(payment), payment.method || '-', payment.reference || '-', kes(payment.amount), renderClientPaymentStatus(payment)];
   });
   return (
+    <>
+    <style>{clientInvoiceMobilePolishCss}</style>
     <div className="lf-matter-grid lf-client-matter-grid" style={styles.matterGrid}>
       <Card title="My matters" hint={`${matters.length} file(s)`}>
         <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
@@ -683,8 +799,52 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
         </Card>
         <MatterDocuments matterId={selected.id} clientMode notify={notify} />
         <Card title="Invoices and payment proof" hint="Upload M-PESA or bank transfer confirmation">
-          <div className="lf-client-invoices-cards"><Table columns={['Invoice', 'Amount', 'Paid', 'Balance', 'Status', 'PDF']} rows={invoices.map(i => [i.number || i.id, kes(i.amount), kes(i.amountPaid), kes(i.balance), <div key={`${i.id}-status`} style={{ display: 'grid', gap: 3 }}><Badge tone={statusTone(invoiceDisplayStatus(i))}>{invoiceDisplayStatus(i)}</Badge>{invoiceDueDistanceText(i) ? <span style={{ fontSize: 11, color: isInvoiceOverdue(i) ? '#DC2626' : '#6B7280' }}>{invoiceDueDistanceText(i)}</span> : null}</div>, <DownloadButton key={`${i.id}-pdf`} label="PDF" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />])} empty="No invoices shared yet." /></div>
-          <div className="lf-client-invoice-payments-cards"><Table columns={['Invoice', 'Date', 'Receipt', 'Method', 'Reference', 'Amount', 'Status']} rows={paymentRows} empty="No payments recorded yet." /></div>
+          <div className="ux2-client-mobile-stack" aria-label="Invoices for this matter">
+            {invoices.length ? invoices.map(i => (
+              <article key={`matter-invoice-mobile-${i.id}`} className="ux2-client-mobile-card">
+                <div className="ux2-client-mobile-head">
+                  <div>
+                    <div className="ux2-client-mobile-title">{clientInvoiceLabel(i)}</div>
+                    <div className="ux2-client-mobile-subtitle">{selected.title}</div>
+                  </div>
+                  {renderClientInvoiceStatus(i)}
+                </div>
+                <div className="ux2-client-mobile-kv">
+                  <ClientMobileField label="Balance">{kes(i.balance)}</ClientMobileField>
+                  <ClientMobileField label="Amount">{kes(i.amount)}</ClientMobileField>
+                  <ClientMobileField label="Paid">{kes(i.amountPaid)}</ClientMobileField>
+                  <ClientMobileField label="PDF">
+                    <DownloadButton label="Download PDF" ariaLabel={`Download invoice ${clientInvoiceLabel(i)} PDF`} path={`/api/invoices/${i.id}/pdf`} filename={`${clientInvoiceLabel(i)}.pdf`} notify={notify} />
+                  </ClientMobileField>
+                </div>
+              </article>
+            )) : <ClientMobileEmpty>No invoices shared yet.</ClientMobileEmpty>}
+          </div>
+          <div className="lf-client-invoices-cards ux2-client-desktop-table"><Table columns={['Invoice', 'Amount', 'Paid', 'Balance', 'Status', 'PDF']} rows={invoices.map(i => [clientInvoiceLabel(i), kes(i.amount), kes(i.amountPaid), kes(i.balance), renderClientInvoiceStatus(i), <DownloadButton key={`${i.id}-pdf`} label="PDF" ariaLabel={`Download invoice ${clientInvoiceLabel(i)} PDF`} path={`/api/invoices/${i.id}/pdf`} filename={`${clientInvoiceLabel(i)}.pdf`} notify={notify} />])} empty="No invoices shared yet." /></div>
+          <div className="ux2-client-mobile-stack" aria-label="Payments recorded for this matter" style={{ marginTop: 10 }}>
+            {invoicePayments.length ? invoicePayments.map(payment => {
+              const invoice = invoices.find(item => item.id === payment.invoiceId);
+              return (
+                <article key={`matter-payment-mobile-${payment.id}`} className="ux2-client-mobile-card">
+                  <div className="ux2-client-mobile-head">
+                    <div>
+                      <div className="ux2-client-mobile-title">{payment.receiptNumber || payment.id}</div>
+                      <div className="ux2-client-mobile-subtitle">{invoice?.number || payment.invoiceId || 'General payment'}</div>
+                    </div>
+                    {renderClientPaymentStatus(payment)}
+                  </div>
+                  <div className="ux2-client-mobile-kv">
+                    <ClientMobileField label="Amount">{kes(payment.amount)}</ClientMobileField>
+                    <ClientMobileField label="Date">{payment.date || '-'}</ClientMobileField>
+                    <ClientMobileField label="Method">{payment.method || '-'}</ClientMobileField>
+                    <ClientMobileField label="Reference">{payment.reference || '-'}</ClientMobileField>
+                    <ClientMobileField label="Receipt" wide>{renderClientPaymentReceipt(payment)}</ClientMobileField>
+                  </div>
+                </article>
+              );
+            }) : <ClientMobileEmpty>No payments recorded yet.</ClientMobileEmpty>}
+          </div>
+          <div className="lf-client-invoice-payments-cards ux2-client-desktop-table"><Table columns={['Invoice', 'Date', 'Receipt', 'Method', 'Reference', 'Amount', 'Status']} rows={paymentRows} empty="No payments recorded yet." /></div>
           <form onSubmit={submitPayment} style={{ ...styles.formGrid, marginTop: 14 }}>
             <Field label="Invoice"><select style={styles.input} value={payment.invoiceId} onChange={e => setPayment({ ...payment, invoiceId: e.target.value })}><option value="">General payment</option>{invoices.map(i => <option key={i.id} value={i.id}>{i.number || i.id}</option>)}</select></Field>
             <Field label="Method"><select style={styles.input} value={payment.method} onChange={e => setPayment({ ...payment, method: e.target.value })}><option>M-PESA</option><option>Bank Transfer</option><option>Cash Deposit</option></select></Field>
@@ -694,7 +854,34 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
             <Field label="Note"><input style={styles.input} value={payment.note} onChange={e => setPayment({ ...payment, note: e.target.value })} placeholder="Optional note" /></Field>
             <button style={styles.primaryButton}>Upload proof</button>
           </form>
-          <div className="lf-client-proofs-cards"><Table columns={['Reference', 'Method', 'Amount', 'Uploaded', 'Status', 'Review']} rows={proofs.map(p => {
+          <div className="ux2-client-mobile-stack" aria-label="Payment proof status list" style={{ marginTop: 14 }}>
+            {proofs.length ? proofs.map(p => {
+              const prompt = getProofPrompt(p);
+              return (
+                <article key={`proof-mobile-${p.id}`} className="ux2-client-mobile-card">
+                  <div className="ux2-client-mobile-head">
+                    <div>
+                      <div className="ux2-client-mobile-title">{p.reference || 'Payment proof'}</div>
+                      <div className="ux2-client-mobile-subtitle">{p.method || '-'}{p.createdAt ? ` / ${new Date(p.createdAt).toLocaleString()}` : ''}</div>
+                    </div>
+                    <div style={{ display: 'grid', gap: 3 }}>
+                      <Badge tone={p.paymentId ? 'green' : p.status === 'Accepted' ? 'blue' : p.status === 'Rejected' ? 'red' : 'amber'}>{p.status || 'Pending'}</Badge>
+                      {p.reviewedAt ? <span style={{ fontSize: 11, color: '#6B7280' }}>{new Date(p.reviewedAt).toLocaleDateString()}</span> : null}
+                    </div>
+                  </div>
+                  <div className="ux2-client-mobile-kv">
+                    <ClientMobileField label="Amount">{kes(p.amount)}</ClientMobileField>
+                    <ClientMobileField label="Uploaded">{p.createdAt ? new Date(p.createdAt).toLocaleString() : '-'}</ClientMobileField>
+                    <ClientMobileField label="Review" wide>
+                      <span style={{ color: proofPromptColor[prompt.tone] || '#6B7280', fontWeight: 500 }}>{prompt.body}</span>
+                      {p.status === 'Rejected' && p.reviewNote ? <span style={{ display: 'block', marginTop: 3, color: '#374151' }}>{p.reviewNote}</span> : null}
+                    </ClientMobileField>
+                  </div>
+                </article>
+              );
+            }) : <ClientMobileEmpty>No payment proofs uploaded yet. Use the form above after making payment.</ClientMobileEmpty>}
+          </div>
+          <div className="lf-client-proofs-cards ux2-client-desktop-table"><Table columns={['Reference', 'Method', 'Amount', 'Uploaded', 'Status', 'Review']} rows={proofs.map(p => {
             const prompt = getProofPrompt(p);
             return [
               p.reference,
@@ -708,6 +895,7 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
         </Card>
       </div>
     </div>
+    </>
   );
 }
 
@@ -930,9 +1118,9 @@ async function downloadWithNotify(path, filename, notify) {
   }
 }
 
-function DownloadButton({ label, path, filename, notify }) {
+function DownloadButton({ label, path, filename, notify, ariaLabel }) {
   return (
-    <button type="button" style={{ ...styles.link, border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }} onClick={() => downloadWithNotify(path, filename, notify)}>
+    <button type="button" aria-label={ariaLabel} style={{ ...styles.link, border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }} onClick={() => downloadWithNotify(path, filename, notify)}>
       {label}
     </button>
   );
@@ -1232,7 +1420,26 @@ function BillingInvoices({ data, matters, firm, notify, selectMatter, onNavigate
 
   const emptyText = invoices.length === 0 ? 'No invoices shared yet.' : 'No invoices match your search or filters.';
 
+  function billingInvoiceLabel(invoice) {
+    return invoice.number || invoice.id;
+  }
+
+  function billingMatterTitle(invoice) {
+    return matters.find(m => m.id === invoice.matterId)?.title || invoice.matterId || '-';
+  }
+
+  function renderBillingInvoiceStatus(invoice) {
+    return (
+      <div style={{ display: 'grid', gap: 3 }}>
+        <Badge tone={statusTone(invoiceDisplayStatus(invoice))}>{invoiceDisplayStatus(invoice)}</Badge>
+        {invoiceDueDistanceText(invoice) ? <span style={{ fontSize: 11, color: isInvoiceOverdue(invoice) ? '#DC2626' : '#6B7280' }}>{invoiceDueDistanceText(invoice)}</span> : null}
+      </div>
+    );
+  }
+
   return (
+    <>
+    <style>{clientInvoiceMobilePolishCss}</style>
     <Card title="Invoices" hint="Billing across your matters">
       {showGuidance && (
         <section style={{ border: `1px solid ${theme.line}`, borderLeft: `3px solid ${theme.gold}`, borderRadius: 8, padding: 12, marginBottom: 12, background: theme.wash }}>
@@ -1277,12 +1484,14 @@ function BillingInvoices({ data, matters, firm, notify, selectMatter, onNavigate
       <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         <input
           type="search"
+          aria-label="Search invoices"
           placeholder="Find an invoice…"
           value={search}
           onChange={e => setSearch(e.target.value)}
           style={{ flex: 1, minWidth: 160, padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}
         />
         <select
+          aria-label="Filter invoices by status"
           value={statusFilter}
           onChange={e => setStatusFilter(e.target.value)}
           style={{ padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}
@@ -1293,6 +1502,7 @@ function BillingInvoices({ data, matters, firm, notify, selectMatter, onNavigate
           <option value="overdue">Overdue</option>
         </select>
         <select
+          aria-label="Filter invoices by matter"
           value={matterFilter}
           onChange={e => setMatterFilter(e.target.value)}
           style={{ padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}
@@ -1301,6 +1511,7 @@ function BillingInvoices({ data, matters, firm, notify, selectMatter, onNavigate
           {matters.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}
         </select>
         <select
+          aria-label="Sort invoices"
           value={sortOrder}
           onChange={e => setSortOrder(e.target.value)}
           style={{ padding: '6px 10px', fontSize: 13, border: `1px solid ${theme.line}`, borderRadius: 6, background: '#fff', outline: 'none' }}
@@ -1318,21 +1529,43 @@ function BillingInvoices({ data, matters, firm, notify, selectMatter, onNavigate
             : `Showing ${filtered.length} of ${invoices.length} invoice${invoices.length === 1 ? '' : 's'}`}
         </p>
       )}
-      <div className="lf-client-all-invoices-cards">
+      <div className="ux2-client-mobile-stack" aria-label="Invoices mobile list">
+        {filtered.length ? filtered.map(i => (
+          <article key={`billing-invoice-mobile-${i.id}`} className="ux2-client-mobile-card">
+            <div className="ux2-client-mobile-head">
+              <div>
+                <div className="ux2-client-mobile-title">{billingInvoiceLabel(i)}</div>
+                <div className="ux2-client-mobile-subtitle">{billingMatterTitle(i)}</div>
+              </div>
+              {renderBillingInvoiceStatus(i)}
+            </div>
+            <div className="ux2-client-mobile-kv">
+              <ClientMobileField label="Balance">{kes(i.balance)}</ClientMobileField>
+              <ClientMobileField label="Amount">{kes(i.amount)}</ClientMobileField>
+              <ClientMobileField label="Paid">{kes(i.amountPaid)}</ClientMobileField>
+              <ClientMobileField label="PDF">
+                <DownloadButton label="Download PDF" ariaLabel={`Download invoice ${billingInvoiceLabel(i)} PDF`} path={`/api/invoices/${i.id}/pdf`} filename={`${billingInvoiceLabel(i)}.pdf`} notify={notify} />
+              </ClientMobileField>
+            </div>
+          </article>
+        )) : <ClientMobileEmpty>{emptyText}</ClientMobileEmpty>}
+      </div>
+      <div className="lf-client-all-invoices-cards ux2-client-desktop-table">
         <Table
           columns={['Invoice', 'Matter', 'Amount', 'Paid', 'Balance', 'Status', 'PDF']}
           rows={filtered.map(i => [
-            i.number || i.id,
-            matters.find(m => m.id === i.matterId)?.title || i.matterId || '-',
+            billingInvoiceLabel(i),
+            billingMatterTitle(i),
             kes(i.amount),
             kes(i.amountPaid),
             kes(i.balance),
-            <div key={`${i.id}-status`} style={{ display: 'grid', gap: 3 }}><Badge tone={statusTone(invoiceDisplayStatus(i))}>{invoiceDisplayStatus(i)}</Badge>{invoiceDueDistanceText(i) ? <span style={{ fontSize: 11, color: isInvoiceOverdue(i) ? '#DC2626' : '#6B7280' }}>{invoiceDueDistanceText(i)}</span> : null}</div>,
-            <DownloadButton key={`${i.id}-pdf`} label="PDF" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />
+            renderBillingInvoiceStatus(i),
+            <DownloadButton key={`${i.id}-pdf`} label="PDF" ariaLabel={`Download invoice ${billingInvoiceLabel(i)} PDF`} path={`/api/invoices/${i.id}/pdf`} filename={`${billingInvoiceLabel(i)}.pdf`} notify={notify} />
           ])}
           empty={emptyText}
         />
       </div>
     </Card>
+    </>
   );
 }

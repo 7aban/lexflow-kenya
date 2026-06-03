@@ -20,6 +20,100 @@ function listFromResponse(response, key) {
 // PRODUCT-15I: staff payment-proof queue endpoint (optional status filter; 'All' omits it).
 const paymentProofsPath = status => `/payment-proofs${status && status !== 'All' ? `?status=${encodeURIComponent(status)}` : ''}`;
 
+const billingMobilePolishCss = `
+  .ux2-mobile-stack { display: none; }
+  @media (max-width: 767px) {
+    .ux2-desktop-table { display: none !important; }
+    .ux2-mobile-stack { display: grid; gap: 10px; }
+    .ux2-mobile-card {
+      border: 1px solid #E5E7EB;
+      border-radius: 8px;
+      background: #fff;
+      padding: 10px;
+      display: grid;
+      gap: 9px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    }
+    .ux2-mobile-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .ux2-mobile-title {
+      color: #111827;
+      font-size: 14px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .ux2-mobile-subtitle {
+      color: #697386;
+      font-size: 12px;
+      line-height: 1.4;
+      overflow-wrap: anywhere;
+    }
+    .ux2-mobile-kv {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .ux2-mobile-field {
+      min-width: 0;
+      border: 1px solid #F3F4F6;
+      border-radius: 6px;
+      padding: 7px 8px;
+      background: #F9FAFB;
+    }
+    .ux2-mobile-field-wide { grid-column: 1 / -1; }
+    .ux2-mobile-label {
+      display: block;
+      color: #697386;
+      font-size: 11px;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    .ux2-mobile-value {
+      color: #111827;
+      font-size: 13px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+    .ux2-mobile-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .ux2-mobile-empty {
+      border: 1px dashed #D1D5DB;
+      border-radius: 8px;
+      padding: 10px;
+      color: #697386;
+      font-size: 13px;
+      background: #F9FAFB;
+    }
+    .ux2-mobile-card select,
+    .ux2-mobile-card input,
+    .ux2-mobile-card textarea {
+      max-width: 100%;
+    }
+  }
+`;
+
+function MobileField({ label, children, wide = false }) {
+  return (
+    <div className={`ux2-mobile-field${wide ? ' ux2-mobile-field-wide' : ''}`}>
+      <span className="ux2-mobile-label">{label}</span>
+      <div className="ux2-mobile-value">{children}</div>
+    </div>
+  );
+}
+
+function MobileEmpty({ children }) {
+  return <div className="ux2-mobile-empty">{children}</div>;
+}
+
 function isBillableValue(value) {
   if (value === undefined || value === null) return true;
   return value === true || value === 1 || value === '1' || value === 'true';
@@ -1391,6 +1485,72 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
     scrollToSection('invoice-register');
   }
 
+  function invoiceLabel(invoice) {
+    return invoice.number || invoice.id;
+  }
+
+  function renderInvoiceStatus(invoice) {
+    const distance = invoiceDueDistanceText(invoice);
+    const overdue = isInvoiceOverdue(invoice);
+    if (isAdmin) {
+      return (
+        <div style={{ display: 'grid', gap: 3 }}>
+          <select
+            aria-label={`Stored status for invoice ${invoiceLabel(invoice)}`}
+            style={styles.tableSelect}
+            value={invoice.status}
+            onChange={e => setStatus(invoice.id, e.target.value)}
+          >
+            <option>Outstanding</option>
+            <option>Paid</option>
+            <option>Overdue</option>
+          </select>
+          {overdue && invoice.status !== 'Overdue' ? <Badge tone="red">Overdue</Badge> : null}
+          {distance ? <span style={{ fontSize: 11, color: overdue ? '#991B1B' : '#697386' }}>{distance}</span> : null}
+        </div>
+      );
+    }
+    return (
+      <div style={{ display: 'grid', gap: 3 }}>
+        <Badge tone={statusTone(invoiceDisplayStatus(invoice))}>{invoiceDisplayStatus(invoice)}</Badge>
+        {distance ? <span style={{ fontSize: 11, color: overdue ? '#991B1B' : '#697386' }}>{distance}</span> : null}
+      </div>
+    );
+  }
+
+  function invoiceActions(invoice) {
+    return [
+      ['Payments', () => openPayments(invoice)],
+      ...(canManage && invoice.status !== 'Paid' ? [['Delete', () => setConfirm({ title: 'Delete invoice?', message: 'Delete this invoice?', onConfirm: () => deleteInvoiceRecord(invoice) })]] : []),
+    ];
+  }
+
+  function renderPaymentStatus(payment) {
+    return payment.voided
+      ? <div style={{ display: 'grid', gap: 3 }}><Badge tone="red">Voided</Badge>{payment.voidReason ? <span style={{ fontSize: 11, color: '#697386' }}>{payment.voidReason}</span> : null}</div>
+      : <Badge tone="green">Active</Badge>;
+  }
+
+  function renderPaymentReceipt(payment) {
+    if (payment.voided) {
+      return (
+        <div style={{ display: 'grid', gap: 3 }}>
+          <Badge tone="red">Voided</Badge>
+          <span style={{ fontSize: 11, color: '#697386' }}>Receipt not downloadable as a valid receipt.</span>
+        </div>
+      );
+    }
+    return payment.receiptNumber
+      ? <DownloadButton label="Download" ariaLabel={`Download receipt ${payment.receiptNumber}`} path={`/api/invoices/${selectedInvoice.id}/payments/${payment.id}/receipt.pdf`} filename={`${payment.receiptNumber}.pdf`} notify={notify} />
+      : '-';
+  }
+
+  function renderPaymentActions(payment) {
+    return isAdmin && !payment.voided
+      ? <ActionGroup actions={[['Void payment', () => setVoidDraft({ payment, reason: '', busy: false })]]} />
+      : '-';
+  }
+
   function InvoicePreviewCard() {
     if (!selectedInvoice) return null;
     const detail = invoiceDetails || selectedInvoice;
@@ -1525,6 +1685,7 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
   }
 
   return <>
+    <style>{billingMobilePolishCss}</style>
     <div style={{ marginBottom: 16, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <IconCash size={16} stroke={1.75} style={{ color: '#697386' }} />
@@ -1671,29 +1832,62 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
           </select>
           <span style={{ fontSize: 12, color: '#697386' }}>{registerInvoices.length} of {invoices.length}</span>
         </div>
-        <div className="lf-invoice-cards"><Table columns={['Invoice', 'Client', 'Matter', 'Amount', 'Paid', 'Balance', 'Status', 'PDF', 'Actions']} rows={registerInvoices.map(i => {
-          const distance = invoiceDueDistanceText(i);
-          const overdue = isInvoiceOverdue(i);
-          // Admin keeps a select bound to the STORED status (never the derived label);
-          // the derived overdue signal is shown as a separate badge/helper line only.
-          const statusCell = isAdmin
-            ? <div key={`${i.id}-status`} style={{ display: 'grid', gap: 3 }}><select style={styles.tableSelect} value={i.status} onChange={e => setStatus(i.id, e.target.value)}><option>Outstanding</option><option>Paid</option><option>Overdue</option></select>{overdue && i.status !== 'Overdue' ? <Badge tone="red">Overdue</Badge> : null}{distance ? <span style={{ fontSize: 11, color: overdue ? '#991B1B' : '#697386' }}>{distance}</span> : null}</div>
-            : <div key={`${i.id}-status`} style={{ display: 'grid', gap: 3 }}><Badge tone={statusTone(invoiceDisplayStatus(i))}>{invoiceDisplayStatus(i)}</Badge>{distance ? <span style={{ fontSize: 11, color: overdue ? '#991B1B' : '#697386' }}>{distance}</span> : null}</div>;
-          return [i.number || i.id, i.clientName || '-', i.matterTitle || '-', kes(i.amount), kes(i.amountPaid), kes(i.balance), statusCell, <DownloadButton key={`${i.id}-pdf`} label="Download" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />, <ActionGroup key={`${i.id}-actions`} actions={[['Payments', () => openPayments(i)], ...(canManage && i.status !== 'Paid' ? [['Delete', () => setConfirm({ title: 'Delete invoice?', message: 'Delete this invoice?', onConfirm: () => deleteInvoiceRecord(i) })]] : [])]} />];
-        })} empty={invoices.length === 0 ? 'No invoices yet.' : 'No invoices match this filter.'} /></div>
+        <div className="lf-invoice-cards">
+          <Table
+            columns={['Invoice', 'Client', 'Matter', 'Amount', 'Paid', 'Balance', 'Status', 'PDF', 'Actions']}
+            rows={registerInvoices.map(i => [
+              invoiceLabel(i),
+              i.clientName || '-',
+              i.matterTitle || '-',
+              kes(i.amount),
+              kes(i.amountPaid),
+              kes(i.balance),
+              renderInvoiceStatus(i),
+              <DownloadButton key={`${i.id}-pdf`} label="Download" ariaLabel={`Download invoice ${invoiceLabel(i)} PDF`} path={`/api/invoices/${i.id}/pdf`} filename={`${invoiceLabel(i)}.pdf`} notify={notify} />,
+              <ActionGroup key={`${i.id}-actions`} actions={invoiceActions(i)} />
+            ])}
+            empty={invoices.length === 0 ? 'No invoices yet.' : 'No invoices match this filter.'}
+          />
+        </div>
         {selectedInvoice && (
           <div style={{ ...styles.pageStack, marginTop: 16 }}>
             <Sub title={`Payments - ${selectedInvoice.number || selectedInvoice.id}`}>
-              <div className="lf-payment-cards"><Table columns={['Date', 'Receipt', 'Method', 'Reference', 'Amount', 'Status', 'Receipt PDF', 'Actions']} rows={payments.map(payment => {
-                const statusCell = payment.voided
-                  ? <div key={`${payment.id}-status`} style={{ display: 'grid', gap: 3 }}><Badge tone="red">Voided</Badge>{payment.voidReason ? <span style={{ fontSize: 11, color: '#697386' }}>{payment.voidReason}</span> : null}</div>
-                  : <Badge key={`${payment.id}-status`} tone="green">Active</Badge>;
-                const receiptCell = payment.voided
-                  ? <Badge key={`${payment.id}-voided-receipt`} tone="red">Voided</Badge>
-                  : payment.receiptNumber ? <DownloadButton key={`${payment.id}-receipt`} label="Download" path={`/api/invoices/${selectedInvoice.id}/payments/${payment.id}/receipt.pdf`} filename={`${payment.receiptNumber}.pdf`} notify={notify} /> : '-';
-                const actions = isAdmin && !payment.voided ? <ActionGroup key={`${payment.id}-actions`} actions={[['Void payment', () => setVoidDraft({ payment, reason: '', busy: false })]]} /> : '-';
-                return [payment.date || '-', payment.receiptNumber || '-', payment.method || '-', payment.reference || '-', kes(payment.amount), statusCell, receiptCell, actions];
-              })} empty="No payments recorded yet." /></div>
+              <div className="ux2-mobile-stack" aria-label={`Payments for invoice ${invoiceLabel(selectedInvoice)}`}>
+                {payments.length ? payments.map(payment => (
+                  <article key={`payment-mobile-${payment.id}`} className="ux2-mobile-card">
+                    <div className="ux2-mobile-head">
+                      <div>
+                        <div className="ux2-mobile-title">{payment.receiptNumber || payment.id}</div>
+                        <div className="ux2-mobile-subtitle">{payment.date || '-'}</div>
+                      </div>
+                      {renderPaymentStatus(payment)}
+                    </div>
+                    <div className="ux2-mobile-kv">
+                      <MobileField label="Amount">{kes(payment.amount)}</MobileField>
+                      <MobileField label="Method">{payment.method || '-'}</MobileField>
+                      <MobileField label="Reference" wide>{payment.reference || '-'}</MobileField>
+                      <MobileField label="Receipt PDF" wide>{renderPaymentReceipt(payment)}</MobileField>
+                    </div>
+                    {isAdmin && !payment.voided ? <div className="ux2-mobile-actions">{renderPaymentActions(payment)}</div> : null}
+                  </article>
+                )) : <MobileEmpty>No payments recorded yet.</MobileEmpty>}
+              </div>
+              <div className="lf-payment-cards ux2-desktop-table">
+                <Table
+                  columns={['Date', 'Receipt', 'Method', 'Reference', 'Amount', 'Status', 'Receipt PDF', 'Actions']}
+                  rows={payments.map(payment => [
+                    payment.date || '-',
+                    payment.receiptNumber || '-',
+                    payment.method || '-',
+                    payment.reference || '-',
+                    kes(payment.amount),
+                    renderPaymentStatus(payment),
+                    renderPaymentReceipt(payment),
+                    renderPaymentActions(payment)
+                  ])}
+                  empty="No payments recorded yet."
+                />
+              </div>
               {canRecordPayment && Number(selectedInvoice.balance || 0) > 0 && (
                 <>
                 {paymentForm.proofId && (
@@ -1732,7 +1926,7 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
       notify={notify}
     />
     {voidDraft && (
-      <div style={styles.modalBackdrop} role="dialog" aria-modal="true" aria-labelledby="payment-void-title">
+      <div style={styles.modalBackdrop} role="dialog" aria-modal="true" aria-labelledby="payment-void-title" aria-describedby="payment-void-helper">
         <div style={styles.modalCard}>
           <div style={styles.modalHead}>
             <h2 id="payment-void-title">Void payment?</h2>
@@ -1740,7 +1934,15 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
           </div>
           <form onSubmit={submitVoidPayment} style={{ display: 'grid', gap: 12 }}>
             <p style={{ margin: 0, color: '#374151' }}>{voidDraft.payment.receiptNumber || voidDraft.payment.id} / {kes(voidDraft.payment.amount)}</p>
-            <Field label="Reason"><textarea required maxLength={500} style={{ ...styles.input, minHeight: 92, resize: 'vertical' }} value={voidDraft.reason} onChange={e => setVoidDraft(current => current ? { ...current, reason: e.target.value } : current)} /></Field>
+            <div id="payment-void-helper" style={{ border: '1px solid #FECACA', borderRadius: 8, background: '#FEF2F2', padding: '10px 12px', color: '#7F1D1D', fontSize: 12, lineHeight: 1.45 }}>
+              <strong style={{ display: 'block', marginBottom: 4 }}>This payment stays in the audit trail, but it will no longer count as an active payment.</strong>
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                <li>Active totals will exclude it.</li>
+                <li>The receipt will no longer download as a normal valid receipt.</li>
+                <li>The invoice balance and displayed status will be recalculated.</li>
+              </ul>
+            </div>
+            <Field label="Reason"><textarea required aria-label={`Void reason for payment ${voidDraft.payment.receiptNumber || voidDraft.payment.id}`} maxLength={500} style={{ ...styles.input, minHeight: 92, resize: 'vertical' }} value={voidDraft.reason} onChange={e => setVoidDraft(current => current ? { ...current, reason: e.target.value } : current)} /></Field>
             <div style={styles.modalActions}>
               <button type="button" style={styles.ghostButton} onClick={() => setVoidDraft(null)} disabled={voidDraft.busy}>Cancel</button>
               <button type="submit" style={styles.dangerButton} disabled={voidDraft.busy || !String(voidDraft.reason || '').trim()}>{voidDraft.busy ? 'Voiding...' : 'Void payment'}</button>
@@ -1762,36 +1964,65 @@ function proofStatusTone(status) {
 // PRODUCT-15I: staff/admin payment-proof review queue. Review is decision-only (no settlement);
 // "Record payment" routes into the existing manual record-payment flow above.
 function PaymentProofQueue({ proofs, proofFilter, setProofFilter, pendingProofCount, proofNotes, setProofNotes, canReviewProof, canRecordPayment, onDownload, onReview, onRecordPayment }) {
-  const rows = proofs.map(proof => {
+  function proofLabel(proof) {
+    return [proof.invoiceNumber || (proof.invoiceId ? proof.invoiceId : 'General payment'), proof.reference].filter(Boolean).join(' / ');
+  }
+
+  function renderProofActions(proof) {
     const actions = [];
+    const label = proofLabel(proof);
     if (proof.hasAttachment) {
       actions.push(
-        <button key={`${proof.id}-dl`} type="button" style={{ ...styles.link, border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }} onClick={() => onDownload(proof)}>Download</button>
+        <button key={`${proof.id}-dl`} type="button" aria-label={`Download attachment for payment proof ${label}`} style={{ ...styles.link, border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }} onClick={() => onDownload(proof)}>Download</button>
       );
     }
     if (canReviewProof && proof.status === 'Pending') {
       actions.push(
-        <button key={`${proof.id}-acc`} type="button" style={{ ...styles.ghostButton, padding: '4px 10px' }} onClick={() => onReview(proof, 'Accepted')}>Accept</button>,
-        <button key={`${proof.id}-rej`} type="button" style={{ ...styles.ghostButton, padding: '4px 10px', color: '#991B1B', borderColor: '#FCA5A5' }} onClick={() => onReview(proof, 'Rejected')}>Reject</button>
+        <button key={`${proof.id}-acc`} type="button" aria-label={`Accept payment proof ${label}`} style={{ ...styles.ghostButton, padding: '4px 10px' }} onClick={() => onReview(proof, 'Accepted')}>Accept</button>,
+        <button key={`${proof.id}-rej`} type="button" aria-label={`Reject payment proof ${label}`} style={{ ...styles.ghostButton, padding: '4px 10px', color: '#991B1B', borderColor: '#FCA5A5' }} onClick={() => onReview(proof, 'Rejected')}>Reject</button>
       );
     }
     if (canRecordPayment && proof.status === 'Accepted' && proof.invoiceId && Number(proof.invoiceBalance || 0) > 0 && !proof.paymentId) {
       actions.push(
-        <button key={`${proof.id}-pay`} type="button" style={{ ...styles.ghostButton, padding: '4px 10px' }} onClick={() => onRecordPayment(proof)}>Record payment</button>
+        <button key={`${proof.id}-pay`} type="button" aria-label={`Record payment from proof ${label}`} style={{ ...styles.ghostButton, padding: '4px 10px' }} onClick={() => onRecordPayment(proof)}>Record payment</button>
       );
     }
-    const noteCell = canReviewProof && proof.status === 'Pending'
-      ? <input style={{ ...styles.input, minWidth: 140 }} placeholder="Optional review note" value={proofNotes[proof.id] || ''} onChange={e => setProofNotes(current => ({ ...current, [proof.id]: e.target.value }))} maxLength={500} />
+    return actions;
+  }
+
+  function renderProofNote(proof) {
+    return canReviewProof && proof.status === 'Pending'
+      ? <input aria-label={`Review note for payment proof ${proofLabel(proof)}`} style={{ ...styles.input, minWidth: 140 }} placeholder="Optional review note" value={proofNotes[proof.id] || ''} onChange={e => setProofNotes(current => ({ ...current, [proof.id]: e.target.value }))} maxLength={500} />
       : (proof.reviewNote || (proof.reviewedAt ? '-' : ''));
+  }
+
+  function renderProofStatus(proof) {
+    return (
+      <div style={{ display: 'grid', gap: 3 }}>
+        <Badge tone={proofStatusTone(proof.status)}>{proof.status}</Badge>
+        {proof.paymentId ? <span style={{ fontSize: 11, color: '#16A34A' }}>Payment recorded</span> : null}
+        {proof.reviewedAt ? <span style={{ fontSize: 11, color: '#697386' }}>{new Date(proof.reviewedAt).toLocaleDateString('en-KE')}{proof.reviewedByName ? ` · ${proof.reviewedByName}` : ''}</span> : null}
+      </div>
+    );
+  }
+
+  function renderProofFile(proof) {
+    return proof.fileName
+      ? <div style={{ display: 'grid', gap: 2 }}><span style={{ fontSize: 12 }}>{proof.fileName}</span><span style={{ fontSize: 11, color: '#697386' }}>{proof.size || ''}</span></div>
+      : <span style={{ fontSize: 11, color: '#697386' }}>No file</span>;
+  }
+
+  const rows = proofs.map(proof => {
+    const actions = renderProofActions(proof);
     return [
       proof.invoiceNumber || (proof.invoiceId ? proof.invoiceId : 'General payment'),
       <div key={`${proof.id}-cm`} style={{ display: 'grid', gap: 2 }}><span>{proof.clientName || '-'}</span><span style={{ fontSize: 11, color: '#697386' }}>{proof.matterTitle || proof.matterReference || '-'}</span></div>,
       <div key={`${proof.id}-mr`} style={{ display: 'grid', gap: 2 }}><span>{proof.method || '-'}</span><span style={{ fontSize: 11, color: '#697386' }}>{proof.reference || '-'}</span></div>,
       kes(proof.amount),
       proof.createdAt ? new Date(proof.createdAt).toLocaleString('en-KE') : '-',
-      <div key={`${proof.id}-st`} style={{ display: 'grid', gap: 3 }}><Badge tone={proofStatusTone(proof.status)}>{proof.status}</Badge>{proof.paymentId ? <span style={{ fontSize: 11, color: '#16A34A' }}>Payment recorded</span> : null}{proof.reviewedAt ? <span style={{ fontSize: 11, color: '#697386' }}>{new Date(proof.reviewedAt).toLocaleDateString('en-KE')}{proof.reviewedByName ? ` · ${proof.reviewedByName}` : ''}</span> : null}</div>,
-      proof.fileName ? <div key={`${proof.id}-fn`} style={{ display: 'grid', gap: 2 }}><span style={{ fontSize: 12 }}>{proof.fileName}</span><span style={{ fontSize: 11, color: '#697386' }}>{proof.size || ''}</span></div> : <span style={{ fontSize: 11, color: '#697386' }}>No file</span>,
-      noteCell,
+      renderProofStatus(proof),
+      renderProofFile(proof),
+      renderProofNote(proof),
       <div key={`${proof.id}-act`} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{actions.length ? actions : <span style={{ fontSize: 11, color: '#697386' }}>—</span>}</div>,
     ];
   });
@@ -1808,7 +2039,32 @@ function PaymentProofQueue({ proofs, proofFilter, setProofFilter, pendingProofCo
           </select>
           <Badge tone={pendingProofCount > 0 ? 'amber' : 'green'}>{pendingProofCount} pending</Badge>
         </div>
-        <div className="lf-payment-proof-cards"><Table columns={['Invoice', 'Client / Matter', 'Method / Ref', 'Amount', 'Uploaded', 'Status', 'File', 'Review note', 'Actions']} rows={rows} empty="No payment proofs in this view." /></div>
+        <div className="ux2-mobile-stack" aria-label="Payment proof review mobile list">
+          {proofs.length ? proofs.map(proof => {
+            const actions = renderProofActions(proof);
+            return (
+              <article key={`proof-mobile-${proof.id}`} className="ux2-mobile-card">
+                <div className="ux2-mobile-head">
+                  <div>
+                    <div className="ux2-mobile-title">{proof.invoiceNumber || (proof.invoiceId ? proof.invoiceId : 'General payment')}</div>
+                    <div className="ux2-mobile-subtitle">{proof.clientName || '-'}{proof.matterTitle || proof.matterReference ? ` / ${proof.matterTitle || proof.matterReference}` : ''}</div>
+                  </div>
+                  {renderProofStatus(proof)}
+                </div>
+                <div className="ux2-mobile-kv">
+                  <MobileField label="Amount">{kes(proof.amount)}</MobileField>
+                  <MobileField label="Uploaded">{proof.createdAt ? new Date(proof.createdAt).toLocaleString('en-KE') : '-'}</MobileField>
+                  <MobileField label="Method">{proof.method || '-'}</MobileField>
+                  <MobileField label="Reference">{proof.reference || '-'}</MobileField>
+                  <MobileField label="File" wide>{renderProofFile(proof)}</MobileField>
+                  <MobileField label="Review note" wide>{renderProofNote(proof)}</MobileField>
+                </div>
+                <div className="ux2-mobile-actions">{actions.length ? actions : <span style={{ fontSize: 11, color: '#697386' }}>No action available</span>}</div>
+              </article>
+            );
+          }) : <MobileEmpty>No payment proofs in this view.</MobileEmpty>}
+        </div>
+        <div className="lf-payment-proof-cards ux2-desktop-table"><Table columns={['Invoice', 'Client / Matter', 'Method / Ref', 'Amount', 'Uploaded', 'Status', 'File', 'Review note', 'Actions']} rows={rows} empty="No payment proofs in this view." /></div>
       </Card>
     </div>
   );
@@ -1822,9 +2078,9 @@ async function downloadWithNotify(path, filename, notify) {
   }
 }
 
-function DownloadButton({ label, path, filename, notify }) {
+function DownloadButton({ label, path, filename, notify, ariaLabel }) {
   return (
-    <button type="button" style={{ ...styles.link, border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }} onClick={() => downloadWithNotify(path, filename, notify)}>
+    <button type="button" aria-label={ariaLabel} style={{ ...styles.link, border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }} onClick={() => downloadWithNotify(path, filename, notify)}>
       {label}
     </button>
   );
