@@ -1154,6 +1154,11 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
   const [proofFilter, setProofFilter] = useState('Pending');
   const [pendingProofCount, setPendingProofCount] = useState(0);
   const [proofNotes, setProofNotes] = useState({});
+  // PRODUCT-15K: collections action queue needs pending AND rejected proofs at once, independent
+  // of the proof-queue's own filter. Loaded once from the SAME existing /payment-proofs route
+  // (status=All) — no new route, no API/backend/schema change; the route never returns BLOB content.
+  const [collectionsProofs, setCollectionsProofs] = useState([]);
+  const [collectionsOpen, setCollectionsOpen] = useState(true);
   const session = readSession();
   const canRecordPayment = ['admin', 'assistant'].includes(session?.user?.role);
   const canReviewProof = ['admin', 'assistant'].includes(session?.user?.role);
@@ -1202,20 +1207,46 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
       .catch(() => {});
     return () => { active = false; };
   }, [proofFilter]);
+  // PRODUCT-15K: separate, filter-independent load for the collections queue (pending + rejected).
+  async function loadCollectionsProofs() {
+    try {
+      const data = await api(paymentProofsPath('All'));
+      setCollectionsProofs(Array.isArray(data?.proofs) ? data.proofs : []);
+    } catch (err) {
+      // Non-fatal: queue degrades to invoice-only items if proofs cannot be loaded.
+    }
+  }
+  useEffect(() => {
+    let active = true;
+    api(paymentProofsPath('All'))
+      .then(data => { if (active) setCollectionsProofs(Array.isArray(data?.proofs) ? data.proofs : []); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+  // PRODUCT-15K: counts use DERIVED overdue (stored 'Overdue' OR isInvoiceOverdue) so the summary
+  // matches the register and Command Summary after PRODUCT-15F. Unpaid is counted directly as
+  // non-Paid to avoid double counting; outstanding = unpaid minus overdue. Stored status untouched.
   const invoiceSummary = useMemo(() => {
     const total = invoices.length;
     const paid = invoices.filter(i => i.status === 'Paid').length;
-    const outstanding = invoices.filter(i => i.status === 'Outstanding').length;
-    const overdue = invoices.filter(i => i.status === 'Overdue').length;
-    return { total, paid, outstanding, overdue, unpaid: outstanding + overdue };
+    const unpaid = invoices.filter(i => i.status !== 'Paid').length;
+    const overdue = invoices.filter(i => i.status === 'Overdue' || isInvoiceOverdue(i)).length;
+    const outstanding = unpaid - overdue;
+    return { total, paid, outstanding, overdue, unpaid };
   }, [invoices]);
+  // PRODUCT-15K: rank by DERIVED display status so derived-overdue invoices lead, consistent with
+  // the register. Stable secondary order by original index. Stored status is never mutated.
   const followUpItems = useMemo(() => {
+    const rank = { Overdue: 0, Outstanding: 1 };
     return invoices
       .filter(i => i.status !== 'Paid')
+      .map((invoice, index) => ({ invoice, index }))
       .sort((a, b) => {
-        const priority = { Overdue: 0, Outstanding: 1 };
-        return (priority[a.status] ?? 2) - (priority[b.status] ?? 2);
+        const ra = rank[invoiceDisplayStatus(a.invoice)] ?? 2;
+        const rb = rank[invoiceDisplayStatus(b.invoice)] ?? 2;
+        return ra === rb ? a.index - b.index : ra - rb;
       })
+      .map(entry => entry.invoice)
       .slice(0, 5);
   }, [invoices]);
   // PRODUCT-15F: filter the register by display status (derived overdue included),
@@ -1233,6 +1264,44 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
       })
       .map(entry => entry.invoice);
   }, [invoices, registerFilter]);
+  // PRODUCT-15K: read-only collections aggregation from data already in the view. Displays only
+  // server-provided amount/balance/amountPaid — never recomputes money/VAT and never mutates
+  // invoice/proof/payment state. Each unpaid invoice is classified once (overdue wins over partial)
+  // so a single invoice never produces two rows.
+  const collections = useMemo(() => {
+    const items = [];
+    invoices.forEach(inv => {
+      if (inv.status === 'Paid') return;
+      const overdue = inv.status === 'Overdue' || isInvoiceOverdue(inv);
+      const amountPaid = Number(inv.amountPaid || 0);
+      const balance = Number(inv.balance || 0);
+      const partial = amountPaid > 0 && balance > 0;
+      if (overdue) items.push({ key: `ov-${inv.id}`, kind: 'overdue', priority: 0, invoice: inv });
+      else if (partial) items.push({ key: `pt-${inv.id}`, kind: 'partial', priority: 1, invoice: inv });
+    });
+    collectionsProofs.forEach(proof => {
+      if (proof.status === 'Pending') items.push({ key: `pp-${proof.id}`, kind: 'pending-proof', priority: 2, proof });
+      else if (proof.status === 'Rejected') items.push({ key: `rp-${proof.id}`, kind: 'rejected-proof', priority: 3, proof });
+    });
+    items.sort((a, b) => a.priority - b.priority);
+    const counts = {
+      overdue: items.filter(i => i.kind === 'overdue').length,
+      partial: items.filter(i => i.kind === 'partial').length,
+      pendingProof: items.filter(i => i.kind === 'pending-proof').length,
+      rejectedProof: items.filter(i => i.kind === 'rejected-proof').length,
+    };
+    return { items, counts, total: items.length };
+  }, [invoices, collectionsProofs]);
+  // PRODUCT-15K: navigation/assist only — preselect a local filter and scroll to the existing
+  // surface. No data is created or mutated here.
+  function goToInvoiceRegister(filterValue) {
+    if (filterValue) setRegisterFilter(filterValue);
+    scrollToSection('invoice-register');
+  }
+  function goToProofQueue(filterValue) {
+    if (filterValue) setProofFilter(filterValue);
+    scrollToSection('payment-proof-queue');
+  }
   async function setStatus(id, status) { try { await api(`/invoices/${id}/status`, { method: 'PATCH', body: { status } }); notify({ type: 'success', message: 'Invoice updated.' }); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteInvoiceRecord(invoice) { try { await api(`/invoices/${invoice.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Invoice deleted.' }); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function openPayments(invoice) {
@@ -1257,6 +1326,8 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
       await reload();
       // Refresh the proof queue so a proof that was just settled shows its linked payment.
       if (settledProof) await loadProofs();
+      // PRODUCT-15K: keep the collections queue counts/items in step after a payment.
+      await loadCollectionsProofs();
     } catch (err) {
       notify({ type: 'danger', message: err.message });
     }
@@ -1268,6 +1339,7 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
       notify({ type: 'success', message: `Payment proof ${status.toLowerCase()}.` });
       setProofNotes(current => { const next = { ...current }; delete next[proof.id]; return next; });
       await loadProofs();
+      await loadCollectionsProofs();
     } catch (err) {
       notify({ type: 'danger', message: err.message });
     }
@@ -1479,7 +1551,7 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
                 <div key={invoice.id} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '6px 0', borderBottom: idx < followUpItems.length - 1 ? '1px solid #F3F4F6' : 'none', fontSize: 13 }}>
                   <span style={{ fontWeight: 500, color: '#111827', whiteSpace: 'nowrap' }}>{invoice.number || invoice.id}</span>
                   <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#697386', flex: '1 1 80px' }}>{invoice.matterTitle || invoice.clientName || ''}</span>
-                  <Badge tone={statusTone(invoice.status)}>{invoice.status}</Badge>
+                  <Badge tone={statusTone(invoiceDisplayStatus(invoice))}>{invoiceDisplayStatus(invoice)}</Badge>
                   {days !== null && (
                     <span style={{ fontSize: 11, color: days < 0 ? '#991B1B' : '#697386', whiteSpace: 'nowrap' }}>{formatDayDistance(days)}</span>
                   )}
@@ -1489,13 +1561,80 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
             })}
           </div>
           <p style={{ fontSize: 12, color: '#697386', margin: '8px 0 0' }}>
-            {followUpItems.some(i => i.status === 'Overdue') ? 'Start with overdue invoices.' : `${followUpItems.length} unpaid invoice${followUpItems.length === 1 ? '' : 's'} need follow-up.`}
+            {followUpItems.some(i => i.status === 'Overdue' || isInvoiceOverdue(i)) ? 'Start with overdue invoices.' : `${followUpItems.length} unpaid invoice${followUpItems.length === 1 ? '' : 's'} need follow-up.`}
           </p>
           <button type="button" style={{ ...styles.ghostButton, marginTop: 10 }} onClick={() => scrollToSection('invoice-register')}>
             View invoice register
           </button>
         </>
       )}
+    </div>
+    <div style={{ marginBottom: 16, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <IconAlertCircle size={16} stroke={1.75} style={{ color: '#697386' }} />
+          <span style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>Collections action queue</span>
+        </div>
+        {collections.total > 0 && (
+          <button type="button" aria-expanded={collectionsOpen} onClick={() => setCollectionsOpen(open => !open)} style={{ ...styles.ghostButton, fontSize: 12, padding: '4px 10px' }}>
+            {collectionsOpen ? 'Hide' : `Show (${collections.total})`}
+          </button>
+        )}
+      </div>
+      {collections.total === 0 ? (
+        <p style={{ fontSize: 12, color: '#697386', margin: '8px 0 0', fontStyle: 'italic' }}>No overdue invoices, partial payments, or proofs awaiting action.</p>
+      ) : collectionsOpen ? (
+        <>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+            {[['Overdue invoices', collections.counts.overdue, '#991B1B'], ['Partial payments', collections.counts.partial, '#92400E'], ['Pending proofs', collections.counts.pendingProof, '#92400E'], ['Rejected proofs', collections.counts.rejectedProof, '#991B1B']].map(([label, value, color]) => (
+              <div key={label} style={{ flex: '1 1 90px', background: '#F9FAFB', border: '1px solid #E5E7EB', borderRadius: 8, padding: '8px 10px' }}>
+                <div style={{ fontSize: 18, fontWeight: 700, color: value > 0 ? color : '#111827' }}>{value}</div>
+                <div style={{ fontSize: 11, color: '#697386', marginTop: 1 }}>{label}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: 10 }}>
+            {collections.items.slice(0, 8).map((item, idx, arr) => {
+              const isInvoice = item.kind === 'overdue' || item.kind === 'partial';
+              const inv = item.invoice;
+              const proof = item.proof;
+              const typeLabel = item.kind === 'overdue' ? 'Overdue invoice' : item.kind === 'partial' ? 'Partial payment' : item.kind === 'pending-proof' ? 'Pending proof' : 'Rejected proof';
+              const number = isInvoice ? (inv.number || inv.id) : (proof.invoiceNumber || (proof.invoiceId ? proof.invoiceId : 'General payment'));
+              const who = isInvoice ? (inv.matterTitle || inv.clientName || '') : (proof.clientName || proof.matterTitle || '');
+              // Display server-provided figures only — no recomputation of money or VAT.
+              const amountText = isInvoice ? `${kes(inv.balance)} due` : kes(proof.amount);
+              const subText = item.kind === 'overdue' ? invoiceDueDistanceText(inv)
+                : item.kind === 'partial' ? `Paid ${kes(inv.amountPaid)} of ${kes(inv.amount)}`
+                : proof.createdAt ? `Uploaded ${new Date(proof.createdAt).toLocaleDateString('en-KE')}` : '';
+              const badge = isInvoice
+                ? <Badge tone={statusTone(invoiceDisplayStatus(inv))}>{invoiceDisplayStatus(inv)}</Badge>
+                : <Badge tone={proofStatusTone(proof.status)}>{proof.status}</Badge>;
+              const action = item.kind === 'overdue' ? ['Record payment / follow up', () => goToInvoiceRegister('Overdue')]
+                : item.kind === 'partial' ? ['Follow up balance', () => goToInvoiceRegister('Outstanding')]
+                : item.kind === 'pending-proof' ? ['Review proof', () => goToProofQueue('Pending')]
+                : ['Await corrected proof / re-review', () => goToProofQueue('Rejected')];
+              return (
+                <div key={item.key} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '6px 0', borderBottom: idx < arr.length - 1 ? '1px solid #F3F4F6' : 'none', fontSize: 13 }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: '#697386', flex: '0 0 auto', minWidth: 90 }}>{typeLabel}</span>
+                  <span style={{ fontWeight: 500, color: '#111827', whiteSpace: 'nowrap' }}>{number}</span>
+                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#697386', flex: '1 1 80px' }}>{who}</span>
+                  {badge}
+                  <span style={{ fontWeight: 500, color: '#111827', whiteSpace: 'nowrap' }}>{amountText}</span>
+                  {subText ? <span style={{ fontSize: 11, color: item.kind === 'overdue' ? '#991B1B' : '#697386', whiteSpace: 'nowrap' }}>{subText}</span> : null}
+                  <button type="button" style={{ ...styles.ghostButton, fontSize: 12, padding: '4px 10px', whiteSpace: 'nowrap' }} onClick={action[1]}>{action[0]}</button>
+                </div>
+              );
+            })}
+          </div>
+          {collections.total > 8 && (
+            <p style={{ fontSize: 11, color: '#697386', margin: '8px 0 0' }}>Showing 8 of {collections.total}. Use the invoice register and payment proof queue below for the full list.</p>
+          )}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+            <button type="button" style={styles.ghostButton} onClick={() => goToInvoiceRegister('Overdue')}>View invoice register</button>
+            <button type="button" style={styles.ghostButton} onClick={() => goToProofQueue('Pending')}>View payment proof queue</button>
+          </div>
+        </>
+      ) : null}
     </div>
     <InvoicePreviewCard />
     <div id="invoice-register">
