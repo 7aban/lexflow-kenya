@@ -65,6 +65,19 @@ function nextEventFor(matter, appearances) {
   return appearances.find(event => event.matterId === matter.id && event.date >= new Date().toISOString().slice(0, 10));
 }
 
+// PRODUCT-15M display-only proof-status guidance. Reads existing payment_proofs
+// fields only (status / paymentId / reviewNote); it never mutates proof state,
+// invoice status, balances or settlement. A populated paymentId means the firm
+// has separately recorded a payment — accepted proof alone is NOT settlement.
+const proofPromptColor = { green: '#16A34A', blue: '#2563EB', red: '#DC2626', amber: '#6B7280' };
+function getProofPrompt(proof) {
+  if (!proof) return { title: 'Awaiting review', tone: 'amber', body: 'Proof uploaded — awaiting firm review.' };
+  if (proof.paymentId) return { title: 'Payment recorded', tone: 'green', body: 'Payment recorded.' };
+  if (proof.status === 'Accepted') return { title: 'Proof accepted', tone: 'blue', body: 'Proof accepted — payment recording pending.' };
+  if (proof.status === 'Rejected') return { title: 'Action needed', tone: 'red', body: 'Action needed — see firm note.' };
+  return { title: 'Awaiting review', tone: 'amber', body: 'Proof uploaded — awaiting firm review.' };
+}
+
 export default function ClientApp({ user, firm, logout, notify, toast, setToast }) {
   const [view, setView] = useState('Dashboard');
   const [dashboard, setDashboard] = useState({ client: null, matters: [], documents: [], invoices: [], appearances: [], notices: [], paymentProofs: [], invoicePayments: [] });
@@ -296,7 +309,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
         )}
         {!loading && view === 'Notices' && <Notices notices={dashboard.notices} matters={dashboard.matters} notify={notify} />}
         {!loading && view === 'Documents' && <Documents documents={dashboard.documents} matters={dashboard.matters} notify={notify} />}
-        {!loading && view === 'Invoices' && <BillingInvoices data={dashboard} matters={dashboard.matters} notify={notify} />}
+        {!loading && view === 'Invoices' && <BillingInvoices data={dashboard} matters={dashboard.matters} firm={firm} notify={notify} selectMatter={id => { setSelectedId(id); setView('My Matters'); }} onNavigate={switchView} />}
         {!loading && view === 'Account' && <Account user={user} client={dashboard.client} firm={firm} matters={dashboard.matters} avatarUrl={myAvatarUrl} hasAvatar={selfHasAvatar} onAvatarUpload={handleAvatarUpload} onAvatarRemove={handleAvatarRemove} onNavigate={switchView} />}
         {!loading && view === 'Court Dates' && <CourtDates appearances={dashboard.appearances} matters={dashboard.matters} />}
       </main>
@@ -678,14 +691,17 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
             <Field label="Note"><input style={styles.input} value={payment.note} onChange={e => setPayment({ ...payment, note: e.target.value })} placeholder="Optional note" /></Field>
             <button style={styles.primaryButton}>Upload proof</button>
           </form>
-          <div className="lf-client-proofs-cards"><Table columns={['Reference', 'Method', 'Amount', 'Uploaded', 'Status', 'Review']} rows={proofs.map(p => [
-            p.reference,
-            p.method,
-            kes(p.amount),
-            p.createdAt ? new Date(p.createdAt).toLocaleString() : '-',
-            <div key={`${p.id}-st`} style={{ display: 'grid', gap: 3 }}><Badge tone={p.status === 'Accepted' ? 'green' : p.status === 'Rejected' ? 'red' : 'amber'}>{p.status || 'Pending'}</Badge>{p.reviewedAt ? <span style={{ fontSize: 11, color: '#6B7280' }}>{new Date(p.reviewedAt).toLocaleDateString()}</span> : null}</div>,
-            <div key={`${p.id}-rv`} style={{ display: 'grid', gap: 3 }}>{p.reviewNote ? <span style={{ fontSize: 12 }}>{p.reviewNote}</span> : <span style={{ fontSize: 11, color: '#6B7280' }}>{(p.status || 'Pending') === 'Pending' ? 'Awaiting review' : '—'}</span>}{p.paymentId ? <span style={{ fontSize: 11, color: '#16A34A' }}>Payment recorded</span> : null}</div>,
-          ])} empty="No payment proof uploaded yet." /></div>
+          <div className="lf-client-proofs-cards"><Table columns={['Reference', 'Method', 'Amount', 'Uploaded', 'Status', 'Review']} rows={proofs.map(p => {
+            const prompt = getProofPrompt(p);
+            return [
+              p.reference,
+              p.method,
+              kes(p.amount),
+              p.createdAt ? new Date(p.createdAt).toLocaleString() : '-',
+              <div key={`${p.id}-st`} style={{ display: 'grid', gap: 3 }}><Badge tone={p.paymentId ? 'green' : p.status === 'Accepted' ? 'blue' : p.status === 'Rejected' ? 'red' : 'amber'}>{p.status || 'Pending'}</Badge>{p.reviewedAt ? <span style={{ fontSize: 11, color: '#6B7280' }}>{new Date(p.reviewedAt).toLocaleDateString()}</span> : null}</div>,
+              <div key={`${p.id}-rv`} style={{ display: 'grid', gap: 3 }}><span style={{ fontSize: 12, color: proofPromptColor[prompt.tone] || '#6B7280', fontWeight: 500 }}>{prompt.body}</span>{p.status === 'Rejected' && p.reviewNote ? <span style={{ fontSize: 12, color: '#374151' }}>{p.reviewNote}</span> : null}</div>,
+            ];
+          })} empty="No payment proofs uploaded yet. Use the form above after making payment." /></div>
         </Card>
       </div>
     </div>
@@ -1128,13 +1144,14 @@ function CourtDates({ appearances, matters }) {
   );
 }
 
-function BillingInvoices({ data, matters, notify }) {
+function BillingInvoices({ data, matters, firm, notify, selectMatter, onNavigate }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [matterFilter, setMatterFilter] = useState('');
   const [sortOrder, setSortOrder] = useState('newest');
 
   const invoices = data.invoices || [];
+  const proofs = data.paymentProofs || [];
 
   const filtered = useMemo(() => {
     let result = [...invoices];
@@ -1195,10 +1212,45 @@ function BillingInvoices({ data, matters, notify }) {
     return { total: invoices.length, paidCount: paid.length, unpaidCount: unpaid.length, overdueCount: overdue.length, totalOutstanding };
   }, [invoices]);
 
+  // PRODUCT-15M display-only guidance. Counts read existing proof status only.
+  const proofCounts = useMemo(() => ({
+    pending: proofs.filter(p => (p.status || 'Pending') === 'Pending').length,
+    rejected: proofs.filter(p => p.status === 'Rejected').length,
+    recorded: proofs.filter(p => p.paymentId).length,
+  }), [proofs]);
+  const paymentInstructions = (firm?.paymentInstructions || '').trim();
+  const showGuidance = summary.unpaidCount > 0 || summary.overdueCount > 0 || proofCounts.rejected > 0 || proofCounts.pending > 0 || !!paymentInstructions;
+
+  function goToProofUpload() {
+    const target = invoices.find(i => i.matterId && i.status !== 'Paid') || invoices.find(i => i.matterId);
+    if (target && target.matterId && selectMatter) selectMatter(target.matterId);
+    else onNavigate?.('My Matters');
+  }
+
   const emptyText = invoices.length === 0 ? 'No invoices shared yet.' : 'No invoices match your search or filters.';
 
   return (
     <Card title="Invoices" hint="Billing across your matters">
+      {showGuidance && (
+        <section style={{ border: `1px solid ${theme.line}`, borderLeft: `3px solid ${theme.gold}`, borderRadius: 8, padding: 12, marginBottom: 12, background: theme.wash }}>
+          <h3 style={{ margin: '0 0 6px', fontSize: 14, fontWeight: 600 }}>Payment guidance</h3>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 16px', fontSize: 13, lineHeight: 1.7, marginBottom: paymentInstructions ? 8 : 6 }}>
+            {summary.unpaidCount > 0 && <span>{summary.unpaidCount} unpaid invoice{summary.unpaidCount === 1 ? '' : 's'}</span>}
+            {summary.overdueCount > 0 && <span style={{ color: '#DC2626' }}>{summary.overdueCount} overdue</span>}
+            {summary.totalOutstanding > 0 && <span>Balance due: {kes(summary.totalOutstanding)}</span>}
+            {proofCounts.pending > 0 && <span>{proofCounts.pending} proof{proofCounts.pending === 1 ? '' : 's'} awaiting review</span>}
+            {proofCounts.rejected > 0 && <span style={{ color: '#DC2626' }}>{proofCounts.rejected} proof{proofCounts.rejected === 1 ? ' needs' : 's need'} attention</span>}
+          </div>
+          {paymentInstructions && (
+            <div style={{ fontSize: 12, color: '#374151', lineHeight: 1.5, whiteSpace: 'pre-wrap', background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 6, padding: '8px 10px', marginBottom: 8 }}>
+              <span style={{ display: 'block', fontWeight: 600, color: '#111827', marginBottom: 2 }}>How to pay</span>
+              {paymentInstructions}
+            </div>
+          )}
+          <p style={{ margin: '0 0 8px', fontSize: 12, color: '#6B7280', lineHeight: 1.5 }}>Uploading payment proof does not settle an invoice on its own — the firm reviews and records each payment before it is marked paid.</p>
+          <button type="button" onClick={goToProofUpload} style={styles.tinyButton}>Go to payment proof upload</button>
+        </section>
+      )}
       <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap', fontSize: 13 }}>
         <div style={{ background: theme.wash, borderRadius: 6, padding: '6px 12px', flex: '1 1 auto', minWidth: 120 }}>
           <span style={{ color: '#6B7280', display: 'block', fontSize: 11 }}>Outstanding</span>
