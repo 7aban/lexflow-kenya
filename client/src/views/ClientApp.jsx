@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconLayoutDashboard, IconBriefcase, IconBell, IconFile, IconInvoice, IconUserCircle, IconCalendarEvent } from '@tabler/icons-react';
 import { api, deleteMyAvatar, downloadWithAuth, fileToDataUrl, getMyAvatar, uploadMyAvatar } from '../lib/apiClient.js';
 import { styles, StyleTag, theme, loadAndApplyFirmTheme } from '../theme.jsx';
-import { Badge, Card, Empty, Field, kes, Logo, MeetingLink, Skeleton, statusTone, Table, Toast, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText } from '../components/ui.jsx';
+import { Badge, Card, Empty, Field, kes, Logo, MeetingLink, safeHttpUrl, Skeleton, statusTone, Table, Toast, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText } from '../components/ui.jsx';
 import ClientChatWidget from '../components/ClientChatWidget.jsx';
 import MatterDocuments from '../components/MatterDocuments.jsx';
 
@@ -370,7 +370,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
             </div>
           </div>
           <div className="lf-top-actions" style={styles.topActions}>
-            {firm?.websiteURL && <a style={styles.ghostButton} href={firm.websiteURL} target="_blank" rel="noopener noreferrer">Visit website</a>}
+            {safeHttpUrl(firm?.websiteURL) && <a style={styles.ghostButton} href={safeHttpUrl(firm.websiteURL)} target="_blank" rel="noopener noreferrer">Visit website</a>}
             <button type="button" onClick={load} disabled={loading} style={styles.ghostButton}>{loading ? 'Refreshing...' : 'Refresh'}</button>
           </div>
         </header>
@@ -1173,10 +1173,10 @@ function Account({ user, client, firm, matters, avatarUrl, hasAvatar, onAvatarUp
           <Row label="Email" value={firm?.email} />
           <Row label="Phone" value={firm?.phone} />
           <Row label="Address" value={firm?.address} />
-          {firm?.websiteURL && (
+          {safeHttpUrl(firm?.websiteURL) && (
             <div style={{ display: 'flex', gap: 8, padding: '6px 8px', background: theme.wash, borderRadius: 6 }}>
               <span style={{ fontWeight: 500, minWidth: 90, color: '#374151' }}>Website</span>
-              <a style={styles.link} href={firm.websiteURL} target="_blank" rel="noopener noreferrer">Open website</a>
+              <a style={styles.link} href={safeHttpUrl(firm.websiteURL)} target="_blank" rel="noopener noreferrer">Open website</a>
             </div>
           )}
         </div>

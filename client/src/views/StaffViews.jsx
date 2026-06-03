@@ -3,7 +3,7 @@ import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconCl
 import { api, applyChecklistTemplate, createChecklistTemplate, createMatterChecklistItem, deleteChecklistTemplate, deleteClientAvatar, deleteUserAvatar, deleteMatterChecklistItem, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getInvoiceDetails, listChecklistTemplates, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, updateChecklistTemplate, updateMatterChecklistItem, uploadClientAvatar, uploadUserAvatar } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
-import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText } from '../components/ui.jsx';
+import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, safeHttpUrl, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText } from '../components/ui.jsx';
 import MatterDocuments from '../components/MatterDocuments.jsx';
 import TaskTimer, { taskTimerActive } from '../components/TaskTimer.jsx';
 
@@ -2998,7 +2998,7 @@ function MatterCourtPrepCard({ detail }) {
         <button type="button" onClick={() => scrollToSection('matter-section-court')} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }} aria-label="Go to court section">Go to court section</button>
       </div>
       <span style={{ fontSize: 14, color: theme.ink }}>{nextAppearance.title || `${nextAppearance.type || 'Court'} preparation`}</span>
-      {nextAppearance.meetingLink && <a href={nextAppearance.meetingLink} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: theme.blue, textDecoration: 'underline' }}>Virtual court link</a>}
+      {safeHttpUrl(nextAppearance.meetingLink) && <a href={safeHttpUrl(nextAppearance.meetingLink)} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: theme.blue, textDecoration: 'underline' }}>Virtual court link</a>}
       {chips.length > 0 && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{chips.map((c, i) => <span key={i} style={chipStyle}>{c.label}</span>)}</div>}
     </section>
   );
@@ -3512,7 +3512,7 @@ function MatterCourtMode({ detail, nextActionHints }) {
             {nextAppearance.location && <CourtModeField label="Location" value={nextAppearance.location} />}
             {nextAppearance.attorney && <CourtModeField label="Attorney" value={nextAppearance.attorney} />}
             {nextAppearance.prepNote && <CourtModeField label="Prep Note" value={nextAppearance.prepNote} />}
-            {nextAppearance.meetingLink && <CourtModeField label="Virtual Court" value={<a href={nextAppearance.meetingLink} target="_blank" rel="noopener noreferrer" style={styles.link}>{nextAppearance.meetingLink}</a>} />}
+            {safeHttpUrl(nextAppearance.meetingLink) && <CourtModeField label="Virtual Court" value={<a href={safeHttpUrl(nextAppearance.meetingLink)} target="_blank" rel="noopener noreferrer" style={styles.link}>{nextAppearance.meetingLink}</a>} />}
           </div>
         </div>
       )}

@@ -1,8 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
 import { theme, styles } from '../theme.jsx';
 
+// Constrain admin/staff-entered external URLs to http(s); returns '' for missing,
+// malformed, relative, or non-http(s) (javascript:/data:/blob:/file:) values.
+export function safeHttpUrl(value) {
+  if (!value || typeof value !== 'string') return '';
+  const candidate = value.trim();
+  if (!candidate) return '';
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed.href;
+  } catch {
+    return '';
+  }
+  return '';
+}
+
 export function MeetingLink({ event, dashboard = false }) {
-  const href = (event?.meetingLink || '').trim();
+  const href = safeHttpUrl(event?.meetingLink);
   if (!href) return <span style={styles.mutedText}>-</span>;
   const urgent = dashboard ? isTodayOrTomorrow(event.date) : isToday(event.date);
   if (urgent) {
