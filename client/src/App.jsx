@@ -554,8 +554,8 @@ export default function App() {
             <div style={styles.userRole}>{user?.role || 'user'}</div>
           </div>
           <div ref={accountMenuRef} style={{ position: 'relative' }}>
-            <button type="button" onClick={() => setAccountMenuOpen(o => !o)} style={{ ...styles.logout, display: 'flex', alignItems: 'center', gap: 2 }}>
-              <IconChevronDown size={14} />
+            <button type="button" aria-label="Account menu" aria-haspopup="menu" aria-expanded={accountMenuOpen} onClick={() => setAccountMenuOpen(o => !o)} style={{ ...styles.logout, display: 'flex', alignItems: 'center', gap: 2 }}>
+              <IconChevronDown size={14} aria-hidden="true" />
             </button>
             {accountMenuOpen && (
               <div style={{ ...styles.actionMenu, position: 'absolute', bottom: '100%', right: 0, marginBottom: 4 }}>

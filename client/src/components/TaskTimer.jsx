@@ -106,13 +106,13 @@ export default function TaskTimer({ task, matterId, matterRate = 15000, showRate
   return (
     <div style={{ display: 'grid', gap: 7, minWidth: 250 }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
-        <button type="button" title={running ? 'Pause timer' : 'Start timer'} onClick={running ? pause : start} style={roundButton(running ? theme.green : theme.navy600)}>{running ? '⏸' : '▶'}</button>
-        <button type="button" title="Reset timer" onClick={reset} style={roundButton(theme.muted)}>↺</button>
+        <button type="button" aria-label={running ? 'Pause timer' : 'Start timer'} title={running ? 'Pause timer' : 'Start timer'} onClick={running ? pause : start} style={roundButton(running ? theme.green : theme.navy600)}><span aria-hidden="true">{running ? '⏸' : '▶'}</span></button>
+        <button type="button" aria-label="Reset timer" title="Reset timer" onClick={reset} style={roundButton(theme.muted)}><span aria-hidden="true">↺</span></button>
         <span style={clockStyle}>
           {running && <span style={pulseStyle} />}
           {formatClock(elapsed)}
         </span>
-        {canSave && <button type="button" title="Save time entry" onClick={() => setShowSave(open => !open)} style={styles.tinyButton}>💾 Save</button>}
+        {canSave && <button type="button" title="Save time entry" onClick={() => setShowSave(open => !open)} style={styles.tinyButton}><span aria-hidden="true">💾</span> Save</button>}
         {logged > 0 && <Badge tone="green">{logged.toFixed(2)}h logged</Badge>}
       </div>
       <div style={{ maxHeight: showSave ? 420 : 0, overflow: 'hidden', transition: 'max-height .18s ease' }}>
