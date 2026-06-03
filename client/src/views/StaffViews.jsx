@@ -1398,6 +1398,15 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
     scrollToSection('payment-proof-queue');
   }
   async function setStatus(id, status) { try { await api(`/invoices/${id}/status`, { method: 'PATCH', body: { status } }); notify({ type: 'success', message: 'Invoice updated.' }); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
+  function confirmStatusChange(invoice, nextStatus) {
+    if (!nextStatus || nextStatus === invoice.status) return;
+    const paidNote = nextStatus === 'Paid' ? ' This does not record a payment or change the payment-derived balance.' : '';
+    setConfirm({
+      title: 'Change invoice status?',
+      message: `Change invoice ${invoiceLabel(invoice)} status from ${invoice.status} to ${nextStatus}? This status is visible in the client portal.${paidNote}`,
+      onConfirm: () => setStatus(invoice.id, nextStatus),
+    });
+  }
   async function deleteInvoiceRecord(invoice) { try { await api(`/invoices/${invoice.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Invoice deleted.' }); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function openPayments(invoice) {
     try {
@@ -1499,7 +1508,7 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
             aria-label={`Stored status for invoice ${invoiceLabel(invoice)}`}
             style={styles.tableSelect}
             value={invoice.status}
-            onChange={e => setStatus(invoice.id, e.target.value)}
+            onChange={e => confirmStatusChange(invoice, e.target.value)}
           >
             <option>Outstanding</option>
             <option>Paid</option>
