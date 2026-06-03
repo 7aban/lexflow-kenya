@@ -269,6 +269,10 @@ async function initDb() {
   await run("UPDATE payments SET createdAt=COALESCE(NULLIF(createdAt,''), COALESCE(NULLIF(date,''), CURRENT_TIMESTAMP)) WHERE createdAt IS NULL OR createdAt=''");
   await ensureColumn('payments', 'receiptNumber', 'TEXT');
   await ensureColumn('payments', 'receiptIssuedAt', 'TEXT');
+  // PRODUCT-15O: non-destructive admin payment void. Existing rows stay active because voidedAt is NULL.
+  await ensureColumn('payments', 'voidedAt', 'TEXT');
+  await ensureColumn('payments', 'voidedBy', 'TEXT');
+  await ensureColumn('payments', 'voidReason', 'TEXT');
   // PRODUCT-15I: payment-proof review lifecycle. Existing rows default to Pending.
   await ensureColumn('payment_proofs', 'status', "TEXT DEFAULT 'Pending'");
   await ensureColumn('payment_proofs', 'reviewedBy', 'TEXT');
@@ -4584,7 +4588,8 @@ app.post('/api/matters/:id/notes', async (req, res) => {
 });
 
 async function invoicePaymentSummary(invoiceId, invoiceAmount = 0) {
-  const row = await get('SELECT COALESCE(SUM(amount),0) amountPaid, COUNT(*) paymentCount, MAX(date) lastPaymentAt FROM payments WHERE invoiceId=?', [invoiceId]);
+  // PRODUCT-15O: voided payments (voidedAt set) are excluded from every active total.
+  const row = await get('SELECT COALESCE(SUM(amount),0) amountPaid, COUNT(*) paymentCount, MAX(date) lastPaymentAt FROM payments WHERE invoiceId=? AND voidedAt IS NULL', [invoiceId]);
   const amountPaid = Number(row?.amountPaid || 0);
   const amount = Number(invoiceAmount || 0);
   return {
@@ -4636,6 +4641,8 @@ async function attachInvoiceSummaries(invoices = []) {
   return invoices;
 }
 
+const PAYMENT_PUBLIC_COLUMNS = 'id,invoiceId,matterId,clientId,amount,method,reference,date,note,proofId,createdBy,createdAt,receiptNumber,receiptIssuedAt,voidedAt,voidedBy,voidReason';
+
 function maskInvoiceBilling(invoice) {
   invoice.amount = null;
   invoice.amountPaid = null;
@@ -4660,6 +4667,11 @@ function publicPayment(row, { client = false } = {}) {
     createdAt: row.createdAt || '',
     receiptNumber: row.receiptNumber || '',
     receiptIssuedAt: row.receiptIssuedAt || '',
+    // PRODUCT-15O: void state. Clients see only that a payment was voided (and when),
+    // never the internal voidedBy/reason.
+    voided: Boolean(row.voidedAt),
+    voidedAt: row.voidedAt || '',
+    ...(client ? {} : { voidedBy: row.voidedBy || '', voidReason: row.voidReason || '' }),
   };
 }
 
@@ -4758,7 +4770,7 @@ app.get('/api/invoices/:id/payments', async (req, res) => {
     await recordAuditEvent(req, { action: 'forbidden_invoice_payments', entityType: 'invoice', entityId: req.params.id, metadata: { reason: 'billing_visibility_disabled' } }).catch(() => {});
     return res.status(403).json({ error: 'Billing access restricted' });
   }
-  const payments = await all('SELECT id,invoiceId,matterId,clientId,amount,method,reference,date,note,proofId,createdAt,receiptNumber,receiptIssuedAt FROM payments WHERE invoiceId=? ORDER BY date DESC, createdAt DESC', [req.params.id]);
+  const payments = await all(`SELECT ${PAYMENT_PUBLIC_COLUMNS} FROM payments WHERE invoiceId=? ORDER BY date DESC, createdAt DESC`, [req.params.id]);
   res.json({ invoice, payments: payments.map(row => publicPayment(row, { client: req.user.role === 'client' })) });
 });
 app.post('/api/invoices/:id/payments', async (req, res) => {
@@ -4831,7 +4843,72 @@ app.post('/api/invoices/:id/payments', async (req, res) => {
     clientId: invoice.clientId || '',
     metadata: { invoiceId: invoice.id, paymentId: id, amount, method, date, proofLinked: Boolean(proofId), amountPaid: updatedSummary.amountPaid, balance: updatedSummary.balance, receiptNumber },
   }).catch(() => {});
-  res.json({ invoice: await invoiceWithDetails(invoice.id), payment: publicPayment(await get('SELECT id,invoiceId,matterId,clientId,amount,method,reference,date,note,proofId,createdAt,receiptNumber,receiptIssuedAt FROM payments WHERE id=?', [id])) });
+  res.json({ invoice: await invoiceWithDetails(invoice.id), payment: publicPayment(await get(`SELECT ${PAYMENT_PUBLIC_COLUMNS} FROM payments WHERE id=?`, [id])) });
+});
+app.post('/api/invoices/:invoiceId/payments/:paymentId/void', async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+  const { invoiceId, paymentId } = req.params;
+  const reason = String(req.body.reason || '').trim();
+  if (!reason) return res.status(400).json({ error: 'Void reason is required' });
+  const voidReason = reason.slice(0, 500);
+  const invoice = await invoiceWithDetails(invoiceId);
+  if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+  if (!(await canAccessInvoice(req, invoiceId))) return res.status(403).json({ error: 'Invoice access denied' });
+  const payment = await get(`SELECT ${PAYMENT_PUBLIC_COLUMNS} FROM payments WHERE id=? AND invoiceId=?`, [paymentId, invoiceId]);
+  if (!payment) return res.status(404).json({ error: 'Payment not found' });
+  if (payment.voidedAt) return res.status(400).json({ error: 'Payment is already voided' });
+
+  const previousSummary = await invoicePaymentSummary(invoice.id, invoice.amount);
+  const previousStatus = invoice.status || 'Outstanding';
+  const voidedAt = new Date().toISOString();
+  await run('UPDATE payments SET voidedAt=?, voidedBy=?, voidReason=? WHERE id=? AND invoiceId=?', [voidedAt, req.user.userId || '', voidReason, payment.id, invoice.id]);
+
+  let proofUnlinked = false;
+  if (payment.proofId) {
+    const proofResult = await run('UPDATE payment_proofs SET paymentId=? WHERE paymentId=?', ['', payment.id]);
+    proofUnlinked = Number(proofResult?.changes || 0) > 0;
+  }
+
+  const updatedSummary = await invoicePaymentSummary(invoice.id, invoice.amount);
+  let newStatus = previousStatus;
+  if (previousStatus === 'Paid' && !updatedSummary.isPaid) newStatus = 'Outstanding';
+  if (newStatus !== previousStatus) {
+    await run('UPDATE invoices SET status=? WHERE id=?', [newStatus, invoice.id]);
+    await logAudit(req, 'status', 'invoice', invoice.id, `Set invoice ${invoice.number || invoice.id} status to ${newStatus}`);
+    await recordAuditEvent(req, {
+      action: 'invoice_status_updated',
+      entityType: 'invoice',
+      entityId: invoice.id,
+      matterId: invoice.matterId || '',
+      clientId: invoice.clientId || '',
+      metadata: { invoiceId: invoice.id, number: invoice.number || '', oldStatus: previousStatus, newStatus, reason: 'payment_voided', paymentId: payment.id, amountPaid: updatedSummary.amountPaid, balance: updatedSummary.balance },
+    }).catch(() => {});
+  }
+
+  await logAudit(req, 'void_payment', 'invoice', invoice.id, `Voided payment for invoice ${invoice.number || invoice.id}`);
+  await recordAuditEvent(req, {
+    action: 'payment_voided',
+    entityType: 'payment',
+    entityId: payment.id,
+    matterId: payment.matterId || invoice.matterId || '',
+    clientId: payment.clientId || invoice.clientId || '',
+    metadata: {
+      invoiceId: invoice.id,
+      paymentId: payment.id,
+      amount: Number(payment.amount || 0),
+      previousAmountPaid: previousSummary.amountPaid,
+      newAmountPaid: updatedSummary.amountPaid,
+      previousBalance: previousSummary.balance,
+      newBalance: updatedSummary.balance,
+      previousStatus,
+      newStatus,
+      proofUnlinked,
+      reasonLength: voidReason.length,
+    },
+  }).catch(() => {});
+
+  const voidedPayment = await get(`SELECT ${PAYMENT_PUBLIC_COLUMNS} FROM payments WHERE id=?`, [payment.id]);
+  res.json({ invoice: await invoiceWithDetails(invoice.id), payment: publicPayment(voidedPayment) });
 });
 app.patch('/api/invoices/:id/status', requireAdmin, async (req, res) => {
   if (!['Paid', 'Outstanding', 'Overdue'].includes(req.body.status)) return res.status(400).json({ error: 'Invalid invoice status' });
@@ -4929,8 +5006,9 @@ app.get('/api/invoices/:invoiceId/payments/:paymentId/receipt.pdf', async (req, 
   }
   const invoice = await invoiceWithDetails(invoiceId);
   if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
-  const payment = await get('SELECT id,invoiceId,matterId,clientId,amount,method,reference,date,note,proofId,createdBy,createdAt,receiptNumber,receiptIssuedAt FROM payments WHERE id=? AND invoiceId=?', [paymentId, invoiceId]);
+  const payment = await get(`SELECT ${PAYMENT_PUBLIC_COLUMNS} FROM payments WHERE id=? AND invoiceId=?`, [paymentId, invoiceId]);
   if (!payment) return res.status(404).json({ error: 'Payment not found' });
+  if (payment.voidedAt) return res.status(409).json({ error: 'Payment receipt is voided' });
   if (!payment.receiptNumber) return res.status(404).json({ error: 'Receipt not available for this payment' });
   const receivedBy = payment.createdBy ? await get('SELECT fullName FROM users WHERE id=?', [payment.createdBy]) : null;
   await recordAuditEvent(req, {
@@ -4994,7 +5072,7 @@ app.get('/api/client/dashboard', async (req, res) => {
   if (req.user.role !== 'client') return res.status(403).json({ error: 'Client access required' });
   const data = await getClientDashboardData(req.user.clientId || '', req);
   await attachInvoiceSummaries(data.invoices || []);
-  data.invoicePayments = (await all('SELECT id,invoiceId,matterId,clientId,amount,method,reference,date,note,proofId,createdAt,receiptNumber,receiptIssuedAt FROM payments WHERE clientId=? ORDER BY date DESC, createdAt DESC', [req.user.clientId || ''])).map(row => publicPayment(row, { client: true }));
+  data.invoicePayments = (await all(`SELECT ${PAYMENT_PUBLIC_COLUMNS} FROM payments WHERE clientId=? ORDER BY date DESC, createdAt DESC`, [req.user.clientId || ''])).map(row => publicPayment(row, { client: true }));
   res.json(data);
 });
 
@@ -5053,7 +5131,7 @@ app.get('/api/payment-proofs', requireStaff, async (req, res) => {
       m.title matterTitle, m.reference matterReference,
       c.name clientName,
       (SELECT u.fullName FROM users u WHERE u.id=pp.reviewedBy) reviewedByName,
-      COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.invoiceId=pp.invoiceId),0) invoiceAmountPaid,
+      COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.invoiceId=pp.invoiceId AND p.voidedAt IS NULL),0) invoiceAmountPaid,
       CASE WHEN pp.content IS NULL THEN 0 ELSE 1 END hasAttachment
     FROM payment_proofs pp
     LEFT JOIN invoices i ON i.id=pp.invoiceId

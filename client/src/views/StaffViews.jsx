@@ -1149,6 +1149,7 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
   const [invoiceDetails, setInvoiceDetails] = useState(null);
   const [payments, setPayments] = useState([]);
   const [paymentForm, setPaymentForm] = useState({ amount: '', method: 'Bank Transfer', reference: '', date: new Date().toISOString().slice(0, 10), note: '', proofId: '' });
+  const [voidDraft, setVoidDraft] = useState(null);
   const [firmSettings, setFirmSettings] = useState({ ...defaultFirmSettings, ...(providedFirmSettings || {}) });
   const [proofs, setProofs] = useState([]);
   const [proofFilter, setProofFilter] = useState('Pending');
@@ -1329,6 +1330,27 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
       // PRODUCT-15K: keep the collections queue counts/items in step after a payment.
       await loadCollectionsProofs();
     } catch (err) {
+      notify({ type: 'danger', message: err.message });
+    }
+  }
+  async function submitVoidPayment(event) {
+    event.preventDefault();
+    if (!selectedInvoice || !voidDraft?.payment) return;
+    const reason = String(voidDraft.reason || '').trim();
+    if (!reason) { notify({ type: 'danger', message: 'Void reason is required.' }); return; }
+    try {
+      setVoidDraft(current => current ? { ...current, busy: true } : current);
+      await api(`/invoices/${selectedInvoice.id}/payments/${voidDraft.payment.id}/void`, { method: 'POST', body: { reason } });
+      const data = await listInvoicePayments(selectedInvoice.id);
+      setPayments(data.payments || []);
+      if (data.invoice) setInvoiceDetails(data.invoice);
+      setVoidDraft(null);
+      notify({ type: 'success', message: 'Payment voided.' });
+      await reload();
+      await loadProofs();
+      await loadCollectionsProofs();
+    } catch (err) {
+      setVoidDraft(current => current ? { ...current, busy: false } : current);
       notify({ type: 'danger', message: err.message });
     }
   }
@@ -1662,7 +1684,16 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
         {selectedInvoice && (
           <div style={{ ...styles.pageStack, marginTop: 16 }}>
             <Sub title={`Payments - ${selectedInvoice.number || selectedInvoice.id}`}>
-              <div className="lf-payment-cards"><Table columns={['Date', 'Receipt', 'Method', 'Reference', 'Amount', 'Receipt PDF']} rows={payments.map(payment => [payment.date || '-', payment.receiptNumber || '-', payment.method || '-', payment.reference || '-', kes(payment.amount), payment.receiptNumber ? <DownloadButton key={`${payment.id}-receipt`} label="Download" path={`/api/invoices/${selectedInvoice.id}/payments/${payment.id}/receipt.pdf`} filename={`${payment.receiptNumber}.pdf`} notify={notify} /> : '-'])} empty="No payments recorded yet." /></div>
+              <div className="lf-payment-cards"><Table columns={['Date', 'Receipt', 'Method', 'Reference', 'Amount', 'Status', 'Receipt PDF', 'Actions']} rows={payments.map(payment => {
+                const statusCell = payment.voided
+                  ? <div key={`${payment.id}-status`} style={{ display: 'grid', gap: 3 }}><Badge tone="red">Voided</Badge>{payment.voidReason ? <span style={{ fontSize: 11, color: '#697386' }}>{payment.voidReason}</span> : null}</div>
+                  : <Badge key={`${payment.id}-status`} tone="green">Active</Badge>;
+                const receiptCell = payment.voided
+                  ? <Badge key={`${payment.id}-voided-receipt`} tone="red">Voided</Badge>
+                  : payment.receiptNumber ? <DownloadButton key={`${payment.id}-receipt`} label="Download" path={`/api/invoices/${selectedInvoice.id}/payments/${payment.id}/receipt.pdf`} filename={`${payment.receiptNumber}.pdf`} notify={notify} /> : '-';
+                const actions = isAdmin && !payment.voided ? <ActionGroup key={`${payment.id}-actions`} actions={[['Void payment', () => setVoidDraft({ payment, reason: '', busy: false })]]} /> : '-';
+                return [payment.date || '-', payment.receiptNumber || '-', payment.method || '-', payment.reference || '-', kes(payment.amount), statusCell, receiptCell, actions];
+              })} empty="No payments recorded yet." /></div>
               {canRecordPayment && Number(selectedInvoice.balance || 0) > 0 && (
                 <>
                 {paymentForm.proofId && (
@@ -1700,6 +1731,24 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
       onRecordPayment={recordPaymentFromProof}
       notify={notify}
     />
+    {voidDraft && (
+      <div style={styles.modalBackdrop} role="dialog" aria-modal="true" aria-labelledby="payment-void-title">
+        <div style={styles.modalCard}>
+          <div style={styles.modalHead}>
+            <h2 id="payment-void-title">Void payment?</h2>
+            <button type="button" aria-label="Close" onClick={() => setVoidDraft(null)} style={styles.toastClose}>x</button>
+          </div>
+          <form onSubmit={submitVoidPayment} style={{ display: 'grid', gap: 12 }}>
+            <p style={{ margin: 0, color: '#374151' }}>{voidDraft.payment.receiptNumber || voidDraft.payment.id} / {kes(voidDraft.payment.amount)}</p>
+            <Field label="Reason"><textarea required maxLength={500} style={{ ...styles.input, minHeight: 92, resize: 'vertical' }} value={voidDraft.reason} onChange={e => setVoidDraft(current => current ? { ...current, reason: e.target.value } : current)} /></Field>
+            <div style={styles.modalActions}>
+              <button type="button" style={styles.ghostButton} onClick={() => setVoidDraft(null)} disabled={voidDraft.busy}>Cancel</button>
+              <button type="submit" style={styles.dangerButton} disabled={voidDraft.busy || !String(voidDraft.reason || '').trim()}>{voidDraft.busy ? 'Voiding...' : 'Void payment'}</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    )}
     <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
   </>;
 }
