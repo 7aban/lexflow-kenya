@@ -2479,6 +2479,10 @@ export function Users({ clients = [], notify }) {
   const [userLoadError, setUserLoadError] = useState('');
   const [form, setForm] = useState({ email: '', password: '', fullName: '', role: 'assistant', clientId: '' });
   const [includeInactive, setIncludeInactive] = useState(false);
+  // PRODUCT-16B: client-side User Management filters (UI convenience only; no fetch/API/semantics change).
+  const [userSearch, setUserSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
   useEffect(() => { load(); }, [includeInactive]);
   async function load() {
     try {
@@ -2528,6 +2532,20 @@ export function Users({ clients = [], notify }) {
   }
   const clientOptions = Array.isArray(clients) ? clients : [];
   const visibleUsers = Array.isArray(users) ? users : [];
+  // PRODUCT-16B: filter the already-loaded users array only. Role values match stored values
+  // (admin/advocate/assistant/client); status mirrors the existing isActive badge logic.
+  const userQuery = userSearch.trim().toLowerCase();
+  const filteredUsers = visibleUsers.filter(u => {
+    if (roleFilter !== 'all' && u.role !== roleFilter) return false;
+    if (statusFilter === 'active' && !u.isActive) return false;
+    if (statusFilter === 'inactive' && u.isActive) return false;
+    if (userQuery) {
+      const haystack = `${u.fullName || ''} ${u.email || ''}`.toLowerCase();
+      if (!haystack.includes(userQuery)) return false;
+    }
+    return true;
+  });
+  const userEmptyText = visibleUsers.length === 0 ? 'No users found.' : 'No users match these filters.';
   return <div className="lf-split-grid" style={styles.splitGrid}>
     <Card title="Create user" hint="Role-based access"><form onSubmit={submit} style={styles.formGrid}>
       <Field label="Full name"><input required style={styles.input} value={form.fullName} onChange={e => setForm({ ...form, fullName: e.target.value })} /></Field>
@@ -2543,8 +2561,31 @@ export function Users({ clients = [], notify }) {
         <input type="checkbox" checked={includeInactive} onChange={e => setIncludeInactive(e.target.checked)} />
         Show inactive users
       </label>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input
+          type="search"
+          aria-label="Search users by name or email"
+          placeholder="Search users…"
+          value={userSearch}
+          onChange={e => setUserSearch(e.target.value)}
+          style={{ flex: 1, minWidth: 150, border: `1px solid ${theme.line}`, borderRadius: 6, padding: '7px 11px', background: '#fff', fontSize: 13, outline: 'none' }}
+        />
+        <select aria-label="Filter users by role" value={roleFilter} onChange={e => setRoleFilter(e.target.value)} style={{ ...styles.input, width: 'auto', minWidth: 128 }}>
+          <option value="all">All roles</option>
+          <option value="admin">Admin</option>
+          <option value="advocate">Advocate</option>
+          <option value="assistant">Assistant</option>
+          <option value="client">Client</option>
+        </select>
+        <select aria-label="Filter users by status" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ ...styles.input, width: 'auto', minWidth: 128 }}>
+          <option value="all">All statuses</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+        <span style={{ fontSize: 12, color: '#697386' }}>Showing {filteredUsers.length} of {visibleUsers.length} users</span>
+      </div>
       <div className="lf-user-cards">
-        <Table columns={['Photo', 'Name', 'Email', 'Role', 'Status', 'Client', 'Actions']} rows={visibleUsers.map(u => [
+        <Table columns={['Photo', 'Name', 'Email', 'Role', 'Status', 'Client', 'Actions']} rows={filteredUsers.map(u => [
           <UserAvatar key={`av-${u.id}`} userId={u.id} hasAvatar={u.hasAvatar} fullName={u.fullName} size={28} />,
           <div key={`name-${u.id}`} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <span>{u.fullName}</span>
@@ -2571,7 +2612,7 @@ export function Users({ clients = [], notify }) {
           <div key={`actions-${u.id}`} style={{ display: 'flex', gap: 6 }}>
             <button style={styles.tinyButton} onClick={() => toggleActive(u.id, !u.isActive, u.fullName)}>{u.isActive ? 'Deactivate' : 'Activate'}</button>
           </div>,
-        ])} empty="No users found." />
+        ])} empty={userEmptyText} />
       </div>
     </Card>
   </div>;
