@@ -1,14 +1,31 @@
 export const API_BASE = '/api';
 export const AUTH_FAILURE_MESSAGE = 'Session expired. Please log in again.';
 
+// SEC-UX-AUDIT-1: one-time migration off the legacy generic 'token' key.
+// Adopt a legacy generic token only when no LexFlow token exists yet, then
+// always drop the generic key so it is never treated as a continuing source.
+function migrateLegacyToken() {
+  try {
+    const legacy = localStorage.getItem('token');
+    if (!legacy) return;
+    if (!localStorage.getItem('lexflowToken') && !localStorage.getItem('lexflowSession')) {
+      localStorage.setItem('lexflowToken', legacy);
+    }
+    localStorage.removeItem('token');
+  } catch {
+    // localStorage may be unavailable; ignore.
+  }
+}
+
 export function readSession() {
+  migrateLegacyToken();
   try {
     const session = JSON.parse(localStorage.getItem('lexflowSession') || 'null');
     if (session?.token) return session;
-    const token = localStorage.getItem('lexflowToken') || localStorage.getItem('token');
+    const token = localStorage.getItem('lexflowToken');
     return token ? { token, user: null } : null;
   } catch {
-    const token = localStorage.getItem('lexflowToken') || localStorage.getItem('token');
+    const token = localStorage.getItem('lexflowToken');
     return token ? { token, user: null } : null;
   }
 }
@@ -16,7 +33,8 @@ export function readSession() {
 export function saveSession(session) {
   localStorage.setItem('lexflowSession', JSON.stringify(session));
   localStorage.setItem('lexflowToken', session.token);
-  localStorage.setItem('token', session.token);
+  // SEC-UX-AUDIT-1: never persist the legacy generic 'token'; clean up any stale copy.
+  localStorage.removeItem('token');
 }
 
 export async function exchangeOAuthCode(code) {
