@@ -61,6 +61,7 @@ const LEXFLOW_STORAGE_KEYS = [
   'lexflowSession',
   'lexflowToken',
   'token',
+  'lexflow:v1:staff:openNavGroups',
   'lexflowOpenNavGroups',
 ];
 

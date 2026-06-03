@@ -69,10 +69,36 @@ function defaultNavGroup(role) {
   return allowedNavGroups(role)[0]?.title || 'Overview';
 }
 
+const OPEN_NAV_GROUPS_STORAGE_KEY = 'lexflow:v1:staff:openNavGroups';
+const LEGACY_OPEN_NAV_GROUPS_STORAGE_KEY = 'lexflowOpenNavGroups';
+
+function parseStoredNavGroups(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return { status: 'missing' };
+    const saved = JSON.parse(raw);
+    if (Array.isArray(saved)) return { status: 'valid', value: saved };
+    localStorage.removeItem(key);
+    return { status: 'invalid' };
+  } catch {
+    try { localStorage.removeItem(key); } catch {}
+    return { status: 'invalid' };
+  }
+}
+
 function readOpenNavGroups(role) {
   try {
-    const saved = JSON.parse(localStorage.getItem('lexflowOpenNavGroups'));
-    return Array.isArray(saved) && saved.length ? new Set(saved) : null;
+    const saved = parseStoredNavGroups(OPEN_NAV_GROUPS_STORAGE_KEY);
+    if (saved.status === 'valid') return new Set(saved.value);
+    if (saved.status === 'invalid') return null;
+
+    const legacy = parseStoredNavGroups(LEGACY_OPEN_NAV_GROUPS_STORAGE_KEY);
+    if (legacy.status === 'valid') {
+      localStorage.setItem(OPEN_NAV_GROUPS_STORAGE_KEY, JSON.stringify(legacy.value));
+      localStorage.removeItem(LEGACY_OPEN_NAV_GROUPS_STORAGE_KEY);
+      return new Set(legacy.value);
+    }
+    return null;
   } catch {
     return null;
   }
@@ -94,7 +120,7 @@ function StaffNavigation({ visibleGroups, openNavGroups, setOpenNavGroups, view,
                     const next = new Set(prev);
                     if (next.has(group.title)) { next.delete(group.title); }
                     else { next.add(group.title); }
-                    try { localStorage.setItem('lexflowOpenNavGroups', JSON.stringify([...next])); } catch {}
+                    try { localStorage.setItem(OPEN_NAV_GROUPS_STORAGE_KEY, JSON.stringify([...next])); } catch {}
                     return next;
                   });
                 }}
@@ -329,7 +355,7 @@ export default function App() {
         if (prev.has(activeGroup.title)) return prev;
         const next = new Set(prev);
         next.add(activeGroup.title);
-        try { localStorage.setItem('lexflowOpenNavGroups', JSON.stringify([...next])); } catch {}
+        try { localStorage.setItem(OPEN_NAV_GROUPS_STORAGE_KEY, JSON.stringify([...next])); } catch {}
         return next;
       });
     }
