@@ -2106,6 +2106,7 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
   const [themeLoading, setThemeLoading] = useState(false);
   const [themePreview, setThemePreview] = useState(null);
   const [themeError, setThemeError] = useState('');
+  const [settingsSection, setSettingsSection] = useState('identity');
 
   useEffect(() => setForm({ ...defaultFirmSettings, ...settings }), [settings]);
   useEffect(() => { loadNotices(); }, []);
@@ -2259,160 +2260,211 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
   const reminder = form.reminderSettings || {};
   const clientOptions = Array.isArray(clients) ? clients : [];
   const effectiveTheme = themePreview || firmTheme || {};
+  const settingsSections = [
+    { id: 'identity', label: 'Firm Identity', hint: 'Contact details, website, and logo shown across firm and client-facing surfaces.' },
+    { id: 'billing', label: 'Billing & Payment', hint: 'Invoice defaults, payment guidance, tax identifiers, and billing visibility.' },
+    { id: 'branding', label: 'Branding & Theme', hint: 'Saved firm colors plus the live workspace theme preview controls.' },
+    { id: 'reminders', label: 'Reminders & Automation', hint: 'Firm-wide reminder channels and provider credentials.' },
+  ];
+  const activeSettingsSection = settingsSections.find(section => section.id === settingsSection) || settingsSections[0];
 
   return (
     <div style={styles.pageStack}>
-      <Card title="Firm Settings" hint="Branding, invoice identity and client portal contact details">
-        <form onSubmit={submit} style={styles.formGrid}>
-          <Field label="Firm Name"><input required style={styles.input} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
-          <Field label="Website URL"><input type="url" style={styles.input} value={form.websiteURL || ''} onChange={e => setForm({ ...form, websiteURL: e.target.value })} /></Field>
-          <Field label="Primary Color"><input type="color" style={styles.colorInput} value={form.primaryColor || '#0F1B33'} onChange={e => setForm({ ...form, primaryColor: e.target.value })} /></Field>
-          <Field label="Accent Color"><input type="color" style={styles.colorInput} value={form.accentColor || '#D4A34A'} onChange={e => setForm({ ...form, accentColor: e.target.value })} /></Field>
-          <Field label="Email"><input style={styles.input} value={form.email || ''} onChange={e => setForm({ ...form, email: e.target.value })} /></Field>
-          <Field label="Phone"><input style={styles.input} value={form.phone || ''} onChange={e => setForm({ ...form, phone: e.target.value })} /></Field>
-          <Field label="Address"><input style={styles.input} value={form.address || ''} onChange={e => setForm({ ...form, address: e.target.value })} /></Field>
-          <Field label="Logo"><input type="file" accept="image/*" style={styles.input} onChange={chooseLogo} /></Field>
-          <div className="lf-logo-preview" style={styles.logoPreview}>
-            {form.logo ? <img src={form.logo} alt="Firm logo preview" /> : <span>LF</span>}
-            <button type="button" style={styles.tinyButton} onClick={() => setForm({ ...form, logo: '' })}>Clear logo</button>
-          </div>
-          <div style={{ gridColumn: '1 / -1', borderTop: '1px solid #E5E7EB', paddingTop: 14, marginTop: 4 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: theme.ink }}>Billing & payment</div>
-          </div>
-          <Field label="Default invoice due period">
-            <select style={styles.input} value={String(invoiceDueDaysSetting(form))} onChange={e => setForm({ ...form, defaultInvoiceDueDays: Number(e.target.value) })}>
-              <option value="7">7 days</option>
-              <option value="14">14 days</option>
-              <option value="30">30 days</option>
-              <option value="45">45 days</option>
-            </select>
-            <div style={styles.formHelper}>Used when invoice generation has no due-date override.</div>
-          </Field>
-          <Field label="Payment instructions">
-            <textarea style={{ ...styles.input, minHeight: 84, resize: 'vertical' }} maxLength={800} value={form.paymentInstructions || ''} onChange={e => setForm({ ...form, paymentInstructions: e.target.value })} />
-            <div style={styles.formHelper}>Shown on invoice and receipt PDFs when populated.</div>
-          </Field>
-          <Field label="KRA PIN"><input style={styles.input} maxLength={80} value={form.kraPin || ''} onChange={e => setForm({ ...form, kraPin: e.target.value })} /></Field>
-          <Field label="VAT registration number"><input style={styles.input} maxLength={80} value={form.vatNumber || ''} onChange={e => setForm({ ...form, vatNumber: e.target.value })} /></Field>
-          <Field label="Invoice footer note / payment terms">
-            <textarea style={{ ...styles.input, minHeight: 68, resize: 'vertical' }} maxLength={500} value={form.invoiceFooterNote || ''} onChange={e => setForm({ ...form, invoiceFooterNote: e.target.value })} />
-          </Field>
-          <Field label="Allow advocates to see billing information">
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <input type="checkbox" checked={Number(form.advocateBillingVisibility ?? 1) !== 0} onChange={e => setForm({ ...form, advocateBillingVisibility: e.target.checked ? 1 : 0 })} />
-              Advocates can view billing data
-            </label>
-            <div style={styles.formHelper}>When unchecked, advocates cannot see revenue, invoice amounts, invoice PDFs, billing rates, or time-entry rates.</div>
-          </Field>
-          <button style={styles.primaryButton}>Save settings</button>
-        </form>
-      </Card>
-
-      <Card title="Firm Identity Preview" hint="Current firm identity for documents, invoices, and client-facing information">
-        {(() => {
-          const previewInitials = (settings.name || 'LF').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || 'LF';
-          return (
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-                <div style={{ width: 56, height: 56, borderRadius: 10, background: settings.primaryColor || '#0F1B33', display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 900, fontSize: 18, overflow: 'hidden', flexShrink: 0 }}>
-                  {settings.logo ? <img src={settings.logo} alt="Firm logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span>{previewInitials}</span>}
-                </div>
-                <div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: theme.ink }}>{settings.name || <span style={styles.mutedText}>Not set</span>}</div>
-                </div>
-              </div>
-              <div style={styles.formGrid}>
-                <div style={styles.field}>
-                  <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: theme.muted }}>Email</label>
-                  <div>{settings.email || <span style={styles.mutedText}>Not set</span>}</div>
-                </div>
-                <div style={styles.field}>
-                  <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: theme.muted }}>Phone</label>
-                  <div>{settings.phone || <span style={styles.mutedText}>Not set</span>}</div>
-                </div>
-                <div style={styles.field}>
-                  <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: theme.muted }}>Address</label>
-                  <div>{settings.address || <span style={styles.mutedText}>Not set</span>}</div>
-                </div>
-                <div style={styles.field}>
-                  <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: theme.muted }}>Website</label>
-                  <div>{settings.websiteURL || <span style={styles.mutedText}>Not set</span>}</div>
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: 16, marginTop: 12, marginBottom: 12 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ width: 20, height: 20, borderRadius: 5, background: settings.primaryColor || '#0F1B33', flexShrink: 0, border: '1px solid rgba(0,0,0,.08)' }} />
-                  <span style={{ fontSize: 12, color: theme.ink, fontWeight: 600 }}>Primary</span>
-                  <span style={{ fontSize: 12, color: theme.muted }}>{settings.primaryColor || 'default'}</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ width: 20, height: 20, borderRadius: 5, background: settings.accentColor || '#D4A34A', flexShrink: 0, border: '1px solid rgba(0,0,0,.08)' }} />
-                  <span style={{ fontSize: 12, color: theme.ink, fontWeight: 600 }}>Accent</span>
-                  <span style={{ fontSize: 12, color: theme.muted }}>{settings.accentColor || 'default'}</span>
-                </div>
-              </div>
-              <div style={styles.formHelper}>This preview shows the identity currently available for LexFlow documents, invoices, receipts, and client-facing firm information. Later phases will apply branding more deeply to generated documents and letterheads.</div>
-            </div>
-          );
-        })()}
-      </Card>
-
-      <Card title="Firm Branding / Theme" hint="Choose a preset or adjust colors, then save the workspace theme.">
-        <div style={{ ...styles.formGrid, marginBottom: 16 }}>
-          <div>
-            <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: theme.muted }}><span>Presets</span></label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
-              {presets.map(p => (
-                <button key={p.id} type="button" onClick={() => handlePreview(p.id)} style={{ ...styles.ghostButton, borderColor: themePreview?.source === 'preset' && themePreview?.id === p.id ? theme.gold : undefined }} disabled={themeLoading}>
-                  {p.id === 'lexflow-default' ? 'LexFlow Default' : p.id === 'emerald-gold' ? 'Emerald Gold' : p.id === 'midnight-slate' ? 'Midnight Slate' : p.id}
+      <Card title="Firm Settings" hint="Guided sections for contact, billing, branding, and reminder settings">
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {settingsSections.map(section => {
+              const active = settingsSection === section.id;
+              return (
+                <button
+                  key={section.id}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setSettingsSection(section.id)}
+                  style={active ? styles.primaryButton : styles.ghostButton}
+                >
+                  {section.label}
                 </button>
-              ))}
-              <button type="button" onClick={() => handlePreview(null)} style={styles.ghostButton} disabled={themeLoading}>Custom (current)</button>
-            </div>
+              );
+            })}
           </div>
-          <Field label="Primary Color"><input type="color" style={styles.colorInput} value={effectiveTheme.primaryColor || '#0F1B33'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), primaryColor: e.target.value, source: 'manual' })); }} /></Field>
-          <Field label="Accent Color"><input type="color" style={styles.colorInput} value={effectiveTheme.accentColor || '#D4A34A'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), accentColor: e.target.value, source: 'manual' })); }} /></Field>
-          <Field label="Background"><input type="color" style={styles.colorInput} value={effectiveTheme.backgroundColor || '#0A0F1A'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), backgroundColor: e.target.value, source: 'manual' })); }} /></Field>
-          <Field label="Surface"><input type="color" style={styles.colorInput} value={effectiveTheme.surfaceColor || '#111827'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), surfaceColor: e.target.value, source: 'manual' })); }} /></Field>
-          <Field label="Text"><input type="color" style={styles.colorInput} value={effectiveTheme.textColor || '#E5E7EB'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), textColor: e.target.value, source: 'manual' })); }} /></Field>
-          <Field label="Text Muted"><input type="color" style={styles.colorInput} value={effectiveTheme.textSecondaryColor || '#9CA3AF'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), textSecondaryColor: e.target.value, source: 'manual' })); }} /></Field>
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-          <button style={styles.primaryButton} onClick={handleSave} disabled={themeLoading}>{themeLoading ? 'Saving...' : 'Save Theme'}</button>
-          <button style={styles.ghostButton} onClick={() => { applyFirmTheme(themePreview || firmTheme || {}); setThemePreview(null); setThemeError(''); }} disabled={!themePreview || themeLoading}>Apply Preview</button>
-          <button style={styles.dangerButton} onClick={handleReset} disabled={themeLoading}>{themeLoading ? 'Resetting...' : 'Reset to Default'}</button>
-        </div>
-        {themeError && <div style={{ ...styles.alert, ...(themeError.startsWith('Preview warnings') ? {} : styles.alertDanger), padding: 10, borderRadius: 6 }}>{themeError}</div>}
-        <div style={{ marginTop: 12, padding: 14, borderRadius: 8, background: 'var(--lf-surface, #111827)', border: `1px solid var(--lf-border, ${theme.line})`, color: 'var(--lf-text, #E5E7EB)' }}>
-          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', marginBottom: 8, color: 'var(--lf-text-muted, #9CA3AF)' }}>Theme sample</div>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-            <span style={{ border: 0, borderRadius: 6, padding: '6px 14px', background: 'var(--lf-button, #D4A34A)', color: 'var(--lf-button-text, #fff)', fontWeight: 700 }}>Primary action sample</span>
-            <span style={{ border: `1px solid var(--lf-border, ${theme.line})`, borderRadius: 6, padding: '6px 14px', background: '#fff', color: 'var(--lf-primary, #0F1B33)', fontWeight: 700 }}>Secondary action sample</span>
+          <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: theme.wash, padding: 12, display: 'grid', gap: 3 }}>
+            <strong style={{ color: theme.ink, fontSize: 13 }}>{activeSettingsSection.label}</strong>
+            <span style={{ color: theme.muted, fontSize: 12 }}>{activeSettingsSection.hint}</span>
           </div>
-          <div style={{ padding: 10, borderRadius: 6, background: 'var(--lf-background, #0A0F1A)', border: `1px solid var(--lf-border, ${theme.line})`, fontSize: 12, color: 'var(--lf-text-muted, #9CA3AF)' }}>Card sample with <a href="#" style={{ color: 'var(--lf-link, #D4A34A)', textDecoration: 'none' }}>link</a>, <span style={{ color: 'var(--lf-success, #047857)' }}>success</span>, <span style={{ color: 'var(--lf-warning, #B45309)' }}>warning</span>, and <span style={{ color: 'var(--lf-danger, #B91C1C)' }}>danger</span> text.</div>
         </div>
       </Card>
 
-      <Card title="Client Reminder Automation" hint="Quiet reminders for court dates and invoice follow-ups. Templates use firm defaults and run silently in the background.">
-        <form onSubmit={submit} style={styles.formGrid}>
-          <Field label="Automatic Reminders"><select style={styles.input} value={reminder.remindersEnabled ? 'yes' : 'no'} onChange={e => setReminderSetting('remindersEnabled', e.target.value === 'yes')}><option value="yes">Enabled</option><option value="no">Disabled</option></select></Field>
-          <Field label="WhatsApp"><select style={styles.input} value={reminder.whatsappEnabled ? 'yes' : 'no'} onChange={e => setReminderSetting('whatsappEnabled', e.target.value === 'yes')}><option value="no">Off</option><option value="yes">On</option></select></Field>
-          <Field label="Email"><select style={styles.input} value={reminder.emailEnabled ? 'yes' : 'no'} onChange={e => setReminderSetting('emailEnabled', e.target.value === 'yes')}><option value="no">Off</option><option value="yes">On</option></select></Field>
-          {reminder.whatsappEnabled && <>
-            <Field label="Twilio SID"><input style={styles.input} value={reminder.twilioSid || ''} onChange={e => setReminderSetting('twilioSid', e.target.value)} /></Field>
-            <Field label="Twilio Token"><input type="password" style={styles.input} value={reminder.twilioToken || ''} onChange={e => setReminderSetting('twilioToken', e.target.value)} /></Field>
-            <Field label="WhatsApp From"><input style={styles.input} value={reminder.twilioFromNumber || ''} onChange={e => setReminderSetting('twilioFromNumber', e.target.value)} placeholder="whatsapp:+14155238886" /></Field>
-          </>}
-          {reminder.emailEnabled && <>
-            <Field label="SMTP Host"><input style={styles.input} value={reminder.smtpHost || ''} onChange={e => setReminderSetting('smtpHost', e.target.value)} /></Field>
-            <Field label="SMTP Port"><input style={styles.input} value={reminder.smtpPort || ''} onChange={e => setReminderSetting('smtpPort', e.target.value)} /></Field>
-            <Field label="SMTP User"><input style={styles.input} value={reminder.smtpUser || ''} onChange={e => setReminderSetting('smtpUser', e.target.value)} /></Field>
-            <Field label="SMTP Password"><input type="password" style={styles.input} value={reminder.smtpPass || ''} onChange={e => setReminderSetting('smtpPass', e.target.value)} /></Field>
-          </>}
-          <div style={styles.formHelper}>When credentials are blank, LexFlow uses console stubs for testing. Real messages send automatically once provider credentials are saved.</div>
-          <button style={styles.primaryButton}>Save automation</button>
-        </form>
-      </Card>
+      {settingsSection === 'identity' && (
+        <Card title="Firm Identity" hint="Core firm details shown on invoices, receipts, documents, and the client portal">
+          <form onSubmit={submit} style={styles.formGrid}>
+            <Field label="Firm Name"><input required style={styles.input} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
+            <Field label="Website URL"><input type="url" style={styles.input} value={form.websiteURL || ''} onChange={e => setForm({ ...form, websiteURL: e.target.value })} /></Field>
+            <Field label="Email"><input style={styles.input} value={form.email || ''} onChange={e => setForm({ ...form, email: e.target.value })} /></Field>
+            <Field label="Phone"><input style={styles.input} value={form.phone || ''} onChange={e => setForm({ ...form, phone: e.target.value })} /></Field>
+            <Field label="Address"><input style={styles.input} value={form.address || ''} onChange={e => setForm({ ...form, address: e.target.value })} /></Field>
+            <Field label="Logo"><input type="file" accept="image/*" style={styles.input} onChange={chooseLogo} /></Field>
+            <div className="lf-logo-preview" style={styles.logoPreview}>
+              {form.logo ? <img src={form.logo} alt="Firm logo preview" /> : <span>LF</span>}
+              <button type="button" style={styles.tinyButton} onClick={() => setForm({ ...form, logo: '' })}>Clear logo</button>
+            </div>
+            <button style={styles.primaryButton}>Save settings</button>
+          </form>
+        </Card>
+      )}
+
+      {settingsSection === 'billing' && (
+        <Card title="Billing & Payment" hint="Invoice defaults and client-facing payment guidance">
+          <form onSubmit={submit} style={styles.formGrid}>
+            <Field label="Default invoice due period">
+              <select style={styles.input} value={String(invoiceDueDaysSetting(form))} onChange={e => setForm({ ...form, defaultInvoiceDueDays: Number(e.target.value) })}>
+                <option value="7">7 days</option>
+                <option value="14">14 days</option>
+                <option value="30">30 days</option>
+                <option value="45">45 days</option>
+              </select>
+              <div style={styles.formHelper}>Used when invoice generation has no due-date override.</div>
+            </Field>
+            <Field label="Payment instructions">
+              <textarea style={{ ...styles.input, minHeight: 84, resize: 'vertical' }} maxLength={800} value={form.paymentInstructions || ''} onChange={e => setForm({ ...form, paymentInstructions: e.target.value })} />
+              <div style={styles.formHelper}>Shown on invoice and receipt PDFs when populated.</div>
+            </Field>
+            <Field label="KRA PIN"><input style={styles.input} maxLength={80} value={form.kraPin || ''} onChange={e => setForm({ ...form, kraPin: e.target.value })} /></Field>
+            <Field label="VAT registration number"><input style={styles.input} maxLength={80} value={form.vatNumber || ''} onChange={e => setForm({ ...form, vatNumber: e.target.value })} /></Field>
+            <Field label="Invoice footer note / payment terms">
+              <textarea style={{ ...styles.input, minHeight: 68, resize: 'vertical' }} maxLength={500} value={form.invoiceFooterNote || ''} onChange={e => setForm({ ...form, invoiceFooterNote: e.target.value })} />
+            </Field>
+            <Field label="Allow advocates to see billing information">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="checkbox" checked={Number(form.advocateBillingVisibility ?? 1) !== 0} onChange={e => setForm({ ...form, advocateBillingVisibility: e.target.checked ? 1 : 0 })} />
+                Advocates can view billing data
+              </label>
+              <div style={styles.formHelper}>When unchecked, advocates cannot see revenue, invoice amounts, invoice PDFs, billing rates, or time-entry rates.</div>
+            </Field>
+            <button style={styles.primaryButton}>Save settings</button>
+          </form>
+        </Card>
+      )}
+
+      {settingsSection === 'branding' && (
+        <>
+          <Card title="Firm Branding" hint="Saved firm colors used by firm identity and client-facing details">
+            <form onSubmit={submit} style={styles.formGrid}>
+              <Field label="Primary Color"><input type="color" style={styles.colorInput} value={form.primaryColor || '#0F1B33'} onChange={e => setForm({ ...form, primaryColor: e.target.value })} /></Field>
+              <Field label="Accent Color"><input type="color" style={styles.colorInput} value={form.accentColor || '#D4A34A'} onChange={e => setForm({ ...form, accentColor: e.target.value })} /></Field>
+              <button style={styles.primaryButton}>Save settings</button>
+            </form>
+          </Card>
+
+          <Card title="Firm Identity Preview" hint="Current firm identity for documents, invoices, and client-facing information">
+            {(() => {
+              const previewInitials = (settings.name || 'LF').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || 'LF';
+              return (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
+                    <div style={{ width: 56, height: 56, borderRadius: 10, background: settings.primaryColor || '#0F1B33', display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 900, fontSize: 18, overflow: 'hidden', flexShrink: 0 }}>
+                      {settings.logo ? <img src={settings.logo} alt="Firm logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span>{previewInitials}</span>}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: theme.ink }}>{settings.name || <span style={styles.mutedText}>Not set</span>}</div>
+                    </div>
+                  </div>
+                  <div style={styles.formGrid}>
+                    <div style={styles.field}>
+                      <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: theme.muted }}>Email</label>
+                      <div>{settings.email || <span style={styles.mutedText}>Not set</span>}</div>
+                    </div>
+                    <div style={styles.field}>
+                      <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: theme.muted }}>Phone</label>
+                      <div>{settings.phone || <span style={styles.mutedText}>Not set</span>}</div>
+                    </div>
+                    <div style={styles.field}>
+                      <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: theme.muted }}>Address</label>
+                      <div>{settings.address || <span style={styles.mutedText}>Not set</span>}</div>
+                    </div>
+                    <div style={styles.field}>
+                      <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: theme.muted }}>Website</label>
+                      <div>{settings.websiteURL || <span style={styles.mutedText}>Not set</span>}</div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 16, marginTop: 12, marginBottom: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ width: 20, height: 20, borderRadius: 5, background: settings.primaryColor || '#0F1B33', flexShrink: 0, border: '1px solid rgba(0,0,0,.08)' }} />
+                      <span style={{ fontSize: 12, color: theme.ink, fontWeight: 600 }}>Primary</span>
+                      <span style={{ fontSize: 12, color: theme.muted }}>{settings.primaryColor || 'default'}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ width: 20, height: 20, borderRadius: 5, background: settings.accentColor || '#D4A34A', flexShrink: 0, border: '1px solid rgba(0,0,0,.08)' }} />
+                      <span style={{ fontSize: 12, color: theme.ink, fontWeight: 600 }}>Accent</span>
+                      <span style={{ fontSize: 12, color: theme.muted }}>{settings.accentColor || 'default'}</span>
+                    </div>
+                  </div>
+                  <div style={styles.formHelper}>This preview shows the identity currently available for LexFlow documents, invoices, receipts, and client-facing firm information. Later phases will apply branding more deeply to generated documents and letterheads.</div>
+                </div>
+              );
+            })()}
+          </Card>
+
+          <Card title="Firm Branding / Theme" hint="Choose a preset or adjust colors, then save the workspace theme.">
+            <div style={{ ...styles.formGrid, marginBottom: 16 }}>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: theme.muted }}><span>Presets</span></label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+                  {presets.map(p => (
+                    <button key={p.id} type="button" onClick={() => handlePreview(p.id)} style={{ ...styles.ghostButton, borderColor: themePreview?.source === 'preset' && themePreview?.id === p.id ? theme.gold : undefined }} disabled={themeLoading}>
+                      {p.id === 'lexflow-default' ? 'LexFlow Default' : p.id === 'emerald-gold' ? 'Emerald Gold' : p.id === 'midnight-slate' ? 'Midnight Slate' : p.id}
+                    </button>
+                  ))}
+                  <button type="button" onClick={() => handlePreview(null)} style={styles.ghostButton} disabled={themeLoading}>Custom (current)</button>
+                </div>
+              </div>
+              <Field label="Primary Color"><input type="color" style={styles.colorInput} value={effectiveTheme.primaryColor || '#0F1B33'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), primaryColor: e.target.value, source: 'manual' })); }} /></Field>
+              <Field label="Accent Color"><input type="color" style={styles.colorInput} value={effectiveTheme.accentColor || '#D4A34A'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), accentColor: e.target.value, source: 'manual' })); }} /></Field>
+              <Field label="Background"><input type="color" style={styles.colorInput} value={effectiveTheme.backgroundColor || '#0A0F1A'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), backgroundColor: e.target.value, source: 'manual' })); }} /></Field>
+              <Field label="Surface"><input type="color" style={styles.colorInput} value={effectiveTheme.surfaceColor || '#111827'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), surfaceColor: e.target.value, source: 'manual' })); }} /></Field>
+              <Field label="Text"><input type="color" style={styles.colorInput} value={effectiveTheme.textColor || '#E5E7EB'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), textColor: e.target.value, source: 'manual' })); }} /></Field>
+              <Field label="Text Muted"><input type="color" style={styles.colorInput} value={effectiveTheme.textSecondaryColor || '#9CA3AF'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), textSecondaryColor: e.target.value, source: 'manual' })); }} /></Field>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+              <button style={styles.primaryButton} onClick={handleSave} disabled={themeLoading}>{themeLoading ? 'Saving...' : 'Save Theme'}</button>
+              <button style={styles.ghostButton} onClick={() => { applyFirmTheme(themePreview || firmTheme || {}); setThemePreview(null); setThemeError(''); }} disabled={!themePreview || themeLoading}>Apply Preview</button>
+              <button style={styles.dangerButton} onClick={handleReset} disabled={themeLoading}>{themeLoading ? 'Resetting...' : 'Reset to Default'}</button>
+            </div>
+            {themeError && <div style={{ ...styles.alert, ...(themeError.startsWith('Preview warnings') ? {} : styles.alertDanger), padding: 10, borderRadius: 6 }}>{themeError}</div>}
+            <div style={{ marginTop: 12, padding: 14, borderRadius: 8, background: 'var(--lf-surface, #111827)', border: `1px solid var(--lf-border, ${theme.line})`, color: 'var(--lf-text, #E5E7EB)' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', marginBottom: 8, color: 'var(--lf-text-muted, #9CA3AF)' }}>Theme sample</div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                <span style={{ border: 0, borderRadius: 6, padding: '6px 14px', background: 'var(--lf-button, #D4A34A)', color: 'var(--lf-button-text, #fff)', fontWeight: 700 }}>Primary action sample</span>
+                <span style={{ border: `1px solid var(--lf-border, ${theme.line})`, borderRadius: 6, padding: '6px 14px', background: '#fff', color: 'var(--lf-primary, #0F1B33)', fontWeight: 700 }}>Secondary action sample</span>
+              </div>
+              <div style={{ padding: 10, borderRadius: 6, background: 'var(--lf-background, #0A0F1A)', border: `1px solid var(--lf-border, ${theme.line})`, fontSize: 12, color: 'var(--lf-text-muted, #9CA3AF)' }}>Card sample with <a href="#" style={{ color: 'var(--lf-link, #D4A34A)', textDecoration: 'none' }}>link</a>, <span style={{ color: 'var(--lf-success, #047857)' }}>success</span>, <span style={{ color: 'var(--lf-warning, #B45309)' }}>warning</span>, and <span style={{ color: 'var(--lf-danger, #B91C1C)' }}>danger</span> text.</div>
+            </div>
+          </Card>
+        </>
+      )}
+
+      {settingsSection === 'reminders' && (
+        <Card title="Client Reminder Automation" hint="Quiet reminders for court dates and invoice follow-ups. Templates use firm defaults and run silently in the background.">
+          <form onSubmit={submit} style={styles.formGrid}>
+            <Field label="Automatic Reminders"><select style={styles.input} value={reminder.remindersEnabled ? 'yes' : 'no'} onChange={e => setReminderSetting('remindersEnabled', e.target.value === 'yes')}><option value="yes">Enabled</option><option value="no">Disabled</option></select></Field>
+            <Field label="WhatsApp"><select style={styles.input} value={reminder.whatsappEnabled ? 'yes' : 'no'} onChange={e => setReminderSetting('whatsappEnabled', e.target.value === 'yes')}><option value="no">Off</option><option value="yes">On</option></select></Field>
+            <Field label="Email"><select style={styles.input} value={reminder.emailEnabled ? 'yes' : 'no'} onChange={e => setReminderSetting('emailEnabled', e.target.value === 'yes')}><option value="no">Off</option><option value="yes">On</option></select></Field>
+            {reminder.whatsappEnabled && <>
+              <Field label="Twilio SID"><input style={styles.input} value={reminder.twilioSid || ''} onChange={e => setReminderSetting('twilioSid', e.target.value)} /></Field>
+              <Field label="Twilio Token"><input type="password" style={styles.input} value={reminder.twilioToken || ''} onChange={e => setReminderSetting('twilioToken', e.target.value)} /></Field>
+              <Field label="WhatsApp From"><input style={styles.input} value={reminder.twilioFromNumber || ''} onChange={e => setReminderSetting('twilioFromNumber', e.target.value)} placeholder="whatsapp:+14155238886" /></Field>
+            </>}
+            {reminder.emailEnabled && <>
+              <Field label="SMTP Host"><input style={styles.input} value={reminder.smtpHost || ''} onChange={e => setReminderSetting('smtpHost', e.target.value)} /></Field>
+              <Field label="SMTP Port"><input style={styles.input} value={reminder.smtpPort || ''} onChange={e => setReminderSetting('smtpPort', e.target.value)} /></Field>
+              <Field label="SMTP User"><input style={styles.input} value={reminder.smtpUser || ''} onChange={e => setReminderSetting('smtpUser', e.target.value)} /></Field>
+              <Field label="SMTP Password"><input type="password" style={styles.input} value={reminder.smtpPass || ''} onChange={e => setReminderSetting('smtpPass', e.target.value)} /></Field>
+            </>}
+            <div style={styles.formHelper}>When credentials are blank, LexFlow uses console stubs for testing. Real messages send automatically once provider credentials are saved.</div>
+            <button style={styles.primaryButton}>Save automation</button>
+          </form>
+        </Card>
+      )}
 
       <Card title="Client Portal Notices" hint="Publish broadcast or client-specific updates with secure attachments">
         <form onSubmit={createNotice} style={styles.formGrid}>
@@ -3587,4 +3639,3 @@ function MatterCourtMode({ detail, nextActionHints }) {
     </div>
   );
 }
-
