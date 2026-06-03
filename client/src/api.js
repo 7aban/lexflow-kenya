@@ -23,9 +23,9 @@ const authExpiredError = () => {
 export const getStoredToken = () => {
   try {
     const session = JSON.parse(localStorage.getItem('lexflowSession') || 'null');
-    return session?.token || localStorage.getItem('lexflowToken') || localStorage.getItem('token') || '';
+    return session?.token || localStorage.getItem('lexflowToken') || '';
   } catch {
-    return localStorage.getItem('lexflowToken') || localStorage.getItem('token') || '';
+    return localStorage.getItem('lexflowToken') || '';
   }
 };
 
