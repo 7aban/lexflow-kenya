@@ -1265,7 +1265,10 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
   // of the proof-queue's own filter. Loaded once from the SAME existing /payment-proofs route
   // (status=All) — no new route, no API/backend/schema change; the route never returns BLOB content.
   const [collectionsProofs, setCollectionsProofs] = useState([]);
-  const [collectionsOpen, setCollectionsOpen] = useState(true);
+  // PRODUCT-16G: collapse the high-level billing overview by default so the invoice
+  // register is the primary work surface sooner. Display-only; no billing logic change.
+  const [billingOverviewOpen, setBillingOverviewOpen] = useState(false);
+  const [collectionsOpen, setCollectionsOpen] = useState(false);
   const session = readSession();
   const canRecordPayment = ['admin', 'assistant'].includes(session?.user?.role);
   const canReviewProof = ['admin', 'assistant'].includes(session?.user?.role);
@@ -1707,6 +1710,16 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
 
   return <>
     <style>{billingMobilePolishCss}</style>
+    <section aria-label="Billing overview" style={{ marginBottom: 16, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <IconCash size={16} stroke={1.75} style={{ color: '#697386' }} />
+          <span style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>Billing overview</span>
+        </div>
+        <button type="button" aria-expanded={billingOverviewOpen} onClick={() => setBillingOverviewOpen(open => !open)} style={{ ...styles.ghostButton, fontSize: 12, padding: '4px 10px' }}>{billingOverviewOpen ? 'Hide' : 'Show'}</button>
+      </div>
+      <p style={{ fontSize: 12, color: '#697386', margin: '6px 0 0' }}>Summary, unpaid follow-up and quick billing totals.</p>
+      {billingOverviewOpen && (<>
     <div style={{ marginBottom: 16, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <IconCash size={16} stroke={1.75} style={{ color: '#697386' }} />
@@ -1773,6 +1786,8 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
         </>
       )}
     </div>
+      </>)}
+    </section>
     <div style={{ marginBottom: 16, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
