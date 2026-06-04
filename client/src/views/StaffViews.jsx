@@ -892,6 +892,9 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   const [tooltip, setTooltip] = useState(null);
   const [loading, setLoading] = useState(false);
   const [cockpitOpen, setCockpitOpen] = useState(false);
+  // PRODUCT-16M: client-side Matter list filters (UI convenience only; no fetch/API/selection/semantics change).
+  const [matterSearch, setMatterSearch] = useState('');
+  const [matterStage, setMatterStage] = useState('open');
   const emptyMatterForm = { clientId: '', title: '', practiceArea: '', stage: 'Intake', assignedTo: '', paralegal: '', description: '', court: '', judge: '', caseNo: '', opposingCounsel: '', priority: 'Medium', solDate: '', billingType: 'hourly', billingRate: 15000, fixedFee: 0, retainerBalance: 0, remindersEnabled: 'firm_default', courtRemindersEnabled: 'firm_default', invoiceRemindersEnabled: 'firm_default' };
   const [form, setForm] = useState(emptyMatterForm);
   const [time, setTime] = useState({ hours: 1, description: '', rate: 15000, billable: true });
@@ -1082,16 +1085,53 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   async function saveTimeEntry(entry, values) { try { const body = { ...values }; if (!canViewBilling) delete body.rate; await api(`/time-entries/${entry.id}`, { method: 'PATCH', body }); setEditingTime(null); notify({ type: 'success', message: 'Time entry updated.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteTimeEntryRecord(entry) { try { await api(`/time-entries/${entry.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Time entry deleted.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
 
+  // PRODUCT-16M: filter the already-loaded matters for the list only. Stage 'open' hides Closed files,
+  // 'all' shows every stage, otherwise match the chosen stage. Search spans title/reference/id/client/
+  // advocate/practice. data.matters is never mutated and `selected`/selectedId/loadDetail are untouched,
+  // so filtering the list never closes the currently open matter.
+  const matterQuery = matterSearch.trim().toLowerCase();
+  const filteredMatters = data.matters.filter(m => {
+    const stage = m.stage || 'Intake';
+    if (matterStage === 'open') { if (stage === 'Closed') return false; }
+    else if (matterStage !== 'all' && stage !== matterStage) return false;
+    if (matterQuery) {
+      const haystack = `${m.title || ''} ${m.reference || ''} ${m.id || ''} ${m.clientName || ''} ${m.assignedTo || ''} ${m.practiceArea || ''}`.toLowerCase();
+      if (!haystack.includes(matterQuery)) return false;
+    }
+    return true;
+  });
+  const matterEmptyText = data.matters.length === 0 ? 'No matters yet.' : 'No matters match these filters.';
+
   return (
     <div className="lf-matter-grid" style={styles.matterGrid}>
-      <Card title="Matter list" hint={`${data.matters.length} active files`}>
-        {data.matters.length ? data.matters.map(m => (
-          <button key={m.id} onClick={() => setSelectedId(m.id)} onMouseMove={e => setTooltip({ x: e.clientX, y: e.clientY, title: m.title, lines: [m.reference || m.id, `Stage: ${m.stage || 'Intake'}`, `Priority: ${m.priority || 'Medium'}`, `Advocate: ${m.assignedTo || '-'}`, `Next court: ${nextCourtDate(m)}`], initial: (m.title || 'M').slice(0, 1) })} onMouseLeave={() => setTooltip(null)} style={{ ...styles.matterButton, ...(selected?.id === m.id ? styles.matterActive : {}) }}>
-            <strong>{m.title}</strong>
-            <span>{m.reference || m.id}</span>
-            <small>{m.clientName || 'No client'} / {m.stage || 'Intake'}</small>
-          </button>
-        )) : <Empty title="No matters" text="Create one after adding a client." />}
+      <Card title="Matter list" hint={`Showing ${filteredMatters.length} of ${data.matters.length} matters`}>
+        {data.matters.length ? (
+          <>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <input type="search" aria-label="Search matters by title, client, reference, or advocate" placeholder="Search matters…" value={matterSearch} onChange={e => setMatterSearch(e.target.value)} style={{ flex: 1, minWidth: 140, border: `1px solid ${theme.line}`, borderRadius: 6, padding: '7px 11px', background: '#fff', fontSize: 13, outline: 'none' }} />
+              <select aria-label="Filter matters by stage" value={matterStage} onChange={e => setMatterStage(e.target.value)} style={{ ...styles.input, width: 'auto', minWidth: 132 }}>
+                <option value="open">Active (hide Closed)</option>
+                <option value="all">All stages</option>
+                <option value="Intake">Intake</option>
+                <option value="Conflict Check">Conflict Check</option>
+                <option value="Engagement">Engagement</option>
+                <option value="Active">Active</option>
+                <option value="Discovery">Discovery</option>
+                <option value="Trial Prep">Trial Prep</option>
+                <option value="On Hold">On Hold</option>
+                <option value="Closed">Closed</option>
+              </select>
+            </div>
+            <div style={{ fontSize: 12, color: '#697386', marginBottom: 10 }}>Filtering the list does not close the currently open matter.</div>
+            {filteredMatters.length ? filteredMatters.map(m => (
+              <button key={m.id} onClick={() => setSelectedId(m.id)} onMouseMove={e => setTooltip({ x: e.clientX, y: e.clientY, title: m.title, lines: [m.reference || m.id, `Stage: ${m.stage || 'Intake'}`, `Priority: ${m.priority || 'Medium'}`, `Advocate: ${m.assignedTo || '-'}`, `Next court: ${nextCourtDate(m)}`], initial: (m.title || 'M').slice(0, 1) })} onMouseLeave={() => setTooltip(null)} style={{ ...styles.matterButton, ...(selected?.id === m.id ? styles.matterActive : {}) }}>
+                <strong>{m.title}</strong>
+                <span>{m.reference || m.id}</span>
+                <small>{m.clientName || 'No client'} / {m.stage || 'Intake'}</small>
+              </button>
+            )) : <Empty title="No matches" text={matterEmptyText} />}
+          </>
+        ) : <Empty title="No matters" text={matterEmptyText} />}
       </Card>
       <div style={styles.pageStack}>
         {canManage && (
