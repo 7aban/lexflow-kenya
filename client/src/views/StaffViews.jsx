@@ -1230,6 +1230,9 @@ export function Tasks({ data, canManage, reload, notify, focus }) {
   const [form, setForm] = useState({ matterId: '', title: '', dueDate: '' });
   const [editingTask, setEditingTask] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  // PRODUCT-16H: client-side status filter so completed tasks stop crowding daily work.
+  // Display-only over already-loaded data.tasks; defaults to Open. No API/payload/timer change.
+  const [taskFilter, setTaskFilter] = useState('open');
 
   useEffect(() => {
     if (!focus?.taskId) return;
@@ -1241,11 +1244,27 @@ export function Tasks({ data, canManage, reload, notify, focus }) {
       setTimeout(() => { el.style.background = prev; }, 1200);
     }
   }, [focus?.taskId, focus?.ts]);
+  // PRODUCT-16H: derived (display-only) overdue follows the existing StaffViews pattern
+  // (!completed && dueDate && dueDate < today). data.tasks is never mutated.
+  const allTasks = data.tasks || [];
+  const filteredTasks = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    if (taskFilter === 'open') return allTasks.filter(t => !t.completed);
+    if (taskFilter === 'overdue') return allTasks.filter(t => !t.completed && t.dueDate && t.dueDate < today);
+    if (taskFilter === 'done') return allTasks.filter(t => t.completed);
+    return allTasks;
+  }, [allTasks, taskFilter]);
+  const taskEmpty = {
+    all: ['No tasks yet.', 'Once records exist, they will appear here.'],
+    open: ['No open tasks', 'All tasks are completed or none are open.'],
+    overdue: ['No overdue tasks', 'No incomplete tasks are past their due date.'],
+    done: ['No completed tasks', 'Completed tasks will appear here.'],
+  }[taskFilter] || ['No tasks yet.', 'Once records exist, they will appear here.'];
   async function submit(event) { event.preventDefault(); try { await api('/tasks', { method: 'POST', body: form }); setForm({ matterId: '', title: '', dueDate: '' }); notify({ type: 'success', message: 'Task created.' }); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function toggle(task) { try { await api(`/tasks/${task.id}`, { method: 'PATCH', body: { completed: !task.completed } }); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function saveTask(task, values) { try { await api(`/tasks/${task.id}`, { method: 'PATCH', body: values }); setEditingTask(null); notify({ type: 'success', message: 'Task updated.' }); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteTaskRecord(task) { try { await api(`/tasks/${task.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Task deleted.' }); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
-  return <div className="lf-split-grid lf-task-split-grid" style={styles.splitGrid}><Card title="New task" hint="Deadline control"><form onSubmit={submit} style={styles.formGrid}><Field label="Matter"><select required style={styles.input} value={form.matterId} onChange={e => setForm({ ...form, matterId: e.target.value })}><option value="">Select matter</option>{data.matters.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}</select></Field><Field label="Task"><input required style={styles.input} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></Field><Field label="Due"><input type="date" style={styles.input} value={form.dueDate} onChange={e => setForm({ ...form, dueDate: e.target.value })} /></Field><button style={styles.primaryButton}>Create task</button></form></Card><Card title="Task board" hint={`${data.tasks.length} tasks`}><TaskEditorList tasks={data.tasks} canManage={canManage} editingTask={editingTask} setEditingTask={setEditingTask} saveTask={saveTask} toggle={toggle} confirmDelete={task => setConfirm({ title: 'Delete task?', message: 'Delete this task?', onConfirm: () => deleteTaskRecord(task) })} /></Card><ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} /></div>;
+  return <div className="lf-split-grid lf-task-split-grid" style={styles.splitGrid}><Card title="New task" hint="Deadline control"><form onSubmit={submit} style={styles.formGrid}><Field label="Matter"><select required style={styles.input} value={form.matterId} onChange={e => setForm({ ...form, matterId: e.target.value })}><option value="">Select matter</option>{data.matters.map(m => <option key={m.id} value={m.id}>{m.title}</option>)}</select></Field><Field label="Task"><input required style={styles.input} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></Field><Field label="Due"><input type="date" style={styles.input} value={form.dueDate} onChange={e => setForm({ ...form, dueDate: e.target.value })} /></Field><button style={styles.primaryButton}>Create task</button></form></Card><Card title="Task board" hint={`${filteredTasks.length} of ${allTasks.length} tasks`}><div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}><select aria-label="Filter tasks by status" value={taskFilter} onChange={e => setTaskFilter(e.target.value)} style={{ ...styles.input, width: 'auto', minWidth: 128 }}><option value="open">Open</option><option value="overdue">Overdue</option><option value="done">Done</option><option value="all">All</option></select><span style={{ fontSize: 12, color: '#697386' }}>Showing {filteredTasks.length} of {allTasks.length} tasks</span></div><TaskEditorList tasks={filteredTasks} canManage={canManage} editingTask={editingTask} setEditingTask={setEditingTask} saveTask={saveTask} toggle={toggle} confirmDelete={task => setConfirm({ title: 'Delete task?', message: 'Delete this task?', onConfirm: () => deleteTaskRecord(task) })} emptyTitle={taskEmpty[0]} emptyText={taskEmpty[1]} /></Card><ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} /></div>;
 }
 
 export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSettings: providedFirmSettings }) {
@@ -2901,8 +2920,8 @@ function MatterChecklistPanel({ items = [], templates = [], canManage, canToggle
   );
 }
 
-function TaskEditorList({ tasks, entries = [], matter, canManage, canViewBilling = true, editingTask, setEditingTask, saveTask, toggle, confirmDelete, taskTimer, setTaskTimer, notify, onTimerSaved }) {
-  if (!tasks.length) return <Empty title="No tasks yet." text="Once records exist, they will appear here." />;
+function TaskEditorList({ tasks, entries = [], matter, canManage, canViewBilling = true, editingTask, setEditingTask, saveTask, toggle, confirmDelete, taskTimer, setTaskTimer, notify, onTimerSaved, emptyTitle = 'No tasks yet.', emptyText = 'Once records exist, they will appear here.' }) {
+  if (!tasks.length) return <Empty title={emptyTitle} text={emptyText} />;
   const warmBorder = '1px solid #DDD8CE';
   const warmHeadBg = '#F5F2EB';
   const warmCellPad = '11px 14px';
