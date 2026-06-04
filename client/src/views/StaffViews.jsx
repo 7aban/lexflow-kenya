@@ -1820,6 +1820,11 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
     );
   }
 
+  // PRODUCT-17C: export exactly the filtered invoice register rows the user is viewing
+  function exportInvoices() {
+    if (!registerInvoices.length) return;
+    downloadCsv('lexflow-invoices.csv', ['Invoice', 'Client', 'Matter', 'Invoice Date', 'Due Date', 'Amount', 'Amount Paid', 'Balance', 'Status'], registerInvoices.map(i => [invoiceLabel(i), i.clientName || '', i.matterTitle || '', i.date || '', i.dueDate || '', i.amount ?? '', i.amountPaid ?? '', i.balance ?? '', invoiceDisplayStatus(i)]));
+  }
   return <>
     <style>{billingMobilePolishCss}</style>
     <section aria-label="Billing overview" style={{ marginBottom: 16, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
@@ -1979,6 +1984,7 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
             <option value="Paid">Paid</option>
           </select>
           <span style={{ fontSize: 12, color: '#697386' }}>{registerInvoices.length} of {invoices.length}</span>
+          <button type="button" style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 12px' }} onClick={exportInvoices} disabled={!registerInvoices.length} title="Download the filtered invoices as a CSV file">Export CSV</button>
         </div>
         <div className="lf-invoice-cards">
           <Table
