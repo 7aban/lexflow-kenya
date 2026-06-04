@@ -2653,6 +2653,12 @@ export function Users({ clients = [], notify }) {
     return true;
   });
   const userEmptyText = visibleUsers.length === 0 ? 'No users found.' : 'No users match these filters.';
+  // PRODUCT-16I: choosing the Inactive status filter auto-loads inactive users via the existing
+  // include_inactive fetch path. Active/All never force the broader scope back off once enabled.
+  function handleStatusFilterChange(nextStatus) {
+    setStatusFilter(nextStatus);
+    if (nextStatus === 'inactive') setIncludeInactive(true);
+  }
   return <div className="lf-split-grid" style={styles.splitGrid}>
     <Card title="Create user" hint="Role-based access"><form onSubmit={submit} style={styles.formGrid}>
       <Field label="Full name"><input required style={styles.input} value={form.fullName} onChange={e => setForm({ ...form, fullName: e.target.value })} /></Field>
@@ -2684,13 +2690,14 @@ export function Users({ clients = [], notify }) {
           <option value="assistant">Assistant</option>
           <option value="client">Client</option>
         </select>
-        <select aria-label="Filter users by status" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ ...styles.input, width: 'auto', minWidth: 128 }}>
+        <select aria-label="Filter users by status" value={statusFilter} onChange={e => handleStatusFilterChange(e.target.value)} style={{ ...styles.input, width: 'auto', minWidth: 128 }}>
           <option value="all">All statuses</option>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
         </select>
         <span style={{ fontSize: 12, color: '#697386' }}>Showing {filteredUsers.length} of {visibleUsers.length} users</span>
       </div>
+      <div style={{ fontSize: 12, color: '#697386', marginBottom: 12 }}>Inactive users are loaded automatically when you choose the Inactive filter.</div>
       <div className="lf-user-cards">
         <Table columns={['Photo', 'Name', 'Email', 'Role', 'Status', 'Client', 'Actions']} rows={filteredUsers.map(u => [
           <UserAvatar key={`av-${u.id}`} userId={u.id} hasAvatar={u.hasAvatar} fullName={u.fullName} size={28} />,
