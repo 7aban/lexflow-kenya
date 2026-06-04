@@ -42,6 +42,27 @@ function dueLabel(date) {
   return `In ${days} days`;
 }
 
+function csvCell(value) {
+  let text = value === null || value === undefined ? '' : String(value);
+  if (/^[=+\-@\t\r]/.test(text.replace(/^ +/, ''))) text = `'${text}`;
+  if (/[",\n\r]/.test(text)) text = `"${text.replace(/"/g, '""')}"`;
+  return text;
+}
+
+function downloadCsv(filename, columns, rows) {
+  if (!rows.length) return;
+  const csv = [columns, ...rows].map(cells => cells.map(csvCell).join(',')).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 export default function DeadlineCenter({ data, canManage, notify, focus }) {
   const [deadlines, setDeadlines] = useState([]);
   const [guidance, setGuidance] = useState([]);
@@ -318,7 +339,9 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
         </Card>
       </div>
 
-      <Card title="Deadline Timeline" hint="Court dates, tasks, invoices, limitation dates and custom obligations in one list.">
+      <Card title="Deadline Timeline" hint="Court dates, tasks, invoices, limitation dates and custom obligations in one list." action={
+        <button type="button" style={styles.ghostButton} disabled={deadlines.length === 0} onClick={() => downloadCsv('lexflow-deadlines.csv', ['Due Date', 'Type', 'Title', 'Matter / Client', 'Owner', 'Status'], deadlines.map(d => [d.dueDate, d.type, d.title, d.matterTitle || d.reference || d.clientName || '', d.owner, d.status || 'Open']))}>Export CSV</button>
+      }>
         {loading ? <Skeleton rows={3} /> : rows.length ? (
           <div className="lf-deadline-cards">
             <Table columns={['Due', 'Type', 'Deadline', 'Matter / Client', 'Owner', 'Status', 'Action']} rows={rows} rowIds={deadlines.map(r => `deadline-${r.id}`)} empty="No deadlines found." />
