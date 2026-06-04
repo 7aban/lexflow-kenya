@@ -716,6 +716,7 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [sortOrder, setSortOrder] = useState('newest');
+  const [paymentHistoryOpen, setPaymentHistoryOpen] = useState(false);
 
   const statusOptions = useMemo(() => {
     const s = new Set();
@@ -833,6 +834,22 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
             )) : <ClientMobileEmpty>No invoices shared yet.</ClientMobileEmpty>}
           </div>
           <div className="lf-client-invoices-cards ux2-client-desktop-table"><Table columns={['Invoice', 'Amount', 'Paid', 'Balance', 'Status', 'PDF']} rows={invoices.map(i => [clientInvoiceLabel(i), kes(i.amount), kes(i.amountPaid), kes(i.balance), renderClientInvoiceStatus(i), <DownloadButton key={`${i.id}-pdf`} label="PDF" ariaLabel={`Download invoice ${clientInvoiceLabel(i)} PDF`} path={`/api/invoices/${i.id}/pdf`} filename={`${clientInvoiceLabel(i)}.pdf`} notify={notify} />])} empty="No invoices shared yet." /></div>
+          <form onSubmit={submitPayment} style={{ ...styles.formGrid, marginTop: 14 }}>
+            <Field label="Invoice"><select style={styles.input} value={payment.invoiceId} onChange={e => setPayment({ ...payment, invoiceId: e.target.value })}><option value="">General payment</option>{invoices.map(i => <option key={i.id} value={i.id}>{i.number || i.id}</option>)}</select></Field>
+            <Field label="Method"><select style={styles.input} value={payment.method} onChange={e => setPayment({ ...payment, method: e.target.value })}><option>M-PESA</option><option>Bank Transfer</option><option>Cash Deposit</option></select></Field>
+            <Field label="Reference"><input required style={styles.input} value={payment.reference} onChange={e => setPayment({ ...payment, reference: e.target.value })} placeholder="M-PESA code or bank ref" /></Field>
+            <Field label="Amount"><input type="number" style={styles.input} value={payment.amount} onChange={e => setPayment({ ...payment, amount: e.target.value })} /></Field>
+            <Field label="Screenshot"><input type="file" accept="image/*,.pdf" style={styles.input} onChange={e => setPayment({ ...payment, file: e.target.files?.[0] || null })} /></Field>
+            <Field label="Note"><input style={styles.input} value={payment.note} onChange={e => setPayment({ ...payment, note: e.target.value })} placeholder="Optional note" /></Field>
+            <button style={styles.primaryButton}>Upload proof</button>
+          </form>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 14 }}>
+            <h4 style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>Payment history</h4>
+            <button type="button" aria-expanded={paymentHistoryOpen} onClick={() => setPaymentHistoryOpen(open => !open)} style={{ ...styles.ghostButton, fontSize: 12, padding: '4px 10px' }}>{paymentHistoryOpen ? 'Hide' : 'Show'}</button>
+          </div>
+          {!paymentHistoryOpen && <p style={{ margin: '6px 0 0', fontSize: 12, color: '#6B7280' }}>Receipts and proof review history are tucked away until needed. Select Show to view them.</p>}
+          {paymentHistoryOpen && (
+            <>
           <div className="ux2-client-mobile-stack" aria-label="Payments recorded for this matter" style={{ marginTop: 10 }}>
             {invoicePayments.length ? invoicePayments.map(payment => {
               const invoice = invoices.find(item => item.id === payment.invoiceId);
@@ -857,15 +874,6 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
             }) : <ClientMobileEmpty>No payments recorded yet.</ClientMobileEmpty>}
           </div>
           <div className="lf-client-invoice-payments-cards ux2-client-desktop-table"><Table columns={['Invoice', 'Date', 'Receipt', 'Method', 'Reference', 'Amount', 'Status']} rows={paymentRows} empty="No payments recorded yet." /></div>
-          <form onSubmit={submitPayment} style={{ ...styles.formGrid, marginTop: 14 }}>
-            <Field label="Invoice"><select style={styles.input} value={payment.invoiceId} onChange={e => setPayment({ ...payment, invoiceId: e.target.value })}><option value="">General payment</option>{invoices.map(i => <option key={i.id} value={i.id}>{i.number || i.id}</option>)}</select></Field>
-            <Field label="Method"><select style={styles.input} value={payment.method} onChange={e => setPayment({ ...payment, method: e.target.value })}><option>M-PESA</option><option>Bank Transfer</option><option>Cash Deposit</option></select></Field>
-            <Field label="Reference"><input required style={styles.input} value={payment.reference} onChange={e => setPayment({ ...payment, reference: e.target.value })} placeholder="M-PESA code or bank ref" /></Field>
-            <Field label="Amount"><input type="number" style={styles.input} value={payment.amount} onChange={e => setPayment({ ...payment, amount: e.target.value })} /></Field>
-            <Field label="Screenshot"><input type="file" accept="image/*,.pdf" style={styles.input} onChange={e => setPayment({ ...payment, file: e.target.files?.[0] || null })} /></Field>
-            <Field label="Note"><input style={styles.input} value={payment.note} onChange={e => setPayment({ ...payment, note: e.target.value })} placeholder="Optional note" /></Field>
-            <button style={styles.primaryButton}>Upload proof</button>
-          </form>
           <div className="ux2-client-mobile-stack" aria-label="Payment proof status list" style={{ marginTop: 14 }}>
             {proofs.length ? proofs.map(p => {
               const prompt = getProofPrompt(p);
@@ -904,6 +912,8 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
               <div key={`${p.id}-rv`} style={{ display: 'grid', gap: 3 }}><span style={{ fontSize: 12, color: proofPromptColor[prompt.tone] || '#6B7280', fontWeight: 500 }}>{prompt.body}</span>{p.status === 'Rejected' && p.reviewNote ? <span style={{ fontSize: 12, color: '#374151' }}>{p.reviewNote}</span> : null}</div>,
             ];
           })} empty="No payment proofs uploaded yet. Use the form above after making payment." /></div>
+            </>
+          )}
         </Card>
       </div>
     </div>
