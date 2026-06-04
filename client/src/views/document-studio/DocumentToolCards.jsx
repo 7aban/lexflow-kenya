@@ -3,38 +3,47 @@ import { Badge } from '../../components/ui.jsx';
 
 const documentToolCards = [
   {
+    id: 'merge',
     title: 'Merge PDFs',
     description: 'Combine pleadings, exhibits, and annexures into one staged court bundle.',
   },
   {
+    id: 'extract',
     title: 'Extract pages',
     description: 'Pull selected page ranges from one matter PDF into a new document.',
   },
   {
+    id: 'split',
     title: 'Split / reorder pages',
     description: 'Prepare page ranges and reorder scanned bundles before final export.',
   },
   {
+    id: 'delete',
     title: 'Delete pages',
     description: 'Remove duplicate, blank, or incorrectly scanned pages during review.',
   },
   {
+    id: 'rotate',
     title: 'Rotate pages',
     description: 'Correct sideways pages in affidavits, exhibits, and annexures.',
   },
   {
+    id: 'paginate',
     title: 'Add page numbers / paginate bundle',
     description: 'Apply court-ready pagination before filing or service.',
   },
   {
+    id: 'bundle',
     title: 'Court bundle prep',
     description: 'Combine selected matter PDFs into a single court-ready bundle with optional page numbers.',
   },
   {
+    id: 'images',
     title: 'Images to PDF',
     description: 'Convert evidence images and scanned pages into PDF output.',
   },
   {
+    id: 'tenth-lining',
     title: 'Tenth-lining / appellate formatting',
     description: 'Prepare legal-document formatting helpers for appellate practice.',
   },
@@ -49,7 +58,7 @@ const workflowPrinciples = [
 
 const activeToolNames = new Set(['Merge PDFs', 'Rotate pages', 'Extract pages', 'Delete pages', 'Add page numbers / paginate bundle', 'Court bundle prep']);
 
-export default function DocumentToolCards({ onOpenMerge, onOpenRotate, onOpenExtract, onOpenDelete, onOpenPaginate, onOpenBundle }) {
+export default function DocumentToolCards({ onOpenMerge, onOpenRotate, onOpenExtract, onOpenDelete, onOpenPaginate, onOpenBundle, selectedTool }) {
   const openHandlers = {
     'Merge PDFs': onOpenMerge,
     'Rotate pages': onOpenRotate,
@@ -87,7 +96,7 @@ export default function DocumentToolCards({ onOpenMerge, onOpenRotate, onOpenExt
                   opacity: active ? 1 : 0.75,
                 }}
               >
-                {active ? 'Open Tool' : 'Not available yet'}
+                {selectedTool === tool.id ? 'Active' : active ? 'Open Tool' : 'Not available yet'}
               </button>
             </div>
           );

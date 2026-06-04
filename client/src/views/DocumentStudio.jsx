@@ -120,6 +120,7 @@ export default function DocumentStudio({ notify }) {
   const [bundleSaveSuccess, setBundleSaveSuccess] = useState('');
   // UI-only: optional Court Bundle features start collapsed (progressive disclosure).
   const [bundleOptionsOpen, setBundleOptionsOpen] = useState(false);
+  const [selectedTool, setSelectedTool] = useState(null);
 
   const panelRef = useRef(null);
   const mergePanelRef = useRef(null);
@@ -796,34 +797,9 @@ export default function DocumentStudio({ notify }) {
     }
   }
 
-  function scrollToMergeTool() {
+  function handleSelectTool(tool) {
+    setSelectedTool(tool);
     if (!matters.length && !mattersLoading) loadMatters();
-    setTimeout(() => mergePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 40);
-  }
-
-  function scrollToRotateTool() {
-    if (!matters.length && !mattersLoading) loadMatters();
-    setTimeout(() => rotatePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 40);
-  }
-
-  function scrollToExtractTool() {
-    if (!matters.length && !mattersLoading) loadMatters();
-    setTimeout(() => extractPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 40);
-  }
-
-  function scrollToDeleteTool() {
-    if (!matters.length && !mattersLoading) loadMatters();
-    setTimeout(() => deletePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 40);
-  }
-
-  function scrollToPaginateTool() {
-    if (!matters.length && !mattersLoading) loadMatters();
-    setTimeout(() => paginatePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 40);
-  }
-
-  function scrollToBundleTool() {
-    if (!matters.length && !mattersLoading) loadMatters();
-    setTimeout(() => bundlePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 40);
   }
 
   if (loading) return <Skeleton />;
@@ -906,13 +882,17 @@ export default function DocumentStudio({ notify }) {
 
       <Card title="Document Tools" hint="Prepare, combine, paginate, and format court-ready documents">
         <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
-          <div style={{ border: `1px solid ${theme.line}`, borderLeft: `3px solid ${theme.blue}`, borderRadius: 8, background: '#FAFAF9', padding: '12px 14px', display: 'grid', gap: 4 }}>
-            <strong style={{ fontSize: 14, color: theme.ink }}>Legal PDF utilities</strong>
-            <span style={{ fontSize: 13, color: theme.muted, lineHeight: 1.55 }}>
-              Merge existing matter PDFs, rotate PDF pages, extract selected pages, or remove unwanted pages. Other document tools remain staged.
-            </span>
-          </div>
+          <DocumentToolCards
+            onOpenMerge={() => handleSelectTool('merge')}
+            onOpenRotate={() => handleSelectTool('rotate')}
+            onOpenExtract={() => handleSelectTool('extract')}
+            onOpenDelete={() => handleSelectTool('delete')}
+            onOpenPaginate={() => handleSelectTool('paginate')}
+            onOpenBundle={() => handleSelectTool('bundle')}
+            selectedTool={selectedTool}
+          />
 
+          {selectedTool === 'merge' && (
           <div
             ref={mergePanelRef}
             style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 16, display: 'grid', gap: 14, minWidth: 0 }}
@@ -1041,7 +1021,9 @@ export default function DocumentStudio({ notify }) {
               </div>
             )}
           </div>
+          )}
 
+          {selectedTool === 'rotate' && (
           <div
             ref={rotatePanelRef}
             style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 16, display: 'grid', gap: 14, minWidth: 0 }}
@@ -1141,7 +1123,9 @@ export default function DocumentStudio({ notify }) {
             {rotateSaveError && <Alert tone="danger">{rotateSaveError}</Alert>}
             {rotateSaveSuccess && <Alert tone="success">{rotateSaveSuccess}</Alert>}
           </div>
+          )}
 
+          {selectedTool === 'extract' && (
           <div
             ref={extractPanelRef}
             style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 16, display: 'grid', gap: 14, minWidth: 0 }}
@@ -1239,7 +1223,9 @@ export default function DocumentStudio({ notify }) {
             {extractSaveError && <Alert tone="danger">{extractSaveError}</Alert>}
             {extractSaveSuccess && <Alert tone="success">{extractSaveSuccess}</Alert>}
           </div>
+          )}
 
+          {selectedTool === 'delete' && (
           <div
             ref={deletePanelRef}
             style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 16, display: 'grid', gap: 14, minWidth: 0 }}
@@ -1341,7 +1327,9 @@ export default function DocumentStudio({ notify }) {
               This operation cannot be undone once saved.
             </div>
           </div>
+          )}
 
+          {selectedTool === 'paginate' && (
           <div
             ref={paginatePanelRef}
             style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 16, display: 'grid', gap: 14, minWidth: 0 }}
@@ -1458,7 +1446,9 @@ export default function DocumentStudio({ notify }) {
               Numbers are added to every page in the selected PDF. For formal court bundles, verify pagination before filing.
             </div>
           </div>
+          )}
 
+          {selectedTool === 'bundle' && (
           <div
             ref={bundlePanelRef}
             style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 16, display: 'grid', gap: 14, minWidth: 0 }}
@@ -1798,15 +1788,7 @@ export default function DocumentStudio({ notify }) {
               )}
             </div>
           </div>
-
-          <DocumentToolCards
-            onOpenMerge={scrollToMergeTool}
-            onOpenRotate={scrollToRotateTool}
-            onOpenExtract={scrollToExtractTool}
-            onOpenDelete={scrollToDeleteTool}
-            onOpenPaginate={scrollToPaginateTool}
-            onOpenBundle={scrollToBundleTool}
-          />
+          )}
         </div>
       </Card>
     </div>
