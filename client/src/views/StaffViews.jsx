@@ -876,6 +876,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   const [confirm, setConfirm] = useState(null);
   const [tooltip, setTooltip] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [cockpitOpen, setCockpitOpen] = useState(false);
   const emptyMatterForm = { clientId: '', title: '', practiceArea: '', stage: 'Intake', assignedTo: '', paralegal: '', description: '', court: '', judge: '', caseNo: '', opposingCounsel: '', priority: 'Medium', solDate: '', billingType: 'hourly', billingRate: 15000, fixedFee: 0, retainerBalance: 0, remindersEnabled: 'firm_default', courtRemindersEnabled: 'firm_default', invoiceRemindersEnabled: 'firm_default' };
   const [form, setForm] = useState(emptyMatterForm);
   const [time, setTime] = useState({ hours: 1, description: '', rate: 15000, billable: true });
@@ -1161,12 +1162,23 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
                       <IconNote size={14} stroke={1.75} /> Note
                     </button>
                   </div>
-                  <div className="lf-matter-cockpit" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
-                    <MatterNextStepPanel detail={detail} />
-                    <MatterCourtPrepCard detail={detail} />
-                    <MatterKeyDocumentsPanel detail={detail} />
-                    <MatterBillingSnapshot detail={detail} />
-                  </div>
+                  <section aria-label="Matter cockpit" style={{ border: `1px solid ${theme.line}`, background: '#fff', borderRadius: 10, padding: 14, display: 'grid', gap: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                      <div style={{ display: 'grid', gap: 2 }}>
+                        <strong style={{ fontSize: 13 }}>Matter cockpit</strong>
+                        <span style={{ color: theme.muted, fontSize: 12 }}>Next step, court prep, key documents, and billing snapshot.</span>
+                      </div>
+                      <button type="button" aria-expanded={cockpitOpen} onClick={() => setCockpitOpen(open => !open)} style={{ ...styles.ghostButton, fontSize: 12, padding: '4px 10px' }}>{cockpitOpen ? 'Hide cockpit' : 'Show cockpit'}</button>
+                    </div>
+                    {cockpitOpen && (
+                      <div className="lf-matter-cockpit" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
+                        <MatterNextStepPanel detail={detail} />
+                        <MatterCourtPrepCard detail={detail} />
+                        <MatterKeyDocumentsPanel detail={detail} />
+                        <MatterBillingSnapshot detail={detail} />
+                      </div>
+                    )}
+                  </section>
                   <MatterCommandSummary detail={detail} nextActionHints={nextActionHints} />
                   <MatterNextActionHints hints={nextActionHints} />
                   <MatterActivityTimeline detail={detail} />
