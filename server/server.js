@@ -43,6 +43,9 @@ const { appBaseUrl, invitationUrl, checkInvitationRateLimit } = createInvitation
 const { recordAuditEvent } = createAudit({ run, get });
 const oauth = createOAuth({ run, get, all });
 const CONVERSATION_STATUSES = new Set(['open', 'pending', 'resolved']);
+const WORK_EMAIL_SYNC_TYPE = 'email_metadata';
+const WORK_EMAIL_SYNC_LIMIT = 25;
+const GENERIC_EMAIL_DOMAINS = new Set(['gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'yahoo.com', 'icloud.com', 'me.com', 'proton.me', 'protonmail.com']);
 const MAX_MERGE_PDF_COUNT = 10;
 const MAX_MERGE_PDF_INPUT_BYTES = 20 * 1024 * 1024;
 const MAX_EXTRACT_PDF_PAGES = 250;
@@ -212,6 +215,8 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS oauth_accounts (id TEXT PRIMARY KEY, userId TEXT NOT NULL, provider TEXT CHECK(provider IN ('google','microsoft')) NOT NULL, providerSubject TEXT NOT NULL, email TEXT NOT NULL, emailVerified INTEGER DEFAULT 0, revokedAt TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, lastLoginAt TEXT, UNIQUE(provider, providerSubject))`);
   await run(`CREATE TABLE IF NOT EXISTS connected_accounts (id TEXT PRIMARY KEY, userId TEXT NOT NULL, provider TEXT NOT NULL CHECK(provider IN ('google','microsoft')), providerAccountId TEXT, email TEXT, displayName TEXT, scopes TEXT, status TEXT NOT NULL DEFAULT 'connected', connectedAt TEXT NOT NULL, disconnectedAt TEXT, lastSyncAt TEXT, lastError TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS connected_account_tokens (id TEXT PRIMARY KEY, connectedAccountId TEXT NOT NULL, accessTokenEncrypted TEXT, refreshTokenEncrypted TEXT, tokenType TEXT, expiresAt TEXT, scope TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS work_email_messages (id TEXT PRIMARY KEY, connectedAccountId TEXT NOT NULL, userId TEXT NOT NULL, provider TEXT NOT NULL, providerAccountId TEXT, providerMessageId TEXT NOT NULL, providerThreadId TEXT, sender TEXT, recipientsSummary TEXT, subject TEXT, snippet TEXT, receivedAt TEXT, hasAttachments INTEGER DEFAULT 0, labelsJson TEXT, foldersJson TEXT, matchedMatterId TEXT, matchConfidence REAL, matchReason TEXT, importedAt TEXT NOT NULL, updatedAt TEXT, UNIQUE(connectedAccountId, providerMessageId))`);
+  await run(`CREATE TABLE IF NOT EXISTS connected_account_sync_state (id TEXT PRIMARY KEY, connectedAccountId TEXT NOT NULL, syncType TEXT NOT NULL, cursorJson TEXT, lastAttemptAt TEXT, lastSuccessAt TEXT, lastError TEXT, lastImportedCount INTEGER DEFAULT 0, createdAt TEXT NOT NULL, updatedAt TEXT, UNIQUE(connectedAccountId, syncType))`);
   await run(`CREATE TABLE IF NOT EXISTS matter_checklist_items (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT NOT NULL, completed INTEGER DEFAULT 0, position INTEGER DEFAULT 0, notes TEXT, dueDate TEXT, assignee TEXT, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, completedAt TEXT, completedBy TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS checklist_templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, practiceArea TEXT, active INTEGER DEFAULT 1, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS checklist_template_items (id TEXT PRIMARY KEY, templateId TEXT NOT NULL, title TEXT NOT NULL, notes TEXT, position INTEGER DEFAULT 0, createdAt TEXT NOT NULL)`);
@@ -323,6 +328,10 @@ async function initDb() {
   await run('CREATE INDEX IF NOT EXISTS idx_conversations_matterId ON conversations(matterId)');
   await run('CREATE INDEX IF NOT EXISTS idx_conversations_clientId ON conversations(clientId)');
   await run('CREATE INDEX IF NOT EXISTS idx_notifications_userId_readAt_createdAt ON notifications(userId, readAt, createdAt)');
+  await run('CREATE INDEX IF NOT EXISTS idx_work_email_messages_user_received ON work_email_messages(userId, receivedAt)');
+  await run('CREATE INDEX IF NOT EXISTS idx_work_email_messages_account_received ON work_email_messages(connectedAccountId, receivedAt)');
+  await run('CREATE INDEX IF NOT EXISTS idx_work_email_messages_matched_matter ON work_email_messages(matchedMatterId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_connected_account_sync_state_account_type ON connected_account_sync_state(connectedAccountId, syncType)');
   await run('CREATE INDEX IF NOT EXISTS idx_payments_invoiceId_date_createdAt ON payments(invoiceId, date, createdAt)');
   await run('CREATE INDEX IF NOT EXISTS idx_payments_clientId_date_createdAt ON payments(clientId, date, createdAt)');
   await run('CREATE INDEX IF NOT EXISTS idx_payment_proofs_status_createdAt ON payment_proofs(status, createdAt)');
@@ -958,6 +967,312 @@ async function connectedAccountStateUser(req, provider, state) {
   return { ok: true, user };
 }
 
+function workEmailProviderClient(provider) {
+  if (provider === 'google') return googleOAuth;
+  if (provider === 'microsoft') return microsoftOAuth;
+  throw new Error('Unsupported work email provider');
+}
+
+function parseWorkEmailCursor(cursorJson) {
+  if (!cursorJson) return {};
+  try {
+    const parsed = JSON.parse(cursorJson);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function cleanWorkEmailText(value, maxLength = 1000) {
+  return typeof value === 'string' ? value.replace(/[\u0000-\u001F\u007F]/g, ' ').trim().slice(0, maxLength) : '';
+}
+
+function jsonArrayText(value) {
+  const values = Array.isArray(value) ? value : [];
+  return JSON.stringify(values.map(item => cleanWorkEmailText(String(item || ''), 200)).filter(Boolean));
+}
+
+function normalizeReceivedAt(value) {
+  const text = cleanWorkEmailText(value, 120);
+  if (!text) return '';
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? text : parsed.toISOString();
+}
+
+function normalizeWorkEmailMessage(message = {}) {
+  return {
+    providerMessageId: cleanWorkEmailText(message.providerMessageId, 500),
+    providerThreadId: cleanWorkEmailText(message.providerThreadId, 500),
+    sender: cleanWorkEmailText(message.sender, 500),
+    recipientsSummary: cleanWorkEmailText(message.recipientsSummary, 1000),
+    subject: cleanWorkEmailText(message.subject, 500),
+    snippet: cleanWorkEmailText(message.snippet, 1000),
+    receivedAt: normalizeReceivedAt(message.receivedAt),
+    hasAttachments: message.hasAttachments ? 1 : 0,
+    labelsJson: jsonArrayText(message.labels),
+    foldersJson: jsonArrayText(message.folders),
+  };
+}
+
+function wordsForMatch(value, minLength = 3) {
+  return cleanWorkEmailText(value, 500)
+    .toLowerCase()
+    .split(/[^a-z0-9]+/i)
+    .filter(word => word.length >= minLength);
+}
+
+function emailDomain(email) {
+  const match = String(email || '').toLowerCase().match(/[a-z0-9._%+-]+@([a-z0-9.-]+\.[a-z]{2,})/);
+  return match ? match[1] : '';
+}
+
+function bestMatterCandidate(current, candidate) {
+  if (!candidate) return current;
+  if (!current || Number(candidate.confidence || 0) > Number(current.confidence || 0)) return candidate;
+  return current;
+}
+
+async function suggestMatterForWorkEmail(req, message) {
+  const params = [];
+  let where = '';
+  if (req.user.role === 'advocate') {
+    where = 'WHERE m.assignedTo=?';
+    params.push(req.user.fullName || '');
+  }
+  const matters = await all(
+    `SELECT m.id, m.reference, m.caseNo, m.title, c.name clientName, c.email clientEmail
+     FROM matters m
+     LEFT JOIN clients c ON c.id=m.clientId
+     ${where}`,
+    params,
+  );
+  const haystack = [
+    message.subject,
+    message.snippet,
+    message.sender,
+    message.recipientsSummary,
+  ].map(value => cleanWorkEmailText(value, 1000).toLowerCase()).join(' ');
+  const addressText = [message.sender, message.recipientsSummary].join(' ').toLowerCase();
+  let best = null;
+  for (const matter of matters) {
+    const reference = cleanWorkEmailText(matter.reference, 120).toLowerCase();
+    const caseNo = cleanWorkEmailText(matter.caseNo, 120).toLowerCase();
+    if (reference && haystack.includes(reference)) {
+      best = bestMatterCandidate(best, { matter, confidence: 0.95, reason: `Reference match: ${matter.reference}` });
+      continue;
+    }
+    if (caseNo && haystack.includes(caseNo)) {
+      best = bestMatterCandidate(best, { matter, confidence: 0.92, reason: `Case number match: ${matter.caseNo}` });
+      continue;
+    }
+
+    const clientEmail = cleanWorkEmailText(matter.clientEmail, 255).toLowerCase();
+    if (clientEmail && addressText.includes(clientEmail)) {
+      best = bestMatterCandidate(best, { matter, confidence: 0.88, reason: `Client email match: ${matter.clientEmail}` });
+      continue;
+    }
+    const clientDomain = emailDomain(clientEmail);
+    if (clientDomain && !GENERIC_EMAIL_DOMAINS.has(clientDomain) && addressText.includes(clientDomain)) {
+      best = bestMatterCandidate(best, { matter, confidence: 0.72, reason: `Client email domain match: ${clientDomain}` });
+    }
+
+    const clientWords = wordsForMatch(matter.clientName, 3);
+    if (clientWords.length && clientWords.every(word => haystack.includes(word))) {
+      best = bestMatterCandidate(best, { matter, confidence: 0.74, reason: `Client name match: ${matter.clientName}` });
+    }
+
+    const titleWords = wordsForMatch(matter.title, 4).slice(0, 5);
+    const titleHits = titleWords.filter(word => haystack.includes(word)).length;
+    if (titleWords.length >= 2 && titleHits >= Math.min(2, titleWords.length)) {
+      best = bestMatterCandidate(best, { matter, confidence: 0.66, reason: `Matter title terms match: ${matter.title}` });
+    }
+  }
+  if (!best || Number(best.confidence || 0) < 0.6) return null;
+  return {
+    matterId: best.matter.id,
+    matterTitle: best.matter.title || '',
+    clientName: best.matter.clientName || '',
+    confidence: Number(best.confidence.toFixed(2)),
+    reason: best.reason,
+  };
+}
+
+function publicWorkEmailMessage(row = {}) {
+  return {
+    id: row.id,
+    connectedAccountId: row.connectedAccountId,
+    provider: row.provider,
+    providerAccountId: row.providerAccountId || '',
+    providerMessageId: row.providerMessageId || '',
+    providerThreadId: row.providerThreadId || '',
+    sender: row.sender || '',
+    recipientsSummary: row.recipientsSummary || '',
+    subject: row.subject || '',
+    snippet: row.snippet || '',
+    receivedAt: row.receivedAt || '',
+    hasAttachments: Boolean(row.hasAttachments),
+    labels: safeJsonArray(row.labelsJson),
+    folders: safeJsonArray(row.foldersJson),
+    matchedMatterId: row.matchedMatterId || '',
+    matchedMatterTitle: row.matchedMatterTitle || '',
+    matchedClientName: row.matchedClientName || '',
+    matchConfidence: row.matchConfidence === null || row.matchConfidence === undefined ? null : Number(row.matchConfidence),
+    matchReason: row.matchReason || '',
+    importedAt: row.importedAt || '',
+    updatedAt: row.updatedAt || '',
+    accountEmail: row.accountEmail || '',
+    accountProvider: row.accountProvider || row.provider || '',
+  };
+}
+
+function safeJsonArray(value) {
+  try {
+    const parsed = JSON.parse(value || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+async function upsertWorkEmailSyncState(connectedAccountId, { cursor = '', lastAttemptAt, lastSuccessAt = '', lastError = '', lastImportedCount = 0 }) {
+  const now = new Date().toISOString();
+  const existing = await get('SELECT id FROM connected_account_sync_state WHERE connectedAccountId=? AND syncType=?', [connectedAccountId, WORK_EMAIL_SYNC_TYPE]);
+  const cursorJson = JSON.stringify({ cursor: cleanWorkEmailText(cursor, 4000) });
+  if (existing) {
+    await run(
+      `UPDATE connected_account_sync_state
+       SET cursorJson=?, lastAttemptAt=?, lastSuccessAt=?, lastError=?, lastImportedCount=?, updatedAt=?
+       WHERE id=?`,
+      [cursorJson, lastAttemptAt || now, lastSuccessAt, lastError, Number(lastImportedCount || 0), now, existing.id],
+    );
+    return existing.id;
+  }
+  const id = genId('CAS');
+  await run(
+    `INSERT INTO connected_account_sync_state
+     (id,connectedAccountId,syncType,cursorJson,lastAttemptAt,lastSuccessAt,lastError,lastImportedCount,createdAt,updatedAt)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    [id, connectedAccountId, WORK_EMAIL_SYNC_TYPE, cursorJson, lastAttemptAt || now, lastSuccessAt, lastError, Number(lastImportedCount || 0), now, now],
+  );
+  return id;
+}
+
+async function storeWorkEmailMetadata(req, account, providerResult, attemptAt) {
+  const messages = (Array.isArray(providerResult?.messages) ? providerResult.messages : [])
+    .map(normalizeWorkEmailMessage)
+    .filter(message => message.providerMessageId);
+  const now = new Date().toISOString();
+  let importedCount = 0;
+  let updatedCount = 0;
+  const matchEvents = [];
+  await run('BEGIN TRANSACTION');
+  try {
+    for (const message of messages) {
+      const match = await suggestMatterForWorkEmail(req, message);
+      const existing = await get(
+        'SELECT id FROM work_email_messages WHERE connectedAccountId=? AND providerMessageId=?',
+        [account.id, message.providerMessageId],
+      );
+      if (existing) {
+        await run(
+          `UPDATE work_email_messages
+           SET providerThreadId=?, sender=?, recipientsSummary=?, subject=?, snippet=?, receivedAt=?, hasAttachments=?, labelsJson=?, foldersJson=?, matchedMatterId=?, matchConfidence=?, matchReason=?, updatedAt=?
+           WHERE id=?`,
+          [
+            message.providerThreadId,
+            message.sender,
+            message.recipientsSummary,
+            message.subject,
+            message.snippet,
+            message.receivedAt,
+            message.hasAttachments,
+            message.labelsJson,
+            message.foldersJson,
+            match?.matterId || '',
+            match?.confidence || null,
+            match?.reason || '',
+            now,
+            existing.id,
+          ],
+        );
+        updatedCount += 1;
+        if (match?.matterId) matchEvents.push({ messageId: existing.id, ...match });
+      } else {
+        const id = genId('WEM');
+        await run(
+          `INSERT INTO work_email_messages
+           (id,connectedAccountId,userId,provider,providerAccountId,providerMessageId,providerThreadId,sender,recipientsSummary,subject,snippet,receivedAt,hasAttachments,labelsJson,foldersJson,matchedMatterId,matchConfidence,matchReason,importedAt,updatedAt)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [
+            id,
+            account.id,
+            req.user.userId,
+            account.provider,
+            account.providerAccountId || '',
+            message.providerMessageId,
+            message.providerThreadId,
+            message.sender,
+            message.recipientsSummary,
+            message.subject,
+            message.snippet,
+            message.receivedAt,
+            message.hasAttachments,
+            message.labelsJson,
+            message.foldersJson,
+            match?.matterId || '',
+            match?.confidence || null,
+            match?.reason || '',
+            now,
+            now,
+          ],
+        );
+        importedCount += 1;
+        if (match?.matterId) matchEvents.push({ messageId: id, ...match });
+      }
+    }
+    await upsertWorkEmailSyncState(account.id, {
+      cursor: providerResult?.cursor || '',
+      lastAttemptAt: attemptAt,
+      lastSuccessAt: now,
+      lastError: '',
+      lastImportedCount: importedCount + updatedCount,
+    });
+    await run('UPDATE connected_accounts SET lastSyncAt=?, lastError="", updatedAt=? WHERE id=?', [now, now, account.id]);
+    await run('COMMIT');
+  } catch (err) {
+    await run('ROLLBACK').catch(() => {});
+    throw err;
+  }
+  const totalRow = await get('SELECT COUNT(*) count FROM work_email_messages WHERE connectedAccountId=?', [account.id]);
+  return {
+    summary: {
+      importedCount,
+      updatedCount,
+      totalMessages: Number(totalRow?.count || 0),
+      lastSuccessAt: now,
+    },
+    matchEvents,
+  };
+}
+
+async function recordWorkEmailSyncFailure(req, connectedAccountId, reason, attemptAt) {
+  const now = new Date().toISOString();
+  await upsertWorkEmailSyncState(connectedAccountId, {
+    cursor: '',
+    lastAttemptAt: attemptAt || now,
+    lastSuccessAt: '',
+    lastError: reason,
+    lastImportedCount: 0,
+  }).catch(() => {});
+  await run('UPDATE connected_accounts SET lastError=?, updatedAt=? WHERE id=?', [reason, now, connectedAccountId]).catch(() => {});
+  await recordAuditEvent(req, {
+    action: 'work_email_sync_failed',
+    entityType: 'connected_account',
+    entityId: connectedAccountId,
+    metadata: { connectedAccountId, reason },
+  }).catch(() => {});
+}
+
 app.get('/api/connected-accounts', authenticate, requireStaff, async (req, res) => {
   const accounts = await oauth.getConnectedAccounts(req.user.userId);
   res.json(accounts);
@@ -1031,6 +1346,140 @@ app.post('/api/connected-accounts/:id/disconnect', authenticate, requireStaff, a
   res.json(result.account);
 });
 
+app.post('/api/connected-accounts/:id/sync-email-metadata', authenticate, requireStaff, async (req, res) => {
+  const attemptAt = new Date().toISOString();
+  const credential = await oauth.getConnectedAccountSyncCredential(req.user.userId, req.params.id).catch(() => ({
+    ok: false,
+    status: 500,
+    error: 'credential_read_failed',
+    message: 'Connected account could not be read.',
+  }));
+  if (!credential.ok) {
+    await recordAuditEvent(req, {
+      action: 'work_email_sync_failed',
+      entityType: 'connected_account',
+      entityId: req.params.id,
+      metadata: { connectedAccountId: req.params.id, reason: credential.error },
+    }).catch(() => {});
+    return res.status(credential.status || 400).json({ error: credential.message || 'Connected account cannot be synced.' });
+  }
+
+  const { account, tokens } = credential;
+  await recordAuditEvent(req, {
+    action: 'work_email_sync_started',
+    entityType: 'connected_account',
+    entityId: account.id,
+    metadata: { provider: account.provider, connectedAccountId: account.id },
+  }).catch(() => {});
+
+  try {
+    const stateRow = await get('SELECT cursorJson FROM connected_account_sync_state WHERE connectedAccountId=? AND syncType=?', [account.id, WORK_EMAIL_SYNC_TYPE]);
+    const cursorState = parseWorkEmailCursor(stateRow?.cursorJson);
+    const providerClient = workEmailProviderClient(account.provider);
+    const providerResult = await providerClient.fetchEmailMetadata({
+      accessToken: tokens.accessToken,
+      cursor: cursorState.cursor || '',
+      limit: WORK_EMAIL_SYNC_LIMIT,
+    });
+    const stored = await storeWorkEmailMetadata(req, account, providerResult, attemptAt);
+    if (stored.summary.importedCount || stored.summary.updatedCount) {
+      await recordAuditEvent(req, {
+        action: 'work_email_metadata_imported',
+        entityType: 'connected_account',
+        entityId: account.id,
+        metadata: {
+          provider: account.provider,
+          connectedAccountId: account.id,
+          importedCount: stored.summary.importedCount,
+          updatedCount: stored.summary.updatedCount,
+        },
+      }).catch(() => {});
+    }
+    for (const match of stored.matchEvents) {
+      await recordAuditEvent(req, {
+        action: 'work_email_match_suggested',
+        entityType: 'work_email_message',
+        entityId: match.messageId,
+        matterId: match.matterId,
+        metadata: {
+          connectedAccountId: account.id,
+          workEmailMessageId: match.messageId,
+          matterId: match.matterId,
+          confidence: match.confidence,
+          reason: match.reason,
+        },
+      }).catch(() => {});
+    }
+    await recordAuditEvent(req, {
+      action: 'work_email_sync_completed',
+      entityType: 'connected_account',
+      entityId: account.id,
+      metadata: {
+        provider: account.provider,
+        connectedAccountId: account.id,
+        importedCount: stored.summary.importedCount,
+        updatedCount: stored.summary.updatedCount,
+        totalMessages: stored.summary.totalMessages,
+      },
+    }).catch(() => {});
+    res.json(stored.summary);
+  } catch (err) {
+    await recordWorkEmailSyncFailure(req, account.id, 'sync_failed', attemptAt);
+    res.status(502).json({ error: 'Email metadata sync failed.' });
+  }
+});
+
+app.get('/api/work-email/messages/:id/matches', authenticate, requireStaff, async (req, res) => {
+  const row = await get(
+    `SELECT wem.id, wem.matchedMatterId, wem.matchConfidence, wem.matchReason, m.title matchedMatterTitle, c.name matchedClientName
+     FROM work_email_messages wem
+     LEFT JOIN matters m ON m.id=wem.matchedMatterId
+     LEFT JOIN clients c ON c.id=m.clientId
+     WHERE wem.id=? AND wem.userId=?`,
+    [req.params.id, req.user.userId],
+  );
+  if (!row) return res.status(404).json({ error: 'Work email message not found.' });
+  if (!row.matchedMatterId) return res.json([]);
+  res.json([{
+    matterId: row.matchedMatterId,
+    matterTitle: row.matchedMatterTitle || '',
+    clientName: row.matchedClientName || '',
+    confidence: row.matchConfidence === null || row.matchConfidence === undefined ? null : Number(row.matchConfidence),
+    reason: row.matchReason || '',
+  }]);
+});
+
+app.get('/api/work-email/messages', authenticate, requireStaff, async (req, res) => {
+  const filters = ['wem.userId=?'];
+  const params = [req.user.userId];
+  if (req.query.connectedAccountId) {
+    filters.push('wem.connectedAccountId=?');
+    params.push(String(req.query.connectedAccountId));
+  }
+  if (req.query.matchedMatterId) {
+    filters.push('wem.matchedMatterId=?');
+    params.push(String(req.query.matchedMatterId));
+  }
+  if (req.query.q) {
+    const q = `%${String(req.query.q).trim()}%`;
+    filters.push('(wem.sender LIKE ? OR wem.recipientsSummary LIKE ? OR wem.subject LIKE ? OR wem.snippet LIKE ?)');
+    params.push(q, q, q, q);
+  }
+  const limit = Math.min(Math.max(Number(req.query.limit || 25), 1), 100);
+  const rows = await all(
+    `SELECT wem.*, ca.email accountEmail, ca.provider accountProvider, m.title matchedMatterTitle, c.name matchedClientName
+     FROM work_email_messages wem
+     LEFT JOIN connected_accounts ca ON ca.id=wem.connectedAccountId
+     LEFT JOIN matters m ON m.id=wem.matchedMatterId
+     LEFT JOIN clients c ON c.id=m.clientId
+     WHERE ${filters.join(' AND ')}
+     ORDER BY COALESCE(wem.receivedAt, wem.importedAt) DESC, wem.importedAt DESC
+     LIMIT ?`,
+    [...params, limit],
+  );
+  res.json(rows.map(publicWorkEmailMessage));
+});
+
 app.use('/api', authenticate);
 
 app.get('/api/auth/me', async (req, res) => {
@@ -1084,6 +1533,8 @@ app.delete('/api/auth/users/:id', requireAdmin, async (req, res) => {
   const user = await get('SELECT id,email,fullName,role FROM users WHERE id=?', [req.params.id]);
   await run('BEGIN TRANSACTION');
   try {
+    await run('DELETE FROM work_email_messages WHERE connectedAccountId IN (SELECT id FROM connected_accounts WHERE userId=?)', [req.params.id]);
+    await run('DELETE FROM connected_account_sync_state WHERE connectedAccountId IN (SELECT id FROM connected_accounts WHERE userId=?)', [req.params.id]);
     await run('DELETE FROM connected_account_tokens WHERE connectedAccountId IN (SELECT id FROM connected_accounts WHERE userId=?)', [req.params.id]);
     await run('DELETE FROM connected_accounts WHERE userId=?', [req.params.id]);
     await run('DELETE FROM oauth_accounts WHERE userId=?', [req.params.id]);

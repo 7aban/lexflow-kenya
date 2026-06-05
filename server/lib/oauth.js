@@ -59,6 +59,19 @@ function encryptConnectedToken(value) {
   return `v1:${iv.toString('base64url')}:${tag.toString('base64url')}:${ciphertext.toString('base64url')}`;
 }
 
+function decryptConnectedToken(value) {
+  if (!value) return '';
+  const parts = String(value).split(':');
+  if (parts.length !== 4 || parts[0] !== 'v1') throw new Error('Invalid connected account token format');
+  const [, ivText, tagText, ciphertextText] = parts;
+  const decipher = crypto.createDecipheriv('aes-256-gcm', connectedAccountsTokenKey(), Buffer.from(ivText, 'base64url'));
+  decipher.setAuthTag(Buffer.from(tagText, 'base64url'));
+  return Buffer.concat([
+    decipher.update(Buffer.from(ciphertextText, 'base64url')),
+    decipher.final(),
+  ]).toString('utf8');
+}
+
 function publicConnectedAccount(row = {}) {
   return {
     id: row.id,
@@ -293,6 +306,40 @@ function createOAuth({ run, get, all }) {
     return { ok: true, account: publicConnectedAccount(updated) };
   }
 
+  async function getConnectedAccountSyncCredential(userId, connectedAccountId) {
+    const row = await get(
+      `SELECT ca.id, ca.userId, ca.provider, ca.providerAccountId, ca.email, ca.displayName, ca.scopes, ca.status,
+              ca.connectedAt, ca.disconnectedAt, ca.lastSyncAt, ca.lastError, ca.createdAt, ca.updatedAt,
+              cat.accessTokenEncrypted, cat.refreshTokenEncrypted, cat.tokenType, cat.expiresAt, cat.scope tokenScope
+       FROM connected_accounts ca
+       LEFT JOIN connected_account_tokens cat ON cat.connectedAccountId=ca.id
+       WHERE ca.id=?`,
+      [connectedAccountId],
+    );
+    if (!row || row.userId !== userId) {
+      return { ok: false, status: 404, error: 'not_found', message: 'Connected account not found.' };
+    }
+    if (row.status !== 'connected') {
+      return { ok: false, status: 400, error: 'disconnected', message: 'Connected account is disconnected.' };
+    }
+    const accessToken = decryptConnectedToken(row.accessTokenEncrypted || '');
+    const refreshToken = decryptConnectedToken(row.refreshTokenEncrypted || '');
+    if (!accessToken) {
+      return { ok: false, status: 400, error: 'missing_access_token', message: 'Connected account token is unavailable.' };
+    }
+    return {
+      ok: true,
+      account: publicConnectedAccount(row),
+      tokens: {
+        accessToken,
+        refreshToken,
+        tokenType: row.tokenType || '',
+        expiresAt: row.expiresAt || '',
+        scope: row.tokenScope || row.scopes || '',
+      },
+    };
+  }
+
   return {
     validateExistingStaffUser,
     completeOAuthLogin,
@@ -301,6 +348,7 @@ function createOAuth({ run, get, all }) {
     getConnectedAccounts,
     upsertConnectedAccount,
     disconnectConnectedAccount,
+    getConnectedAccountSyncCredential,
   };
 }
 

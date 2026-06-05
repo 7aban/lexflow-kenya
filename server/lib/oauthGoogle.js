@@ -3,6 +3,7 @@ const config = require('./config');
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v3/userinfo';
+const GOOGLE_GMAIL_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/messages';
 const GOOGLE_SCOPES = 'openid email profile';
 const GOOGLE_CONNECTED_SCOPES = [
   'openid',
@@ -80,6 +81,62 @@ async function getUserInfo(accessToken) {
   return res.json();
 }
 
+function gmailHeader(headers = [], name) {
+  const header = headers.find(item => String(item?.name || '').toLowerCase() === name.toLowerCase());
+  return String(header?.value || '').trim();
+}
+
+function gmailHasAttachments(part = {}) {
+  if (!part || typeof part !== 'object') return false;
+  if (part.filename || part.body?.attachmentId) return true;
+  return Array.isArray(part.parts) && part.parts.some(gmailHasAttachments);
+}
+
+function normalizeGmailMessage(message = {}) {
+  const headers = message.payload?.headers || [];
+  return {
+    providerMessageId: String(message.id || '').trim(),
+    providerThreadId: String(message.threadId || '').trim(),
+    sender: gmailHeader(headers, 'From'),
+    recipientsSummary: [gmailHeader(headers, 'To'), gmailHeader(headers, 'Cc')].filter(Boolean).join('; '),
+    subject: gmailHeader(headers, 'Subject'),
+    snippet: String(message.snippet || '').trim(),
+    receivedAt: gmailHeader(headers, 'Date') || (message.internalDate ? new Date(Number(message.internalDate)).toISOString() : ''),
+    hasAttachments: gmailHasAttachments(message.payload || {}),
+    labels: Array.isArray(message.labelIds) ? message.labelIds : [],
+    folders: Array.isArray(message.labelIds) ? message.labelIds : [],
+  };
+}
+
+async function gmailJson(url, accessToken) {
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Google Gmail metadata failed (${res.status}): ${body}`);
+  }
+  return res.json();
+}
+
+async function fetchEmailMetadata({ accessToken, cursor = '', limit = 25 } = {}) {
+  if (!accessToken) throw new Error('Google access token is required for email metadata sync');
+  const params = new URLSearchParams({
+    maxResults: String(Math.min(Math.max(Number(limit || 25), 1), 50)),
+    includeSpamTrash: 'false',
+  });
+  if (cursor) params.set('pageToken', cursor);
+  const list = await gmailJson(`${GOOGLE_GMAIL_URL}?${params.toString()}`, accessToken);
+  const ids = Array.isArray(list.messages) ? list.messages.map(item => item.id).filter(Boolean) : [];
+  const messages = [];
+  for (const id of ids) {
+    const detailParams = new URLSearchParams({ format: 'metadata' });
+    ['From', 'To', 'Cc', 'Subject', 'Date'].forEach(header => detailParams.append('metadataHeaders', header));
+    const detail = await gmailJson(`${GOOGLE_GMAIL_URL}/${encodeURIComponent(id)}?${detailParams.toString()}`, accessToken);
+    const normalized = normalizeGmailMessage(detail);
+    if (normalized.providerMessageId) messages.push(normalized);
+  }
+  return { messages, cursor: list.nextPageToken || '' };
+}
+
 function tokenExpiry(tokens = {}) {
   const expiresIn = Number(tokens.expires_in || 0);
   return expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : '';
@@ -125,6 +182,7 @@ module.exports = {
   buildConnectedAuthorizationUrl,
   handleCallback,
   handleConnectedCallback,
+  fetchEmailMetadata,
   requireGoogleConfig,
   GOOGLE_CONNECTED_SCOPES,
 };

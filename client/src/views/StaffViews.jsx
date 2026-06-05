@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote } from '@tabler/icons-react';
-import { api, applyChecklistTemplate, createChecklistTemplate, createMatterChecklistItem, deleteChecklistTemplate, deleteClientAvatar, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getInvoiceDetails, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, startConnectedAccountOAuth, updateChecklistTemplate, updateMatterChecklistItem, uploadClientAvatar, uploadUserAvatar } from '../lib/apiClient.js';
+import { api, applyChecklistTemplate, createChecklistTemplate, createMatterChecklistItem, deleteChecklistTemplate, deleteClientAvatar, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getInvoiceDetails, getWorkEmailMessages, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, updateChecklistTemplate, updateMatterChecklistItem, uploadClientAvatar, uploadUserAvatar } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, safeHttpUrl, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText, invoiceDueDistanceDays } from '../components/ui.jsx';
@@ -152,16 +152,28 @@ function connectedAccountDate(value) {
   return parsed ? parsed.toLocaleDateString() : '-';
 }
 
+function connectedAccountDateTime(value) {
+  const parsed = parseDateValue(value);
+  return parsed ? parsed.toLocaleString() : '-';
+}
+
 export function ConnectedAccounts({ notify }) {
   const [accounts, setAccounts] = useState([]);
+  const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [busyProvider, setBusyProvider] = useState('');
   const [busyId, setBusyId] = useState('');
+  const [syncingId, setSyncingId] = useState('');
 
   async function load() {
     setLoading(true);
     try {
-      setAccounts(listFromResponse(await listConnectedAccounts(), 'accounts'));
+      const [accountResponse, messageResponse] = await Promise.all([
+        listConnectedAccounts(),
+        getWorkEmailMessages({ limit: 20 }),
+      ]);
+      setAccounts(listFromResponse(accountResponse, 'accounts'));
+      setMessages(listFromResponse(messageResponse, 'messages'));
     } catch (err) {
       notify({ type: 'danger', message: err.message });
     } finally {
@@ -197,14 +209,55 @@ export function ConnectedAccounts({ notify }) {
     }
   }
 
+  async function syncEmail(account) {
+    setSyncingId(account.id);
+    try {
+      const result = await syncConnectedAccountEmailMetadata(account.id);
+      notify({ type: 'success', message: `Email metadata synced. ${Number(result.importedCount || 0)} imported, ${Number(result.updatedCount || 0)} updated.` });
+      await load();
+    } catch (err) {
+      notify({ type: 'danger', message: err.message });
+    } finally {
+      setSyncingId('');
+    }
+  }
+
   const rows = accounts.map(account => [
     connectedProviderLabel(account.provider),
     account.email || <span style={styles.mutedText}>No email</span>,
     account.status === 'connected' ? <Badge tone="green">Connected</Badge> : <Badge tone="amber">Disconnected</Badge>,
-    connectedAccountDate(account.connectedAt),
-    account.status === 'connected'
-      ? <button type="button" style={styles.dangerButton} disabled={busyId === account.id} onClick={() => disconnect(account)}>{busyId === account.id ? 'Disconnecting...' : 'Disconnect'}</button>
-      : <span style={styles.mutedText}>Disconnected</span>,
+    <div style={{ display: 'grid', gap: 2 }}>
+      <span>{account.lastSyncAt ? connectedAccountDateTime(account.lastSyncAt) : '-'}</span>
+      {account.lastError ? <small style={{ color: theme.red }}>{account.lastError}</small> : null}
+    </div>,
+    account.status === 'connected' ? (
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <button type="button" style={styles.ghostButton} disabled={syncingId === account.id} onClick={() => syncEmail(account)}>
+          {syncingId === account.id ? 'Syncing...' : 'Sync email metadata now'}
+        </button>
+        <button type="button" style={styles.dangerButton} disabled={busyId === account.id} onClick={() => disconnect(account)}>{busyId === account.id ? 'Disconnecting...' : 'Disconnect'}</button>
+      </div>
+    ) : <span style={styles.mutedText}>Disconnected</span>,
+  ]);
+
+  const messageRows = messages.map(message => [
+    <div style={{ display: 'grid', gap: 2 }}>
+      <strong>{connectedProviderLabel(message.accountProvider || message.provider)}</strong>
+      <small style={styles.mutedText}>{message.accountEmail || '-'}</small>
+    </div>,
+    message.sender || <span style={styles.mutedText}>Unknown sender</span>,
+    <div style={{ display: 'grid', gap: 2 }}>
+      <strong>{message.subject || '(No subject)'}</strong>
+      {message.snippet ? <small style={styles.mutedText}>{message.snippet}</small> : null}
+    </div>,
+    connectedAccountDateTime(message.receivedAt),
+    message.hasAttachments ? 'Yes' : 'No',
+    message.matchedMatterId ? (
+      <div style={{ display: 'grid', gap: 2 }}>
+        <strong>{message.matchedMatterTitle || message.matchedMatterId}</strong>
+        <small style={styles.mutedText}>{message.matchReason || 'Suggested match'}</small>
+      </div>
+    ) : <span style={styles.mutedText}>No suggestion</span>,
   ]);
 
   return (
@@ -212,7 +265,7 @@ export function ConnectedAccounts({ notify }) {
       <Card title="Connected Accounts" hint="Authorize external provider access for future integrations">
         <div style={{ display: 'grid', gap: 12 }}>
           <div style={{ ...styles.alert, padding: 10, borderRadius: 6 }}>
-            Email and calendar sync are not enabled yet. This only authorizes future integrations.
+            Metadata only. Email bodies and attachments are not imported. Calendar sync remains disabled.
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button type="button" style={styles.primaryButton} onClick={() => connect('google')} disabled={Boolean(busyProvider)}>
@@ -228,8 +281,15 @@ export function ConnectedAccounts({ notify }) {
         {loading
           ? <div style={styles.mutedText}>Loading connected accounts...</div>
           : accounts.length
-            ? <Table columns={['Provider', 'Email', 'Status', 'Connected', 'Actions']} rows={rows} />
+            ? <Table columns={['Provider', 'Email', 'Status', 'Last sync', 'Actions']} rows={rows} />
             : <Empty title="No connected accounts." text="Connect Google or Microsoft when provider authorization is ready." />}
+      </Card>
+      <Card title="Work Email Metadata" hint={`${messages.length} recent metadata message${messages.length === 1 ? '' : 's'}`}>
+        {loading
+          ? <div style={styles.mutedText}>Loading email metadata...</div>
+          : messages.length
+            ? <Table columns={['Account', 'Sender', 'Subject', 'Received', 'Attachments', 'Suggested matter']} rows={messageRows} />
+            : <Empty title="No email metadata synced." text="Use Sync email metadata now on a connected account." />}
       </Card>
     </div>
   );

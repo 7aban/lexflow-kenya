@@ -268,6 +268,9 @@ export const markNotificationsRead = data => api('/notifications/read', { method
 export const listConnectedAccounts = () => api('/connected-accounts');
 export const startConnectedAccountOAuth = provider => api(`/connected-accounts/${encodeURIComponent(provider)}/start`, { method: 'POST', body: {} });
 export const disconnectConnectedAccount = id => api(`/connected-accounts/${encodeURIComponent(id)}/disconnect`, { method: 'POST', body: {} });
+export const syncConnectedAccountEmailMetadata = id => api(`/connected-accounts/${encodeURIComponent(id)}/sync-email-metadata`, { method: 'POST', body: {} });
+export const getWorkEmailMessages = (filters = {}) => api(queryPath('/work-email/messages', filters));
+export const getWorkEmailMessageMatches = id => api(`/work-email/messages/${encodeURIComponent(id)}/matches`);
 export const getConversations = (params = {}) => api(queryPath('/conversations', params));
 export const createConversation = data => api('/conversations', { method: 'POST', body: data });
 export const getConversationMessages = conversationId => api(`/conversations/${conversationId}/messages`);
