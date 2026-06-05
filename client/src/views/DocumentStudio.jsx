@@ -4,6 +4,7 @@ import { styles, theme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Skeleton } from '../components/ui.jsx';
 import DocumentToolCards from './document-studio/DocumentToolCards.jsx';
 import TemplatePreviewPanel from './document-studio/TemplatePreviewPanel.jsx';
+import StampPlacementHelper from './document-studio/StampPlacementHelper.jsx';
 
 function matterLabel(matter = {}) {
   const base = matter.title || matter.reference || matter.caseNumber || `Matter ${matter.id}`;
@@ -180,6 +181,8 @@ export default function DocumentStudio({ notify }) {
   const [stampSaveLoading, setStampSaveLoading] = useState(false);
   const [stampSaveError, setStampSaveError] = useState(null);
   const [stampSaveSuccess, setStampSaveSuccess] = useState('');
+
+  const [stampSelectedAssetUrl, setStampSelectedAssetUrl] = useState('');
 
   const [toolsOpen, setToolsOpen] = useState(false);
   const [selectedTool, setSelectedTool] = useState(null);
@@ -878,6 +881,31 @@ export default function DocumentStudio({ notify }) {
       setBundleSaveLoading(false);
     }
   }
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl = '';
+    setStampSelectedAssetUrl('');
+    if (!stampAssetId) return () => {};
+    const asset = signatureAssets.find(a => a.id === stampAssetId);
+    if (!asset) return () => {};
+    const session = readSession();
+    fetch(`${API_BASE}/signature-assets/${encodeURIComponent(asset.id)}/content`, {
+      headers: session?.token ? { Authorization: `Bearer ${session.token}` } : {},
+    }).then(response => {
+      if (!response.ok) throw new Error('Preview unavailable');
+      return response.blob();
+    }).then(blob => {
+      objectUrl = URL.createObjectURL(blob);
+      if (active) setStampSelectedAssetUrl(objectUrl);
+    }).catch(() => {
+      if (active) setStampSelectedAssetUrl('');
+    });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [stampAssetId, signatureAssets]);
 
   async function loadStampDocuments(matterId) {
     setStampDocsLoading(true);
@@ -2233,40 +2261,16 @@ export default function DocumentStudio({ notify }) {
                 />
               </label>
 
-              <label style={{ ...styles.field, minWidth: 0 }}>
-                <span style={{ fontSize: 12, color: theme.muted }}>X position (points from left)</span>
-                <input
-                  type="number"
-                  style={styles.input}
-                  value={stampX}
-                  onChange={event => { setStampX(Number(event.target.value)); setStampError(null); setStampSuccess(''); setStampSaveError(null); setStampSaveSuccess(''); }}
-                  disabled={stampLoading || stampSaveLoading}
-                />
-              </label>
-
-              <label style={{ ...styles.field, minWidth: 0 }}>
-                <span style={{ fontSize: 12, color: theme.muted }}>Y position (points from bottom)</span>
-                <input
-                  type="number"
-                  style={styles.input}
-                  value={stampY}
-                  onChange={event => { setStampY(Number(event.target.value)); setStampError(null); setStampSuccess(''); setStampSaveError(null); setStampSaveSuccess(''); }}
-                  disabled={stampLoading || stampSaveLoading}
-                />
-              </label>
-
-              <label style={{ ...styles.field, minWidth: 0 }}>
-                <span style={{ fontSize: 12, color: theme.muted }}>Image width (points)</span>
-                <input
-                  type="number"
-                  min="1"
-                  max="2000"
-                  style={styles.input}
-                  value={stampWidth}
-                  onChange={event => { setStampWidth(Number(event.target.value)); setStampError(null); setStampSuccess(''); setStampSaveError(null); setStampSaveSuccess(''); }}
-                  disabled={stampLoading || stampSaveLoading}
-                />
-              </label>
+              <StampPlacementHelper
+                stampX={stampX}
+                stampY={stampY}
+                stampWidth={stampWidth}
+                onXChange={event => { setStampX(Number(event.target.value)); setStampError(null); setStampSuccess(''); setStampSaveError(null); setStampSaveSuccess(''); }}
+                onYChange={event => { setStampY(Number(event.target.value)); setStampError(null); setStampSuccess(''); setStampSaveError(null); setStampSaveSuccess(''); }}
+                onWidthChange={event => { setStampWidth(Number(event.target.value)); setStampError(null); setStampSuccess(''); setStampSaveError(null); setStampSaveSuccess(''); }}
+                selectedAssetUrl={stampSelectedAssetUrl}
+                disabled={stampLoading || stampSaveLoading}
+              />
 
               <label style={{ ...styles.field, minWidth: 0 }}>
                 <span style={{ fontSize: 12, color: theme.muted }}>Output filename</span>
