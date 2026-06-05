@@ -3902,7 +3902,7 @@ function DocumentRequestsPanel({ matterId, canManage, notify, downloadWithAuth }
     if (!matterId) return;
     setLoading(true);
     try {
-      const data = await api(`/api/document-requests?matterId=${matterId}`);
+      const data = await api(`/document-requests?matterId=${matterId}`);
       setRequests(Array.isArray(data) ? data : []);
     } catch (err) { notify?.({ type: 'danger', message: err.message }); }
     finally { setLoading(false); }
@@ -3915,7 +3915,7 @@ function DocumentRequestsPanel({ matterId, canManage, notify, downloadWithAuth }
     if (!title.trim()) return;
     setSubmitting(true);
     try {
-      await api('/api/document-requests', { method: 'POST', body: { matterId, title: title.trim(), description: description.trim() } });
+      await api('/document-requests', { method: 'POST', body: { matterId, title: title.trim(), description: description.trim() } });
       setTitle('');
       setDescription('');
       setShowForm(false);
@@ -3927,7 +3927,7 @@ function DocumentRequestsPanel({ matterId, canManage, notify, downloadWithAuth }
 
   async function cancelRequest(requestId) {
     try {
-      await api(`/api/document-requests/${requestId}`, { method: 'PATCH', body: { status: 'cancelled' } });
+      await api(`/document-requests/${requestId}`, { method: 'PATCH', body: { status: 'cancelled' } });
       notify?.({ type: 'success', message: 'Request cancelled.' });
       await loadRequests();
     } catch (err) { notify?.({ type: 'danger', message: err.message }); }

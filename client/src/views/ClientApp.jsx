@@ -1055,7 +1055,7 @@ function ClientDocumentRequests({ matters, notify }) {
   async function loadRequests() {
     setLoading(true);
     try {
-      const data = await api('/api/client/document-requests');
+      const data = await api('/client/document-requests');
       setRequests(Array.isArray(data) ? data : []);
     } catch (err) { notify?.({ type: 'danger', message: err.message }); }
     finally { setLoading(false); }
@@ -1068,7 +1068,7 @@ function ClientDocumentRequests({ matters, notify }) {
     if (!file) return;
     setUploading(requestId);
     try {
-      await api(`/api/document-requests/${requestId}/respond`, {
+      await api(`/document-requests/${requestId}/respond`, {
         method: 'POST',
         body: { name: file.name, mimeType: file.type || 'application/octet-stream', data: await fileToDataUrl(file) },
       });
