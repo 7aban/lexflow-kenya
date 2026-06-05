@@ -7,8 +7,35 @@ function titleFor(conversation) {
   return conversation.subject || conversation.matterTitle || conversation.clientName || 'Client conversation';
 }
 
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
 function previewTime(value) {
-  return value ? new Date(value).toLocaleString() : '-';
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  const now = new Date();
+  const startOfDay = d => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const dayDiff = Math.round((startOfDay(now) - startOfDay(date)) / 86400000);
+  if (dayDiff === 0) {
+    return `Today ${date.toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
+  }
+  if (dayDiff === 1) return 'Yesterday';
+  const dayMonth = `${date.getDate()} ${SHORT_MONTHS[date.getMonth()]}`;
+  return date.getFullYear() === now.getFullYear() ? dayMonth : `${dayMonth} ${date.getFullYear()}`;
+}
+
+function messageCountLabel(count) {
+  const n = Number(count) || 0;
+  if (n === 0) return 'No messages';
+  if (n === 1) return '1 message';
+  return `${n} messages`;
+}
+
+function lastFromLabel(item) {
+  const role = item?.lastMessageSenderRole;
+  if (!role || role === 'no messages') return '';
+  if (role === 'client') return item?.clientName || 'Client';
+  return 'Firm';
 }
 
 function MessageAvatar({ conversationId, messageId, hasAvatar, name, size = 28 }) {
@@ -59,7 +86,7 @@ function attachmentList(files = [], notify) {
 function statusTone(status) {
   if (status === 'resolved') return 'green';
   if (status === 'pending') return 'amber';
-  return 'amber';
+  return 'blue';
 }
 
 const commPalette = {
@@ -126,7 +153,7 @@ const commStyles = {
     boxShadow: '0 6px 14px rgba(17,34,25,.14)',
   },
   threadButton: {
-    borderBottomColor: commPalette.border,
+    borderBottom: `1px solid ${commPalette.border}`,
     color: theme.ink,
   },
   threadUnread: {
@@ -412,7 +439,7 @@ export default function Communications({ clients = [], matters = [], focus, noti
                     </span>
                   </span>
                   <span>{item.clientName || 'Client'}{item.matterTitle ? ` / ${item.matterTitle}` : ''}</span>
-                  <small>{item.messageCount || 0} message(s) / {item.lastMessageSenderRole || 'no messages'} / {previewTime(item.lastMessageAt || item.createdAt)}</small>
+                  <small>{[messageCountLabel(item.messageCount), lastFromLabel(item) ? `Last from ${lastFromLabel(item)}` : '', previewTime(item.lastMessageAt || item.createdAt)].filter(Boolean).join(' · ')}</small>
                 </button>
               )) : <CommunicationsEmpty title="No conversations" text="Start a conversation or wait for a client message." />}
             </div>
