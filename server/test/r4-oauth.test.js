@@ -1,6 +1,7 @@
 const request = require('supertest');
 const crypto = require('crypto');
 const { app } = require('../server.js');
+const config = require('../lib/config');
 const googleOAuth = require('../lib/oauthGoogle');
 const microsoftOAuth = require('../lib/oauthMicrosoft');
 
@@ -48,6 +49,34 @@ describe('R4 Staff OAuth Backend', () => {
     const payload = `${provider}:${nonce}:${expiry}`;
     const hmac = crypto.createHmac('sha256', secret).update(payload).digest('hex');
     return `${payload}:${hmac}`;
+  }
+
+  async function withDb(work) {
+    const sqlite3 = require('sqlite3');
+    const db = new sqlite3.Database(config.DATABASE_PATH);
+    const run = (sql, params = []) => new Promise((resolve, reject) => db.run(sql, params, function (err) { err ? reject(err) : resolve(this); }));
+    const get = (sql, params = []) => new Promise((resolve, reject) => db.get(sql, params, (err, row) => err ? reject(err) : resolve(row)));
+    const all = (sql, params = []) => new Promise((resolve, reject) => db.all(sql, params, (err, rows) => err ? reject(err) : resolve(rows)));
+    const close = () => new Promise((resolve) => db.close(() => resolve()));
+    try {
+      return await work({ run, get, all });
+    } finally {
+      await close();
+    }
+  }
+
+  async function withAllowedDomains(domains, work) {
+    const original = config.OAUTH_ALLOWED_DOMAINS;
+    config.OAUTH_ALLOWED_DOMAINS = domains;
+    try {
+      return await work();
+    } finally {
+      config.OAUTH_ALLOWED_DOMAINS = original;
+    }
+  }
+
+  function callbackLocation(res) {
+    return new URL(res.header.location);
   }
 
   describe('A. OAuth config', () => {
@@ -110,6 +139,16 @@ describe('R4 Staff OAuth Backend', () => {
       expect(result.error).not.toContain(stateSecret);
       expect(result.error).not.toContain('0123456789abcdef');
     });
+
+    test('B6. Reusing a valid state nonce is rejected', () => {
+      const { verifyState } = require('../lib/oauthState');
+      const state = signState('google');
+      const first = verifyState(state, 'google');
+      const second = verifyState(state, 'google');
+      expect(first.valid).toBe(true);
+      expect(second.valid).toBe(false);
+      expect(second.error).toContain('already been used');
+    });
   });
 
   describe('C. OAuth callback validation', () => {
@@ -136,10 +175,157 @@ describe('R4 Staff OAuth Backend', () => {
       expect(res.status).toBe(302);
       expect(res.header.location).toContain('error=');
     });
+
+    test('C4. Callback rejects inactive staff and does not issue an exchange code', async () => {
+      const providerSubject = `test-subject-inactive-${Date.now()}`;
+      const userId = `test-oauth-inactive-${Date.now()}`;
+      const email = `inactive-oauth-${Date.now()}@lexflow.co.ke`;
+      const spyGoogle = jest.spyOn(googleOAuth, 'handleCallback').mockResolvedValue({
+        provider: 'google',
+        providerSubject,
+        email,
+        emailVerified: true,
+      });
+
+      try {
+        await withDb(({ run }) => run(
+          'INSERT INTO users (id,email,password,fullName,role,createdAt,isActive) VALUES (?,?,?,?,?,?,?)',
+          [userId, email, 'hashed', 'Inactive OAuth User', 'assistant', new Date().toISOString(), 0],
+        ));
+
+        const res = await request(app)
+          .get('/api/auth/oauth/google/callback')
+          .query({ code: 'inactive-code', state: signState('google') });
+        expect(res.status).toBe(302);
+        const url = callbackLocation(res);
+        expect(url.searchParams.get('code')).toBeNull();
+        expect(url.searchParams.get('error')).toBeTruthy();
+
+        const event = await withDb(({ get }) => get(
+          "SELECT metadata_json FROM audit_events WHERE action='oauth_login_failed' ORDER BY timestamp DESC LIMIT 1",
+        ));
+        expect(JSON.parse(event.metadata_json).reason).toBe('inactive_account');
+      } finally {
+        spyGoogle.mockRestore();
+        await withDb(async ({ run }) => {
+          await run('DELETE FROM oauth_accounts WHERE providerSubject=?', [providerSubject]);
+          await run('DELETE FROM users WHERE id=?', [userId]);
+        });
+      }
+    });
   });
 
-  describe('D. OAuth account management', () => {
-    test('D1. Staff can view own linked providers (empty)', async () => {
+  describe('D. OAuth allowed-domain policy', () => {
+    test('D1. Allowed domains are normalized and accepted', async () => {
+      const providerSubject = `test-subject-domain-allowed-${Date.now()}`;
+      const spyGoogle = jest.spyOn(googleOAuth, 'handleCallback').mockResolvedValue({
+        provider: 'google',
+        providerSubject,
+        email: ' Admin@LexFlow.CO.KE ',
+        emailVerified: true,
+      });
+
+      try {
+        await withAllowedDomains([' LexFlow.CO.KE '], async () => {
+          const callbackRes = await request(app)
+            .get('/api/auth/oauth/google/callback')
+            .query({ code: 'domain-allowed-code', state: signState('google') });
+          const url = callbackLocation(callbackRes);
+          const exchangeCode = url.searchParams.get('code');
+          expect(exchangeCode).toBeTruthy();
+
+          const exchangeRes = await request(app)
+            .post('/api/auth/oauth/exchange')
+            .send({ code: exchangeCode });
+          expect(exchangeRes.status).toBe(200);
+          expect(exchangeRes.body.token).toBeDefined();
+        });
+      } finally {
+        spyGoogle.mockRestore();
+        await withDb(({ run }) => run('DELETE FROM oauth_accounts WHERE providerSubject=?', [providerSubject]));
+      }
+    });
+
+    test('D2. Disallowed Google email domain is rejected', async () => {
+      const providerSubject = `test-subject-domain-rejected-${Date.now()}`;
+      const spyGoogle = jest.spyOn(googleOAuth, 'handleCallback').mockResolvedValue({
+        provider: 'google',
+        providerSubject,
+        email: 'admin@example.com',
+        emailVerified: true,
+      });
+
+      try {
+        await withAllowedDomains(['lexflow.co.ke'], async () => {
+          const res = await request(app)
+            .get('/api/auth/oauth/google/callback')
+            .query({ code: 'domain-rejected-code', state: signState('google') });
+          const url = callbackLocation(res);
+          expect(url.searchParams.get('code')).toBeNull();
+          expect(url.searchParams.get('error')).toBeTruthy();
+        });
+      } finally {
+        spyGoogle.mockRestore();
+        await withDb(({ run }) => run('DELETE FROM oauth_accounts WHERE providerSubject=?', [providerSubject]));
+      }
+    });
+
+    test('D3. Empty allowed-domain list preserves current behavior', async () => {
+      const providerSubject = `test-subject-domain-empty-${Date.now()}`;
+      const spyGoogle = jest.spyOn(googleOAuth, 'handleCallback').mockResolvedValue({
+        provider: 'google',
+        providerSubject,
+        email: 'admin@lexflow.co.ke',
+        emailVerified: true,
+      });
+
+      try {
+        await withAllowedDomains(null, async () => {
+          const callbackRes = await request(app)
+            .get('/api/auth/oauth/google/callback')
+            .query({ code: 'domain-empty-code', state: signState('google') });
+          const url = callbackLocation(callbackRes);
+          const exchangeCode = url.searchParams.get('code');
+          expect(exchangeCode).toBeTruthy();
+
+          const exchangeRes = await request(app)
+            .post('/api/auth/oauth/exchange')
+            .send({ code: exchangeCode });
+          expect(exchangeRes.status).toBe(200);
+        });
+      } finally {
+        spyGoogle.mockRestore();
+        await withDb(({ run }) => run('DELETE FROM oauth_accounts WHERE providerSubject=?', [providerSubject]));
+      }
+    });
+
+    test('D4. Microsoft callback uses the same allowed-domain policy', async () => {
+      const providerSubject = `test-subject-ms-domain-rejected-${Date.now()}`;
+      const spyMicrosoft = jest.spyOn(microsoftOAuth, 'handleCallback').mockResolvedValue({
+        provider: 'microsoft',
+        providerSubject,
+        email: 'admin@example.com',
+        emailVerified: null,
+      });
+
+      try {
+        await withAllowedDomains(['lexflow.co.ke'], async () => {
+          const res = await request(app)
+            .get('/api/auth/oauth/microsoft/callback')
+            .query({ code: 'ms-domain-rejected-code', state: signState('microsoft') });
+          const url = callbackLocation(res);
+          expect(url.searchParams.get('code')).toBeNull();
+          expect(url.searchParams.get('error')).toBeTruthy();
+        });
+      } finally {
+        spyMicrosoft.mockRestore();
+        await withDb(({ run }) => run('DELETE FROM oauth_accounts WHERE providerSubject=?', [providerSubject]));
+      }
+    });
+  });
+
+  describe('E. OAuth account management', () => {
+    test('E1. Staff can view own linked providers (empty)', async () => {
       const res = await request(app)
         .get('/api/auth/oauth/accounts')
         .set('Authorization', `Bearer ${adminToken}`);
@@ -147,14 +333,14 @@ describe('R4 Staff OAuth Backend', () => {
       expect(Array.isArray(res.body)).toBe(true);
     });
 
-    test('D2. Staff cannot unlink non-existent provider', async () => {
+    test('E2. Staff cannot unlink non-existent provider', async () => {
       const res = await request(app)
         .delete('/api/auth/oauth/accounts/google')
         .set('Authorization', `Bearer ${adminToken}`);
       expect(res.statusCode).toBe(404);
     });
 
-    test('D3. Client cannot access OAuth accounts', async () => {
+    test('E3. Client cannot access OAuth accounts', async () => {
       const res = await request(app)
         .get('/api/auth/oauth/accounts')
         .set('Authorization', `Bearer ${clientToken}`);
@@ -162,8 +348,8 @@ describe('R4 Staff OAuth Backend', () => {
     });
   });
 
-  describe('E. OAuth user deletion cleanup', () => {
-    test('E1. Deleting a user cascades to oauth_accounts', async () => {
+  describe('F. OAuth user deletion cleanup', () => {
+    test('F1. Deleting a user cascades to oauth_accounts', async () => {
       const sqlite3 = require('sqlite3');
       const config = require('../lib/config');
 
@@ -192,8 +378,8 @@ describe('R4 Staff OAuth Backend', () => {
     });
   });
 
-  describe('F. Audit logging for OAuth', () => {
-    test('F1. OAuth login started creates audit event', async () => {
+  describe('G. Audit logging for OAuth', () => {
+    test('G1. OAuth login started creates audit event', async () => {
       const sqlite3 = require('sqlite3');
       const config = require('../lib/config');
 
@@ -214,7 +400,7 @@ describe('R4 Staff OAuth Backend', () => {
       expect(metadata.provider).toMatch(/^(google|microsoft)$/);
     });
 
-    test('F2. OAuth login failure creates audit event', async () => {
+    test('G2. OAuth login failure creates audit event', async () => {
       const sqlite3 = require('sqlite3');
       const config = require('../lib/config');
 
@@ -232,7 +418,7 @@ describe('R4 Staff OAuth Backend', () => {
       expect(lastEvent.action).toBe('oauth_login_failed');
     });
 
-    test('F3. OAuth audit metadata excludes tokens/secrets', async () => {
+    test('G3. OAuth audit metadata excludes tokens/secrets', async () => {
       const sqlite3 = require('sqlite3');
       const config = require('../lib/config');
 
@@ -255,7 +441,101 @@ describe('R4 Staff OAuth Backend', () => {
     });
   });
 
-  describe('G. OAuth one-time code exchange', () => {
+  describe('H. Microsoft verified-email semantics', () => {
+    test('H1. Microsoft Graph profile does not overclaim email verification', async () => {
+      const originalFetch = global.fetch;
+      global.fetch = jest.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ access_token: 'test-ms-access-token' }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ id: 'test-ms-profile', mail: 'admin@lexflow.co.ke' }),
+        });
+
+      try {
+        const profile = await microsoftOAuth.handleCallback('ms-code');
+        expect(profile.provider).toBe('microsoft');
+        expect(profile.email).toBe('admin@lexflow.co.ke');
+        expect(profile.emailVerified).toBeNull();
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
+
+    test('H2. Microsoft unknown verification is accepted but stored as unverified', async () => {
+      const providerSubject = `test-subject-ms-unknown-verified-${Date.now()}`;
+      const spyMicrosoft = jest.spyOn(microsoftOAuth, 'handleCallback').mockResolvedValue({
+        provider: 'microsoft',
+        providerSubject,
+        email: 'admin@lexflow.co.ke',
+        emailVerified: null,
+      });
+
+      try {
+        const callbackRes = await request(app)
+          .get('/api/auth/oauth/microsoft/callback')
+          .query({ code: 'ms-unknown-verified-code', state: signState('microsoft') });
+        const url = callbackLocation(callbackRes);
+        const exchangeCode = url.searchParams.get('code');
+        expect(exchangeCode).toBeTruthy();
+
+        const exchangeRes = await request(app)
+          .post('/api/auth/oauth/exchange')
+          .send({ code: exchangeCode });
+        expect(exchangeRes.status).toBe(200);
+
+        const account = await withDb(({ get }) => get(
+          'SELECT emailVerified FROM oauth_accounts WHERE provider=? AND providerSubject=?',
+          ['microsoft', providerSubject],
+        ));
+        expect(account.emailVerified).toBe(0);
+      } finally {
+        spyMicrosoft.mockRestore();
+        await withDb(({ run }) => run('DELETE FROM oauth_accounts WHERE providerSubject=?', [providerSubject]));
+      }
+    });
+  });
+
+  describe('I. OAuth account link conflicts', () => {
+    test('I1. Provider subject linked to another staff user is rejected', async () => {
+      const providerSubject = `test-subject-link-conflict-${Date.now()}`;
+      const spyGoogle = jest.spyOn(googleOAuth, 'handleCallback').mockResolvedValue({
+        provider: 'google',
+        providerSubject,
+        email: 'admin@lexflow.co.ke',
+        emailVerified: true,
+      });
+
+      try {
+        await withDb(async ({ get, run }) => {
+          const advocate = await get('SELECT id FROM users WHERE lower(email)=lower(?)', ['sarah.mwangi@achokilaw.co.ke']);
+          await run(
+            'INSERT INTO oauth_accounts (id,userId,provider,providerSubject,email,emailVerified,createdAt,updatedAt,lastLoginAt) VALUES (?,?,?,?,?,?,?,?,?)',
+            [`oa-conflict-${Date.now()}`, advocate.id, 'google', providerSubject, 'sarah.mwangi@achokilaw.co.ke', 1, new Date().toISOString(), new Date().toISOString(), new Date().toISOString()],
+          );
+        });
+
+        const res = await request(app)
+          .get('/api/auth/oauth/google/callback')
+          .query({ code: 'link-conflict-code', state: signState('google') });
+        const url = callbackLocation(res);
+        expect(url.searchParams.get('code')).toBeNull();
+        expect(url.searchParams.get('error')).toBeTruthy();
+
+        const event = await withDb(({ get }) => get(
+          "SELECT metadata_json FROM audit_events WHERE action='oauth_login_failed' ORDER BY timestamp DESC LIMIT 1",
+        ));
+        expect(JSON.parse(event.metadata_json).reason).toBe('oauth_link_conflict');
+      } finally {
+        spyGoogle.mockRestore();
+        await withDb(({ run }) => run('DELETE FROM oauth_accounts WHERE providerSubject=?', [providerSubject]));
+      }
+    });
+  });
+
+  describe('J. OAuth one-time code exchange', () => {
     let spyGoogle;
     let spyMicrosoft;
 
@@ -289,7 +569,7 @@ describe('R4 Staff OAuth Backend', () => {
       spyMicrosoft.mockRestore();
     });
 
-    test('G1. Google callback redirect uses code= not token=', async () => {
+    test('J1. Google callback redirect uses code= not token=', async () => {
       const res = await request(app)
         .get('/api/auth/oauth/google/callback')
         .query({ code: 'any-code', state: signState('google') });
@@ -302,7 +582,7 @@ describe('R4 Staff OAuth Backend', () => {
       expect(url.searchParams.get('code')).toBeTruthy();
     });
 
-    test('G2. Microsoft callback redirect uses code= not token=', async () => {
+    test('J2. Microsoft callback redirect uses code= not token=', async () => {
       const res = await request(app)
         .get('/api/auth/oauth/microsoft/callback')
         .query({ code: 'any-code', state: signState('microsoft') });
@@ -315,7 +595,7 @@ describe('R4 Staff OAuth Backend', () => {
       expect(url.searchParams.get('code')).toBeTruthy();
     });
 
-    test('G3. Successful exchange returns token and user', async () => {
+    test('J3. Successful exchange returns token and user', async () => {
       const callbackRes = await request(app)
         .get('/api/auth/oauth/google/callback')
         .query({ code: 'g3-code', state: signState('google') });
@@ -333,7 +613,7 @@ describe('R4 Staff OAuth Backend', () => {
       expect(exchangeRes.body.user.email).toBe('admin@lexflow.co.ke');
     });
 
-    test('G4. Exchange code is single-use', async () => {
+    test('J4. Exchange code is single-use', async () => {
       const callbackRes = await request(app)
         .get('/api/auth/oauth/google/callback')
         .query({ code: 'g4-code', state: signState('google') });
@@ -352,21 +632,21 @@ describe('R4 Staff OAuth Backend', () => {
       expect(second.status).toBe(400);
     });
 
-    test('G5. Missing exchange code returns 400', async () => {
+    test('J5. Missing exchange code returns 400', async () => {
       const res = await request(app)
         .post('/api/auth/oauth/exchange')
         .send({});
       expect(res.status).toBe(400);
     });
 
-    test('G6. Invalid exchange code returns 400', async () => {
+    test('J6. Invalid exchange code returns 400', async () => {
       const res = await request(app)
         .post('/api/auth/oauth/exchange')
         .send({ code: 'this-code-does-not-exist-in-the-map' });
       expect(res.status).toBe(400);
     });
 
-    test('G7. Expired exchange code returns 400', async () => {
+    test('J7. Expired exchange code returns 400', async () => {
       const callbackRes = await request(app)
         .get('/api/auth/oauth/google/callback')
         .query({ code: 'g7-exp', state: signState('google') });
@@ -380,6 +660,28 @@ describe('R4 Staff OAuth Backend', () => {
         .send({ code: exchangeCode });
       expect(expiredRes.status).toBe(400);
       jest.useRealTimers();
+    });
+
+    test('J8. Replayed callback state does not issue a second exchange code', async () => {
+      const state = signState('google');
+      const firstRes = await request(app)
+        .get('/api/auth/oauth/google/callback')
+        .query({ code: 'j8-code-1', state });
+      const firstUrl = callbackLocation(firstRes);
+      const firstCode = firstUrl.searchParams.get('code');
+      expect(firstCode).toBeTruthy();
+
+      const exchangeRes = await request(app)
+        .post('/api/auth/oauth/exchange')
+        .send({ code: firstCode });
+      expect(exchangeRes.status).toBe(200);
+
+      const replayRes = await request(app)
+        .get('/api/auth/oauth/google/callback')
+        .query({ code: 'j8-code-2', state });
+      const replayUrl = callbackLocation(replayRes);
+      expect(replayUrl.searchParams.get('code')).toBeNull();
+      expect(replayUrl.searchParams.get('error')).toBeTruthy();
     });
   });
 });

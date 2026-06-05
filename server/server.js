@@ -846,7 +846,7 @@ app.get('/api/auth/oauth/google/callback', async (req, res) => {
     const profile = await googleOAuth.handleCallback(code);
     const result = await oauth.completeOAuthLogin(profile);
     if (!result.ok) {
-      await recordAuditEvent(req, { action: result.error === 'unknown_user' ? 'oauth_unknown_user_rejected' : result.error === 'client_rejected' ? 'oauth_login_failed' : 'oauth_login_failed', entityType: 'oauth', metadata: { provider: 'google', reason: result.error } }).catch(() => {});
+      await recordAuditEvent(req, { action: result.error === 'unknown_user' ? 'oauth_unknown_user_rejected' : result.error === 'client_rejected' ? 'oauth_login_failed' : 'oauth_login_failed', entityType: result.user?.id ? 'user' : 'oauth', entityId: result.user?.id, metadata: { provider: 'google', reason: result.error, role: result.user?.role || '' } }).catch(() => {});
       return res.redirect(`${config.BASE_URL}/oauth/callback?error=${encodeURIComponent(result.message)}`);
     }
     await recordAuditEvent(req, { action: 'oauth_login_succeeded', entityType: 'user', entityId: result.user.id, metadata: { provider: 'google', role: result.user.role } }).catch(() => {});
@@ -884,7 +884,7 @@ app.get('/api/auth/oauth/microsoft/callback', async (req, res) => {
     const profile = await microsoftOAuth.handleCallback(code);
     const result = await oauth.completeOAuthLogin(profile);
     if (!result.ok) {
-      await recordAuditEvent(req, { action: result.error === 'unknown_user' ? 'oauth_unknown_user_rejected' : result.error === 'client_rejected' ? 'oauth_login_failed' : 'oauth_login_failed', entityType: 'oauth', metadata: { provider: 'microsoft', reason: result.error } }).catch(() => {});
+      await recordAuditEvent(req, { action: result.error === 'unknown_user' ? 'oauth_unknown_user_rejected' : result.error === 'client_rejected' ? 'oauth_login_failed' : 'oauth_login_failed', entityType: result.user?.id ? 'user' : 'oauth', entityId: result.user?.id, metadata: { provider: 'microsoft', reason: result.error, role: result.user?.role || '' } }).catch(() => {});
       return res.redirect(`${config.BASE_URL}/oauth/callback?error=${encodeURIComponent(result.message)}`);
     }
     await recordAuditEvent(req, { action: 'oauth_login_succeeded', entityType: 'user', entityId: result.user.id, metadata: { provider: 'microsoft', role: result.user.role } }).catch(() => {});

@@ -61,13 +61,14 @@ async function handleCallback(code) {
   const accessToken = await exchangeCode(code);
   const profile = await getUserInfo(accessToken);
   // Discard accessToken - do not store provider tokens
-  const mail = profile.mail || profile.userPrincipalName || '';
-  const emailVerified = !!mail && !mail.startsWith('#EXT#');
+  const mail = String(profile.mail || profile.userPrincipalName || '').trim();
   return {
     provider: 'microsoft',
     providerSubject: profile.id || '',
     email: mail,
-    emailVerified,
+    // Microsoft Graph /me does not expose a direct verified-email boolean.
+    // Keep the value unknown instead of treating presence of mail/UPN as proof.
+    emailVerified: null,
   };
 }
 
