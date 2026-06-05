@@ -215,6 +215,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS checklist_template_items (id TEXT PRIMARY KEY, templateId TEXT NOT NULL, title TEXT NOT NULL, notes TEXT, position INTEGER DEFAULT 0, createdAt TEXT NOT NULL)`);
   await run(`CREATE TABLE IF NOT EXISTS document_templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, practiceArea TEXT, category TEXT, bodyMarkup TEXT, active INTEGER DEFAULT 1, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS document_requests (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, clientId TEXT NOT NULL, staffUserId TEXT NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', createdAt TEXT NOT NULL, respondedAt TEXT, responseDocumentId TEXT, cancelledAt TEXT, cancelledBy TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS signature_assets (id TEXT PRIMARY KEY, ownerType TEXT NOT NULL CHECK(ownerType IN ('user','firm')), ownerId TEXT, assetType TEXT NOT NULL CHECK(assetType IN ('signature','stamp')), label TEXT NOT NULL, mimeType TEXT NOT NULL, content BLOB NOT NULL, size INTEGER, isDefault INTEGER DEFAULT 0, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT, deletedAt TEXT)`);
 
   await ensureClientUserSupport();
   await ensureColumn('matter_checklist_items', 'dueDate', 'TEXT');
@@ -314,6 +315,7 @@ async function initDb() {
   await run('CREATE INDEX IF NOT EXISTS idx_documents_matterId_deletedAt_date ON documents(matterId, deletedAt, date)');
   await run('CREATE INDEX IF NOT EXISTS idx_documents_folderId_deletedAt ON documents(folderId, deletedAt)');
   await run('CREATE INDEX IF NOT EXISTS idx_documents_messageId_deletedAt ON documents(messageId, deletedAt)');
+  await run('CREATE INDEX IF NOT EXISTS idx_signature_assets_scope ON signature_assets(ownerType, ownerId, assetType, deletedAt, isDefault)');
   await run('CREATE INDEX IF NOT EXISTS idx_documents_noticeId_deletedAt ON documents(noticeId, deletedAt)');
   await run('CREATE INDEX IF NOT EXISTS idx_messages_conversationId_createdAt ON messages(conversationId, createdAt)');
   await run('CREATE INDEX IF NOT EXISTS idx_conversations_matterId ON conversations(matterId)');
@@ -1244,6 +1246,208 @@ app.delete('/api/clients/:clientId/avatar', async (req, res) => {
     metadata: { role: 'client', clientId: req.params.clientId, targetUserId: resolved.user.id },
   }).catch(() => {});
   res.json({ id: resolved.user.id, clientId: req.params.clientId, hasAvatar: false });
+});
+
+const SIGNATURE_ASSET_MAX_BYTES = AVATAR_MAX_BYTES;
+const SIGNATURE_ASSET_LABEL_MAX = 120;
+
+function signatureAssetPublic(row = {}) {
+  return {
+    id: row.id,
+    ownerType: row.ownerType,
+    ownerId: row.ownerId || null,
+    assetType: row.assetType,
+    label: row.label || '',
+    mimeType: row.mimeType || '',
+    size: Number(row.size || 0),
+    isDefault: Number(row.isDefault || 0) === 1,
+    createdBy: row.createdBy || '',
+    createdAt: row.createdAt || '',
+    updatedAt: row.updatedAt || '',
+  };
+}
+
+function signatureAssetAuditMetadata(asset = {}) {
+  const metadata = signatureAssetPublic(asset);
+  delete metadata.createdBy;
+  delete metadata.createdAt;
+  delete metadata.updatedAt;
+  return metadata;
+}
+
+function canReadSignatureAsset(req, asset = {}) {
+  if (!req.user || req.user.role === 'client') return false;
+  if (req.user.role === 'admin') return true;
+  if (asset.ownerType === 'firm' && asset.assetType === 'stamp') return true;
+  if (req.user.role === 'advocate' && asset.ownerType === 'user' && asset.assetType === 'signature' && asset.ownerId === req.user.userId) return true;
+  return false;
+}
+
+function canManageSignatureAsset(req, asset = {}) {
+  if (!req.user || req.user.role === 'client') return false;
+  if (req.user.role === 'admin') return true;
+  if (req.user.role === 'advocate' && asset.ownerType === 'user' && asset.assetType === 'signature' && asset.ownerId === req.user.userId) return true;
+  return false;
+}
+
+function signatureOwnerFilter(ownerType, ownerId, assetType) {
+  const params = [ownerType, assetType];
+  const ownerClause = ownerId ? 'ownerId=?' : 'ownerId IS NULL';
+  if (ownerId) params.push(ownerId);
+  return {
+    clause: `ownerType=? AND assetType=? AND ${ownerClause}`,
+    params,
+  };
+}
+
+async function activeSignatureAssetCount(ownerType, ownerId, assetType) {
+  const filter = signatureOwnerFilter(ownerType, ownerId, assetType);
+  const row = await get(`SELECT COUNT(*) count FROM signature_assets WHERE ${filter.clause} AND deletedAt IS NULL`, filter.params);
+  return Number(row?.count || 0);
+}
+
+async function clearSignatureAssetDefaults(ownerType, ownerId, assetType) {
+  const filter = signatureOwnerFilter(ownerType, ownerId, assetType);
+  await run(`UPDATE signature_assets SET isDefault=0 WHERE ${filter.clause} AND deletedAt IS NULL`, filter.params);
+}
+
+function wantsDefault(value) {
+  return value === true || value === 1 || value === '1' || value === 'true';
+}
+
+async function normalizeSignatureAssetCreate(req) {
+  const ownerType = String(req.body?.ownerType || '').trim().toLowerCase();
+  const assetType = String(req.body?.assetType || '').trim().toLowerCase();
+  const label = String(req.body?.label || '').trim().slice(0, SIGNATURE_ASSET_LABEL_MAX);
+  if (!label) return { status: 400, error: 'label is required' };
+  if (!ownerType || !assetType) return { status: 400, error: 'ownerType and assetType are required' };
+
+  let ownerId = null;
+  if (ownerType === 'firm') {
+    if (assetType !== 'stamp') return { status: 400, error: 'Firm assets must be stamp images' };
+    if (req.user.role !== 'admin') return { status: 403, error: 'Admin access required for firm stamp assets' };
+  } else if (ownerType === 'user') {
+    if (assetType !== 'signature') return { status: 400, error: 'User assets must be signature images' };
+    ownerId = req.user.role === 'admin' && req.body?.ownerId ? String(req.body.ownerId).trim() : req.user.userId;
+    if (!ownerId) return { status: 400, error: 'ownerId is required for user signature assets' };
+    if (req.user.role !== 'admin' && ownerId !== req.user.userId) return { status: 403, error: 'Personal signature assets must belong to the current user' };
+    if (!['admin', 'advocate'].includes(req.user.role)) return { status: 403, error: 'Advocate or admin access required for personal signature assets' };
+    const owner = await get('SELECT id, role FROM users WHERE id=?', [ownerId]);
+    if (!owner) return { status: 400, error: 'Signature owner not found' };
+    if (!['admin', 'advocate'].includes(owner.role)) return { status: 400, error: 'Personal signature assets are only supported for advocates and admins' };
+  } else {
+    return { status: 400, error: 'ownerType must be user or firm' };
+  }
+
+  const mimeType = String(req.body?.mimeType || '').split(';')[0].trim().toLowerCase();
+  if (!mimeType || !AVATAR_ALLOWED_MIME.has(mimeType)) return { status: 400, error: 'Only image/jpeg, image/png, and image/webp are supported' };
+  if (!req.body?.data) return { status: 400, error: 'data is required' };
+  let buffer;
+  try {
+    buffer = decodeAvatarBase64(req.body.data);
+  } catch (err) {
+    return { status: 400, error: err.message || 'Invalid image data' };
+  }
+  if (!buffer || buffer.length === 0) return { status: 400, error: 'Image data is empty' };
+  if (buffer.length > SIGNATURE_ASSET_MAX_BYTES) return { status: 400, error: 'Image exceeds 512 KB limit' };
+
+  return { ownerType, ownerId, assetType, label, mimeType, buffer, size: buffer.length };
+}
+
+app.get('/api/signature-assets', requireStaff, async (req, res) => {
+  let rows;
+  const columns = 'id,ownerType,ownerId,assetType,label,mimeType,size,isDefault,createdBy,createdAt,updatedAt';
+  if (req.user.role === 'admin') {
+    rows = await all(`SELECT ${columns} FROM signature_assets WHERE deletedAt IS NULL ORDER BY ownerType, assetType, isDefault DESC, createdAt DESC`);
+  } else if (req.user.role === 'advocate') {
+    rows = await all(`SELECT ${columns} FROM signature_assets
+      WHERE deletedAt IS NULL
+        AND ((ownerType='firm' AND assetType='stamp') OR (ownerType='user' AND assetType='signature' AND ownerId=?))
+      ORDER BY ownerType, assetType, isDefault DESC, createdAt DESC`, [req.user.userId]);
+  } else {
+    rows = await all(`SELECT ${columns} FROM signature_assets
+      WHERE deletedAt IS NULL AND ownerType='firm' AND assetType='stamp'
+      ORDER BY isDefault DESC, createdAt DESC`);
+  }
+  res.json(rows.map(signatureAssetPublic));
+});
+
+app.post('/api/signature-assets', requireStaff, async (req, res) => {
+  const normalized = await normalizeSignatureAssetCreate(req);
+  if (normalized.error) return res.status(normalized.status || 400).json({ error: normalized.error });
+  const shouldDefault = wantsDefault(req.body?.isDefault) || await activeSignatureAssetCount(normalized.ownerType, normalized.ownerId, normalized.assetType) === 0;
+  const id = genId('SIG');
+  const createdAt = new Date().toISOString();
+  if (shouldDefault) await clearSignatureAssetDefaults(normalized.ownerType, normalized.ownerId, normalized.assetType);
+  await run(`INSERT INTO signature_assets (id,ownerType,ownerId,assetType,label,mimeType,content,size,isDefault,createdBy,createdAt,updatedAt,deletedAt)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+    id,
+    normalized.ownerType,
+    normalized.ownerId,
+    normalized.assetType,
+    normalized.label,
+    normalized.mimeType,
+    normalized.buffer,
+    normalized.size,
+    shouldDefault ? 1 : 0,
+    req.user.userId || '',
+    createdAt,
+    null,
+    null,
+  ]);
+  const asset = await get('SELECT id,ownerType,ownerId,assetType,label,mimeType,size,isDefault,createdBy,createdAt,updatedAt FROM signature_assets WHERE id=?', [id]);
+  await recordAuditEvent(req, { action: 'signature_asset_created', entityType: 'signature_asset', entityId: id, metadata: signatureAssetAuditMetadata(asset) }).catch(() => {});
+  res.json(signatureAssetPublic(asset));
+});
+
+app.get('/api/signature-assets/:id/content', requireStaff, async (req, res) => {
+  const asset = await get('SELECT * FROM signature_assets WHERE id=? AND deletedAt IS NULL', [req.params.id]);
+  if (!asset) return res.status(404).json({ error: 'Signature asset not found' });
+  if (!canReadSignatureAsset(req, asset)) return res.status(403).json({ error: 'Signature asset access denied' });
+  res.setHeader('Content-Type', AVATAR_ALLOWED_MIME.has(asset.mimeType) ? asset.mimeType : 'application/octet-stream');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'private, max-age=300');
+  res.send(Buffer.isBuffer(asset.content) ? asset.content : Buffer.from(asset.content || ''));
+});
+
+app.patch('/api/signature-assets/:id', requireStaff, async (req, res) => {
+  const asset = await get('SELECT * FROM signature_assets WHERE id=? AND deletedAt IS NULL', [req.params.id]);
+  if (!asset) return res.status(404).json({ error: 'Signature asset not found' });
+  if (!canManageSignatureAsset(req, asset)) return res.status(403).json({ error: 'Signature asset access denied' });
+
+  const now = new Date().toISOString();
+  if (req.body?.deleted === true || req.body?.status === 'deleted') {
+    await run('UPDATE signature_assets SET deletedAt=?, updatedAt=?, isDefault=0 WHERE id=?', [now, now, asset.id]);
+    const deleted = { ...asset, deletedAt: now, updatedAt: now, isDefault: 0 };
+    await recordAuditEvent(req, { action: 'signature_asset_deleted', entityType: 'signature_asset', entityId: asset.id, metadata: signatureAssetAuditMetadata(deleted) }).catch(() => {});
+    return res.json({ ...signatureAssetPublic(deleted), deletedAt: now });
+  }
+
+  let changed = false;
+  if (Object.prototype.hasOwnProperty.call(req.body || {}, 'label')) {
+    const label = String(req.body.label || '').trim().slice(0, SIGNATURE_ASSET_LABEL_MAX);
+    if (!label) return res.status(400).json({ error: 'label is required' });
+    if (label !== asset.label) {
+      await run('UPDATE signature_assets SET label=?, updatedAt=? WHERE id=?', [label, now, asset.id]);
+      asset.label = label;
+      asset.updatedAt = now;
+      changed = true;
+      await recordAuditEvent(req, { action: 'signature_asset_updated', entityType: 'signature_asset', entityId: asset.id, metadata: signatureAssetAuditMetadata(asset) }).catch(() => {});
+    }
+  }
+
+  if (wantsDefault(req.body?.isDefault) || wantsDefault(req.body?.default)) {
+    await clearSignatureAssetDefaults(asset.ownerType, asset.ownerId || null, asset.assetType);
+    await run('UPDATE signature_assets SET isDefault=1, updatedAt=? WHERE id=?', [now, asset.id]);
+    asset.isDefault = 1;
+    asset.updatedAt = now;
+    changed = true;
+    await recordAuditEvent(req, { action: 'signature_asset_default_set', entityType: 'signature_asset', entityId: asset.id, metadata: signatureAssetAuditMetadata(asset) }).catch(() => {});
+  }
+
+  if (!changed) return res.json(signatureAssetPublic(asset));
+  const updated = await get('SELECT id,ownerType,ownerId,assetType,label,mimeType,size,isDefault,createdBy,createdAt,updatedAt FROM signature_assets WHERE id=?', [asset.id]);
+  res.json(signatureAssetPublic(updated));
 });
 
 app.post('/api/invitations', requireAdmin, validate(invitationValidation), async (req, res) => {

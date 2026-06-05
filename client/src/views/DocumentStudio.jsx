@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf, deletePdfPages, saveDeletedPdf, numberPdfPages, saveNumberedPdf, createCourtBundle, saveCourtBundle } from '../lib/apiClient.js';
+import { API_BASE, api, fileToDataUrl, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, readSession, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf, deletePdfPages, saveDeletedPdf, numberPdfPages, saveNumberedPdf, createCourtBundle, saveCourtBundle } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Skeleton } from '../components/ui.jsx';
 import DocumentToolCards from './document-studio/DocumentToolCards.jsx';
@@ -8,6 +8,48 @@ import TemplatePreviewPanel from './document-studio/TemplatePreviewPanel.jsx';
 function matterLabel(matter = {}) {
   const base = matter.title || matter.reference || matter.caseNumber || `Matter ${matter.id}`;
   return matter.reference && matter.title ? `${matter.title} (${matter.reference})` : base;
+}
+
+const SIGNATURE_ASSET_ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp'];
+const SIGNATURE_ASSET_MAX_BYTES = 512 * 1024;
+
+function formatAssetSize(size) {
+  const bytes = Number(size || 0);
+  if (!bytes) return '';
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+function SignatureAssetPreview({ asset }) {
+  const [url, setUrl] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl = '';
+    setUrl('');
+    if (!asset?.id) return () => {};
+    const session = readSession();
+    fetch(`${API_BASE}/signature-assets/${encodeURIComponent(asset.id)}/content`, {
+      headers: session?.token ? { Authorization: `Bearer ${session.token}` } : {},
+    }).then(response => {
+      if (!response.ok) throw new Error('Preview unavailable');
+      return response.blob();
+    }).then(blob => {
+      objectUrl = URL.createObjectURL(blob);
+      if (active) setUrl(objectUrl);
+    }).catch(() => {
+      if (active) setUrl('');
+    });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [asset?.id]);
+
+  return (
+    <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#FAFAF9', minHeight: 96, display: 'grid', placeItems: 'center', padding: 12, overflow: 'hidden' }}>
+      {url ? <img src={url} alt={`${asset.label || 'Signature asset'} preview`} style={{ maxWidth: '100%', maxHeight: 120, objectFit: 'contain' }} /> : <span style={{ fontSize: 12, color: theme.muted }}>No image selected</span>}
+    </div>
+  );
 }
 
 export default function DocumentStudio({ notify }) {
@@ -122,6 +164,11 @@ export default function DocumentStudio({ notify }) {
   const [bundleOptionsOpen, setBundleOptionsOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [selectedTool, setSelectedTool] = useState(null);
+  const [signatureAssets, setSignatureAssets] = useState([]);
+  const [signatureAssetsLoading, setSignatureAssetsLoading] = useState(false);
+  const [signatureAssetsError, setSignatureAssetsError] = useState(null);
+  const [signatureAssetLabels, setSignatureAssetLabels] = useState({});
+  const [signatureAssetBusy, setSignatureAssetBusy] = useState('');
 
   const panelRef = useRef(null);
   const mergePanelRef = useRef(null);
@@ -134,6 +181,7 @@ export default function DocumentStudio({ notify }) {
   useEffect(() => {
     load();
     loadMatters();
+    loadSignatureAssets();
     // Best-effort firm name for prefilling the optional cover "prepared by" field.
     api('/firm-settings').then(settings => {
       if (settings && typeof settings.name === 'string') setFirmName(settings.name);
@@ -248,6 +296,105 @@ export default function DocumentStudio({ notify }) {
       setMattersError(err.message || 'Could not load matters.');
     } finally {
       setMattersLoading(false);
+    }
+  }
+
+  async function loadSignatureAssets() {
+    setSignatureAssetsLoading(true);
+    setSignatureAssetsError(null);
+    try {
+      const data = await api('/signature-assets');
+      const rows = Array.isArray(data) ? data : [];
+      setSignatureAssets(rows);
+      setSignatureAssetLabels(current => {
+        const next = { ...current };
+        rows.forEach(asset => { next[asset.id] = next[asset.id] ?? asset.label ?? ''; });
+        return next;
+      });
+    } catch (err) {
+      const message = err.message || 'Could not load signature assets.';
+      setSignatureAssetsError(message);
+    } finally {
+      setSignatureAssetsLoading(false);
+    }
+  }
+
+  async function uploadSignatureAsset(kind, event) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!SIGNATURE_ASSET_ALLOWED_MIME.includes(file.type)) {
+      notify?.({ type: 'danger', message: 'Only PNG, JPEG, and WebP images are supported.' });
+      return;
+    }
+    if (file.size > SIGNATURE_ASSET_MAX_BYTES) {
+      notify?.({ type: 'danger', message: 'Image exceeds 512 KB limit.' });
+      return;
+    }
+    const busyKey = `upload-${kind}`;
+    setSignatureAssetBusy(busyKey);
+    try {
+      await api('/signature-assets', {
+        method: 'POST',
+        body: {
+          ownerType: kind === 'stamp' ? 'firm' : 'user',
+          assetType: kind === 'stamp' ? 'stamp' : 'signature',
+          label: file.name.replace(/\.[^.]+$/, '').slice(0, 120) || (kind === 'stamp' ? 'Firm stamp image' : 'Visual signature image'),
+          mimeType: file.type,
+          data: await fileToDataUrl(file),
+        },
+      });
+      notify?.({ type: 'success', message: kind === 'stamp' ? 'Firm stamp image uploaded.' : 'Visual signature image uploaded.' });
+      await loadSignatureAssets();
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message || 'Could not upload image.' });
+    } finally {
+      setSignatureAssetBusy('');
+    }
+  }
+
+  async function renameSignatureAsset(asset) {
+    const label = String(signatureAssetLabels[asset.id] ?? asset.label ?? '').trim();
+    if (!label) {
+      notify?.({ type: 'danger', message: 'Label is required.' });
+      return;
+    }
+    setSignatureAssetBusy(`rename-${asset.id}`);
+    try {
+      await api(`/signature-assets/${asset.id}`, { method: 'PATCH', body: { label } });
+      notify?.({ type: 'success', message: 'Asset renamed.' });
+      await loadSignatureAssets();
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message || 'Could not rename asset.' });
+    } finally {
+      setSignatureAssetBusy('');
+    }
+  }
+
+  async function setDefaultSignatureAsset(asset) {
+    setSignatureAssetBusy(`default-${asset.id}`);
+    try {
+      await api(`/signature-assets/${asset.id}`, { method: 'PATCH', body: { isDefault: true } });
+      notify?.({ type: 'success', message: 'Default asset updated.' });
+      await loadSignatureAssets();
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message || 'Could not set default asset.' });
+    } finally {
+      setSignatureAssetBusy('');
+    }
+  }
+
+  async function deleteSignatureAsset(asset) {
+    if (!window.confirm(`Delete "${asset.label}"?`)) return;
+    setSignatureAssetBusy(`delete-${asset.id}`);
+    try {
+      await api(`/signature-assets/${asset.id}`, { method: 'PATCH', body: { deleted: true } });
+      notify?.({ type: 'success', message: 'Asset deleted.' });
+      await loadSignatureAssets();
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message || 'Could not delete asset.' });
+    } finally {
+      setSignatureAssetBusy('');
     }
   }
 
@@ -829,9 +976,97 @@ export default function DocumentStudio({ notify }) {
   const activeBundleOptionCount = [bundlePaginate, bundleIncludeIndex, bundleIncludeCover, bundleIncludeDividers, bundleIncludeBookmarks, bundleIncludeCertificate].filter(Boolean).length;
   const bundleSectionLabelStyle = { fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', color: theme.muted };
   const bundleHelperStyle = { border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 };
+  const session = readSession();
+  const currentRole = session?.user?.role || '';
+  const currentUserId = session?.user?.id || session?.user?.userId || '';
+  const isAdmin = currentRole === 'admin';
+  const personalSignatureAssets = signatureAssets.filter(asset => asset.ownerType === 'user' && asset.assetType === 'signature' && (!currentUserId || asset.ownerId === currentUserId));
+  const firmStampAssets = signatureAssets.filter(asset => asset.ownerType === 'firm' && asset.assetType === 'stamp');
+  const signaturePanelStyle = { border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 14, display: 'grid', gap: 12, minWidth: 0 };
+
+  function renderSignatureAssetRows(assets, canManage) {
+    if (signatureAssetsLoading) return <Skeleton />;
+    if (!assets.length) return <Empty title="No image stored" text="Upload a PNG, JPEG, or WebP image." />;
+    return (
+      <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
+        {assets.map(asset => (
+          <div key={asset.id} style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: 12, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: 12, alignItems: 'start', minWidth: 0 }}>
+            <SignatureAssetPreview asset={asset} />
+            <div style={{ display: 'grid', gap: 8, minWidth: 0 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <strong style={{ fontSize: 13, color: theme.ink, overflowWrap: 'anywhere' }}>{asset.label}</strong>
+                {asset.isDefault && <Badge tone="green">Default</Badge>}
+                <span style={{ fontSize: 12, color: theme.muted }}>{asset.mimeType}{asset.size ? ` / ${formatAssetSize(asset.size)}` : ''}</span>
+              </div>
+              {canManage ? (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <input
+                    aria-label={`Rename ${asset.label}`}
+                    value={signatureAssetLabels[asset.id] ?? asset.label ?? ''}
+                    onChange={event => setSignatureAssetLabels(current => ({ ...current, [asset.id]: event.target.value }))}
+                    maxLength={120}
+                    style={{ ...styles.input, minWidth: 160, flex: '1 1 180px' }}
+                    disabled={Boolean(signatureAssetBusy)}
+                  />
+                  <button type="button" style={styles.ghostButton} onClick={() => renameSignatureAsset(asset)} disabled={Boolean(signatureAssetBusy)}>
+                    {signatureAssetBusy === `rename-${asset.id}` ? 'Saving...' : 'Rename'}
+                  </button>
+                  {!asset.isDefault && (
+                    <button type="button" style={styles.tinyButton} onClick={() => setDefaultSignatureAsset(asset)} disabled={Boolean(signatureAssetBusy)}>
+                      {signatureAssetBusy === `default-${asset.id}` ? 'Saving...' : 'Set default'}
+                    </button>
+                  )}
+                  <button type="button" style={styles.dangerTinyButton} onClick={() => deleteSignatureAsset(asset)} disabled={Boolean(signatureAssetBusy)}>
+                    {signatureAssetBusy === `delete-${asset.id}` ? 'Deleting...' : 'Delete'}
+                  </button>
+                </div>
+              ) : (
+                <span style={{ fontSize: 12, color: theme.muted }}>Managed by firm administrators.</span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
+      <Card title="Signatures & stamps" hint="This stores an image for later placement on documents. It is not a certified electronic signature.">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))', gap: 14, minWidth: 0 }}>
+          <div style={signaturePanelStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                <strong style={{ fontSize: 14, color: theme.ink }}>Visual signature image</strong>
+                <span style={{ fontSize: 12, color: theme.muted }}>Personal reusable image asset</span>
+              </div>
+              <label style={{ ...styles.primaryButton, opacity: signatureAssetBusy === 'upload-signature' ? 0.65 : 1, cursor: signatureAssetBusy === 'upload-signature' ? 'not-allowed' : 'pointer' }}>
+                {signatureAssetBusy === 'upload-signature' ? 'Uploading...' : 'Upload signature image'}
+                <input type="file" accept="image/png,image/jpeg,image/webp" style={{ display: 'none' }} disabled={Boolean(signatureAssetBusy)} onChange={event => uploadSignatureAsset('signature', event)} />
+              </label>
+            </div>
+            {renderSignatureAssetRows(personalSignatureAssets, true)}
+          </div>
+
+          <div style={signaturePanelStyle}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                <strong style={{ fontSize: 14, color: theme.ink }}>Firm stamp image</strong>
+                <span style={{ fontSize: 12, color: theme.muted }}>Firm reusable image asset</span>
+              </div>
+              {isAdmin && (
+                <label style={{ ...styles.primaryButton, opacity: signatureAssetBusy === 'upload-stamp' ? 0.65 : 1, cursor: signatureAssetBusy === 'upload-stamp' ? 'not-allowed' : 'pointer' }}>
+                  {signatureAssetBusy === 'upload-stamp' ? 'Uploading...' : 'Upload stamp image'}
+                  <input type="file" accept="image/png,image/jpeg,image/webp" style={{ display: 'none' }} disabled={Boolean(signatureAssetBusy)} onChange={event => uploadSignatureAsset('stamp', event)} />
+                </label>
+              )}
+            </div>
+            {renderSignatureAssetRows(firmStampAssets, isAdmin)}
+          </div>
+        </div>
+        {signatureAssetsError && <Alert tone="danger">{signatureAssetsError}</Alert>}
+      </Card>
+
       <Card title="Active Templates" hint={hint}>
         {templates.length === 0 ? (
           <Empty title="No templates configured" text="Contact your administrator." />
