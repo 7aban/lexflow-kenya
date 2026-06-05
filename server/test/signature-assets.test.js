@@ -22,6 +22,16 @@ function dbGet(sql, params = []) {
   });
 }
 
+function dbRun(sql, params = []) {
+  const db = new sqlite3.Database(path.join(__dirname, '..', 'lawfirm.db'));
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function onRun(err) {
+      db.close();
+      err ? reject(err) : resolve(this);
+    });
+  });
+}
+
 async function latestAudit(action, entityId) {
   return dbGet(
     'SELECT * FROM audit_events WHERE action=? AND entity_id=? ORDER BY timestamp DESC LIMIT 1',
@@ -62,6 +72,8 @@ describe('PRODUCT-23B signature and stamp asset storage', () => {
 
   beforeAll(async () => {
     await dbReady;
+
+    await dbRun('DELETE FROM signature_assets');
 
     const adminRes = await request(app)
       .post('/api/auth/login')
