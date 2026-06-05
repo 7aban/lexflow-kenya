@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { API_BASE, api, fileToDataUrl, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, readSession, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf, deletePdfPages, saveDeletedPdf, numberPdfPages, saveNumberedPdf, createCourtBundle, saveCourtBundle } from '../lib/apiClient.js';
+import { API_BASE, api, fileToDataUrl, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, readSession, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf, deletePdfPages, saveDeletedPdf, numberPdfPages, saveNumberedPdf, createCourtBundle, saveCourtBundle, stampPdf, saveStampedPdf } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Skeleton } from '../components/ui.jsx';
 import DocumentToolCards from './document-studio/DocumentToolCards.jsx';
@@ -162,6 +162,25 @@ export default function DocumentStudio({ notify }) {
   const [bundleSaveSuccess, setBundleSaveSuccess] = useState('');
   // UI-only: optional Court Bundle features start collapsed (progressive disclosure).
   const [bundleOptionsOpen, setBundleOptionsOpen] = useState(false);
+
+  const [stampMatterId, setStampMatterId] = useState('');
+  const [stampDocuments, setStampDocuments] = useState([]);
+  const [stampDocsLoading, setStampDocsLoading] = useState(false);
+  const [stampDocsError, setStampDocsError] = useState(null);
+  const [stampDocumentId, setStampDocumentId] = useState('');
+  const [stampAssetId, setStampAssetId] = useState('');
+  const [stampPageNumber, setStampPageNumber] = useState(1);
+  const [stampX, setStampX] = useState(0);
+  const [stampY, setStampY] = useState(0);
+  const [stampWidth, setStampWidth] = useState(200);
+  const [stampFilename, setStampFilename] = useState('stamped-document.pdf');
+  const [stampLoading, setStampLoading] = useState(false);
+  const [stampError, setStampError] = useState(null);
+  const [stampSuccess, setStampSuccess] = useState('');
+  const [stampSaveLoading, setStampSaveLoading] = useState(false);
+  const [stampSaveError, setStampSaveError] = useState(null);
+  const [stampSaveSuccess, setStampSaveSuccess] = useState('');
+
   const [toolsOpen, setToolsOpen] = useState(false);
   const [selectedTool, setSelectedTool] = useState(null);
   const [signatureAssets, setSignatureAssets] = useState([]);
@@ -177,6 +196,7 @@ export default function DocumentStudio({ notify }) {
   const deletePanelRef = useRef(null);
   const paginatePanelRef = useRef(null);
   const bundlePanelRef = useRef(null);
+  const stampPanelRef = useRef(null);
 
   useEffect(() => {
     load();
@@ -271,6 +291,20 @@ export default function DocumentStudio({ notify }) {
       setBundleSaveSuccess('');
     }
   }, [bundleMatterId]);
+
+  useEffect(() => {
+    if (stampMatterId) {
+      loadStampDocuments(stampMatterId);
+    } else {
+      setStampDocuments([]);
+      setStampDocumentId('');
+      setStampDocsError(null);
+      setStampError(null);
+      setStampSuccess('');
+      setStampSaveError(null);
+      setStampSaveSuccess('');
+    }
+  }, [stampMatterId]);
 
   async function load() {
     setLoading(true);
@@ -845,6 +879,81 @@ export default function DocumentStudio({ notify }) {
     }
   }
 
+  async function loadStampDocuments(matterId) {
+    setStampDocsLoading(true);
+    setStampDocsError(null);
+    setStampError(null);
+    setStampSuccess('');
+    setStampSaveError(null);
+    setStampSaveSuccess('');
+    setStampDocumentId('');
+    try {
+      const docs = await getMatterDocuments(matterId);
+      setStampDocuments((Array.isArray(docs) ? docs : []).filter(doc => doc.mimeType === 'application/pdf'));
+    } catch (err) {
+      setStampDocuments([]);
+      setStampDocsError(err.message || 'Could not load matter documents.');
+    } finally {
+      setStampDocsLoading(false);
+    }
+  }
+
+  async function runStampPdf() {
+    setStampError(null);
+    setStampSuccess('');
+    setStampSaveError(null);
+    setStampSaveSuccess('');
+    if (!stampDocumentId) {
+      setStampError('Select a PDF document.');
+      return;
+    }
+    if (!stampAssetId) {
+      setStampError('Select a signature or stamp asset.');
+      return;
+    }
+    setStampLoading(true);
+    try {
+      await stampPdf(stampDocumentId, stampAssetId, stampPageNumber, stampX, stampY, stampWidth, stampFilename);
+      setStampSuccess('Stamped PDF downloaded.');
+      notify?.({ type: 'success', message: 'Stamped PDF downloaded.' });
+    } catch (err) {
+      const message = err.message || 'Could not stamp PDF.';
+      setStampError(message);
+      notify?.({ type: 'danger', message });
+    } finally {
+      setStampLoading(false);
+    }
+  }
+
+  async function runStampSave() {
+    setStampSaveError(null);
+    setStampSaveSuccess('');
+    if (!stampDocumentId) {
+      setStampSaveError('Select a PDF document.');
+      return;
+    }
+    if (!stampAssetId) {
+      setStampSaveError('Select a signature or stamp asset.');
+      return;
+    }
+    if (!stampMatterId) {
+      setStampSaveError('Select a matter first.');
+      return;
+    }
+    setStampSaveLoading(true);
+    try {
+      await saveStampedPdf(stampMatterId, stampDocumentId, stampAssetId, stampPageNumber, stampX, stampY, stampWidth, stampFilename);
+      setStampSaveSuccess('Saved to matter documents. Open the matter Documents tab to view it.');
+      notify?.({ type: 'success', message: 'Saved to matter documents. Open the matter Documents tab to view it.' });
+    } catch (err) {
+      const message = err.message || 'Could not save stamped PDF.';
+      setStampSaveError(message);
+      notify?.({ type: 'danger', message });
+    } finally {
+      setStampSaveLoading(false);
+    }
+  }
+
   async function loadMergeDocuments(matterId) {
     setMergeDocsLoading(true);
     setMergeDocsError(null);
@@ -1139,11 +1248,12 @@ export default function DocumentStudio({ notify }) {
               onOpenExtract={() => handleSelectTool('extract')}
               onOpenDelete={() => handleSelectTool('delete')}
               onOpenPaginate={() => handleSelectTool('paginate')}
-              onOpenBundle={() => handleSelectTool('bundle')}
-              selectedTool={selectedTool}
-            />
+               onOpenBundle={() => handleSelectTool('bundle')}
+               onOpenStamp={() => handleSelectTool('stamp')}
+               selectedTool={selectedTool}
+             />
 
-          {selectedTool === 'merge' && (
+           {selectedTool === 'merge' && (
           <div
             ref={mergePanelRef}
             style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 16, display: 'grid', gap: 14, minWidth: 0 }}
@@ -2038,6 +2148,163 @@ export default function DocumentStudio({ notify }) {
                 </div>
               )}
             </div>
+          </div>
+          )}
+
+          {selectedTool === 'stamp' && (
+          <div
+            ref={stampPanelRef}
+            style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 16, display: 'grid', gap: 14, minWidth: 0 }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                <strong style={{ fontSize: 14, color: theme.ink }}>Sign / stamp PDF</strong>
+                <span style={{ fontSize: 12, color: theme.muted }}>Place a stored signature or stamp image onto a PDF page</span>
+              </div>
+              <Badge tone="green">Available</Badge>
+            </div>
+
+            <div style={{ border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
+              This places a stored signature/stamp image onto a PDF. It is not a certified electronic signature.
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, alignItems: 'end', minWidth: 0 }}>
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Matter</span>
+                <select
+                  style={styles.input}
+                  value={stampMatterId}
+                  onChange={event => { setStampMatterId(event.target.value); setStampError(null); setStampSuccess(''); setStampSaveError(null); setStampSaveSuccess(''); }}
+                  disabled={mattersLoading || stampLoading || stampSaveLoading}
+                >
+                  <option value="">{mattersLoading ? 'Loading matters...' : 'Select a matter'}</option>
+                  {matters.map(m => (
+                    <option key={m.id} value={m.id}>{matterLabel(m)}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>PDF document</span>
+                <select
+                  style={styles.input}
+                  value={stampDocumentId}
+                  onChange={event => { setStampDocumentId(event.target.value); setStampError(null); setStampSuccess(''); setStampSaveError(null); setStampSaveSuccess(''); }}
+                  disabled={!stampMatterId || stampDocsLoading || stampLoading || stampSaveLoading}
+                >
+                  <option value="">
+                    {!stampMatterId ? 'Select a matter first' : stampDocsLoading ? 'Loading documents...' : stampDocuments.length === 0 ? 'No PDFs found' : '— Select a PDF —'}
+                  </option>
+                  {stampDocuments.map(doc => (
+                    <option key={doc.id} value={doc.id}>
+                      {doc.displayName || doc.name || doc.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Signature / stamp asset</span>
+                <select
+                  style={styles.input}
+                  value={stampAssetId}
+                  onChange={event => { setStampAssetId(event.target.value); setStampError(null); setStampSuccess(''); setStampSaveError(null); setStampSaveSuccess(''); }}
+                  disabled={stampLoading || stampSaveLoading}
+                >
+                  <option value="">{signatureAssets.length === 0 ? 'No assets available' : '— Select an asset —'}</option>
+                  {signatureAssets.map(asset => (
+                    <option key={asset.id} value={asset.id}>
+                      {asset.label || asset.id} ({asset.assetType === 'stamp' ? 'stamp' : 'signature'})
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Page number</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="99999"
+                  style={styles.input}
+                  value={stampPageNumber}
+                  onChange={event => { setStampPageNumber(Number(event.target.value)); setStampError(null); setStampSuccess(''); setStampSaveError(null); setStampSaveSuccess(''); }}
+                  disabled={stampLoading || stampSaveLoading}
+                />
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>X position (points from left)</span>
+                <input
+                  type="number"
+                  style={styles.input}
+                  value={stampX}
+                  onChange={event => { setStampX(Number(event.target.value)); setStampError(null); setStampSuccess(''); setStampSaveError(null); setStampSaveSuccess(''); }}
+                  disabled={stampLoading || stampSaveLoading}
+                />
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Y position (points from bottom)</span>
+                <input
+                  type="number"
+                  style={styles.input}
+                  value={stampY}
+                  onChange={event => { setStampY(Number(event.target.value)); setStampError(null); setStampSuccess(''); setStampSaveError(null); setStampSaveSuccess(''); }}
+                  disabled={stampLoading || stampSaveLoading}
+                />
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Image width (points)</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="2000"
+                  style={styles.input}
+                  value={stampWidth}
+                  onChange={event => { setStampWidth(Number(event.target.value)); setStampError(null); setStampSuccess(''); setStampSaveError(null); setStampSaveSuccess(''); }}
+                  disabled={stampLoading || stampSaveLoading}
+                />
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Output filename</span>
+                <input
+                  style={styles.input}
+                  value={stampFilename}
+                  onChange={event => setStampFilename(event.target.value)}
+                  placeholder="stamped-document.pdf"
+                  disabled={stampLoading || stampSaveLoading}
+                />
+              </label>
+
+              <button
+                type="button"
+                style={{ ...styles.primaryButton, minHeight: 36, opacity: stampDocumentId && stampAssetId && !stampLoading ? 1 : 0.65, cursor: stampDocumentId && stampAssetId && !stampLoading ? 'pointer' : 'not-allowed' }}
+                onClick={runStampPdf}
+                disabled={!stampDocumentId || !stampAssetId || stampLoading}
+              >
+                {stampLoading ? 'Stamping...' : 'Stamp and Download'}
+              </button>
+
+              {stampMatterId && (
+                <button
+                  type="button"
+                  style={{ ...styles.ghostButton, minHeight: 36, opacity: stampDocumentId && stampAssetId && !stampSaveLoading && stampMatterId ? 1 : 0.65, cursor: stampDocumentId && stampAssetId && !stampSaveLoading && stampMatterId ? 'pointer' : 'not-allowed' }}
+                  onClick={runStampSave}
+                  disabled={!stampDocumentId || !stampAssetId || !stampMatterId || stampSaveLoading}
+                >
+                  {stampSaveLoading ? 'Saving...' : 'Save to matter documents'}
+                </button>
+              )}
+            </div>
+
+            {stampDocsError && <Alert tone="danger">{stampDocsError}</Alert>}
+            {stampError && <Alert tone="danger">{stampError}</Alert>}
+            {stampSuccess && <Alert tone="success">{stampSuccess}</Alert>}
+            {stampSaveError && <Alert tone="danger">{stampSaveError}</Alert>}
+            {stampSaveSuccess && <Alert tone="success">{stampSaveSuccess}</Alert>}
           </div>
           )}
           </div>

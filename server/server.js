@@ -3501,6 +3501,302 @@ app.post('/api/document-tools/extract-pdf-pages/save', requireAdvocateOrAdmin, a
   }
 });
 
+// Stamp / sign PDF — place a stored signature or stamp image onto one page.
+// This is image placement only, not a certified electronic signature.
+
+const STAMP_PDF_ALLOWED_ASSET_MIME = new Set(['image/png', 'image/jpeg', 'image/jpg']);
+const STAMP_PDF_MAX_PLACEMENT_DIMENSION = 2000;
+
+async function loadStampAsset(assetId) {
+  const asset = await get('SELECT * FROM signature_assets WHERE id=? AND deletedAt IS NULL', [assetId]);
+  if (!asset) return { error: 'Signature asset not found', status: 404 };
+  const mime = String(asset.mimeType || '').toLowerCase();
+  if (!STAMP_PDF_ALLOWED_ASSET_MIME.has(mime)) return { status: 400, error: 'Only PNG and JPEG signature/stamp images are supported for PDF placement' };
+  return { asset, mime };
+}
+
+function computeStampedHeight(assetBuffer, mime, width) {
+  // Approximate aspect ratio from image dimensions embedded in the buffer header.
+  // For PNG: IHDR chunk at offset 16 stores 4-byte width, 4-byte height (big-endian).
+  // For JPEG: parse SOF0 marker starting at offset 2 for height (2 bytes), width (2 bytes).
+  let imgWidth = 0;
+  let imgHeight = 0;
+  try {
+    if (mime === 'image/png' && assetBuffer.length > 32 && assetBuffer.slice(1, 4).toString() === 'PNG') {
+      imgWidth = assetBuffer.readUInt32BE(16);
+      imgHeight = assetBuffer.readUInt32BE(20);
+    } else if (mime.startsWith('image/jpeg') && assetBuffer[0] === 0xFF && assetBuffer[1] === 0xD8) {
+      for (let offset = 2; offset < assetBuffer.length - 9; ) {
+        if (assetBuffer[offset] !== 0xFF) break;
+        const marker = assetBuffer[offset + 1];
+        if (marker === 0xC0 || marker === 0xC1 || marker === 0xC2) {
+          imgHeight = assetBuffer.readUInt16BE(offset + 5);
+          imgWidth = assetBuffer.readUInt16BE(offset + 7);
+          break;
+        }
+        const segLen = assetBuffer.readUInt16BE(offset + 2);
+        offset += 2 + segLen;
+      }
+    }
+  } catch {
+    // fall through to default aspect
+  }
+  if (imgWidth > 0 && imgHeight > 0) return (width / imgWidth) * imgHeight;
+  return width; // fallback 1:1
+}
+
+app.post('/api/document-tools/stamp-pdf', requireStaff, async (req, res) => {
+  try {
+    const { documentId, assetId, pageNumber: rawPage, x: rawX, y: rawY, width: rawWidth, filename: rawFilename } = req.body || {};
+
+    if (!documentId) return res.status(400).json({ error: 'documentId is required' });
+    if (!assetId) return res.status(400).json({ error: 'assetId is required' });
+    if (rawPage === undefined || rawPage === null) return res.status(400).json({ error: 'pageNumber is required' });
+
+    const doc = await get('SELECT * FROM documents WHERE id=? AND deletedAt IS NULL', [documentId]);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    if (!(await canAccessDocument(req, doc)) || !doc.matterId || !(await canAccessMatter(req, doc.matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: documentId, matterId: doc.matterId || '', clientId: await documentAuditClientId(doc, req), metadata: { reason: 'insufficient permissions', context: documentAuditContext(doc), route: 'document_tool_stamp_pdf' } }).catch(() => {});
+      return res.status(403).json({ error: 'Document access denied' });
+    }
+    if (doc.mimeType !== 'application/pdf') return res.status(400).json({ error: 'Only PDF documents can be stamped' });
+
+    const loadResult = await loadStampAsset(assetId);
+    if (loadResult.error) return res.status(loadResult.status || 400).json({ error: loadResult.error });
+    const { asset, mime: assetMime } = loadResult;
+
+    if (!canReadSignatureAsset(req, asset)) return res.status(403).json({ error: 'Signature asset access denied' });
+
+    const pageNumber = Number(rawPage);
+    if (!Number.isInteger(pageNumber) || pageNumber < 1) return res.status(400).json({ error: 'pageNumber must be a positive integer' });
+
+    const x = Number(rawX);
+    if (!Number.isFinite(x)) return res.status(400).json({ error: 'x must be a finite number' });
+
+    const y = Number(rawY);
+    if (!Number.isFinite(y)) return res.status(400).json({ error: 'y must be a finite number' });
+
+    const width = Number(rawWidth);
+    if (!Number.isFinite(width) || width <= 0 || width > STAMP_PDF_MAX_PLACEMENT_DIMENSION) {
+      return res.status(400).json({ error: 'width must be a positive number not exceeding 2000' });
+    }
+
+    const inputContent = Buffer.isBuffer(doc.content) ? doc.content : Buffer.from(doc.content || '');
+
+    const outputFilename = cleanPdfDownloadName(rawFilename || (doc.displayName || doc.name || 'document').replace(/\.pdf$/i, '') + '-stamped.pdf');
+
+    let sourcePdf;
+    try {
+      sourcePdf = await PDFLibDocument.load(inputContent, { ignoreEncryption: false });
+    } catch {
+      return res.status(400).json({ error: 'Could not read PDF — it may be corrupt or encrypted' });
+    }
+
+    if (pageNumber > sourcePdf.getPageCount()) {
+      return res.status(400).json({ error: `Page ${pageNumber} is out of range — the PDF has ${sourcePdf.getPageCount()} page(s)` });
+    }
+
+    const assetBuffer = Buffer.isBuffer(asset.content) ? asset.content : Buffer.from(asset.content || '');
+    const height = computeStampedHeight(assetBuffer, assetMime, width);
+
+    let image;
+    try {
+      if (assetMime.startsWith('image/png')) {
+        image = await sourcePdf.embedPng(assetBuffer);
+      } else {
+        image = await sourcePdf.embedJpg(assetBuffer);
+      }
+    } catch {
+      return res.status(400).json({ error: 'Could not embed the signature/stamp image onto the PDF' });
+    }
+
+    const targetPage = sourcePdf.getPage(pageNumber - 1);
+    targetPage.drawImage(image, { x, y, width, height });
+
+    let outputBuffer;
+    try {
+      outputBuffer = Buffer.from(await sourcePdf.save());
+    } catch {
+      return res.status(500).json({ error: 'Could not save the stamped PDF' });
+    }
+
+    if (outputBuffer.length > 50 * 1024 * 1024) return res.status(413).json({ error: 'Stamped PDF exceeds the 50 MB output limit' });
+
+    const clientId = await documentAuditClientId(doc, req);
+
+    await recordAuditEvent(req, {
+      action: 'document_tool_stamp_pdf_downloaded',
+      entityType: 'document_tool',
+      entityId: documentId,
+      matterId: doc.matterId || '',
+      clientId,
+      metadata: {
+        sourceDocumentId: documentId,
+        sourceMatterId: doc.matterId || '',
+        assetId,
+        assetType: asset.assetType,
+        pageNumber,
+        placementX: x,
+        placementY: y,
+        width,
+        height,
+        inputBytes: inputContent.length,
+        outputBytes: outputBuffer.length,
+        filename: outputFilename,
+      },
+    }).catch(() => {});
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(outputBuffer);
+  } catch {
+    res.status(500).json({ error: 'Unable to stamp PDF' });
+  }
+});
+
+app.post('/api/document-tools/stamp-pdf/save', requireAdvocateOrAdmin, async (req, res) => {
+  try {
+    const { matterId, documentId, assetId, pageNumber: rawPage, x: rawX, y: rawY, width: rawWidth, filename: rawFilename } = req.body || {};
+
+    if (!documentId) return res.status(400).json({ error: 'documentId is required' });
+    if (!matterId) return res.status(400).json({ error: 'matterId is required' });
+    if (!assetId) return res.status(400).json({ error: 'assetId is required' });
+    if (rawPage === undefined || rawPage === null) return res.status(400).json({ error: 'pageNumber is required' });
+
+    const matter = await get('SELECT * FROM matters WHERE id=?', [matterId]);
+    if (!matter) return res.status(404).json({ error: 'Matter not found' });
+    if (!(await canAccessMatter(req, matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: matterId, metadata: { reason: 'insufficient permissions', route: 'document_tool_stamp_pdf_save' } }).catch(() => {});
+      return res.status(403).json({ error: 'Matter access denied' });
+    }
+
+    const doc = await get('SELECT * FROM documents WHERE id=? AND deletedAt IS NULL', [documentId]);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    if (!(await canAccessDocument(req, doc)) || !doc.matterId || !(await canAccessMatter(req, doc.matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: documentId, matterId: doc.matterId || '', clientId: await documentAuditClientId(doc, req), metadata: { reason: 'insufficient permissions', context: documentAuditContext(doc), route: 'document_tool_stamp_pdf_save' } }).catch(() => {});
+      return res.status(403).json({ error: 'Document access denied' });
+    }
+    if (doc.mimeType !== 'application/pdf') return res.status(400).json({ error: 'Only PDF documents can be stamped' });
+    if (doc.matterId !== matterId) return res.status(400).json({ error: 'Document must belong to the target matter' });
+
+    const loadResult = await loadStampAsset(assetId);
+    if (loadResult.error) return res.status(loadResult.status || 400).json({ error: loadResult.error });
+    const { asset, mime: assetMime } = loadResult;
+
+    if (!canReadSignatureAsset(req, asset)) return res.status(403).json({ error: 'Signature asset access denied' });
+
+    const pageNumber = Number(rawPage);
+    if (!Number.isInteger(pageNumber) || pageNumber < 1) return res.status(400).json({ error: 'pageNumber must be a positive integer' });
+
+    const x = Number(rawX);
+    if (!Number.isFinite(x)) return res.status(400).json({ error: 'x must be a finite number' });
+
+    const y = Number(rawY);
+    if (!Number.isFinite(y)) return res.status(400).json({ error: 'y must be a finite number' });
+
+    const width = Number(rawWidth);
+    if (!Number.isFinite(width) || width <= 0 || width > STAMP_PDF_MAX_PLACEMENT_DIMENSION) {
+      return res.status(400).json({ error: 'width must be a positive number not exceeding 2000' });
+    }
+
+    const inputContent = Buffer.isBuffer(doc.content) ? doc.content : Buffer.from(doc.content || '');
+
+    const outputFilename = cleanPdfDownloadName(rawFilename || (doc.displayName || doc.name || 'document').replace(/\.pdf$/i, '') + '-stamped.pdf');
+
+    let sourcePdf;
+    try {
+      sourcePdf = await PDFLibDocument.load(inputContent, { ignoreEncryption: false });
+    } catch {
+      return res.status(400).json({ error: 'Could not read PDF — it may be corrupt or encrypted' });
+    }
+
+    if (pageNumber > sourcePdf.getPageCount()) {
+      return res.status(400).json({ error: `Page ${pageNumber} is out of range — the PDF has ${sourcePdf.getPageCount()} page(s)` });
+    }
+
+    const assetBuffer = Buffer.isBuffer(asset.content) ? asset.content : Buffer.from(asset.content || '');
+    const height = computeStampedHeight(assetBuffer, assetMime, width);
+
+    let image;
+    try {
+      if (assetMime.startsWith('image/png')) {
+        image = await sourcePdf.embedPng(assetBuffer);
+      } else {
+        image = await sourcePdf.embedJpg(assetBuffer);
+      }
+    } catch {
+      return res.status(400).json({ error: 'Could not embed the signature/stamp image onto the PDF' });
+    }
+
+    const targetPage = sourcePdf.getPage(pageNumber - 1);
+    targetPage.drawImage(image, { x, y, width, height });
+
+    let outputBuffer;
+    try {
+      outputBuffer = Buffer.from(await sourcePdf.save());
+    } catch {
+      return res.status(500).json({ error: 'Could not save the stamped PDF' });
+    }
+
+    if (outputBuffer.length > 50 * 1024 * 1024) return res.status(413).json({ error: 'Stamped PDF exceeds the 50 MB output limit' });
+
+    const docIdNew = genId('DOC');
+    const cleanName = cleanDocumentName(outputFilename);
+    const size = `${Math.max(1, Math.round(outputBuffer.length / 1024))} KB`;
+
+    await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+      docIdNew,
+      matterId,
+      cleanName,
+      cleanName,
+      'PDF',
+      'application/pdf',
+      today(),
+      size,
+      outputBuffer,
+      'document_tool',
+      null,
+      null,
+      null,
+      0,
+      req.user.userId || '',
+    ]);
+
+    const resultDoc = await get(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=?`, [docIdNew]);
+
+    await recordAuditEvent(req, {
+      action: 'document_tool_stamp_pdf_saved',
+      entityType: 'document_tool',
+      entityId: docIdNew,
+      matterId,
+      clientId: await documentAuditClientId(resultDoc, req),
+      metadata: {
+        sourceDocumentId: documentId,
+        sourceMatterId: doc.matterId || '',
+        targetMatterId: matterId,
+        outputDocumentId: docIdNew,
+        assetId,
+        assetType: asset.assetType,
+        pageNumber,
+        placementX: x,
+        placementY: y,
+        width,
+        height,
+        inputBytes: inputContent.length,
+        outputBytes: outputBuffer.length,
+        filename: cleanName,
+        clientVisible: false,
+      },
+    }).catch(() => {});
+
+    res.json(publicDocument(resultDoc));
+  } catch {
+    res.status(500).json({ error: 'Unable to save stamped PDF' });
+  }
+});
+
 app.post('/api/document-tools/delete-pdf-pages', requireStaff, async (req, res) => {
   try {
     const { documentId, pages: rawPages, filename: rawFilename } = req.body || {};

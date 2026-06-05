@@ -32,7 +32,7 @@ const defaultReminderTemplates = [
 async function createSchema() {
   const tables = [
     'audit_logs', 'notifications', 'payment_proofs', 'payments', 'receipt_sequences', 'expenses', 'disbursements', 'invoice_items', 'invoices',
-    'messages', 'conversations', 'client_activity', 'case_notes', 'documents', 'folders', 'appearances', 'time_entries', 'tasks', 'deadlines', 'document_templates', 'checklist_template_items', 'checklist_templates', 'matter_checklist_items', 'document_requests', 'matters', 'clients',
+     'messages', 'conversations', 'client_activity', 'case_notes', 'documents', 'signature_assets', 'folders', 'appearances', 'time_entries', 'tasks', 'deadlines', 'document_templates', 'checklist_template_items', 'checklist_templates', 'matter_checklist_items', 'document_requests', 'matters', 'clients',
     'users', 'integrations_log', 'firm_settings', 'reminder_settings', 'reminder_templates', 'reminder_logs',
     'firm_notices', 'invitations',
   ];
