@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createDeadline, deleteDeadline, getComplianceGuidance, getDeadlines, updateDeadline } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
-import { Badge, Card, ConfirmModal, Empty, Field, Skeleton, Stat, Table } from '../components/ui.jsx';
+import { Badge, Card, ConfirmModal, Empty, Field, MeetingLink, safeHttpUrl, Skeleton, Stat, Table } from '../components/ui.jsx';
 
 const blankForm = { title: '', type: 'statutory', dueDate: '', owner: '', matterId: '', clientId: '', notes: '' };
 const typeOptions = ['all', 'Court Date', 'Internal Task', 'SOL / Limitation', 'Invoice Due', 'client', 'internal', 'statutory', 'tax', 'regulatory'];
@@ -244,6 +244,7 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
                       </span>
                     )}
                     {item.notes && <span style={{ fontSize: 12, color: theme.muted, fontStyle: 'italic' }}>{item.notes}</span>}
+                    {safeHttpUrl(item.meetingLink) && <MeetingLink event={{ ...item, date: item.dueDate }} dashboard />}
                   </div>
                 );
               })}
