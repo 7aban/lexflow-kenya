@@ -1,5 +1,5 @@
 import { Component, useEffect, useRef, useState } from 'react';
-import { IconLayoutDashboard, IconChartLine, IconUsers, IconUserPlus, IconBriefcase, IconCheckbox, IconCalendarDue, IconFileInvoice, IconMessages, IconUsersGroup, IconSettings, IconListSearch, IconExternalLink, IconChevronDown, IconShield, IconSearch, IconBell, IconRefresh, IconTemplate } from '@tabler/icons-react';
+import { IconLayoutDashboard, IconChartLine, IconUsers, IconUserPlus, IconBriefcase, IconCheckbox, IconCalendarDue, IconFileInvoice, IconMessages, IconUsersGroup, IconSettings, IconListSearch, IconExternalLink, IconChevronDown, IconShield, IconSearch, IconBell, IconRefresh, IconTemplate, IconLink } from '@tabler/icons-react';
 import { api, API_BASE, AUTH_FAILURE_MESSAGE, clearSession, clearAllLexFlowStorage, fetchAvatarObjectUrl, getNotifications, markNotificationsRead, readSession, saveSession } from './lib/apiClient.js';
 import { globalSearch } from './api.js';
 import { defaultFirmSettings, styles, StyleTag, theme, loadAndApplyFirmTheme } from './theme.jsx';
@@ -14,7 +14,7 @@ import ClientApp from './views/ClientApp.jsx';
 import Communications from './views/Communications.jsx';
 import DeadlineCenter from './views/DeadlineCenter.jsx';
 import Invitations from './views/Invitations.jsx';
-import { Clients, Dashboard, FirmSettings, Invoices, Matters, Tasks, Users } from './views/StaffViews.jsx';
+import { Clients, ConnectedAccounts, Dashboard, FirmSettings, Invoices, Matters, Tasks, Users } from './views/StaffViews.jsx';
 import DocumentStudio from './views/DocumentStudio.jsx';
 
 const navIcons = {
@@ -32,6 +32,7 @@ const navIcons = {
   'Audit Log': IconListSearch,
   'Structured Audit': IconShield,
   'Document Studio': IconTemplate,
+  'Connected Accounts': IconLink,
   'eFiling CTS': IconExternalLink,
   eCitizen: IconExternalLink,
   'Ardhi Sasa': IconExternalLink,
@@ -52,6 +53,7 @@ const navGroups = [
   { title: 'Finance', items: [['Invoices', ['admin']]] },
   { title: 'Communications', items: [['Communications', ['admin', 'advocate', 'assistant']]] },
   { title: 'Administration', items: [['Users', ['admin']], ['Firm Settings', ['admin']], ['Audit Log', ['admin']], ['Structured Audit', ['admin']]] },
+  { title: 'Account', items: [['Connected Accounts', ['admin', 'advocate', 'assistant']]] },
   { title: 'Resources', items: [
     ['eFiling CTS', ['admin', 'advocate', 'assistant'], 'https://efiling.court.go.ke/auth'],
     ['eCitizen', ['admin', 'advocate', 'assistant'], 'https://www.ecitizen.go.ke'],
@@ -523,6 +525,7 @@ export default function App() {
     Performance: 'Managing partner view of advocate output, workload and court attendance.',
     'Firm Settings': 'Client-ready branding, invoice identity and contact details.',
     Users: 'Role-based access for advocates, assistants and administrators.',
+    'Connected Accounts': 'Authorize future Google Workspace and Microsoft 365 integrations.',
     Invitations: 'Secure client portal onboarding links and invitation status.',
     'Audit Log': 'A secure activity trail for important changes and accountability.',
     'Structured Audit': 'Structured event trail for security, access, and operational auditing.',
@@ -671,6 +674,7 @@ export default function App() {
             {(!loading || bootstrapped) && view === 'Invoices' && <Invoices invoices={data.invoices} isAdmin={isAdmin} canManage={canManage} reload={refresh} notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Performance' && isAdmin && <AdvocatePerformance notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Firm Settings' && isAdmin && <FirmSettings settings={firm} clients={data.clients} reload={refresh} notify={setToast} />}
+            {(!loading || bootstrapped) && view === 'Connected Accounts' && <ConnectedAccounts notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Users' && isAdmin && <Users clients={data.clients} notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Invitations' && isAdmin && <Invitations clients={data.clients} notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Audit Log' && isAdmin && <AuditLog notify={setToast} navigate={setView} />}

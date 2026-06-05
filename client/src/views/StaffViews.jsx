@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote } from '@tabler/icons-react';
-import { api, applyChecklistTemplate, createChecklistTemplate, createMatterChecklistItem, deleteChecklistTemplate, deleteClientAvatar, deleteUserAvatar, deleteMatterChecklistItem, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getInvoiceDetails, listChecklistTemplates, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, updateChecklistTemplate, updateMatterChecklistItem, uploadClientAvatar, uploadUserAvatar } from '../lib/apiClient.js';
+import { api, applyChecklistTemplate, createChecklistTemplate, createMatterChecklistItem, deleteChecklistTemplate, deleteClientAvatar, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getInvoiceDetails, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, startConnectedAccountOAuth, updateChecklistTemplate, updateMatterChecklistItem, uploadClientAvatar, uploadUserAvatar } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, safeHttpUrl, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText, invoiceDueDistanceDays } from '../components/ui.jsx';
@@ -139,6 +139,100 @@ function MobileField({ label, children, wide = false }) {
 
 function MobileEmpty({ children }) {
   return <div className="ux2-mobile-empty">{children}</div>;
+}
+
+function connectedProviderLabel(provider) {
+  if (provider === 'google') return 'Google';
+  if (provider === 'microsoft') return 'Microsoft';
+  return provider || 'Provider';
+}
+
+function connectedAccountDate(value) {
+  const parsed = parseDateValue(value);
+  return parsed ? parsed.toLocaleDateString() : '-';
+}
+
+export function ConnectedAccounts({ notify }) {
+  const [accounts, setAccounts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [busyProvider, setBusyProvider] = useState('');
+  const [busyId, setBusyId] = useState('');
+
+  async function load() {
+    setLoading(true);
+    try {
+      setAccounts(listFromResponse(await listConnectedAccounts(), 'accounts'));
+    } catch (err) {
+      notify({ type: 'danger', message: err.message });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function connect(provider) {
+    setBusyProvider(provider);
+    try {
+      const data = await startConnectedAccountOAuth(provider);
+      if (!data?.authorizationUrl) throw new Error('Provider authorization URL was not returned.');
+      window.location.href = data.authorizationUrl;
+    } catch (err) {
+      notify({ type: 'danger', message: err.message });
+      setBusyProvider('');
+    }
+  }
+
+  async function disconnect(account) {
+    if (!window.confirm(`Disconnect ${connectedProviderLabel(account.provider)} for ${account.email || 'this account'}?`)) return;
+    setBusyId(account.id);
+    try {
+      await disconnectConnectedAccount(account.id);
+      notify({ type: 'success', message: 'Connected account disconnected.' });
+      await load();
+    } catch (err) {
+      notify({ type: 'danger', message: err.message });
+    } finally {
+      setBusyId('');
+    }
+  }
+
+  const rows = accounts.map(account => [
+    connectedProviderLabel(account.provider),
+    account.email || <span style={styles.mutedText}>No email</span>,
+    account.status === 'connected' ? <Badge tone="green">Connected</Badge> : <Badge tone="amber">Disconnected</Badge>,
+    connectedAccountDate(account.connectedAt),
+    account.status === 'connected'
+      ? <button type="button" style={styles.dangerButton} disabled={busyId === account.id} onClick={() => disconnect(account)}>{busyId === account.id ? 'Disconnecting...' : 'Disconnect'}</button>
+      : <span style={styles.mutedText}>Disconnected</span>,
+  ]);
+
+  return (
+    <div style={styles.pageStack}>
+      <Card title="Connected Accounts" hint="Authorize external provider access for future integrations">
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div style={{ ...styles.alert, padding: 10, borderRadius: 6 }}>
+            Email and calendar sync are not enabled yet. This only authorizes future integrations.
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button type="button" style={styles.primaryButton} onClick={() => connect('google')} disabled={Boolean(busyProvider)}>
+              {busyProvider === 'google' ? 'Opening Google...' : 'Connect Google'}
+            </button>
+            <button type="button" style={styles.ghostButton} onClick={() => connect('microsoft')} disabled={Boolean(busyProvider)}>
+              {busyProvider === 'microsoft' ? 'Opening Microsoft...' : 'Connect Microsoft'}
+            </button>
+          </div>
+        </div>
+      </Card>
+      <Card title="Authorized Providers" hint={`${accounts.length} connected account${accounts.length === 1 ? '' : 's'}`}>
+        {loading
+          ? <div style={styles.mutedText}>Loading connected accounts...</div>
+          : accounts.length
+            ? <Table columns={['Provider', 'Email', 'Status', 'Connected', 'Actions']} rows={rows} />
+            : <Empty title="No connected accounts." text="Connect Google or Microsoft when provider authorization is ready." />}
+      </Card>
+    </div>
+  );
 }
 
 function isBillableValue(value) {

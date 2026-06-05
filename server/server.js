@@ -210,6 +210,8 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS audit_events (id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, actor_user_id TEXT, actor_role TEXT, actor_email TEXT, action TEXT NOT NULL, entity_type TEXT, entity_id TEXT, matter_id TEXT, client_id TEXT, ip_address TEXT, user_agent TEXT, metadata_json TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)`);
   await run(`CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, userId TEXT NOT NULL, type TEXT, matterId TEXT, clientId TEXT, title TEXT, body TEXT, createdAt TEXT, readAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS oauth_accounts (id TEXT PRIMARY KEY, userId TEXT NOT NULL, provider TEXT CHECK(provider IN ('google','microsoft')) NOT NULL, providerSubject TEXT NOT NULL, email TEXT NOT NULL, emailVerified INTEGER DEFAULT 0, revokedAt TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, lastLoginAt TEXT, UNIQUE(provider, providerSubject))`);
+  await run(`CREATE TABLE IF NOT EXISTS connected_accounts (id TEXT PRIMARY KEY, userId TEXT NOT NULL, provider TEXT NOT NULL CHECK(provider IN ('google','microsoft')), providerAccountId TEXT, email TEXT, displayName TEXT, scopes TEXT, status TEXT NOT NULL DEFAULT 'connected', connectedAt TEXT NOT NULL, disconnectedAt TEXT, lastSyncAt TEXT, lastError TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS connected_account_tokens (id TEXT PRIMARY KEY, connectedAccountId TEXT NOT NULL, accessTokenEncrypted TEXT, refreshTokenEncrypted TEXT, tokenType TEXT, expiresAt TEXT, scope TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS matter_checklist_items (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT NOT NULL, completed INTEGER DEFAULT 0, position INTEGER DEFAULT 0, notes TEXT, dueDate TEXT, assignee TEXT, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, completedAt TEXT, completedBy TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS checklist_templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, practiceArea TEXT, active INTEGER DEFAULT 1, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS checklist_template_items (id TEXT PRIMARY KEY, templateId TEXT NOT NULL, title TEXT NOT NULL, notes TEXT, position INTEGER DEFAULT 0, createdAt TEXT NOT NULL)`);
@@ -905,6 +907,130 @@ app.post('/api/auth/oauth/exchange', async (req, res) => {
   res.json({ token: result.token, user: result.user });
 });
 
+const CONNECTED_ACCOUNT_PROVIDERS = new Set(['google', 'microsoft']);
+
+function connectedAccountProvider(provider) {
+  const normalized = String(provider || '').trim().toLowerCase();
+  return CONNECTED_ACCOUNT_PROVIDERS.has(normalized) ? normalized : '';
+}
+
+function connectedAccountAuthorizationUrl(provider, state) {
+  if (provider === 'google') return googleOAuth.buildConnectedAuthorizationUrl(state);
+  if (provider === 'microsoft') return microsoftOAuth.buildConnectedAuthorizationUrl(state);
+  throw new Error('Unsupported connected account provider');
+}
+
+function connectedAccountCallbackUrl(provider, status, reason = '') {
+  const params = new URLSearchParams({ connected_account: status, provider: provider || '' });
+  if (reason) params.set('reason', reason);
+  return `${config.BASE_URL}/?${params.toString()}`;
+}
+
+function attachConnectedAccountAuditUser(req, user) {
+  req.user = {
+    userId: user.id,
+    role: user.role,
+    email: user.email || '',
+    fullName: user.fullName || '',
+    clientId: user.clientId || '',
+  };
+  return req;
+}
+
+async function connectedAccountStateUser(req, provider, state) {
+  const stateCheck = verifyState(state, provider);
+  if (!stateCheck.valid) {
+    await recordAuditEvent(req, { action: 'connected_account_failed', entityType: 'connected_account', metadata: { provider, reason: 'invalid_state' } }).catch(() => {});
+    return { ok: false, error: 'invalid_state' };
+  }
+  const context = stateCheck.context || {};
+  if (context.purpose !== 'connected_account' || !context.userId) {
+    await recordAuditEvent(req, { action: 'connected_account_failed', entityType: 'connected_account', metadata: { provider, reason: 'invalid_state_context' } }).catch(() => {});
+    return { ok: false, error: 'invalid_state_context' };
+  }
+  const user = await get('SELECT id, email, fullName, role, clientId, COALESCE(isActive,1) isActive FROM users WHERE id=?', [context.userId]);
+  if (!user || user.isActive === 0 || user.role === 'client') {
+    if (user) attachConnectedAccountAuditUser(req, user);
+    await recordAuditEvent(req, { action: 'connected_account_failed', entityType: 'connected_account', metadata: { provider, reason: 'user_not_allowed' } }).catch(() => {});
+    return { ok: false, error: 'user_not_allowed' };
+  }
+  attachConnectedAccountAuditUser(req, user);
+  return { ok: true, user };
+}
+
+app.get('/api/connected-accounts', authenticate, requireStaff, async (req, res) => {
+  const accounts = await oauth.getConnectedAccounts(req.user.userId);
+  res.json(accounts);
+});
+
+app.post('/api/connected-accounts/:provider/start', authenticate, requireStaff, async (req, res) => {
+  const provider = connectedAccountProvider(req.params.provider);
+  if (!provider) {
+    await recordAuditEvent(req, { action: 'connected_account_failed', entityType: 'connected_account', metadata: { provider: req.params.provider || '', reason: 'unsupported_provider' } }).catch(() => {});
+    return res.status(400).json({ error: 'Unsupported provider' });
+  }
+  try {
+    const state = signState(provider, { purpose: 'connected_account', userId: req.user.userId });
+    const authorizationUrl = connectedAccountAuthorizationUrl(provider, state);
+    await recordAuditEvent(req, { action: 'connected_account_start', entityType: 'connected_account', metadata: { provider } }).catch(() => {});
+    res.json({ authorizationUrl });
+  } catch (err) {
+    await recordAuditEvent(req, { action: 'connected_account_failed', entityType: 'connected_account', metadata: { provider, reason: 'configuration_error' } }).catch(() => {});
+    res.status(500).json({ error: 'Connected account OAuth is not configured.' });
+  }
+});
+
+app.get('/api/connected-accounts/:provider/callback', async (req, res) => {
+  const provider = connectedAccountProvider(req.params.provider);
+  if (!provider) return res.redirect(connectedAccountCallbackUrl('', 'failed', 'unsupported_provider'));
+  const { code, state, error: providerError } = req.query;
+  const stateResult = await connectedAccountStateUser(req, provider, state);
+  if (!stateResult.ok) return res.redirect(connectedAccountCallbackUrl(provider, 'failed', stateResult.error));
+  if (providerError) {
+    await recordAuditEvent(req, { action: 'connected_account_failed', entityType: 'connected_account', metadata: { provider, reason: 'provider_denied' } }).catch(() => {});
+    return res.redirect(connectedAccountCallbackUrl(provider, 'failed', 'provider_denied'));
+  }
+  if (!code) {
+    await recordAuditEvent(req, { action: 'connected_account_failed', entityType: 'connected_account', metadata: { provider, reason: 'missing_code' } }).catch(() => {});
+    return res.redirect(connectedAccountCallbackUrl(provider, 'failed', 'missing_code'));
+  }
+  try {
+    const profile = provider === 'google'
+      ? await googleOAuth.handleConnectedCallback(code)
+      : await microsoftOAuth.handleConnectedCallback(code);
+    const result = await oauth.upsertConnectedAccount({ ...profile, provider, userId: stateResult.user.id });
+    if (!result.ok) {
+      await recordAuditEvent(req, { action: 'connected_account_failed', entityType: 'connected_account', metadata: { provider, reason: result.error } }).catch(() => {});
+      return res.redirect(connectedAccountCallbackUrl(provider, 'failed', result.error));
+    }
+    await recordAuditEvent(req, {
+      action: 'connected_account_connected',
+      entityType: 'connected_account',
+      entityId: result.account.id,
+      metadata: { provider, connectedAccountId: result.account.id, email: result.account.email || '' },
+    }).catch(() => {});
+    res.redirect(connectedAccountCallbackUrl(provider, 'connected'));
+  } catch (err) {
+    await recordAuditEvent(req, { action: 'connected_account_failed', entityType: 'connected_account', metadata: { provider, reason: 'exchange_or_store_failed' } }).catch(() => {});
+    res.redirect(connectedAccountCallbackUrl(provider, 'failed', 'exchange_or_store_failed'));
+  }
+});
+
+app.post('/api/connected-accounts/:id/disconnect', authenticate, requireStaff, async (req, res) => {
+  const result = await oauth.disconnectConnectedAccount(req.user.userId, req.params.id);
+  if (!result.ok) {
+    await recordAuditEvent(req, { action: 'connected_account_failed', entityType: 'connected_account', entityId: req.params.id, metadata: { reason: result.error } }).catch(() => {});
+    return res.status(404).json({ error: result.message });
+  }
+  await recordAuditEvent(req, {
+    action: 'connected_account_disconnected',
+    entityType: 'connected_account',
+    entityId: result.account.id,
+    metadata: { provider: result.account.provider, connectedAccountId: result.account.id, email: result.account.email || '' },
+  }).catch(() => {});
+  res.json(result.account);
+});
+
 app.use('/api', authenticate);
 
 app.get('/api/auth/me', async (req, res) => {
@@ -958,6 +1084,8 @@ app.delete('/api/auth/users/:id', requireAdmin, async (req, res) => {
   const user = await get('SELECT id,email,fullName,role FROM users WHERE id=?', [req.params.id]);
   await run('BEGIN TRANSACTION');
   try {
+    await run('DELETE FROM connected_account_tokens WHERE connectedAccountId IN (SELECT id FROM connected_accounts WHERE userId=?)', [req.params.id]);
+    await run('DELETE FROM connected_accounts WHERE userId=?', [req.params.id]);
     await run('DELETE FROM oauth_accounts WHERE userId=?', [req.params.id]);
     await run('DELETE FROM users WHERE id=?', [req.params.id]);
     await run('COMMIT');

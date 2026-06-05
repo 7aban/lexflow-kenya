@@ -1,8 +1,10 @@
 const config = require('./config');
+const crypto = require('crypto');
 const { signAccessToken } = require('./tokens');
 const { genId } = require('./utils');
 
 const STAFF_ROLES = new Set(['admin', 'advocate', 'assistant']);
+const CONNECTED_ACCOUNT_PROVIDERS = new Set(['google', 'microsoft']);
 
 function normalizeEmail(email) {
   return typeof email === 'string' ? email.trim() : '';
@@ -25,6 +27,54 @@ function isAllowedOAuthDomain(email) {
   const domains = allowedOAuthDomains();
   if (domains.length === 0) return true;
   return domains.includes(oauthEmailDomain(email));
+}
+
+function normalizeProvider(provider) {
+  const normalized = String(provider || '').trim().toLowerCase();
+  return CONNECTED_ACCOUNT_PROVIDERS.has(normalized) ? normalized : '';
+}
+
+function normalizeOptionalText(value, maxLength = 500) {
+  return typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
+}
+
+function normalizeScopes(scopes) {
+  if (Array.isArray(scopes)) return scopes.map(scope => String(scope || '').trim()).filter(Boolean).join(' ');
+  return normalizeOptionalText(scopes, 2000);
+}
+
+function connectedAccountsTokenKey() {
+  if (!config.CONNECTED_ACCOUNTS_TOKEN_KEY) {
+    throw new Error('CONNECTED_ACCOUNTS_TOKEN_KEY is required for connected account token encryption');
+  }
+  return config.CONNECTED_ACCOUNTS_TOKEN_KEY;
+}
+
+function encryptConnectedToken(value) {
+  if (!value) return '';
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', connectedAccountsTokenKey(), iv);
+  const ciphertext = Buffer.concat([cipher.update(String(value), 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `v1:${iv.toString('base64url')}:${tag.toString('base64url')}:${ciphertext.toString('base64url')}`;
+}
+
+function publicConnectedAccount(row = {}) {
+  return {
+    id: row.id,
+    provider: row.provider,
+    providerAccountId: row.providerAccountId || '',
+    email: row.email || '',
+    displayName: row.displayName || '',
+    scopes: row.scopes || '',
+    status: row.status || 'connected',
+    connectedAt: row.connectedAt || '',
+    disconnectedAt: row.disconnectedAt || '',
+    lastSyncAt: row.lastSyncAt || '',
+    lastError: row.lastError || '',
+    createdAt: row.createdAt || '',
+    updatedAt: row.updatedAt || '',
+  };
 }
 
 function createOAuth({ run, get, all }) {
@@ -135,7 +185,123 @@ function createOAuth({ run, get, all }) {
     return await all('SELECT id, provider, email, emailVerified, revokedAt, createdAt, lastLoginAt FROM oauth_accounts WHERE userId=? ORDER BY createdAt', [userId]);
   }
 
-  return { validateExistingStaffUser, completeOAuthLogin, unlinkOAuthAccount, getLinkedAccounts };
+  async function getConnectedAccounts(userId) {
+    const rows = await all(
+      `SELECT id, provider, providerAccountId, email, displayName, scopes, status, connectedAt, disconnectedAt, lastSyncAt, lastError, createdAt, updatedAt
+       FROM connected_accounts
+       WHERE userId=?
+       ORDER BY connectedAt DESC, createdAt DESC`,
+      [userId],
+    );
+    return rows.map(publicConnectedAccount);
+  }
+
+  async function upsertConnectedAccount({ userId, provider, providerAccountId, email, displayName, scopes, tokens = {} }) {
+    const normalizedProvider = normalizeProvider(provider);
+    if (!normalizedProvider) {
+      return { ok: false, error: 'unsupported_provider', message: 'Unsupported connected account provider.' };
+    }
+
+    const normalizedAccountId = normalizeOptionalText(providerAccountId, 255);
+    const normalizedEmail = normalizeEmail(email);
+    if (!normalizedAccountId) {
+      return { ok: false, error: 'missing_provider_account', message: 'Provider did not return an account id.' };
+    }
+    if (!normalizedEmail) {
+      return { ok: false, error: 'missing_email', message: 'Provider did not return an email address.' };
+    }
+
+    const scopesText = normalizeScopes(scopes || tokens.scope);
+    const now = new Date().toISOString();
+    const encryptedAccessToken = encryptConnectedToken(tokens.accessToken || tokens.access_token || '');
+    const encryptedRefreshToken = encryptConnectedToken(tokens.refreshToken || tokens.refresh_token || '');
+    const tokenType = normalizeOptionalText(tokens.tokenType || tokens.token_type, 80);
+    const expiresAt = normalizeOptionalText(tokens.expiresAt || tokens.expires_at, 80);
+    const tokenScope = normalizeScopes(tokens.scope || scopesText);
+
+    await run('BEGIN TRANSACTION');
+    try {
+      let account = await get(
+        'SELECT id FROM connected_accounts WHERE userId=? AND provider=? AND providerAccountId=?',
+        [userId, normalizedProvider, normalizedAccountId],
+      );
+      let accountId = account?.id;
+      if (accountId) {
+        await run(
+          `UPDATE connected_accounts
+           SET email=?, displayName=?, scopes=?, status='connected', connectedAt=?, disconnectedAt=NULL, lastError='', updatedAt=?
+           WHERE id=?`,
+          [normalizedEmail, normalizeOptionalText(displayName, 255), scopesText, now, now, accountId],
+        );
+      } else {
+        accountId = genId('CA');
+        await run(
+          `INSERT INTO connected_accounts
+           (id,userId,provider,providerAccountId,email,displayName,scopes,status,connectedAt,disconnectedAt,lastSyncAt,lastError,createdAt,updatedAt)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [accountId, userId, normalizedProvider, normalizedAccountId, normalizedEmail, normalizeOptionalText(displayName, 255), scopesText, 'connected', now, null, null, '', now, now],
+        );
+      }
+
+      const tokenRow = await get('SELECT id FROM connected_account_tokens WHERE connectedAccountId=?', [accountId]);
+      if (tokenRow) {
+        await run(
+          `UPDATE connected_account_tokens
+           SET accessTokenEncrypted=?, refreshTokenEncrypted=?, tokenType=?, expiresAt=?, scope=?, updatedAt=?
+           WHERE id=?`,
+          [encryptedAccessToken, encryptedRefreshToken, tokenType, expiresAt, tokenScope, now, tokenRow.id],
+        );
+      } else {
+        await run(
+          `INSERT INTO connected_account_tokens
+           (id,connectedAccountId,accessTokenEncrypted,refreshTokenEncrypted,tokenType,expiresAt,scope,createdAt,updatedAt)
+           VALUES (?,?,?,?,?,?,?,?,?)`,
+          [genId('CAT'), accountId, encryptedAccessToken, encryptedRefreshToken, tokenType, expiresAt, tokenScope, now, now],
+        );
+      }
+
+      await run('COMMIT');
+      const saved = await get(
+        `SELECT id, provider, providerAccountId, email, displayName, scopes, status, connectedAt, disconnectedAt, lastSyncAt, lastError, createdAt, updatedAt
+         FROM connected_accounts WHERE id=?`,
+        [accountId],
+      );
+      return { ok: true, account: publicConnectedAccount(saved) };
+    } catch (err) {
+      await run('ROLLBACK').catch(() => {});
+      return { ok: false, error: 'connected_account_store_failed', message: 'Connected account could not be stored.' };
+    }
+  }
+
+  async function disconnectConnectedAccount(userId, connectedAccountId) {
+    const existing = await get('SELECT id, userId, status FROM connected_accounts WHERE id=?', [connectedAccountId]);
+    if (!existing || existing.userId !== userId) {
+      return { ok: false, error: 'not_found', message: 'Connected account not found.' };
+    }
+    const now = new Date().toISOString();
+    if (existing.status !== 'disconnected') {
+      await run(
+        "UPDATE connected_accounts SET status='disconnected', disconnectedAt=?, updatedAt=? WHERE id=?",
+        [now, now, connectedAccountId],
+      );
+    }
+    const updated = await get(
+      `SELECT id, provider, providerAccountId, email, displayName, scopes, status, connectedAt, disconnectedAt, lastSyncAt, lastError, createdAt, updatedAt
+       FROM connected_accounts WHERE id=?`,
+      [connectedAccountId],
+    );
+    return { ok: true, account: publicConnectedAccount(updated) };
+  }
+
+  return {
+    validateExistingStaffUser,
+    completeOAuthLogin,
+    unlinkOAuthAccount,
+    getLinkedAccounts,
+    getConnectedAccounts,
+    upsertConnectedAccount,
+    disconnectConnectedAccount,
+  };
 }
 
 module.exports = createOAuth;

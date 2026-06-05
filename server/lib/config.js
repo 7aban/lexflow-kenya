@@ -117,6 +117,23 @@ const BACKUP_KEY = (() => {
   return Buffer.from(key, 'hex');
 })();
 
+const CONNECTED_ACCOUNTS_TOKEN_KEY = (() => {
+  const key = process.env.CONNECTED_ACCOUNTS_TOKEN_KEY;
+  if (!key) {
+    if (isTest) {
+      return Buffer.from('0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'hex');
+    }
+    return null;
+  }
+  if (!/^[0-9a-fA-F]{64}$/.test(key)) {
+    if (isProduction) {
+      throw new Error('CONNECTED_ACCOUNTS_TOKEN_KEY must be 64 hex characters (32 bytes)');
+    }
+    return null;
+  }
+  return Buffer.from(key, 'hex');
+})();
+
 // Base URL for invitations/reminders
 const BASE_URL = process.env.BASE_URL || (isProduction ? '' : 'http://localhost:5000');
 
@@ -206,6 +223,7 @@ module.exports = {
   BACKUP_LOG,
   BACKUP_RETENTION_COUNT,
   BACKUP_KEY,
+  CONNECTED_ACCOUNTS_TOKEN_KEY,
   BASE_URL,
   SEED_ADMIN_EMAIL,
   SEED_ADMIN_PASSWORD,

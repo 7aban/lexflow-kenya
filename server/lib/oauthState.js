@@ -24,13 +24,29 @@ function safeEqualHex(left, right) {
   return crypto.timingSafeEqual(Buffer.from(left), Buffer.from(right));
 }
 
-function signState(provider) {
+function encodeContext(context) {
+  if (!context || typeof context !== 'object') return '';
+  return Buffer.from(JSON.stringify(context)).toString('base64url');
+}
+
+function decodeContext(encoded) {
+  if (!encoded) return {};
+  try {
+    const parsed = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return null;
+  }
+}
+
+function signState(provider, context = null) {
   if (!config.OAUTH_STATE_SECRET) {
     throw new Error('OAUTH_STATE_SECRET is required for OAuth state signing');
   }
   const nonce = crypto.randomBytes(16).toString('hex');
   const expiry = Date.now() + STATE_TTL_MS;
-  const payload = `${provider}:${nonce}:${expiry}`;
+  const encodedContext = encodeContext(context);
+  const payload = encodedContext ? `${provider}:${nonce}:${expiry}:${encodedContext}` : `${provider}:${nonce}:${expiry}`;
   const hmac = crypto.createHmac('sha256', config.OAUTH_STATE_SECRET).update(payload).digest('hex');
   return `${payload}:${hmac}`;
 }
@@ -41,17 +57,21 @@ function verifyState(state, expectedProvider) {
     return { valid: false, error: 'OAuth state verification not configured' };
   }
   const parts = state.split(':');
-  if (parts.length !== 4) return { valid: false, error: 'Invalid state format' };
-  const [provider, nonce, expiryStr, hmac] = parts;
+  if (parts.length !== 4 && parts.length !== 5) return { valid: false, error: 'Invalid state format' };
+  const [provider, nonce, expiryStr] = parts;
+  const encodedContext = parts.length === 5 ? parts[3] : '';
+  const hmac = parts[parts.length - 1];
   if (provider !== expectedProvider) return { valid: false, error: 'Provider mismatch in state' };
   const expiry = parseInt(expiryStr, 10);
   const now = Date.now();
   if (isNaN(expiry) || now > expiry) return { valid: false, error: 'State has expired' };
-  const payload = `${provider}:${nonce}:${expiryStr}`;
+  const context = decodeContext(encodedContext);
+  if (context === null) return { valid: false, error: 'Invalid state context' };
+  const payload = encodedContext ? `${provider}:${nonce}:${expiryStr}:${encodedContext}` : `${provider}:${nonce}:${expiryStr}`;
   const expectedHmac = crypto.createHmac('sha256', config.OAUTH_STATE_SECRET).update(payload).digest('hex');
   if (!safeEqualHex(hmac, expectedHmac)) return { valid: false, error: 'State signature verification failed' };
   if (!consumeStateNonce(provider, nonce, expiry, now)) return { valid: false, error: 'State has already been used' };
-  return { valid: true, nonce };
+  return { valid: true, nonce, context };
 }
 
 module.exports = { signState, verifyState };
