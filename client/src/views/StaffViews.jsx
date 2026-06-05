@@ -591,6 +591,82 @@ export function Dashboard({ data, user, onNavigate }) {
   const inProgressTasks = data.tasks.filter(t => !t.completed).length;
   const totalBilled = paid + outstanding;
 
+  // PRODUCT-18B: read-only Practice assistant. Derives workflow prompts entirely from data already
+  // loaded into the Dashboard (matters/tasks/invoices/upcomingEvents) — no fetch, no mutation. Money
+  // figures use server-provided invoice balance only and exclude billing-masked (balance === null)
+  // rows. Wording is workflow-oriented (Review/Confirm/Follow up), never legal advice. Actions are
+  // navigation-only via onNavigate.
+  const practiceAssistant = useMemo(() => {
+    const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+    const invoices = Array.isArray(data.invoices) ? data.invoices : [];
+    const events = Array.isArray(data.dashboard?.upcomingEvents) ? data.dashboard.upcomingEvents : [];
+    const items = [];
+    const sevRank = { high: 0, medium: 1, low: 2 };
+    const openTasks = tasks.filter(t => !t.completed).map(t => ({ ...t, daysAway: daysFromToday(t.dueDate) }));
+
+    // A. Overdue open tasks.
+    const overdueTasks = openTasks
+      .filter(t => Number.isFinite(t.daysAway) && t.daysAway < 0)
+      .sort((a, b) => a.daysAway - b.daysAway);
+    if (overdueTasks.length) {
+      const oldest = overdueTasks[0];
+      items.push({
+        key: 'overdue-tasks', severity: 'high', rank: 1,
+        label: `Review ${overdueTasks.length} overdue task${overdueTasks.length === 1 ? '' : 's'}`,
+        detail: [oldest.title || oldest.description || 'Open task', formatDayDistance(oldest.daysAway)].filter(Boolean).join(' · '),
+        nav: 'Tasks', btn: 'View tasks',
+      });
+    }
+
+    // B. Open tasks due within 3 days (not overdue).
+    const dueSoonTasks = openTasks
+      .filter(t => Number.isFinite(t.daysAway) && t.daysAway >= 0 && t.daysAway <= 3)
+      .sort((a, b) => a.daysAway - b.daysAway);
+    if (dueSoonTasks.length) {
+      const nearest = dueSoonTasks[0];
+      items.push({
+        key: 'due-soon-tasks', severity: 'medium', rank: 5,
+        label: `Confirm ${dueSoonTasks.length} task${dueSoonTasks.length === 1 ? '' : 's'} due within 3 days`,
+        detail: [nearest.title || nearest.description || 'Open task', formatDayDistance(nearest.daysAway)].filter(Boolean).join(' · '),
+        nav: 'Tasks', btn: 'View tasks',
+      });
+    }
+
+    // C. Court appearances within 7 days (upcomingEvents is already the next appearances, date>=today).
+    const soonEvents = events
+      .map(e => ({ ...e, daysAway: daysFromToday(e.date) }))
+      .filter(e => Number.isFinite(e.daysAway) && e.daysAway >= 0 && e.daysAway <= 7)
+      .sort((a, b) => a.daysAway - b.daysAway);
+    if (soonEvents.length) {
+      const nearest = soonEvents[0];
+      const urgent = nearest.daysAway <= 2;
+      items.push({
+        key: 'court-soon', severity: urgent ? 'high' : 'medium', rank: urgent ? 2 : 6,
+        label: `Review ${soonEvents.length} court appearance${soonEvents.length === 1 ? '' : 's'} within 7 days`,
+        detail: [nearest.title || nearest.type || 'Court appearance', formatDayDistance(nearest.daysAway), nearest.matterTitle || nearest.reference || null].filter(Boolean).join(' · '),
+        nav: 'Deadlines', btn: 'Court diary',
+      });
+    }
+
+    // D. Overdue invoices (derived overdue). Exclude billing-masked balances from money figures.
+    const overdueInvoices = invoices.filter(i => i.status !== 'Paid' && (i.status === 'Overdue' || isInvoiceOverdue(i)));
+    if (overdueInvoices.length) {
+      const maskedCount = overdueInvoices.filter(i => i.balance == null).length;
+      const visibleBalance = overdueInvoices.reduce((sum, i) => i.balance == null ? sum : sum + Number(i.balance || 0), 0);
+      const moneyText = overdueInvoices.length - maskedCount > 0 ? `${kes(visibleBalance)} outstanding` : null;
+      const maskedText = maskedCount > 0 ? `${maskedCount} hidden by billing visibility` : null;
+      items.push({
+        key: 'overdue-invoices', severity: 'medium', rank: 7,
+        label: `Follow up ${overdueInvoices.length} overdue invoice${overdueInvoices.length === 1 ? '' : 's'}`,
+        detail: [moneyText, maskedText].filter(Boolean).join(' · ') || 'Review status in the invoice register',
+        nav: 'Invoices', btn: 'View invoices',
+      });
+    }
+
+    items.sort((a, b) => (sevRank[a.severity] - sevRank[b.severity]) || (a.rank - b.rank));
+    return items.slice(0, 6);
+  }, [data.matters, data.tasks, data.invoices, data.dashboard]);
+
   const [alertDismissed, setAlertDismissed] = useState(false);
   const showAlert = overdueCount > 0 && !alertDismissed;
 
@@ -783,6 +859,31 @@ export function Dashboard({ data, user, onNavigate }) {
             <div style={styles.dashPanelEmpty}>No upcoming court dates.</div>
           )}
         </div>
+      </DashboardPanel>
+
+      <DashboardPanel
+        title="Practice assistant"
+        subtitle="Workflow prompts from today's matters, tasks and invoices"
+        fullWidth
+      >
+        {practiceAssistant.length ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {practiceAssistant.map(item => (
+              <div key={item.key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: '#F9FAFB', border: '1px solid #E5E7EB', borderRadius: 8, flexWrap: 'wrap' }}>
+                <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 999, flexShrink: 0, background: item.severity === 'high' ? '#991B1B' : item.severity === 'medium' ? '#92400E' : '#697386' }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>{item.label}</div>
+                  {item.detail ? <div style={{ fontSize: 12, color: '#697386', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.detail}</div> : null}
+                </div>
+                {item.nav ? (
+                  <button type="button" style={{ ...styles.ghostButton, fontSize: 12, padding: '4px 10px', whiteSpace: 'nowrap', flexShrink: 0 }} onClick={() => onNavigate?.(item.nav)}>{item.btn}</button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={styles.dashPanelEmpty}>No urgent practice items today.</div>
+        )}
       </DashboardPanel>
     </div>
   );
