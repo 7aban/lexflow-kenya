@@ -32,7 +32,7 @@ const defaultReminderTemplates = [
 async function createSchema() {
   const tables = [
     'audit_logs', 'notifications', 'payment_proofs', 'payments', 'receipt_sequences', 'expenses', 'disbursements', 'invoice_items', 'invoices',
-    'messages', 'conversations', 'client_activity', 'case_notes', 'documents', 'folders', 'appearances', 'time_entries', 'tasks', 'deadlines', 'document_templates', 'checklist_template_items', 'checklist_templates', 'matter_checklist_items', 'matters', 'clients',
+    'messages', 'conversations', 'client_activity', 'case_notes', 'documents', 'folders', 'appearances', 'time_entries', 'tasks', 'deadlines', 'document_templates', 'checklist_template_items', 'checklist_templates', 'matter_checklist_items', 'document_requests', 'matters', 'clients',
     'users', 'integrations_log', 'firm_settings', 'reminder_settings', 'reminder_templates', 'reminder_logs',
     'firm_notices', 'invitations',
   ];
@@ -46,15 +46,16 @@ async function createSchema() {
   await run(`CREATE TABLE checklist_templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, practiceArea TEXT, active INTEGER DEFAULT 1, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
   await run(`CREATE TABLE checklist_template_items (id TEXT PRIMARY KEY, templateId TEXT NOT NULL, title TEXT NOT NULL, notes TEXT, position INTEGER DEFAULT 0, createdAt TEXT NOT NULL)`);
   await run(`CREATE TABLE document_templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, practiceArea TEXT, category TEXT, bodyMarkup TEXT, active INTEGER DEFAULT 1, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
+  await run(`CREATE TABLE document_requests (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, clientId TEXT NOT NULL, staffUserId TEXT NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', createdAt TEXT NOT NULL, respondedAt TEXT, responseDocumentId TEXT, cancelledAt TEXT, cancelledBy TEXT)`);
   await run(`CREATE TABLE tasks (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT NOT NULL, completed INTEGER DEFAULT 0, assignee TEXT, dueDate TEXT, auto_generated INTEGER DEFAULT 0)`);
   await run(`CREATE TABLE time_entries (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, taskId TEXT, attorney TEXT, date TEXT, hours REAL DEFAULT 0, activity TEXT, description TEXT, rate REAL DEFAULT 0, billed INTEGER DEFAULT 0)`);
   await run(`CREATE TABLE appearances (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT, date TEXT, time TEXT, type TEXT, location TEXT, meetingLink TEXT, attorney TEXT, prepNote TEXT)`);
   await run(`CREATE TABLE folders (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT NOT NULL, createdBy TEXT, createdAt TEXT)`);
-  await run(`CREATE TABLE documents (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT, displayName TEXT, type TEXT, mimeType TEXT, date TEXT, size TEXT, content BLOB, source TEXT DEFAULT 'firm', folderId TEXT, messageId TEXT, noticeId TEXT, clientVisible INTEGER DEFAULT 0, uploadedBy TEXT, deletedAt TEXT)`);
+  await run(`CREATE TABLE documents (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT, displayName TEXT, type TEXT, mimeType TEXT, date TEXT, size TEXT, content BLOB, source TEXT DEFAULT 'firm', folderId TEXT, messageId TEXT, noticeId TEXT, clientVisible INTEGER DEFAULT 0, uploadedBy TEXT, deletedAt TEXT, templateId TEXT, templateName TEXT, generatedBy TEXT, generatedAt TEXT, version INTEGER DEFAULT 1)`);
   await run(`CREATE TABLE case_notes (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, content TEXT NOT NULL, author TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE invoices (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, clientId TEXT, number TEXT, date TEXT, amount REAL DEFAULT 0, status TEXT DEFAULT 'Outstanding', dueDate TEXT, description TEXT, source TEXT DEFAULT 'time')`);
   await run(`CREATE TABLE invoice_items (id TEXT PRIMARY KEY, invoiceId TEXT NOT NULL, timeEntryId TEXT, date TEXT, description TEXT, hours REAL DEFAULT 0, rate REAL DEFAULT 0, amount REAL DEFAULT 0)`);
-  await run(`CREATE TABLE payments (id TEXT PRIMARY KEY, invoiceId TEXT NOT NULL, matterId TEXT NOT NULL, clientId TEXT NOT NULL, amount REAL NOT NULL, method TEXT, reference TEXT, date TEXT NOT NULL, note TEXT, proofId TEXT, createdBy TEXT, createdAt TEXT NOT NULL, receiptNumber TEXT, receiptIssuedAt TEXT)`);
+  await run(`CREATE TABLE payments (id TEXT PRIMARY KEY, invoiceId TEXT NOT NULL, matterId TEXT NOT NULL, clientId TEXT NOT NULL, amount REAL NOT NULL, method TEXT, reference TEXT, date TEXT NOT NULL, note TEXT, proofId TEXT, createdBy TEXT, createdAt TEXT NOT NULL, receiptNumber TEXT, receiptIssuedAt TEXT, voidedAt TEXT, voidedBy TEXT, voidReason TEXT)`);
   await run(`CREATE TABLE receipt_sequences (year TEXT PRIMARY KEY, lastSeq INTEGER NOT NULL DEFAULT 0)`);
   await run(`CREATE TABLE disbursements (id TEXT PRIMARY KEY, matterId TEXT, invoiceId TEXT, description TEXT, amount REAL DEFAULT 0, date TEXT, billed INTEGER DEFAULT 0)`);
   await run(`CREATE TABLE expenses (id TEXT PRIMARY KEY, matterId TEXT, category TEXT, description TEXT, amount REAL DEFAULT 0, date TEXT, vendor TEXT)`);
@@ -68,7 +69,7 @@ async function createSchema() {
   await run(`CREATE TABLE messages (id TEXT PRIMARY KEY, conversationId TEXT NOT NULL, senderId TEXT, senderRole TEXT, body TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE client_activity (id TEXT PRIMARY KEY, clientId TEXT, matterId TEXT, userId TEXT, action TEXT, summary TEXT, entityType TEXT, entityId TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE deadlines (id TEXT PRIMARY KEY, matterId TEXT, clientId TEXT, title TEXT NOT NULL, type TEXT DEFAULT 'internal', dueDate TEXT NOT NULL, owner TEXT, status TEXT DEFAULT 'Open', notes TEXT, createdBy TEXT, createdAt TEXT)`);
-  await run(`CREATE TABLE payment_proofs (id TEXT PRIMARY KEY, invoiceId TEXT, matterId TEXT, clientId TEXT, method TEXT, reference TEXT, amount REAL DEFAULT 0, note TEXT, fileName TEXT, mimeType TEXT, size TEXT, content BLOB, createdAt TEXT)`);
+  await run(`CREATE TABLE payment_proofs (id TEXT PRIMARY KEY, invoiceId TEXT, matterId TEXT, clientId TEXT, method TEXT, reference TEXT, amount REAL DEFAULT 0, note TEXT, fileName TEXT, mimeType TEXT, size TEXT, content BLOB, createdAt TEXT, status TEXT DEFAULT 'Pending', reviewedBy TEXT, reviewedAt TEXT, reviewNote TEXT, paymentId TEXT)`);
   await run(`CREATE TABLE invitations (id TEXT PRIMARY KEY, email TEXT NOT NULL, clientId TEXT, token TEXT UNIQUE NOT NULL, status TEXT DEFAULT 'pending', createdBy TEXT, createdAt TEXT, expiresAt TEXT)`);
   await run(`CREATE TABLE audit_logs (id TEXT PRIMARY KEY, userId TEXT, userName TEXT, role TEXT, action TEXT, entityType TEXT, entityId TEXT, summary TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE notifications (id TEXT PRIMARY KEY, userId TEXT NOT NULL, type TEXT, matterId TEXT, clientId TEXT, title TEXT, body TEXT, createdAt TEXT, readAt TEXT)`);
@@ -387,6 +388,29 @@ async function main() {
       const fileName = `${source === 'firm' ? 'Draft pleading' : 'Client ID'} ${i + 1}.${j === 0 ? 'pdf' : 'png'}`;
       await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [id('DOC'), matter.id, fileName, fileName, j === 0 ? 'PDF' : 'Image', j === 0 ? 'application/pdf' : 'image/png', daysAgo(i * 9 + j), `${18 + i + j} KB`, Buffer.from(`Demo document ${i}-${j}`), source, source === 'firm' ? pleadings : clientUploads, '', '', source === 'firm' && i % 2 === 0 ? 1 : 0, source === 'firm' ? admin.id : clients[i % clients.length].id]);
+    }
+  }
+
+  const requestTimes = [nowIso(), daysAgo(3), daysAgo(5)];
+  const staffUserIds = [admin.id, advocates[0].id, advocates[1].id];
+  const requestMatters = [matters[0], matters[1], matters[2]];
+  const requestTitles = ['Signed Affidavit', 'Signed Board Resolution', 'Proof of Payment'];
+  const requestDescriptions = ['Please upload a signed affidavit for the estate matter.', 'We need a signed board resolution authorising the lease terms.', 'Provide proof of payment for the county supplier debt.'];
+  for (let i = 0; i < 3; i += 1) {
+    const reqId = id('DR');
+    const status = i === 0 ? 'pending' : i === 1 ? 'fulfilled' : 'cancelled';
+    const reqMatter = requestMatters[i];
+    await run('INSERT INTO document_requests (id,matterId,clientId,staffUserId,title,description,status,createdAt,respondedAt,responseDocumentId,cancelledAt,cancelledBy) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+      [reqId, reqMatter.id, reqMatter.clientId, staffUserIds[i], requestTitles[i], requestDescriptions[i], status, requestTimes[i],
+       status === 'fulfilled' ? requestTimes[i] : null,
+       status === 'fulfilled' ? id('DOC') : null,
+       status === 'cancelled' ? requestTimes[i] : null,
+       status === 'cancelled' ? staffUserIds[i] : null]);
+    if (status === 'fulfilled') {
+      const docId = id('DOC');
+      await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [docId, reqMatter.id, 'signed-board-resolution.pdf', 'Signed Board Resolution.pdf', 'PDF', 'application/pdf', daysAgo(3), '24 KB', Buffer.from('Demo board resolution response'), 'client', '', '', '', 0, clients[1].userId]);
+      await run('UPDATE document_requests SET responseDocumentId=? WHERE id=?', [docId, reqId]);
     }
   }
 

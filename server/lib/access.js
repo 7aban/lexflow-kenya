@@ -102,6 +102,19 @@ module.exports = ({ get, all }) => {
     return true; // admin/assistant
   };
 
+  const canAccessDocumentRequest = async (req, request) => {
+    if (!request) return false;
+    if (req.user?.role === 'admin' || req.user?.role === 'assistant') return true;
+    if (req.user?.role === 'advocate') {
+      const matter = await get('SELECT id FROM matters WHERE id=? AND assignedTo=?', [request.matterId || '', req.user.fullName || '']);
+      return Boolean(matter);
+    }
+    if (req.user?.role === 'client') {
+      return request.clientId === req.user.clientId;
+    }
+    return false;
+  };
+
   const isBillingVisibleFor = async (req) => {
     if (req.user?.role !== 'advocate') return true;
     const row = await get('SELECT advocateBillingVisibility FROM firm_settings LIMIT 1');
@@ -118,6 +131,7 @@ module.exports = ({ get, all }) => {
     canAccessTask,
     canAccessAppearance,
     canAccessTimeEntry,
+    canAccessDocumentRequest,
     isBillingVisibleFor,
   };
 };

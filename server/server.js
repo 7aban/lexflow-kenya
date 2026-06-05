@@ -36,7 +36,7 @@ const { buildTemplateMergeContext, mergeTemplateMarkup } = require('./lib/templa
 const app = express();
 const db = new sqlite3.Database(config.DATABASE_PATH);
 const { run, get, all } = createDb(db);
-const { canAccessMatter, canAccessClient, canAccessInvoice, canAccessTask, canAccessTimeEntry, canAccessAppearance, canAccessNotice, canAccessConversation, canAccessDocument, isBillingVisibleFor } = createAccess({ get });
+const { canAccessMatter, canAccessClient, canAccessInvoice, canAccessTask, canAccessTimeEntry, canAccessAppearance, canAccessNotice, canAccessConversation, canAccessDocument, canAccessDocumentRequest, isBillingVisibleFor } = createAccess({ get });
 const { logClientActivity, logAudit } = createLogging({ run });
 const { notifyStaff } = createNotifications({ run, all, genId });
 const { appBaseUrl, invitationUrl, checkInvitationRateLimit } = createInvitations();
@@ -214,6 +214,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS checklist_templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, practiceArea TEXT, active INTEGER DEFAULT 1, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS checklist_template_items (id TEXT PRIMARY KEY, templateId TEXT NOT NULL, title TEXT NOT NULL, notes TEXT, position INTEGER DEFAULT 0, createdAt TEXT NOT NULL)`);
   await run(`CREATE TABLE IF NOT EXISTS document_templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, practiceArea TEXT, category TEXT, bodyMarkup TEXT, active INTEGER DEFAULT 1, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS document_requests (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, clientId TEXT NOT NULL, staffUserId TEXT NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', createdAt TEXT NOT NULL, respondedAt TEXT, responseDocumentId TEXT, cancelledAt TEXT, cancelledBy TEXT)`);
 
   await ensureClientUserSupport();
   await ensureColumn('matter_checklist_items', 'dueDate', 'TEXT');
@@ -280,6 +281,11 @@ async function initDb() {
   await ensureColumn('payment_proofs', 'reviewNote', 'TEXT');
   await ensureColumn('payment_proofs', 'paymentId', 'TEXT');
   await run("UPDATE payment_proofs SET status='Pending' WHERE status IS NULL OR status=''");
+  await ensureColumn('document_requests', 'description', 'TEXT');
+  await ensureColumn('document_requests', 'respondedAt', 'TEXT');
+  await ensureColumn('document_requests', 'responseDocumentId', 'TEXT');
+  await ensureColumn('document_requests', 'cancelledAt', 'TEXT');
+  await ensureColumn('document_requests', 'cancelledBy', 'TEXT');
   await run(`CREATE TABLE IF NOT EXISTS receipt_sequences (year TEXT PRIMARY KEY, lastSeq INTEGER NOT NULL DEFAULT 0)`);
   await run('CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_receiptNumber ON payments(receiptNumber) WHERE receiptNumber IS NOT NULL AND receiptNumber<>""');
   await run('CREATE INDEX IF NOT EXISTS idx_audit_events_timestamp ON audit_events(timestamp)');
@@ -317,6 +323,9 @@ async function initDb() {
   await run('CREATE INDEX IF NOT EXISTS idx_payments_clientId_date_createdAt ON payments(clientId, date, createdAt)');
   await run('CREATE INDEX IF NOT EXISTS idx_payment_proofs_status_createdAt ON payment_proofs(status, createdAt)');
   await run('CREATE INDEX IF NOT EXISTS idx_payment_proofs_matterId ON payment_proofs(matterId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_document_requests_matterId ON document_requests(matterId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_document_requests_clientId ON document_requests(clientId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_document_requests_status ON document_requests(status)');
   await backfillSeededReceiptNumbers();
   await seedReminderTemplates();
 
@@ -2530,6 +2539,108 @@ app.delete('/api/appearances/:id', requireAdvocateOrAdmin, async (req, res) => {
   await logAudit(req, 'delete', 'appearance', req.params.id, `Deleted appearance ${event?.title || event?.type || req.params.id}`);
   await recordAuditEvent(req, { action: 'appearance_deleted', entityType: 'appearance', entityId: req.params.id, metadata: { title: event?.title || '', type: event?.type || '' } }).catch(() => {});
   res.json({ id: req.params.id, deleted: true });
+});
+
+// Document request endpoints
+app.post('/api/document-requests', requireStaff, async (req, res) => {
+  const { matterId, title, description } = req.body;
+  if (!matterId) return res.status(400).json({ error: 'matterId is required' });
+  if (!title || !title.trim()) return res.status(400).json({ error: 'title is required' });
+  const matter = await get('SELECT id, clientId FROM matters WHERE id=?', [matterId]);
+  if (!matter) return res.status(404).json({ error: 'Matter not found' });
+  if (!(await canAccessMatter(req, matterId))) {
+    await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: matterId, metadata: { reason: 'insufficient permissions', route: 'document_request_create' } }).catch(() => {});
+    return res.status(403).json({ error: 'Matter access denied' });
+  }
+  const id = genId('DR');
+  const now = new Date().toISOString();
+  await run('INSERT INTO document_requests (id,matterId,clientId,staffUserId,title,description,status,createdAt) VALUES (?,?,?,?,?,?,?,?)',
+    [id, matterId, matter.clientId, req.user.userId || '', title.trim(), (description || '').trim(), 'pending', now]);
+  const request = await get('SELECT * FROM document_requests WHERE id=?', [id]);
+  await recordAuditEvent(req, { action: 'document_requested', entityType: 'document_request', entityId: id, matterId, clientId: matter.clientId, metadata: { title: title.trim(), matterId } }).catch(() => {});
+  res.json(request);
+});
+
+app.get('/api/document-requests', requireStaff, async (req, res) => {
+  const { matterId } = req.query;
+  if (matterId) {
+    if (!(await canAccessMatter(req, matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: matterId, metadata: { reason: 'insufficient permissions', route: 'document_request_list' } }).catch(() => {});
+      return res.status(403).json({ error: 'Matter access denied' });
+    }
+    const rows = await all(`SELECT dr.*, d.name responseDocumentName, d.displayName responseDocumentDisplayName, d.mimeType responseDocumentMimeType, d.size responseDocumentSize, d.date responseDocumentDate
+      FROM document_requests dr LEFT JOIN documents d ON d.id=dr.responseDocumentId AND d.matterId=dr.matterId AND d.deletedAt IS NULL WHERE dr.matterId=? ORDER BY dr.createdAt DESC`, [matterId]);
+    return res.json(rows);
+  }
+  if (req.user.role === 'advocate') {
+    const rows = await all(`SELECT dr.*, d.name responseDocumentName, d.displayName responseDocumentDisplayName, d.mimeType responseDocumentMimeType, d.size responseDocumentSize, d.date responseDocumentDate
+      FROM document_requests dr LEFT JOIN documents d ON d.id=dr.responseDocumentId AND d.matterId=dr.matterId AND d.deletedAt IS NULL JOIN matters m ON m.id=dr.matterId WHERE m.assignedTo=? ORDER BY dr.createdAt DESC`, [req.user.fullName || '']);
+    return res.json(rows);
+  }
+  const rows = await all(`SELECT dr.*, d.name responseDocumentName, d.displayName responseDocumentDisplayName, d.mimeType responseDocumentMimeType, d.size responseDocumentSize, d.date responseDocumentDate
+    FROM document_requests dr LEFT JOIN documents d ON d.id=dr.responseDocumentId AND d.matterId=dr.matterId AND d.deletedAt IS NULL ORDER BY dr.createdAt DESC`);
+  res.json(rows);
+});
+
+app.get('/api/client/document-requests', async (req, res) => {
+  if (req.user.role !== 'client') return res.status(403).json({ error: 'Client access required' });
+  const clientId = req.user.clientId || '';
+  const rows = await all(`SELECT dr.*, m.title matterTitle, d.name responseDocumentName, d.displayName responseDocumentDisplayName, d.mimeType responseDocumentMimeType, d.size responseDocumentSize, d.date responseDocumentDate
+    FROM document_requests dr LEFT JOIN matters m ON m.id=dr.matterId LEFT JOIN documents d ON d.id=dr.responseDocumentId AND d.matterId=dr.matterId AND d.deletedAt IS NULL WHERE dr.clientId=? AND dr.status IN ('pending','fulfilled') ORDER BY dr.createdAt DESC`, [clientId]);
+  res.json(rows);
+});
+
+app.post('/api/document-requests/:id/respond', async (req, res) => {
+  if (req.user.role !== 'client') return res.status(403).json({ error: 'Client access required' });
+  const request = await get('SELECT * FROM document_requests WHERE id=?', [req.params.id]);
+  if (!request) return res.status(404).json({ error: 'Document request not found' });
+  if (request.status !== 'pending') return res.status(400).json({ error: 'Document request is not pending' });
+  if (request.clientId !== req.user.clientId) {
+    await recordAuditEvent(req, { action: 'forbidden_document_request_access', entityType: 'document_request', entityId: req.params.id, metadata: { reason: 'client mismatch' } }).catch(() => {});
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  const { name, mimeType, data } = req.body;
+  if (!name || !data) return res.status(400).json({ error: 'name and data are required' });
+  const allowed = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+  const imageAllowed = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+  if (![...allowed, ...imageAllowed].includes(mimeType)) return res.status(400).json({ error: 'Only PDF, Word and image documents are supported' });
+  const docId = genId('DOC');
+  const buffer = Buffer.from(String(data).split(',').pop(), 'base64');
+  const cleanName = cleanDocumentName(name);
+  const cleanDisplayName = cleanDocumentName(name);
+  const type = imageAllowed.includes(mimeType) ? 'Image' : mimeType.includes('pdf') ? 'PDF' : 'Word';
+  const folder = await clientUploadsFolder(request.matterId, req.user.userId || '');
+  await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [docId, request.matterId, cleanName, cleanDisplayName, type, mimeType, today(), `${Math.max(1, Math.round(buffer.length / 1024))} KB`, buffer, 'client', folder.id, null, null, 0, req.user.userId || '']);
+  const now = new Date().toISOString();
+  await run('UPDATE document_requests SET status=?, respondedAt=?, responseDocumentId=? WHERE id=?', ['fulfilled', now, docId, req.params.id]);
+  const updated = await get('SELECT * FROM document_requests WHERE id=?', [req.params.id]);
+  await recordAuditEvent(req, { action: 'document_request_responded', entityType: 'document_request', entityId: req.params.id, matterId: request.matterId, clientId: req.user.clientId || '', metadata: { requestTitle: request.title, responseDocumentId: docId } }).catch(() => {});
+  await recordAuditEvent(req, { action: 'document_uploaded', entityType: 'document', entityId: docId, matterId: request.matterId, clientId: req.user.clientId || '', metadata: { filename: cleanName, context: 'document_request_response', route: 'document_request_response' } }).catch(() => {});
+  await logAudit(req, 'upload', 'document', docId, `Uploaded document ${cleanName} in response to request ${request.title}`);
+  const matter = await get('SELECT m.title, m.reference, c.id clientId, c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.id=?', [request.matterId]);
+  await notifyStaff('client_document', request.matterId, 'Client responded to document request', `${matter?.clientName || req.user.fullName || 'Client'} uploaded ${cleanName} for "${request.title}" on ${matter?.title || 'a matter'}.`, matter?.clientId || req.user.clientId || '');
+  await logClientActivity({ clientId: req.user.clientId || '', matterId: request.matterId, userId: req.user.userId || '', action: 'responded_document_request', summary: `Uploaded ${cleanName} for "${request.title}"`, entityType: 'document', entityId: docId });
+  const responseDoc = await get(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=? AND d.matterId=? AND d.deletedAt IS NULL`, [docId, request.matterId]);
+  res.json({ ...updated, responseDocument: responseDoc ? publicDocument(responseDoc) : null });
+});
+
+app.patch('/api/document-requests/:id', requireStaff, async (req, res) => {
+  const request = await get('SELECT * FROM document_requests WHERE id=?', [req.params.id]);
+  if (!request) return res.status(404).json({ error: 'Document request not found' });
+  if (!(await canAccessDocumentRequest(req, request))) {
+    await recordAuditEvent(req, { action: 'forbidden_document_request_access', entityType: 'document_request', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  if (req.body.status === 'cancelled') {
+    if (request.status !== 'pending') return res.status(400).json({ error: 'Only pending requests can be cancelled' });
+    const now = new Date().toISOString();
+    await run('UPDATE document_requests SET status=?, cancelledAt=?, cancelledBy=? WHERE id=?', ['cancelled', now, req.user.userId || '', req.params.id]);
+    const updated = await get('SELECT * FROM document_requests WHERE id=?', [req.params.id]);
+    await recordAuditEvent(req, { action: 'document_request_cancelled', entityType: 'document_request', entityId: req.params.id, matterId: request.matterId, clientId: request.clientId, metadata: { title: request.title } }).catch(() => {});
+    return res.json(updated);
+  }
+  return res.status(400).json({ error: 'Only status=cancelled is supported' });
 });
 
 app.get('/api/matters/:id/folders', async (req, res) => {

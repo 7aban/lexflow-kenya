@@ -1045,6 +1045,102 @@ function NoticeItem({ notice, notify }) {
   );
 }
 
+function ClientDocumentRequests({ matters, notify }) {
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(null);
+  const fileInputRef = useRef(null);
+  const [pendingRequestId, setPendingRequestId] = useState(null);
+
+  async function loadRequests() {
+    setLoading(true);
+    try {
+      const data = await api('/api/client/document-requests');
+      setRequests(Array.isArray(data) ? data : []);
+    } catch (err) { notify?.({ type: 'danger', message: err.message }); }
+    finally { setLoading(false); }
+  }
+
+  useEffect(() => { loadRequests(); }, []);
+
+  async function handleUpload(requestId, event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setUploading(requestId);
+    try {
+      await api(`/api/document-requests/${requestId}/respond`, {
+        method: 'POST',
+        body: { name: file.name, mimeType: file.type || 'application/octet-stream', data: await fileToDataUrl(file) },
+      });
+      notify({ type: 'success', message: 'Document uploaded in response to request.' });
+      event.target.value = '';
+      await loadRequests();
+    } catch (err) { notify({ type: 'danger', message: err.message }); }
+    finally { setUploading(null); }
+  }
+
+  if (loading && !requests.length) return null;
+
+  const pending = requests.filter(r => r.status === 'pending');
+  const fulfilled = requests.filter(r => r.status === 'fulfilled');
+  if (!pending.length && !fulfilled.length) return null;
+
+  return (
+    <div style={{ display: 'grid', gap: 14, marginBottom: 16 }}>
+      {pending.length > 0 && (
+        <Card title="Document requests" hint="Staff have asked for specific documents">
+          <div style={{ display: 'grid', gap: 10 }}>
+            {pending.map(r => {
+              const matter = matters.find(m => m.id === r.matterId);
+              return (
+                <div key={r.id} style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: 12, display: 'grid', gap: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, flexWrap: 'wrap' }}>
+                    <div style={{ display: 'grid', gap: 2 }}>
+                      <strong style={{ fontSize: 14 }}>{r.title}</strong>
+                      {r.description && <span style={{ fontSize: 12, color: theme.muted }}>{r.description}</span>}
+                      {matter && <span style={{ fontSize: 12, color: theme.blue }}>Matter: {matter.title}</span>}
+                    </div>
+                    <Badge tone="gold">Pending</Badge>
+                  </div>
+                  <div>
+                    <input ref={fileInputRef} type="file" style={{ display: 'none' }} onChange={e => handleUpload(r.id, e)} accept="application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg,image/webp" />
+                    <button type="button" disabled={uploading === r.id} onClick={() => { setPendingRequestId(r.id); fileInputRef.current?.click(); }} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 12px' }}>
+                      {uploading === r.id ? 'Uploading…' : 'Upload document'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+      {fulfilled.length > 0 && (
+        <Card title="Past requests" hint="Documents you have already uploaded">
+          <div style={{ display: 'grid', gap: 8 }}>
+            {fulfilled.map(r => {
+              const matter = matters.find(m => m.id === r.matterId);
+              return (
+                <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: 8, border: `1px solid ${theme.line}`, borderRadius: 6 }}>
+                  <div style={{ display: 'grid', gap: 2, minWidth: 0 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>{r.title}</span>
+                    {matter && <span style={{ fontSize: 12, color: theme.muted }}>{matter.title}</span>}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+                    <Badge tone="green">Fulfilled</Badge>
+                    {r.responseDocumentId && (
+                      <button type="button" onClick={() => downloadWithAuth(`/api/documents/${r.responseDocumentId}/download`, r.responseDocumentDisplayName || r.responseDocumentName || 'document', notify)} style={styles.link}>View</button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 function Documents({ documents, matters, notify }) {
   const [search, setSearch] = useState('');
   const [matterFilter, setMatterFilter] = useState('');
@@ -1082,7 +1178,9 @@ function Documents({ documents, matters, notify }) {
   const emptyText = documents.length === 0 ? 'No documents shared yet.' : 'No shared documents match your search.';
 
   return (
-    <Card title="All Documents" hint="Files shared across your matters">
+    <>
+      <ClientDocumentRequests matters={matters} notify={notify} />
+      <Card title="All Documents" hint="Files shared across your matters">
       <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         <input
           type="search"
@@ -1129,6 +1227,7 @@ function Documents({ documents, matters, notify }) {
         />
       </div>
     </Card>
+    </>
   );
 }
 

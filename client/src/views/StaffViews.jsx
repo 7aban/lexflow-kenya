@@ -1389,6 +1389,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
                   <div id="matter-section-tasks" style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Tasks"><TaskEditorList tasks={detail.tasks || []} entries={detail.timeEntries || []} matter={detail} canManage={canManage} canViewBilling={canViewBilling} editingTask={editingTask} setEditingTask={setEditingTask} saveTask={saveTask} taskTimer={taskTimer} setTaskTimer={setTaskTimer} notify={notify} onTimerSaved={async () => { await loadDetail(detail.id); await reload(); }} confirmDelete={task => setConfirm({ title: 'Delete task?', message: 'Delete this task?', onConfirm: () => deleteTaskRecord(task) })} /></Sub></div>
                   <div id="matter-section-court" style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Court appearances">{canManage && <form onSubmit={createEvent} style={{ ...styles.formGrid, marginBottom: 12 }}><Field label="Title"><input required style={styles.input} value={eventForm.title} onChange={e => setEventForm({ ...eventForm, title: e.target.value })} /></Field><Field label="Date"><input required type="date" style={styles.input} value={eventForm.date} onChange={e => setEventForm({ ...eventForm, date: e.target.value })} /></Field><Field label="Time"><input style={styles.input} value={eventForm.time} onChange={e => setEventForm({ ...eventForm, time: e.target.value })} /></Field><Field label="Type"><input style={styles.input} value={eventForm.type} onChange={e => setEventForm({ ...eventForm, type: e.target.value })} /></Field><Field label="Location"><input style={styles.input} value={eventForm.location} onChange={e => setEventForm({ ...eventForm, location: e.target.value })} /></Field><Field label="Meeting Link"><input type="url" placeholder="https://..." style={styles.input} value={eventForm.meetingLink} onChange={e => setEventForm({ ...eventForm, meetingLink: e.target.value })} /></Field><button style={styles.ghostButton}>Schedule event</button></form>}<AppearanceEditorList events={detail.appearances || []} canManage={canManage} editingEvent={editingEvent} setEditingEvent={setEditingEvent} saveEvent={saveEvent} confirmDelete={event => setConfirm({ title: 'Delete appearance?', message: 'Delete this court appearance?', onConfirm: () => deleteEventRecord(event) })} /></Sub></div>
                   <div id="matter-section-documents" style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Documents"><MatterDocuments matterId={detail.id} canManage={canManage} notify={notify} /></Sub></div>
+                  <div id="matter-section-document-requests" style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Document requests"><DocumentRequestsPanel matterId={detail.id} canManage={canManage} notify={notify} downloadWithAuth={downloadWithAuth} /></Sub></div>
                   <div id="matter-section-notes" style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Case notes"><form onSubmit={addNote} style={styles.noteForm}><input style={styles.input} value={note} onChange={e => setNote(e.target.value)} placeholder="Add a note" /><button style={styles.ghostButton}>Save note</button></form><div className="lf-matter-notes-cards"><Table columns={['Note', 'Author', 'Created']} rows={(detail.notes || []).map(n => [n.content, n.author || '-', n.createdAt ? new Date(n.createdAt).toLocaleString() : '-'])} empty="No notes yet." /></div></Sub></div>
                   <div id="matter-section-invoices" style={{ minWidth: 0, maxWidth: '100%' }}>
                     <Sub title="Invoices">
@@ -3885,6 +3886,104 @@ function CourtModeField({ label, value }) {
     <div style={{ display: 'grid', gap: 2 }}>
       <span style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: theme.muted }}>{label}</span>
       <div style={{ fontSize: 13, color: theme.ink }}>{value}</div>
+    </div>
+  );
+}
+
+function DocumentRequestsPanel({ matterId, canManage, notify, downloadWithAuth }) {
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  async function loadRequests() {
+    if (!matterId) return;
+    setLoading(true);
+    try {
+      const data = await api(`/api/document-requests?matterId=${matterId}`);
+      setRequests(Array.isArray(data) ? data : []);
+    } catch (err) { notify?.({ type: 'danger', message: err.message }); }
+    finally { setLoading(false); }
+  }
+
+  useEffect(() => { loadRequests(); }, [matterId]);
+
+  async function createRequest(event) {
+    event.preventDefault();
+    if (!title.trim()) return;
+    setSubmitting(true);
+    try {
+      await api('/api/document-requests', { method: 'POST', body: { matterId, title: title.trim(), description: description.trim() } });
+      setTitle('');
+      setDescription('');
+      setShowForm(false);
+      notify?.({ type: 'success', message: 'Document request sent.' });
+      await loadRequests();
+    } catch (err) { notify?.({ type: 'danger', message: err.message }); }
+    finally { setSubmitting(false); }
+  }
+
+  async function cancelRequest(requestId) {
+    try {
+      await api(`/api/document-requests/${requestId}`, { method: 'PATCH', body: { status: 'cancelled' } });
+      notify?.({ type: 'success', message: 'Request cancelled.' });
+      await loadRequests();
+    } catch (err) { notify?.({ type: 'danger', message: err.message }); }
+  }
+
+  const statusBadge = (status) => {
+    if (status === 'pending') return <Badge tone="gold">Pending</Badge>;
+    if (status === 'fulfilled') return <Badge tone="green">Fulfilled</Badge>;
+    return <Badge tone="muted">Cancelled</Badge>;
+  };
+
+  return (
+    <div style={{ display: 'grid', gap: 10 }}>
+      {canManage && !showForm && (
+        <button type="button" onClick={() => setShowForm(true)} style={{ ...styles.ghostButton, alignSelf: 'start' }}>Request document</button>
+      )}
+      {canManage && showForm && (
+        <form onSubmit={createRequest} style={{ ...styles.formGrid, marginBottom: 8 }}>
+          <input required placeholder="Document title (e.g. Signed Affidavit)" style={styles.input} value={title} onChange={e => setTitle(e.target.value)} />
+          <textarea placeholder="Optional description…" style={{ ...styles.input, minHeight: 60, resize: 'vertical' }} value={description} onChange={e => setDescription(e.target.value)} />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="submit" disabled={submitting || !title.trim()} style={styles.primaryButton}>{submitting ? 'Sending…' : 'Send request'}</button>
+            <button type="button" onClick={() => setShowForm(false)} style={styles.ghostButton}>Cancel</button>
+          </div>
+        </form>
+      )}
+      {loading ? (
+        <span style={{ color: theme.muted, fontSize: 12 }}>Loading requests…</span>
+      ) : requests.length === 0 ? (
+        <span style={{ color: theme.muted, fontSize: 12 }}>No document requests yet.</span>
+      ) : (
+        <div style={{ display: 'grid', gap: 8 }}>
+          {requests.map(r => (
+            <div key={r.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: 8, border: `1px solid ${theme.line}`, borderRadius: 6 }}>
+              <div style={{ flex: 1, display: 'grid', gap: 3, minWidth: 0 }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <strong style={{ fontSize: 13 }}>{r.title}</strong>
+                  {statusBadge(r.status)}
+                </div>
+                {r.description && <span style={{ fontSize: 12, color: theme.muted }}>{r.description}</span>}
+                {r.status === 'fulfilled' && r.responseDocumentId && (
+                  <div style={{ fontSize: 12, marginTop: 4 }}>
+                    <button type="button" onClick={() => downloadWithAuth(`/api/documents/${r.responseDocumentId}/download`, r.responseDocumentDisplayName || r.responseDocumentName || 'document', notify)} style={{ ...styles.link, background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 12 }}>
+                      {r.responseDocumentDisplayName || r.responseDocumentName || 'Download response'}
+                    </button>
+                  </div>
+                )}
+                {r.responseDocumentName && <span style={{ fontSize: 11, color: theme.muted }}>{r.responseDocumentName} ({r.responseDocumentSize || '?'})</span>}
+              </div>
+              {canManage && r.status === 'pending' && (
+                <button type="button" onClick={() => cancelRequest(r.id)} style={{ ...styles.dangerTinyButton, whiteSpace: 'nowrap', flexShrink: 0 }} title="Cancel request">Cancel</button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
