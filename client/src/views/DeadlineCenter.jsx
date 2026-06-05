@@ -129,9 +129,12 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
 
   const todayIso = new Date().toISOString().slice(0, 10);
 
-  const nextCourtItem = useMemo(() => {
-    const upcoming = courtItems.filter(d => d.dueDate && d.dueDate >= todayIso).sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)));
-    return upcoming[0] || null;
+  const upcomingCourtItems = useMemo(() => {
+    return (courtItems || [])
+      .filter(d => d && d.dueDate && d.dueDate >= todayIso)
+      .slice()
+      .sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)))
+      .slice(0, 5);
   }, [courtItems, todayIso]);
 
   const todayCourtItems = useMemo(() => {
@@ -223,16 +226,27 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
           <strong style={{ fontSize: 15 }}>Court diary</strong>
           {courtItems.length > 0 && <button type="button" onClick={scrollToTimeline} style={styles.ghostButton}>View in timeline</button>}
         </div>
-        {nextCourtItem ? (
+        {upcomingCourtItems.length ? (
           <>
-            <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: 14, display: 'grid', gap: 8 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <Badge tone={todayCourtItems.length > 0 ? 'red' : 'blue'}>{todayCourtItems.length > 0 ? 'Today' : 'Next court date'}</Badge>
-                <span style={{ fontSize: 12, color: theme.muted, textAlign: 'right' }}>{nextCourtItem.dueDate}</span>
-              </div>
-              <span style={{ fontSize: 14, fontWeight: 600, color: theme.ink }}>{nextCourtItem.title || 'Court appearance'}</span>
-              {nextCourtItem.matterTitle && <span style={{ fontSize: 12, color: theme.muted }}>Matter: {nextCourtItem.matterTitle}{nextCourtItem.clientName ? ` · ${nextCourtItem.clientName}` : ''}</span>}
-              {nextCourtItem.notes && <span style={{ fontSize: 12, color: theme.muted, fontStyle: 'italic' }}>{nextCourtItem.notes}</span>}
+            <div style={{ display: 'grid', gap: 8 }}>
+              {upcomingCourtItems.map((item, index) => {
+                const isToday = item.dueDate === todayIso;
+                return (
+                  <div key={item.id || `${item.dueDate}-${index}`} style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: 14, display: 'grid', gap: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <Badge tone={isToday ? 'red' : 'blue'}>{isToday ? 'Today' : index === 0 ? 'Next court date' : dueLabel(item.dueDate)}</Badge>
+                      <span style={{ fontSize: 12, color: theme.muted, textAlign: 'right' }}>{item.dueDate}</span>
+                    </div>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: theme.ink }}>{item.title || 'Court appearance'}</span>
+                    {(item.matterTitle || item.clientName) && (
+                      <span style={{ fontSize: 12, color: theme.muted }}>
+                        {item.matterTitle ? `Matter: ${item.matterTitle}${item.clientName ? ` · ${item.clientName}` : ''}` : item.clientName}
+                      </span>
+                    )}
+                    {item.notes && <span style={{ fontSize: 12, color: theme.muted, fontStyle: 'italic' }}>{item.notes}</span>}
+                  </div>
+                );
+              })}
             </div>
             <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
               <span style={{ fontSize: 13, color: theme.muted }}><strong style={{ color: theme.ink }}>{weekCourtCount}</strong> court date{weekCourtCount !== 1 ? 's' : ''} next 7 days</span>
