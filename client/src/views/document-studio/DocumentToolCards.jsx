@@ -61,9 +61,9 @@ const workflowPrinciples = [
   'Current matter, document, and client visibility controls remain unchanged.',
 ];
 
-const activeToolNames = new Set(['Merge PDFs', 'Rotate pages', 'Extract pages', 'Delete pages', 'Add page numbers / paginate bundle', 'Court bundle prep', 'Sign / stamp PDF']);
+const activeToolNames = new Set(['Merge PDFs', 'Rotate pages', 'Extract pages', 'Delete pages', 'Add page numbers / paginate bundle', 'Court bundle prep', 'Sign / stamp PDF', 'Tenth-lining / appellate formatting']);
 
-export default function DocumentToolCards({ onOpenMerge, onOpenRotate, onOpenExtract, onOpenDelete, onOpenPaginate, onOpenBundle, onOpenStamp, selectedTool }) {
+export default function DocumentToolCards({ onOpenMerge, onOpenRotate, onOpenExtract, onOpenDelete, onOpenPaginate, onOpenBundle, onOpenStamp, onOpenTenth, selectedTool }) {
   const openHandlers = {
     'Merge PDFs': onOpenMerge,
     'Rotate pages': onOpenRotate,
@@ -72,6 +72,7 @@ export default function DocumentToolCards({ onOpenMerge, onOpenRotate, onOpenExt
     'Add page numbers / paginate bundle': onOpenPaginate,
     'Court bundle prep': onOpenBundle,
     'Sign / stamp PDF': onOpenStamp,
+    'Tenth-lining / appellate formatting': onOpenTenth,
   };
 
   return (

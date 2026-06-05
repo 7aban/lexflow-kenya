@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { API_BASE, api, fileToDataUrl, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, readSession, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf, deletePdfPages, saveDeletedPdf, numberPdfPages, saveNumberedPdf, createCourtBundle, saveCourtBundle, stampPdf, saveStampedPdf } from '../lib/apiClient.js';
+import { API_BASE, api, fileToDataUrl, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, readSession, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf, deletePdfPages, saveDeletedPdf, numberPdfPages, saveNumberedPdf, createCourtBundle, saveCourtBundle, stampPdf, saveStampedPdf, tenthLinePdf, saveTenthLinedPdf } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Skeleton } from '../components/ui.jsx';
 import DocumentToolCards from './document-studio/DocumentToolCards.jsx';
@@ -184,6 +184,20 @@ export default function DocumentStudio({ notify }) {
 
   const [stampSelectedAssetUrl, setStampSelectedAssetUrl] = useState('');
 
+  const [tenthMatterId, setTenthMatterId] = useState('');
+  const [tenthDocuments, setTenthDocuments] = useState([]);
+  const [tenthDocsLoading, setTenthDocsLoading] = useState(false);
+  const [tenthDocsError, setTenthDocsError] = useState(null);
+  const [tenthDocumentId, setTenthDocumentId] = useState('');
+  const [tenthStartNumber, setTenthStartNumber] = useState(10);
+  const [tenthFilename, setTenthFilename] = useState('tenth-lined-document.pdf');
+  const [tenthLoading, setTenthLoading] = useState(false);
+  const [tenthError, setTenthError] = useState(null);
+  const [tenthSuccess, setTenthSuccess] = useState('');
+  const [tenthSaveLoading, setTenthSaveLoading] = useState(false);
+  const [tenthSaveError, setTenthSaveError] = useState(null);
+  const [tenthSaveSuccess, setTenthSaveSuccess] = useState('');
+
   const [toolsOpen, setToolsOpen] = useState(false);
   const [selectedTool, setSelectedTool] = useState(null);
   const [signatureAssets, setSignatureAssets] = useState([]);
@@ -200,6 +214,7 @@ export default function DocumentStudio({ notify }) {
   const paginatePanelRef = useRef(null);
   const bundlePanelRef = useRef(null);
   const stampPanelRef = useRef(null);
+  const tenthPanelRef = useRef(null);
 
   useEffect(() => {
     load();
@@ -308,6 +323,20 @@ export default function DocumentStudio({ notify }) {
       setStampSaveSuccess('');
     }
   }, [stampMatterId]);
+
+  useEffect(() => {
+    if (tenthMatterId) {
+      loadTenthDocuments(tenthMatterId);
+    } else {
+      setTenthDocuments([]);
+      setTenthDocumentId('');
+      setTenthDocsError(null);
+      setTenthError(null);
+      setTenthSuccess('');
+      setTenthSaveError(null);
+      setTenthSaveSuccess('');
+    }
+  }, [tenthMatterId]);
 
   async function load() {
     setLoading(true);
@@ -982,6 +1011,73 @@ export default function DocumentStudio({ notify }) {
     }
   }
 
+  async function loadTenthDocuments(matterId) {
+    setTenthDocsLoading(true);
+    setTenthDocsError(null);
+    setTenthError(null);
+    setTenthSuccess('');
+    setTenthSaveError(null);
+    setTenthSaveSuccess('');
+    setTenthDocumentId('');
+    try {
+      const docs = await getMatterDocuments(matterId);
+      setTenthDocuments((Array.isArray(docs) ? docs : []).filter(doc => doc.mimeType === 'application/pdf'));
+    } catch (err) {
+      setTenthDocuments([]);
+      setTenthDocsError(err.message || 'Could not load matter documents.');
+    } finally {
+      setTenthDocsLoading(false);
+    }
+  }
+
+  async function runTenthLinePdf() {
+    setTenthError(null);
+    setTenthSuccess('');
+    setTenthSaveError(null);
+    setTenthSaveSuccess('');
+    if (!tenthDocumentId) {
+      setTenthError('Select a PDF document.');
+      return;
+    }
+    setTenthLoading(true);
+    try {
+      await tenthLinePdf(tenthDocumentId, tenthStartNumber, tenthFilename);
+      setTenthSuccess('Tenth-lined PDF downloaded.');
+      notify?.({ type: 'success', message: 'Tenth-lined PDF downloaded.' });
+    } catch (err) {
+      const message = err.message || 'Could not add tenth-line numbering.';
+      setTenthError(message);
+      notify?.({ type: 'danger', message });
+    } finally {
+      setTenthLoading(false);
+    }
+  }
+
+  async function runTenthLineSave() {
+    setTenthSaveError(null);
+    setTenthSaveSuccess('');
+    if (!tenthDocumentId) {
+      setTenthSaveError('Select a PDF document.');
+      return;
+    }
+    if (!tenthMatterId) {
+      setTenthSaveError('Select a matter first.');
+      return;
+    }
+    setTenthSaveLoading(true);
+    try {
+      await saveTenthLinedPdf(tenthDocumentId, tenthStartNumber, tenthFilename, tenthMatterId);
+      setTenthSaveSuccess('Saved to matter documents. Open the matter Documents tab to view it.');
+      notify?.({ type: 'success', message: 'Saved to matter documents. Open the matter Documents tab to view it.' });
+    } catch (err) {
+      const message = err.message || 'Could not save tenth-lined PDF.';
+      setTenthSaveError(message);
+      notify?.({ type: 'danger', message });
+    } finally {
+      setTenthSaveLoading(false);
+    }
+  }
+
   async function loadMergeDocuments(matterId) {
     setMergeDocsLoading(true);
     setMergeDocsError(null);
@@ -1105,6 +1201,8 @@ export default function DocumentStudio({ notify }) {
   const canDeleteSave = !!deleteDocumentId && !!deletePages.trim() && !deleteSaveLoading && !deleteDocsLoading && !!deleteMatterId;
   const canPaginate = !!paginateDocumentId && !paginateLoading && !paginateDocsLoading;
   const canPaginateSave = !!paginateDocumentId && !paginateSaveLoading && !paginateDocsLoading && !!paginateMatterId;
+  const canTenth = !!tenthDocumentId && !tenthLoading && !tenthDocsLoading;
+  const canTenthSave = !!tenthDocumentId && !tenthSaveLoading && !tenthDocsLoading && !!tenthMatterId;
   const selectedBundleDocuments = selectedBundleDocumentIds
     .map(id => bundleDocuments.find(doc => doc.id === id))
     .filter(Boolean);
@@ -1278,6 +1376,7 @@ export default function DocumentStudio({ notify }) {
               onOpenPaginate={() => handleSelectTool('paginate')}
                onOpenBundle={() => handleSelectTool('bundle')}
                onOpenStamp={() => handleSelectTool('stamp')}
+               onOpenTenth={() => handleSelectTool('tenth')}
                selectedTool={selectedTool}
              />
 
@@ -2309,6 +2408,111 @@ export default function DocumentStudio({ notify }) {
             {stampSuccess && <Alert tone="success">{stampSuccess}</Alert>}
             {stampSaveError && <Alert tone="danger">{stampSaveError}</Alert>}
             {stampSaveSuccess && <Alert tone="success">{stampSaveSuccess}</Alert>}
+          </div>
+          )}
+
+          {selectedTool === 'tenth' && (
+          <div
+            ref={tenthPanelRef}
+            style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 16, display: 'grid', gap: 14, minWidth: 0 }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                <strong style={{ fontSize: 14, color: theme.ink }}>Tenth-lining / appellate formatting</strong>
+                <span style={{ fontSize: 12, color: theme.muted }}>Add right-margin line markers at every tenth line</span>
+              </div>
+              <Badge tone="green">Available</Badge>
+            </div>
+
+            <div style={{ border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
+              Adds appellate-style right-margin markers at every tenth line. This overlays visual markers on the PDF and does not reflow or alter the original document.
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, alignItems: 'end', minWidth: 0 }}>
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Matter</span>
+                <select
+                  style={styles.input}
+                  value={tenthMatterId}
+                  onChange={event => { setTenthMatterId(event.target.value); setTenthError(null); setTenthSuccess(''); setTenthSaveError(null); setTenthSaveSuccess(''); }}
+                  disabled={mattersLoading || tenthLoading || tenthSaveLoading}
+                >
+                  <option value="">{mattersLoading ? 'Loading matters...' : 'Select a matter'}</option>
+                  {matters.map(m => (
+                    <option key={m.id} value={m.id}>{matterLabel(m)}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>PDF document</span>
+                <select
+                  style={styles.input}
+                  value={tenthDocumentId}
+                  onChange={event => { setTenthDocumentId(event.target.value); setTenthError(null); setTenthSuccess(''); setTenthSaveError(null); setTenthSaveSuccess(''); }}
+                  disabled={!tenthMatterId || tenthDocsLoading || tenthLoading || tenthSaveLoading}
+                >
+                  <option value="">
+                    {!tenthMatterId ? 'Select a matter first' : tenthDocsLoading ? 'Loading documents...' : tenthDocuments.length === 0 ? 'No PDFs found' : '— Select a PDF —'}
+                  </option>
+                  {tenthDocuments.map(doc => (
+                    <option key={doc.id} value={doc.id}>
+                      {doc.displayName || doc.name || doc.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Starting number</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="99999"
+                  style={styles.input}
+                  value={tenthStartNumber}
+                  onChange={event => { setTenthStartNumber(Number(event.target.value)); setTenthError(null); setTenthSuccess(''); setTenthSaveError(null); setTenthSaveSuccess(''); }}
+                  disabled={tenthLoading || tenthSaveLoading}
+                />
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Output filename</span>
+                <input
+                  style={styles.input}
+                  value={tenthFilename}
+                  onChange={event => setTenthFilename(event.target.value)}
+                  placeholder="tenth-lined-document.pdf"
+                  disabled={tenthLoading || tenthSaveLoading}
+                />
+              </label>
+
+              <button
+                type="button"
+                style={{ ...styles.primaryButton, minHeight: 36, opacity: canTenth ? 1 : 0.65, cursor: canTenth ? 'pointer' : 'not-allowed' }}
+                onClick={runTenthLinePdf}
+                disabled={!canTenth}
+              >
+                {tenthLoading ? 'Applying markers...' : 'Apply and Download'}
+              </button>
+
+              {tenthMatterId && (
+                <button
+                  type="button"
+                  style={{ ...styles.ghostButton, minHeight: 36, opacity: canTenthSave ? 1 : 0.65, cursor: canTenthSave ? 'pointer' : 'not-allowed' }}
+                  onClick={runTenthLineSave}
+                  disabled={!canTenthSave}
+                >
+                  {tenthSaveLoading ? 'Saving...' : 'Save to matter documents'}
+                </button>
+              )}
+            </div>
+
+            {tenthDocsError && <Alert tone="danger">{tenthDocsError}</Alert>}
+            {tenthError && <Alert tone="danger">{tenthError}</Alert>}
+            {tenthSuccess && <Alert tone="success">{tenthSuccess}</Alert>}
+            {tenthSaveError && <Alert tone="danger">{tenthSaveError}</Alert>}
+            {tenthSaveSuccess && <Alert tone="success">{tenthSaveSuccess}</Alert>}
           </div>
           )}
           </div>
