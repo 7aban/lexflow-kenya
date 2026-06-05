@@ -3,7 +3,7 @@ import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconCl
 import { api, applyChecklistTemplate, createChecklistTemplate, createMatterChecklistItem, deleteChecklistTemplate, deleteClientAvatar, deleteUserAvatar, deleteMatterChecklistItem, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getInvoiceDetails, listChecklistTemplates, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, updateChecklistTemplate, updateMatterChecklistItem, uploadClientAvatar, uploadUserAvatar } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
-import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, safeHttpUrl, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText } from '../components/ui.jsx';
+import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, safeHttpUrl, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText, invoiceDueDistanceDays } from '../components/ui.jsx';
 import MatterDocuments from '../components/MatterDocuments.jsx';
 import TaskTimer, { taskTimerActive } from '../components/TaskTimer.jsx';
 
@@ -1519,6 +1519,34 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
     };
     return { items, counts, total: items.length };
   }, [invoices, collectionsProofs]);
+  // PRODUCT-17F: read-only receivables aging. Buckets unpaid invoices by days overdue using the
+  // existing invoiceDueDistanceDays helper and sums server-provided balance only — never recomputes
+  // amount/VAT/payments. Billing-masked rows (balance === null for advocates without billing
+  // visibility) are excluded from money totals and counted separately as `hidden`.
+  const receivablesAging = useMemo(() => {
+    const order = ['Current', '1-30', '31-60', '61-90', '90+'];
+    const buckets = Object.fromEntries(order.map(label => [label, { label, count: 0, total: 0 }]));
+    let grandTotal = 0;
+    let hidden = 0;
+    invoices.forEach(inv => {
+      if (inv.status === 'Paid') return;
+      if (inv.balance == null) { hidden += 1; return; }
+      const days = invoiceDueDistanceDays(inv);
+      let key;
+      if (days === null || days >= 0) key = 'Current';
+      else if (days >= -30) key = '1-30';
+      else if (days >= -60) key = '31-60';
+      else if (days >= -90) key = '61-90';
+      else key = '90+';
+      const balance = Number(inv.balance || 0);
+      buckets[key].count += 1;
+      buckets[key].total += balance;
+      grandTotal += balance;
+    });
+    const rows = order.map(label => buckets[label]);
+    const visibleCount = rows.reduce((sum, b) => sum + b.count, 0);
+    return { rows, grandTotal, hidden, visibleCount };
+  }, [invoices]);
   // PRODUCT-15K: navigation/assist only — preselect a local filter and scroll to the existing
   // surface. No data is created or mutated here.
   function goToInvoiceRegister(filterValue) {
@@ -1976,6 +2004,33 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
           </div>
         </>
       ) : null}
+    </div>
+    <div style={{ marginBottom: 16, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <IconCash size={16} stroke={1.75} style={{ color: '#697386' }} />
+        <span style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>Receivables aging</span>
+      </div>
+      {receivablesAging.visibleCount === 0 && receivablesAging.hidden === 0 ? (
+        <p style={{ fontSize: 12, color: '#697386', margin: '8px 0 0', fontStyle: 'italic' }}>No unpaid receivables to age.</p>
+      ) : (
+        <>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+            {receivablesAging.rows.map(bucket => (
+              <div key={bucket.label} style={{ flex: '1 1 90px', background: '#F9FAFB', border: '1px solid #E5E7EB', borderRadius: 8, padding: '8px 10px' }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#697386' }}>{bucket.label}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: bucket.count > 0 && bucket.label !== 'Current' ? '#991B1B' : '#111827', marginTop: 1 }}>{kes(bucket.total)}</div>
+                <div style={{ fontSize: 11, color: '#697386', marginTop: 1 }}>{bucket.count} invoice{bucket.count === 1 ? '' : 's'}</div>
+              </div>
+            ))}
+          </div>
+          <p style={{ fontSize: 12, color: '#697386', margin: '10px 0 0' }}>
+            Total outstanding (visible): <span style={{ fontWeight: 600, color: '#111827' }}>{kes(receivablesAging.grandTotal)}</span>
+          </p>
+          {receivablesAging.hidden > 0 && (
+            <p style={{ fontSize: 11, color: '#697386', margin: '6px 0 0', fontStyle: 'italic' }}>Some amounts are hidden by billing visibility settings.</p>
+          )}
+        </>
+      )}
     </div>
     <InvoicePreviewCard />
     <div id="invoice-register">
