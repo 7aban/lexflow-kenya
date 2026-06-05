@@ -1334,7 +1334,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
                 ))}
               </div>
               {detailTab === 'Assistant' ? (
-                <AssistantSuggestions suggestions={suggestions} />
+                <AssistantSuggestions suggestions={suggestions} hints={nextActionHints} />
               ) : detailTab === 'Court' ? (
                 <MatterCourtMode detail={detail} nextActionHints={nextActionHints} />
               ) : (
@@ -3270,27 +3270,88 @@ function TimeEntryEditorList({ entries, canManage, canViewBilling = true, editin
   );
 }
 
-function AssistantSuggestions({ suggestions }) {
-  const items = suggestions.length ? suggestions : ['This matter looks up to date. No urgent action is needed right now.'];
+// PRODUCT-18C: the Assistant tab now leads with the richer structured client hints
+// (severity/category/why/evidence) grouped by severity tier, and keeps the server suggestion
+// strings verbatim below as secondary context. Presentation only — no rule logic, money, or
+// legal-advice wording is added; any SOL/limitation hedge in a hint or suggestion renders as-is.
+function AssistantSuggestions({ suggestions, hints = [] }) {
+  const tiers = [
+    { key: 'priority', label: 'Priority', match: s => s === 'critical' || s === 'high' },
+    { key: 'recommended', label: 'Recommended', match: s => s === 'medium' },
+    { key: 'awareness', label: 'For awareness', match: s => s !== 'critical' && s !== 'high' && s !== 'medium' },
+  ];
+  const groups = tiers
+    .map(tier => ({ ...tier, items: (Array.isArray(hints) ? hints : []).filter(h => tier.match(h.severity)) }))
+    .filter(group => group.items.length);
+  // The server emits the "up to date / no urgent" string only as its empty-state sentinel
+  // (never alongside real suggestions). Treat it as the empty marker, not a dropped suggestion;
+  // every genuine server suggestion is kept verbatim below.
+  const serverItems = (Array.isArray(suggestions) ? suggestions : []).filter(text => {
+    const lower = String(text).toLowerCase();
+    return !(lower.includes('up to date') || lower.includes('no urgent'));
+  });
+  const hasContent = groups.length > 0 || serverItems.length > 0;
+  const groupHeading = { fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: theme.muted };
   return (
     <div style={styles.assistantPanel}>
       <div style={styles.assistantIntro}>
         <strong>Matter Assistant</strong>
         <span>Rule-based prompts drawn from tasks, billing, documents, notes, and upcoming court dates.</span>
       </div>
-      <div style={styles.suggestionList}>
-        {items.map((text, index) => {
-          const lower = text.toLowerCase();
-          const isGood = lower.includes('up to date') || lower.includes('no urgent');
-          const isWarning = lower.includes('overdue') || lower.includes('court') || lower.includes('hearing') || lower.includes('retainer') || lower.includes('outstanding');
-          return (
-            <div key={`${text}-${index}`} style={{ ...styles.suggestionItem, ...(isWarning ? styles.suggestionWarning : isGood ? styles.suggestionGood : {}) }}>
-              <span style={styles.suggestionIcon}>{isGood ? 'OK' : isWarning ? '!' : 'TIP'}</span>
-              <span>{text}</span>
+      {!hasContent ? (
+        <div style={styles.suggestionList}>
+          <div style={{ ...styles.suggestionItem, ...styles.suggestionGood }}>
+            <span style={styles.suggestionIcon}>OK</span>
+            <span>This matter looks up to date. No urgent action is needed right now.</span>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 14 }}>
+          {groups.map(group => (
+            <div key={group.key} style={{ display: 'grid', gap: 8 }}>
+              <span style={groupHeading}>{group.label}</span>
+              {group.items.map((hint, index) => {
+                const tone = hintTone(hint.severity);
+                return (
+                  <div key={`${hint.title}-${index}`} style={{ border: `1px solid ${theme.line}`, borderLeft: `4px solid ${timelineToneColor(tone)}`, borderRadius: 8, background: '#F8FAFC', padding: 10, display: 'grid', gap: 7 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <Badge tone={tone}>{hintLabel(hint.severity)}</Badge>
+                      <Badge tone="blue">{hintLabel(hint.category)}</Badge>
+                    </div>
+                    <strong style={{ fontSize: 13 }}>{hint.title}</strong>
+                    <span style={{ color: theme.muted, fontSize: 12 }}>{hint.why}</span>
+                    {(hint.evidence || []).length ? (
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {(hint.evidence || []).map((item, itemIndex) => (
+                          <span key={`${item}-${itemIndex}`} style={{ border: `1px solid ${theme.line}`, background: '#fff', borderRadius: 999, color: theme.ink, fontSize: 11, fontWeight: 700, padding: '3px 8px' }}>{item}</span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
-      </div>
+          ))}
+          {serverItems.length ? (
+            <div style={{ display: 'grid', gap: 8 }}>
+              <span style={groupHeading}>Additional context-based suggestions</span>
+              <div style={styles.suggestionList}>
+                {serverItems.map((text, index) => {
+                  const lower = String(text).toLowerCase();
+                  const isGood = lower.includes('up to date') || lower.includes('no urgent');
+                  const isWarning = lower.includes('overdue') || lower.includes('court') || lower.includes('hearing') || lower.includes('retainer') || lower.includes('outstanding');
+                  return (
+                    <div key={`${text}-${index}`} style={{ ...styles.suggestionItem, ...(isWarning ? styles.suggestionWarning : isGood ? styles.suggestionGood : {}) }}>
+                      <span style={styles.suggestionIcon}>{isGood ? 'OK' : isWarning ? '!' : 'TIP'}</span>
+                      <span>{text}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
