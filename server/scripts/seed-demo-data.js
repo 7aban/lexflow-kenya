@@ -2,6 +2,7 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const { hashPassword } = require('../lib/passwords');
 const config = require('../lib/config');
+const { PDFDocument, StandardFonts } = require('pdf-lib');
 
 const dbPath = config.DATABASE_PATH;
 const db = new sqlite3.Database(dbPath);
@@ -77,6 +78,14 @@ async function createSchema() {
 
 async function insertAudit(action, entityType, entityId, summary, userName = 'Demo Seeder', role = 'admin') {
   await run('INSERT INTO audit_logs (id,userId,userName,role,action,entityType,entityId,summary,createdAt) VALUES (?,?,?,?,?,?,?,?,?)', [id('AUD'), 'seed-admin', userName, role, action, entityType, entityId, summary, nowIso()]);
+}
+
+async function seededPdfBuffer(label) {
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const page = pdf.addPage([400, 400]);
+  page.drawText(String(label || 'Seeded Demo PDF'), { x: 24, y: 200, size: 14, font });
+  return Buffer.from(await pdf.save());
 }
 
 async function main() {
@@ -386,8 +395,10 @@ async function main() {
     for (let j = 0; j < 2; j += 1) {
       const source = j === 0 ? 'firm' : 'client';
       const fileName = `${source === 'firm' ? 'Draft pleading' : 'Client ID'} ${i + 1}.${j === 0 ? 'pdf' : 'png'}`;
+      const docContent = j === 0 ? await seededPdfBuffer(fileName) : Buffer.from(`Demo document ${i}-${j}`);
+      const docSize = `${Math.max(1, Math.round(docContent.length / 1024))} KB`;
       await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [id('DOC'), matter.id, fileName, fileName, j === 0 ? 'PDF' : 'Image', j === 0 ? 'application/pdf' : 'image/png', daysAgo(i * 9 + j), `${18 + i + j} KB`, Buffer.from(`Demo document ${i}-${j}`), source, source === 'firm' ? pleadings : clientUploads, '', '', source === 'firm' && i % 2 === 0 ? 1 : 0, source === 'firm' ? admin.id : clients[i % clients.length].id]);
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [id('DOC'), matter.id, fileName, fileName, j === 0 ? 'PDF' : 'Image', j === 0 ? 'application/pdf' : 'image/png', daysAgo(i * 9 + j), docSize, docContent, source, source === 'firm' ? pleadings : clientUploads, '', '', source === 'firm' && i % 2 === 0 ? 1 : 0, source === 'firm' ? admin.id : clients[i % clients.length].id]);
     }
   }
 
@@ -408,8 +419,10 @@ async function main() {
        status === 'cancelled' ? staffUserIds[i] : null]);
     if (status === 'fulfilled') {
       const docId = id('DOC');
+      const fulfilledContent = await seededPdfBuffer('Signed Board Resolution - Demo');
+      const fulfilledSize = `${Math.max(1, Math.round(fulfilledContent.length / 1024))} KB`;
       await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [docId, reqMatter.id, 'signed-board-resolution.pdf', 'Signed Board Resolution.pdf', 'PDF', 'application/pdf', daysAgo(3), '24 KB', Buffer.from('Demo board resolution response'), 'client', '', '', '', 0, clients[1].userId]);
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [docId, reqMatter.id, 'signed-board-resolution.pdf', 'Signed Board Resolution.pdf', 'PDF', 'application/pdf', daysAgo(3), fulfilledSize, fulfilledContent, 'client', '', '', '', 0, clients[1].userId]);
       await run('UPDATE document_requests SET responseDocumentId=? WHERE id=?', [docId, reqId]);
     }
   }
@@ -444,8 +457,10 @@ async function main() {
   const portalNotice = id('NOTICE');
   await run('INSERT INTO firm_notices (id,title,content,createdAt,createdBy,clientId) VALUES (?,?,?,?,?,?)', [recessNotice, 'Court recess notice', 'Please note that some court stations may adjust dates during recess. The firm will confirm your matter dates directly.', nowIso(), admin.fullName, '']);
   await run('INSERT INTO firm_notices (id,title,content,createdAt,createdBy,clientId) VALUES (?,?,?,?,?,?)', [portalNotice, 'Client portal launch', 'Clients can now upload documents and payment proof directly through the secure portal.', nowIso(), admin.fullName, clients[0].id]);
+  const noticeDocContent = await seededPdfBuffer('Court Recess Guidance - Demo');
+  const noticeDocSize = `${Math.max(1, Math.round(noticeDocContent.length / 1024))} KB`;
   await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [id('DOC'), '', 'court-recess-guidance.pdf', 'Court recess guidance.pdf', 'PDF', 'application/pdf', today.toISOString().slice(0, 10), '12 KB', Buffer.from('Demo notice attachment'), 'firm', '', '', recessNotice, 1, admin.id]);
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [id('DOC'), '', 'court-recess-guidance.pdf', 'Court recess guidance.pdf', 'PDF', 'application/pdf', today.toISOString().slice(0, 10), noticeDocSize, noticeDocContent, 'firm', '', '', recessNotice, 1, admin.id]);
 
   const auditItems = [
     ['create', 'client', clients[0].id, 'Created demo client records'],
