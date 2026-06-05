@@ -120,6 +120,7 @@ export default function DocumentStudio({ notify }) {
   const [bundleSaveSuccess, setBundleSaveSuccess] = useState('');
   // UI-only: optional Court Bundle features start collapsed (progressive disclosure).
   const [bundleOptionsOpen, setBundleOptionsOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [selectedTool, setSelectedTool] = useState(null);
 
   const panelRef = useRef(null);
@@ -881,16 +882,31 @@ export default function DocumentStudio({ notify }) {
       </Card>
 
       <Card title="Document Tools" hint="Prepare, combine, paginate, and format court-ready documents">
-        <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
-          <DocumentToolCards
-            onOpenMerge={() => handleSelectTool('merge')}
-            onOpenRotate={() => handleSelectTool('rotate')}
-            onOpenExtract={() => handleSelectTool('extract')}
-            onOpenDelete={() => handleSelectTool('delete')}
-            onOpenPaginate={() => handleSelectTool('paginate')}
-            onOpenBundle={() => handleSelectTool('bundle')}
-            selectedTool={selectedTool}
-          />
+        <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
+          <button
+            type="button"
+            onClick={() => setToolsOpen(open => !open)}
+            aria-expanded={toolsOpen}
+            aria-controls="document-tools-panel"
+            style={{ ...styles.ghostButton, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, width: '100%', textAlign: 'left', minHeight: 40 }}
+          >
+            <span style={{ display: 'grid', gap: 2, minWidth: 0 }}>
+              <span style={{ fontWeight: 600, fontSize: 13, color: theme.ink }}>{toolsOpen ? 'Hide document tools ▲' : 'Show document tools ▼'}</span>
+              <span style={{ fontSize: 12, color: theme.muted, lineHeight: 1.45 }}>PDF merge, rotate, extract, delete, paginate, and court bundle tools are inside.</span>
+            </span>
+          </button>
+
+          {toolsOpen && (
+          <div id="document-tools-panel" style={{ display: 'grid', gap: 16, minWidth: 0 }}>
+            <DocumentToolCards
+              onOpenMerge={() => handleSelectTool('merge')}
+              onOpenRotate={() => handleSelectTool('rotate')}
+              onOpenExtract={() => handleSelectTool('extract')}
+              onOpenDelete={() => handleSelectTool('delete')}
+              onOpenPaginate={() => handleSelectTool('paginate')}
+              onOpenBundle={() => handleSelectTool('bundle')}
+              selectedTool={selectedTool}
+            />
 
           {selectedTool === 'merge' && (
           <div
@@ -1787,6 +1803,8 @@ export default function DocumentStudio({ notify }) {
                 </div>
               )}
             </div>
+          </div>
+          )}
           </div>
           )}
         </div>
