@@ -11,6 +11,7 @@ function buildMicrosoftTokenUrl(tenantId) {
 const MICROSOFT_SCOPES = 'openid email profile User.Read';
 const MICROSOFT_CONNECTED_SCOPES = 'openid email profile offline_access User.Read Mail.ReadBasic Calendars.ReadBasic';
 const MICROSOFT_MESSAGES_URL = 'https://graph.microsoft.com/v1.0/me/messages';
+const MICROSOFT_CALENDAR_URL = 'https://graph.microsoft.com/v1.0/me/calendar/events';
 
 function requireMicrosoftConfig() {
   if (!config.MICROSOFT_CLIENT_ID) throw new Error('MICROSOFT_CLIENT_ID is required for Microsoft OAuth');
@@ -125,6 +126,39 @@ async function fetchEmailMetadata({ accessToken, cursor = '', limit = 25 } = {})
   return { messages, cursor: data['@odata.nextLink'] || '' };
 }
 
+function graphAttendeesSummary(attendees = []) {
+  if (!Array.isArray(attendees)) return '';
+  return attendees.map(a => a.emailAddress?.address || '').filter(Boolean).join('; ');
+}
+
+async function fetchCalendarMetadata({ accessToken, startDate, endDate, limit = 25 } = {}) {
+  if (!accessToken) throw new Error('Microsoft access token is required for calendar metadata sync');
+  const params = new URLSearchParams({
+    $top: String(Math.min(Math.max(Number(limit || 25), 1), 50)),
+    $select: 'id,subject,start,end,location,bodyPreview,onlineMeeting,organizer,attendees,lastModifiedDateTime',
+    $orderby: 'start/dateTime desc',
+  });
+  if (startDate) params.set('startDateTime', new Date(startDate).toISOString());
+  if (endDate) params.set('endDateTime', new Date(endDate).toISOString());
+  const url = `${MICROSOFT_CALENDAR_URL}?${params.toString()}`;
+  const data = await graphJson(url, accessToken);
+  const events = (Array.isArray(data.value) ? data.value : []).map(event => ({
+    providerEventId: String(event.id || '').trim(),
+    calendarId: 'primary',
+    calendarName: 'Calendar',
+    subject: String(event.subject || '').trim(),
+    startTime: event.start?.dateTime || event.start?.date || '',
+    endTime: event.end?.dateTime || event.end?.date || '',
+    location: event.location?.displayName || '',
+    meetingLink: String(event.onlineMeeting?.joinUrl || event.onlineMeeting?.conferenceId || '').trim(),
+    organizer: event.organizer?.emailAddress?.name || event.organizer?.emailAddress?.address || '',
+    attendeesSummary: graphAttendeesSummary(event.attendees),
+    descriptionSnippet: String(event.bodyPreview || '').trim().replace(/[\u0000-\u001F\u007F]/g, ' ').slice(0, 500),
+    providerUpdatedAt: String(event.lastModifiedDateTime || '').trim(),
+  }));
+  return { events, cursor: data['@odata.nextLink'] || '' };
+}
+
 function tokenExpiry(tokens = {}) {
   const expiresIn = Number(tokens.expires_in || 0);
   return expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : '';
@@ -175,6 +209,7 @@ module.exports = {
   handleCallback,
   handleConnectedCallback,
   fetchEmailMetadata,
+  fetchCalendarMetadata,
   requireMicrosoftConfig,
   MICROSOFT_CONNECTED_SCOPES,
 };

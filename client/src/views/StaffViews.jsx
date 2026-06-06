@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote } from '@tabler/icons-react';
-import { api, applyChecklistTemplate, createChecklistTemplate, createMatterChecklistItem, deleteChecklistTemplate, deleteClientAvatar, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getInvoiceDetails, getWorkEmailMessages, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, updateChecklistTemplate, updateMatterChecklistItem, uploadClientAvatar, uploadUserAvatar } from '../lib/apiClient.js';
+import { api, applyChecklistTemplate, createChecklistTemplate, createMatterChecklistItem, deleteChecklistTemplate, deleteClientAvatar, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getInvoiceDetails, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, updateChecklistTemplate, updateMatterChecklistItem, uploadClientAvatar, uploadUserAvatar } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, safeHttpUrl, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText, invoiceDueDistanceDays } from '../components/ui.jsx';
@@ -160,20 +160,24 @@ function connectedAccountDateTime(value) {
 export function ConnectedAccounts({ notify }) {
   const [accounts, setAccounts] = useState([]);
   const [messages, setMessages] = useState([]);
+  const [calendarEvents, setCalendarEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [busyProvider, setBusyProvider] = useState('');
   const [busyId, setBusyId] = useState('');
   const [syncingId, setSyncingId] = useState('');
+  const [calendarSyncingId, setCalendarSyncingId] = useState('');
 
   async function load() {
     setLoading(true);
     try {
-      const [accountResponse, messageResponse] = await Promise.all([
+      const [accountResponse, messageResponse, calendarResponse] = await Promise.all([
         listConnectedAccounts(),
         getWorkEmailMessages({ limit: 20 }),
+        getWorkCalendarEvents({ limit: 20 }),
       ]);
       setAccounts(listFromResponse(accountResponse, 'accounts'));
       setMessages(listFromResponse(messageResponse, 'messages'));
+      setCalendarEvents(listFromResponse(calendarResponse, 'events'));
     } catch (err) {
       notify({ type: 'danger', message: err.message });
     } finally {
@@ -222,6 +226,19 @@ export function ConnectedAccounts({ notify }) {
     }
   }
 
+  async function syncCalendar(account) {
+    setCalendarSyncingId(account.id);
+    try {
+      const result = await syncConnectedAccountCalendarMetadata(account.id);
+      notify({ type: 'success', message: `Calendar metadata synced. ${Number(result.importedCount || 0)} imported, ${Number(result.updatedCount || 0)} updated.` });
+      await load();
+    } catch (err) {
+      notify({ type: 'danger', message: err.message });
+    } finally {
+      setCalendarSyncingId('');
+    }
+  }
+
   const rows = accounts.map(account => [
     connectedProviderLabel(account.provider),
     account.email || <span style={styles.mutedText}>No email</span>,
@@ -233,7 +250,10 @@ export function ConnectedAccounts({ notify }) {
     account.status === 'connected' ? (
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         <button type="button" style={styles.ghostButton} disabled={syncingId === account.id} onClick={() => syncEmail(account)}>
-          {syncingId === account.id ? 'Syncing...' : 'Sync email metadata now'}
+          {syncingId === account.id ? 'Syncing...' : 'Sync email metadata'}
+        </button>
+        <button type="button" style={styles.ghostButton} disabled={calendarSyncingId === account.id} onClick={() => syncCalendar(account)}>
+          {calendarSyncingId === account.id ? 'Syncing...' : 'Sync calendar metadata'}
         </button>
         <button type="button" style={styles.dangerButton} disabled={busyId === account.id} onClick={() => disconnect(account)}>{busyId === account.id ? 'Disconnecting...' : 'Disconnect'}</button>
       </div>
@@ -260,12 +280,30 @@ export function ConnectedAccounts({ notify }) {
     ) : <span style={styles.mutedText}>No suggestion</span>,
   ]);
 
+  const calendarEventRows = calendarEvents.map(event => [
+    <div style={{ display: 'grid', gap: 2 }}>
+      <strong>{connectedProviderLabel(event.accountProvider || event.provider)}</strong>
+      <small style={styles.mutedText}>{event.accountEmail || '-'}</small>
+    </div>,
+    event.subject || <span style={styles.mutedText}>(No subject)</span>,
+    <div style={{ display: 'grid', gap: 2 }}>
+      <span>{event.startTime ? new Date(event.startTime).toLocaleString() : '-'}</span>
+      {event.meetingLink ? <small><a href={event.meetingLink} target="_blank" rel="noopener noreferrer" style={{ color: theme.link }}>Meeting link</a></small> : null}
+    </div>,
+    event.matchedMatterId ? (
+      <div style={{ display: 'grid', gap: 2 }}>
+        <strong>{event.matchedMatterTitle || event.matchedMatterId}</strong>
+        <small style={styles.mutedText}>{event.matchReason || 'Suggested match'}</small>
+      </div>
+    ) : <span style={styles.mutedText}>No suggestion</span>,
+  ]);
+
   return (
     <div style={styles.pageStack}>
       <Card title="Connected Accounts" hint="Authorize external provider access for future integrations">
         <div style={{ display: 'grid', gap: 12 }}>
           <div style={{ ...styles.alert, padding: 10, borderRadius: 6 }}>
-            Metadata only. Email bodies and attachments are not imported. Calendar sync remains disabled.
+            Metadata only. Email bodies and attachments are not imported. Calendar events are not created, edited, or deleted.
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button type="button" style={styles.primaryButton} onClick={() => connect('google')} disabled={Boolean(busyProvider)}>
@@ -290,6 +328,13 @@ export function ConnectedAccounts({ notify }) {
           : messages.length
             ? <Table columns={['Account', 'Sender', 'Subject', 'Received', 'Attachments', 'Suggested matter']} rows={messageRows} />
             : <Empty title="No email metadata synced." text="Use Sync email metadata now on a connected account." />}
+      </Card>
+      <Card title="Calendar Metadata" hint={`${calendarEvents.length} recent event${calendarEvents.length === 1 ? '' : 's'}`}>
+        {loading
+          ? <div style={styles.mutedText}>Loading calendar metadata...</div>
+          : calendarEvents.length
+            ? <Table columns={['Account', 'Subject', 'Time', 'Suggested matter']} rows={calendarEventRows} />
+            : <Empty title="No calendar metadata synced." text="Use Sync calendar metadata now on a connected account." />}
       </Card>
     </div>
   );

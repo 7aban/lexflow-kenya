@@ -44,6 +44,7 @@ const { recordAuditEvent } = createAudit({ run, get });
 const oauth = createOAuth({ run, get, all });
 const CONVERSATION_STATUSES = new Set(['open', 'pending', 'resolved']);
 const WORK_EMAIL_SYNC_TYPE = 'email_metadata';
+const WORK_CALENDAR_SYNC_TYPE = 'calendar_metadata';
 const WORK_EMAIL_SYNC_LIMIT = 25;
 const GENERIC_EMAIL_DOMAINS = new Set(['gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'yahoo.com', 'icloud.com', 'me.com', 'proton.me', 'protonmail.com']);
 const MAX_MERGE_PDF_COUNT = 10;
@@ -217,6 +218,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS connected_account_tokens (id TEXT PRIMARY KEY, connectedAccountId TEXT NOT NULL, accessTokenEncrypted TEXT, refreshTokenEncrypted TEXT, tokenType TEXT, expiresAt TEXT, scope TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS work_email_messages (id TEXT PRIMARY KEY, connectedAccountId TEXT NOT NULL, userId TEXT NOT NULL, provider TEXT NOT NULL, providerAccountId TEXT, providerMessageId TEXT NOT NULL, providerThreadId TEXT, sender TEXT, recipientsSummary TEXT, subject TEXT, snippet TEXT, receivedAt TEXT, hasAttachments INTEGER DEFAULT 0, labelsJson TEXT, foldersJson TEXT, matchedMatterId TEXT, matchConfidence REAL, matchReason TEXT, importedAt TEXT NOT NULL, updatedAt TEXT, UNIQUE(connectedAccountId, providerMessageId))`);
   await run(`CREATE TABLE IF NOT EXISTS connected_account_sync_state (id TEXT PRIMARY KEY, connectedAccountId TEXT NOT NULL, syncType TEXT NOT NULL, cursorJson TEXT, lastAttemptAt TEXT, lastSuccessAt TEXT, lastError TEXT, lastImportedCount INTEGER DEFAULT 0, createdAt TEXT NOT NULL, updatedAt TEXT, UNIQUE(connectedAccountId, syncType))`);
+  await run(`CREATE TABLE IF NOT EXISTS work_calendar_events (id TEXT PRIMARY KEY, connectedAccountId TEXT NOT NULL, userId TEXT NOT NULL, provider TEXT NOT NULL, providerAccountId TEXT, providerEventId TEXT NOT NULL, calendarId TEXT, calendarName TEXT, subject TEXT, startTime TEXT, endTime TEXT, location TEXT, meetingLink TEXT, organizer TEXT, attendeesSummary TEXT, descriptionSnippet TEXT, providerUpdatedAt TEXT, matchedMatterId TEXT, matchConfidence REAL, matchReason TEXT, importedAt TEXT NOT NULL, updatedAt TEXT, UNIQUE(connectedAccountId, providerEventId))`);
   await run(`CREATE TABLE IF NOT EXISTS matter_checklist_items (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT NOT NULL, completed INTEGER DEFAULT 0, position INTEGER DEFAULT 0, notes TEXT, dueDate TEXT, assignee TEXT, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, completedAt TEXT, completedBy TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS checklist_templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, practiceArea TEXT, active INTEGER DEFAULT 1, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS checklist_template_items (id TEXT PRIMARY KEY, templateId TEXT NOT NULL, title TEXT NOT NULL, notes TEXT, position INTEGER DEFAULT 0, createdAt TEXT NOT NULL)`);
@@ -332,6 +334,9 @@ async function initDb() {
   await run('CREATE INDEX IF NOT EXISTS idx_work_email_messages_account_received ON work_email_messages(connectedAccountId, receivedAt)');
   await run('CREATE INDEX IF NOT EXISTS idx_work_email_messages_matched_matter ON work_email_messages(matchedMatterId)');
   await run('CREATE INDEX IF NOT EXISTS idx_connected_account_sync_state_account_type ON connected_account_sync_state(connectedAccountId, syncType)');
+  await run('CREATE INDEX IF NOT EXISTS idx_work_calendar_events_user_time ON work_calendar_events(userId, startTime)');
+  await run('CREATE INDEX IF NOT EXISTS idx_work_calendar_events_account_time ON work_calendar_events(connectedAccountId, startTime)');
+  await run('CREATE INDEX IF NOT EXISTS idx_work_calendar_events_matched_matter ON work_calendar_events(matchedMatterId)');
   await run('CREATE INDEX IF NOT EXISTS idx_payments_invoiceId_date_createdAt ON payments(invoiceId, date, createdAt)');
   await run('CREATE INDEX IF NOT EXISTS idx_payments_clientId_date_createdAt ON payments(clientId, date, createdAt)');
   await run('CREATE INDEX IF NOT EXISTS idx_payment_proofs_status_createdAt ON payment_proofs(status, createdAt)');
@@ -973,6 +978,12 @@ function workEmailProviderClient(provider) {
   throw new Error('Unsupported work email provider');
 }
 
+function workCalendarProviderClient(provider) {
+  if (provider === 'google') return googleOAuth;
+  if (provider === 'microsoft') return microsoftOAuth;
+  throw new Error('Unsupported work calendar provider');
+}
+
 function parseWorkEmailCursor(cursorJson) {
   if (!cursorJson) return {};
   try {
@@ -1273,6 +1284,261 @@ async function recordWorkEmailSyncFailure(req, connectedAccountId, reason, attem
   }).catch(() => {});
 }
 
+function normalizeCalendarEvent(event = {}) {
+  return {
+    providerEventId: String(event.providerEventId || '').trim(),
+    calendarId: String(event.calendarId || 'primary').trim(),
+    calendarName: String(event.calendarName || '').trim(),
+    subject: String(event.subject || '').trim(),
+    startTime: String(event.startTime || '').trim(),
+    endTime: String(event.endTime || '').trim(),
+    location: String(event.location || '').trim(),
+    meetingLink: String(event.meetingLink || '').trim(),
+    organizer: String(event.organizer || '').trim(),
+    attendeesSummary: String(event.attendeesSummary || '').trim(),
+    descriptionSnippet: String(event.descriptionSnippet || '').trim().replace(/[\u0000-\u001F\u007F]/g, ' ').slice(0, 500),
+    providerUpdatedAt: String(event.providerUpdatedAt || '').trim(),
+  };
+}
+
+function publicCalendarEvent(row = {}) {
+  return {
+    id: row.id,
+    connectedAccountId: row.connectedAccountId,
+    provider: row.provider,
+    providerAccountId: row.providerAccountId || '',
+    providerEventId: row.providerEventId || '',
+    calendarId: row.calendarId || '',
+    calendarName: row.calendarName || '',
+    subject: row.subject || '',
+    startTime: row.startTime || '',
+    endTime: row.endTime || '',
+    location: row.location || '',
+    meetingLink: row.meetingLink || '',
+    organizer: row.organizer || '',
+    attendeesSummary: row.attendeesSummary || '',
+    descriptionSnippet: row.descriptionSnippet || '',
+    matchedMatterId: row.matchedMatterId || '',
+    matchedMatterTitle: row.matchedMatterTitle || '',
+    matchedClientName: row.matchedClientName || '',
+    matchConfidence: row.matchConfidence === null || row.matchConfidence === undefined ? null : Number(row.matchConfidence),
+    matchReason: row.matchReason || '',
+    importedAt: row.importedAt || '',
+    updatedAt: row.updatedAt || '',
+    accountEmail: row.accountEmail || '',
+    accountProvider: row.accountProvider || row.provider || '',
+  };
+}
+
+async function suggestMatterForCalendarEvent(req, event) {
+  const params = [];
+  let where = '';
+  if (req.user.role === 'advocate') {
+    where = 'WHERE m.assignedTo=?';
+    params.push(req.user.fullName || '');
+  }
+  const matters = await all(
+    `SELECT m.id, m.reference, m.caseNo, m.title, c.name clientName, c.email clientEmail
+     FROM matters m
+     LEFT JOIN clients c ON c.id=m.clientId
+     ${where}`,
+    params,
+  );
+  const haystack = [
+    event.subject,
+    event.descriptionSnippet,
+    event.location,
+    event.organizer,
+    event.attendeesSummary,
+  ].map(value => cleanWorkEmailText(value, 1000).toLowerCase()).join(' ');
+  const addressText = [event.organizer, event.attendeesSummary].join(' ').toLowerCase();
+  let best = null;
+  for (const matter of matters) {
+    const reference = cleanWorkEmailText(matter.reference, 120).toLowerCase();
+    const caseNo = cleanWorkEmailText(matter.caseNo, 120).toLowerCase();
+    if (reference && haystack.includes(reference)) {
+      best = bestMatterCandidate(best, { matter, confidence: 0.95, reason: `Reference match: ${matter.reference}` });
+      continue;
+    }
+    if (caseNo && haystack.includes(caseNo)) {
+      best = bestMatterCandidate(best, { matter, confidence: 0.92, reason: `Case number match: ${matter.caseNo}` });
+      continue;
+    }
+
+    const clientEmail = cleanWorkEmailText(matter.clientEmail, 255).toLowerCase();
+    if (clientEmail && addressText.includes(clientEmail)) {
+      best = bestMatterCandidate(best, { matter, confidence: 0.88, reason: `Client email match: ${matter.clientEmail}` });
+      continue;
+    }
+    const clientDomain = emailDomain(clientEmail);
+    if (clientDomain && !GENERIC_EMAIL_DOMAINS.has(clientDomain) && addressText.includes(clientDomain)) {
+      best = bestMatterCandidate(best, { matter, confidence: 0.72, reason: `Client email domain match: ${clientDomain}` });
+    }
+
+    const clientWords = wordsForMatch(matter.clientName, 3);
+    if (clientWords.length && clientWords.every(word => haystack.includes(word))) {
+      best = bestMatterCandidate(best, { matter, confidence: 0.74, reason: `Client name match: ${matter.clientName}` });
+    }
+
+    const titleWords = wordsForMatch(matter.title, 4).slice(0, 5);
+    const titleHits = titleWords.filter(word => haystack.includes(word)).length;
+    if (titleWords.length >= 2 && titleHits >= Math.min(2, titleWords.length)) {
+      best = bestMatterCandidate(best, { matter, confidence: 0.66, reason: `Matter title terms match: ${matter.title}` });
+    }
+  }
+  if (!best || Number(best.confidence || 0) < 0.6) return null;
+  return {
+    matterId: best.matter.id,
+    matterTitle: best.matter.title || '',
+    clientName: best.matter.clientName || '',
+    confidence: Number(best.confidence.toFixed(2)),
+    reason: best.reason,
+  };
+}
+
+async function upsertWorkCalendarSyncState(connectedAccountId, { cursor = '', lastAttemptAt, lastSuccessAt = '', lastError = '', lastImportedCount = 0 }) {
+  const now = new Date().toISOString();
+  const existing = await get('SELECT id FROM connected_account_sync_state WHERE connectedAccountId=? AND syncType=?', [connectedAccountId, WORK_CALENDAR_SYNC_TYPE]);
+  const cursorJson = JSON.stringify({ cursor: cleanWorkEmailText(cursor, 4000) });
+  if (existing) {
+    await run(
+      `UPDATE connected_account_sync_state
+       SET cursorJson=?, lastAttemptAt=?, lastSuccessAt=?, lastError=?, lastImportedCount=?, updatedAt=?
+       WHERE id=?`,
+      [cursorJson, lastAttemptAt || now, lastSuccessAt, lastError, Number(lastImportedCount || 0), now, existing.id],
+    );
+    return existing.id;
+  }
+  const id = genId('CAS');
+  await run(
+    `INSERT INTO connected_account_sync_state
+     (id,connectedAccountId,syncType,cursorJson,lastAttemptAt,lastSuccessAt,lastError,lastImportedCount,createdAt,updatedAt)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    [id, connectedAccountId, WORK_CALENDAR_SYNC_TYPE, cursorJson, lastAttemptAt || now, lastSuccessAt, lastError, Number(lastImportedCount || 0), now, now],
+  );
+  return id;
+}
+
+async function storeWorkCalendarMetadata(req, account, providerResult, attemptAt) {
+  const events = (Array.isArray(providerResult?.events) ? providerResult.events : [])
+    .map(normalizeCalendarEvent)
+    .filter(event => event.providerEventId);
+  const now = new Date().toISOString();
+  let importedCount = 0;
+  let updatedCount = 0;
+  const matchEvents = [];
+  await run('BEGIN TRANSACTION');
+  try {
+    for (const event of events) {
+      const match = await suggestMatterForCalendarEvent(req, event);
+      const existing = await get(
+        'SELECT id FROM work_calendar_events WHERE connectedAccountId=? AND providerEventId=?',
+        [account.id, event.providerEventId],
+      );
+      if (existing) {
+        await run(
+          `UPDATE work_calendar_events
+           SET calendarId=?, calendarName=?, subject=?, startTime=?, endTime=?, location=?, meetingLink=?, organizer=?, attendeesSummary=?, descriptionSnippet=?, providerUpdatedAt=?, matchedMatterId=?, matchConfidence=?, matchReason=?, updatedAt=?
+           WHERE id=?`,
+          [
+            event.calendarId,
+            event.calendarName,
+            event.subject,
+            event.startTime,
+            event.endTime,
+            event.location,
+            event.meetingLink,
+            event.organizer,
+            event.attendeesSummary,
+            event.descriptionSnippet,
+            event.providerUpdatedAt,
+            match?.matterId || '',
+            match?.confidence || null,
+            match?.reason || '',
+            now,
+            existing.id,
+          ],
+        );
+        updatedCount += 1;
+        if (match?.matterId) matchEvents.push({ eventId: existing.id, ...match });
+      } else {
+        const id = genId('WCE');
+        await run(
+          `INSERT INTO work_calendar_events
+           (id,connectedAccountId,userId,provider,providerAccountId,providerEventId,calendarId,calendarName,subject,startTime,endTime,location,meetingLink,organizer,attendeesSummary,descriptionSnippet,providerUpdatedAt,matchedMatterId,matchConfidence,matchReason,importedAt,updatedAt)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [
+            id,
+            account.id,
+            req.user.userId,
+            account.provider,
+            account.providerAccountId || '',
+            event.providerEventId,
+            event.calendarId,
+            event.calendarName,
+            event.subject,
+            event.startTime,
+            event.endTime,
+            event.location,
+            event.meetingLink,
+            event.organizer,
+            event.attendeesSummary,
+            event.descriptionSnippet,
+            event.providerUpdatedAt,
+            match?.matterId || '',
+            match?.confidence || null,
+            match?.reason || '',
+            now,
+            now,
+          ],
+        );
+        importedCount += 1;
+        if (match?.matterId) matchEvents.push({ eventId: id, ...match });
+      }
+    }
+    await upsertWorkCalendarSyncState(account.id, {
+      cursor: providerResult?.cursor || '',
+      lastAttemptAt: attemptAt,
+      lastSuccessAt: now,
+      lastError: '',
+      lastImportedCount: importedCount + updatedCount,
+    });
+    await run('UPDATE connected_accounts SET lastSyncAt=?, lastError="", updatedAt=? WHERE id=?', [now, now, account.id]);
+    await run('COMMIT');
+  } catch (err) {
+    await run('ROLLBACK').catch(() => {});
+    throw err;
+  }
+  const totalRow = await get('SELECT COUNT(*) count FROM work_calendar_events WHERE connectedAccountId=?', [account.id]);
+  return {
+    summary: {
+      importedCount,
+      updatedCount,
+      totalEvents: Number(totalRow?.count || 0),
+      lastSuccessAt: now,
+    },
+    matchEvents,
+  };
+}
+
+async function recordWorkCalendarSyncFailure(req, connectedAccountId, reason, attemptAt) {
+  const now = new Date().toISOString();
+  await upsertWorkCalendarSyncState(connectedAccountId, {
+    cursor: '',
+    lastAttemptAt: attemptAt || now,
+    lastSuccessAt: '',
+    lastError: reason,
+    lastImportedCount: 0,
+  }).catch(() => {});
+  await run('UPDATE connected_accounts SET lastError=?, updatedAt=? WHERE id=?', [reason, now, connectedAccountId]).catch(() => {});
+  await recordAuditEvent(req, {
+    action: 'work_calendar_sync_failed',
+    entityType: 'connected_account',
+    entityId: connectedAccountId,
+    metadata: { connectedAccountId, reason },
+  }).catch(() => {});
+}
+
 app.get('/api/connected-accounts', authenticate, requireStaff, async (req, res) => {
   const accounts = await oauth.getConnectedAccounts(req.user.userId);
   res.json(accounts);
@@ -1478,6 +1744,141 @@ app.get('/api/work-email/messages', authenticate, requireStaff, async (req, res)
     [...params, limit],
   );
   res.json(rows.map(publicWorkEmailMessage));
+});
+
+app.post('/api/connected-accounts/:id/sync-calendar-metadata', authenticate, requireStaff, async (req, res) => {
+  const attemptAt = new Date().toISOString();
+  const credential = await oauth.getConnectedAccountSyncCredential(req.user.userId, req.params.id).catch(() => ({
+    ok: false,
+    status: 500,
+    error: 'credential_read_failed',
+    message: 'Connected account could not be read.',
+  }));
+  if (!credential.ok) {
+    await recordAuditEvent(req, {
+      action: 'work_calendar_sync_failed',
+      entityType: 'connected_account',
+      entityId: req.params.id,
+      metadata: { connectedAccountId: req.params.id, reason: credential.error },
+    }).catch(() => {});
+    return res.status(credential.status || 400).json({ error: credential.message || 'Connected account cannot be synced.' });
+  }
+
+  const { account, tokens } = credential;
+  await recordAuditEvent(req, {
+    action: 'work_calendar_sync_started',
+    entityType: 'connected_account',
+    entityId: account.id,
+    metadata: { provider: account.provider, connectedAccountId: account.id },
+  }).catch(() => {});
+
+  try {
+    const stateRow = await get('SELECT cursorJson FROM connected_account_sync_state WHERE connectedAccountId=? AND syncType=?', [account.id, WORK_CALENDAR_SYNC_TYPE]);
+    const cursorState = parseWorkEmailCursor(stateRow?.cursorJson);
+    const providerClient = workCalendarProviderClient(account.provider);
+    const providerResult = await providerClient.fetchCalendarMetadata({
+      accessToken: tokens.accessToken,
+      startDate: cursorState.startDate || '',
+      endDate: cursorState.endDate || '',
+      limit: 25,
+    });
+    const stored = await storeWorkCalendarMetadata(req, account, providerResult, attemptAt);
+    if (stored.summary.importedCount || stored.summary.updatedCount) {
+      await recordAuditEvent(req, {
+        action: 'work_calendar_metadata_imported',
+        entityType: 'connected_account',
+        entityId: account.id,
+        metadata: {
+          provider: account.provider,
+          connectedAccountId: account.id,
+          importedCount: stored.summary.importedCount,
+          updatedCount: stored.summary.updatedCount,
+        },
+      }).catch(() => {});
+    }
+    for (const match of stored.matchEvents) {
+      await recordAuditEvent(req, {
+        action: 'work_calendar_match_suggested',
+        entityType: 'work_calendar_event',
+        entityId: match.eventId,
+        matterId: match.matterId,
+        metadata: {
+          connectedAccountId: account.id,
+          workCalendarEventId: match.eventId,
+          matterId: match.matterId,
+          confidence: match.confidence,
+          reason: match.reason,
+        },
+      }).catch(() => {});
+    }
+    await recordAuditEvent(req, {
+      action: 'work_calendar_sync_completed',
+      entityType: 'connected_account',
+      entityId: account.id,
+      metadata: {
+        provider: account.provider,
+        connectedAccountId: account.id,
+        importedCount: stored.summary.importedCount,
+        updatedCount: stored.summary.updatedCount,
+        totalEvents: stored.summary.totalEvents,
+      },
+    }).catch(() => {});
+    res.json(stored.summary);
+  } catch (err) {
+    await recordWorkCalendarSyncFailure(req, account.id, 'sync_failed', attemptAt);
+    res.status(502).json({ error: 'Calendar metadata sync failed.' });
+  }
+});
+
+app.get('/api/work-calendar/events/:id/matches', authenticate, requireStaff, async (req, res) => {
+  const row = await get(
+    `SELECT wce.id, wce.matchedMatterId, wce.matchConfidence, wce.matchReason, m.title matchedMatterTitle, c.name matchedClientName
+     FROM work_calendar_events wce
+     LEFT JOIN matters m ON m.id=wce.matchedMatterId
+     LEFT JOIN clients c ON c.id=m.clientId
+     WHERE wce.id=? AND wce.userId=?`,
+    [req.params.id, req.user.userId],
+  );
+  if (!row) return res.status(404).json({ error: 'Work calendar event not found.' });
+  if (!row.matchedMatterId) return res.json([]);
+  res.json([{
+    matterId: row.matchedMatterId,
+    matterTitle: row.matchedMatterTitle || '',
+    clientName: row.matchedClientName || '',
+    confidence: row.matchConfidence === null || row.matchConfidence === undefined ? null : Number(row.matchConfidence),
+    reason: row.matchReason || '',
+  }]);
+});
+
+app.get('/api/work-calendar/events', authenticate, requireStaff, async (req, res) => {
+  const filters = ['wce.userId=?'];
+  const params = [req.user.userId];
+  if (req.query.connectedAccountId) {
+    filters.push('wce.connectedAccountId=?');
+    params.push(String(req.query.connectedAccountId));
+  }
+  if (req.query.matchedMatterId) {
+    filters.push('wce.matchedMatterId=?');
+    params.push(String(req.query.matchedMatterId));
+  }
+  if (req.query.q) {
+    const q = `%${String(req.query.q).trim()}%`;
+    filters.push('(wce.subject LIKE ? OR wce.location LIKE ? OR wce.organizer LIKE ? OR wce.attendeesSummary LIKE ?)');
+    params.push(q, q, q, q);
+  }
+  const limit = Math.min(Math.max(Number(req.query.limit || 25), 1), 100);
+  const rows = await all(
+    `SELECT wce.*, ca.email accountEmail, ca.provider accountProvider, m.title matchedMatterTitle, c.name matchedClientName
+     FROM work_calendar_events wce
+     LEFT JOIN connected_accounts ca ON ca.id=wce.connectedAccountId
+     LEFT JOIN matters m ON m.id=wce.matchedMatterId
+     LEFT JOIN clients c ON c.id=m.clientId
+     WHERE ${filters.join(' AND ')}
+     ORDER BY COALESCE(wce.startTime, wce.importedAt) DESC, wce.importedAt DESC
+     LIMIT ?`,
+    [...params, limit],
+  );
+  res.json(rows.map(publicCalendarEvent));
 });
 
 app.use('/api', authenticate);

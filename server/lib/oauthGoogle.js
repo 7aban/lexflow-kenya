@@ -4,6 +4,7 @@ const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v3/userinfo';
 const GOOGLE_GMAIL_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/messages';
+const GOOGLE_CALENDAR_URL = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
 const GOOGLE_SCOPES = 'openid email profile';
 const GOOGLE_CONNECTED_SCOPES = [
   'openid',
@@ -137,6 +138,34 @@ async function fetchEmailMetadata({ accessToken, cursor = '', limit = 25 } = {})
   return { messages, cursor: list.nextPageToken || '' };
 }
 
+async function fetchCalendarMetadata({ accessToken, startDate, endDate, limit = 25 } = {}) {
+  if (!accessToken) throw new Error('Google access token is required for calendar metadata sync');
+  const params = new URLSearchParams({
+    maxResults: String(Math.min(Math.max(Number(limit || 25), 1), 50)),
+    singleEvents: 'true',
+    orderBy: 'startTime',
+    showDeleted: 'false',
+  });
+  if (startDate) params.set('timeMin', new Date(startDate).toISOString());
+  if (endDate) params.set('timeMax', new Date(endDate).toISOString());
+  const data = await gmailJson(`${GOOGLE_CALENDAR_URL}?${params.toString()}`, accessToken);
+  const events = (Array.isArray(data.items) ? data.items : []).map(event => ({
+    providerEventId: String(event.id || '').trim(),
+    calendarId: 'primary',
+    calendarName: 'primary',
+    subject: String(event.summary || '').trim(),
+    startTime: event.start?.dateTime || event.start?.date || '',
+    endTime: event.end?.dateTime || event.end?.date || '',
+    location: String(event.location || '').trim(),
+    meetingLink: String(event.hangoutLink || event.conferenceData?.entryPoints?.find(ep => ep.entryPointType === 'video')?.uri || '').trim(),
+    organizer: event.organizer?.email || event.organizer?.displayName || '',
+    attendeesSummary: Array.isArray(event.attendees) ? event.attendees.map(a => a.email).filter(Boolean).join('; ') : '',
+    descriptionSnippet: String(event.description || '').trim().replace(/[\u0000-\u001F\u007F]/g, ' ').slice(0, 500),
+    providerUpdatedAt: String(event.updated || '').trim(),
+  }));
+  return { events, cursor: data.nextPageToken || '' };
+}
+
 function tokenExpiry(tokens = {}) {
   const expiresIn = Number(tokens.expires_in || 0);
   return expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : '';
@@ -183,6 +212,7 @@ module.exports = {
   handleCallback,
   handleConnectedCallback,
   fetchEmailMetadata,
+  fetchCalendarMetadata,
   requireGoogleConfig,
   GOOGLE_CONNECTED_SCOPES,
 };
