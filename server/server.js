@@ -219,6 +219,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS work_email_messages (id TEXT PRIMARY KEY, connectedAccountId TEXT NOT NULL, userId TEXT NOT NULL, provider TEXT NOT NULL, providerAccountId TEXT, providerMessageId TEXT NOT NULL, providerThreadId TEXT, sender TEXT, recipientsSummary TEXT, subject TEXT, snippet TEXT, receivedAt TEXT, hasAttachments INTEGER DEFAULT 0, labelsJson TEXT, foldersJson TEXT, matchedMatterId TEXT, matchConfidence REAL, matchReason TEXT, importedAt TEXT NOT NULL, updatedAt TEXT, UNIQUE(connectedAccountId, providerMessageId))`);
   await run(`CREATE TABLE IF NOT EXISTS connected_account_sync_state (id TEXT PRIMARY KEY, connectedAccountId TEXT NOT NULL, syncType TEXT NOT NULL, cursorJson TEXT, lastAttemptAt TEXT, lastSuccessAt TEXT, lastError TEXT, lastImportedCount INTEGER DEFAULT 0, createdAt TEXT NOT NULL, updatedAt TEXT, UNIQUE(connectedAccountId, syncType))`);
   await run(`CREATE TABLE IF NOT EXISTS work_calendar_events (id TEXT PRIMARY KEY, connectedAccountId TEXT NOT NULL, userId TEXT NOT NULL, provider TEXT NOT NULL, providerAccountId TEXT, providerEventId TEXT NOT NULL, calendarId TEXT, calendarName TEXT, subject TEXT, startTime TEXT, endTime TEXT, location TEXT, meetingLink TEXT, organizer TEXT, attendeesSummary TEXT, descriptionSnippet TEXT, providerUpdatedAt TEXT, matchedMatterId TEXT, matchConfidence REAL, matchReason TEXT, importedAt TEXT NOT NULL, updatedAt TEXT, UNIQUE(connectedAccountId, providerEventId))`);
+  await run(`CREATE TABLE IF NOT EXISTS work_metadata_matter_links (id TEXT PRIMARY KEY, sourceType TEXT NOT NULL, sourceId TEXT NOT NULL, matterId TEXT NOT NULL, suggestedMatterId TEXT, confidence REAL, reason TEXT, status TEXT NOT NULL, confirmedBy TEXT, confirmedAt TEXT, unlinkedBy TEXT, unlinkedAt TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS matter_checklist_items (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT NOT NULL, completed INTEGER DEFAULT 0, position INTEGER DEFAULT 0, notes TEXT, dueDate TEXT, assignee TEXT, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, completedAt TEXT, completedBy TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS checklist_templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, practiceArea TEXT, active INTEGER DEFAULT 1, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS checklist_template_items (id TEXT PRIMARY KEY, templateId TEXT NOT NULL, title TEXT NOT NULL, notes TEXT, position INTEGER DEFAULT 0, createdAt TEXT NOT NULL)`);
@@ -337,6 +338,9 @@ async function initDb() {
   await run('CREATE INDEX IF NOT EXISTS idx_work_calendar_events_user_time ON work_calendar_events(userId, startTime)');
   await run('CREATE INDEX IF NOT EXISTS idx_work_calendar_events_account_time ON work_calendar_events(connectedAccountId, startTime)');
   await run('CREATE INDEX IF NOT EXISTS idx_work_calendar_events_matched_matter ON work_calendar_events(matchedMatterId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_work_metadata_links_source_status ON work_metadata_matter_links(sourceType, sourceId, status)');
+  await run('CREATE INDEX IF NOT EXISTS idx_work_metadata_links_matter_status ON work_metadata_matter_links(matterId, status)');
+  await run('CREATE INDEX IF NOT EXISTS idx_work_metadata_links_confirmed_by ON work_metadata_matter_links(confirmedBy)');
   await run('CREATE INDEX IF NOT EXISTS idx_payments_invoiceId_date_createdAt ON payments(invoiceId, date, createdAt)');
   await run('CREATE INDEX IF NOT EXISTS idx_payments_clientId_date_createdAt ON payments(clientId, date, createdAt)');
   await run('CREATE INDEX IF NOT EXISTS idx_payment_proofs_status_createdAt ON payment_proofs(status, createdAt)');
@@ -1043,6 +1047,22 @@ function bestMatterCandidate(current, candidate) {
   return current;
 }
 
+function confirmationSourceFor(row = {}) {
+  if (!row.confirmedMatterId) return '';
+  return row.confirmedMatterId === row.matchedMatterId ? 'suggested' : 'manual_override';
+}
+
+function activeMetadataLinkJoin(sourceType, sourceAlias = '') {
+  return `LEFT JOIN work_metadata_matter_links wml ON wml.id=(
+      SELECT id FROM work_metadata_matter_links active_wml
+      WHERE active_wml.sourceType='${sourceType}' AND active_wml.sourceId=${sourceAlias}.id AND active_wml.status='confirmed'
+      ORDER BY active_wml.confirmedAt DESC, active_wml.createdAt DESC
+      LIMIT 1
+    )
+    LEFT JOIN matters cm ON cm.id=wml.matterId
+    LEFT JOIN clients cc ON cc.id=cm.clientId`;
+}
+
 async function suggestMatterForWorkEmail(req, message) {
   const params = [];
   let where = '';
@@ -1129,6 +1149,13 @@ function publicWorkEmailMessage(row = {}) {
     matchedClientName: row.matchedClientName || '',
     matchConfidence: row.matchConfidence === null || row.matchConfidence === undefined ? null : Number(row.matchConfidence),
     matchReason: row.matchReason || '',
+    confirmedMatterId: row.confirmedMatterId || '',
+    confirmedMatterTitle: row.confirmedMatterTitle || '',
+    confirmedClientName: row.confirmedClientName || '',
+    confirmedAt: row.confirmedAt || '',
+    confirmedBy: row.confirmedBy || '',
+    confirmationStatus: row.confirmedMatterId ? (row.confirmationStatus || 'confirmed') : '',
+    confirmationSource: confirmationSourceFor(row),
     importedAt: row.importedAt || '',
     updatedAt: row.updatedAt || '',
     accountEmail: row.accountEmail || '',
@@ -1323,6 +1350,13 @@ function publicCalendarEvent(row = {}) {
     matchedClientName: row.matchedClientName || '',
     matchConfidence: row.matchConfidence === null || row.matchConfidence === undefined ? null : Number(row.matchConfidence),
     matchReason: row.matchReason || '',
+    confirmedMatterId: row.confirmedMatterId || '',
+    confirmedMatterTitle: row.confirmedMatterTitle || '',
+    confirmedClientName: row.confirmedClientName || '',
+    confirmedAt: row.confirmedAt || '',
+    confirmedBy: row.confirmedBy || '',
+    confirmationStatus: row.confirmedMatterId ? (row.confirmationStatus || 'confirmed') : '',
+    confirmationSource: confirmationSourceFor(row),
     importedAt: row.importedAt || '',
     updatedAt: row.updatedAt || '',
     accountEmail: row.accountEmail || '',
@@ -1539,6 +1573,119 @@ async function recordWorkCalendarSyncFailure(req, connectedAccountId, reason, at
   }).catch(() => {});
 }
 
+async function workEmailMessageWithConfirmation(messageId, userId) {
+  return get(
+    `SELECT wem.*, ca.email accountEmail, ca.provider accountProvider, m.title matchedMatterTitle, c.name matchedClientName,
+      wml.matterId confirmedMatterId, cm.title confirmedMatterTitle, cc.name confirmedClientName,
+      wml.confirmedAt confirmedAt, wml.confirmedBy confirmedBy, wml.status confirmationStatus
+     FROM work_email_messages wem
+     LEFT JOIN connected_accounts ca ON ca.id=wem.connectedAccountId
+     LEFT JOIN matters m ON m.id=wem.matchedMatterId
+     LEFT JOIN clients c ON c.id=m.clientId
+     ${activeMetadataLinkJoin('email', 'wem')}
+     WHERE wem.id=? AND wem.userId=?`,
+    [messageId, userId],
+  );
+}
+
+async function workCalendarEventWithConfirmation(eventId, userId) {
+  return get(
+    `SELECT wce.*, ca.email accountEmail, ca.provider accountProvider, m.title matchedMatterTitle, c.name matchedClientName,
+      wml.matterId confirmedMatterId, cm.title confirmedMatterTitle, cc.name confirmedClientName,
+      wml.confirmedAt confirmedAt, wml.confirmedBy confirmedBy, wml.status confirmationStatus
+     FROM work_calendar_events wce
+     LEFT JOIN connected_accounts ca ON ca.id=wce.connectedAccountId
+     LEFT JOIN matters m ON m.id=wce.matchedMatterId
+     LEFT JOIN clients c ON c.id=m.clientId
+     ${activeMetadataLinkJoin('calendar', 'wce')}
+     WHERE wce.id=? AND wce.userId=?`,
+    [eventId, userId],
+  );
+}
+
+async function confirmWorkMetadataMatter(req, { sourceType, sourceId, connectedAccountId, suggestedMatterId, confidence, reason, selectedMatterId, auditAction, entityType }) {
+  const requestedMatterId = String(selectedMatterId || '').trim();
+  const suggestionMatterId = String(suggestedMatterId || '').trim();
+  const matterId = requestedMatterId || suggestionMatterId;
+  if (!matterId) return { ok: false, status: 400, error: 'matterId is required when no suggested matter is available.' };
+  const matter = await get('SELECT id, clientId FROM matters WHERE id=?', [matterId]);
+  if (!matter) return { ok: false, status: 404, error: 'Matter not found.' };
+  if (!(await canAccessMatter(req, matterId))) {
+    await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: matterId, clientId: matter.clientId || '', metadata: { reason: 'insufficient permissions', route: `${sourceType}_metadata_confirm_matter` } }).catch(() => {});
+    return { ok: false, status: 403, error: 'Matter access denied.' };
+  }
+  const now = new Date().toISOString();
+  const confirmationSource = requestedMatterId && requestedMatterId !== suggestionMatterId ? 'manual_override' : 'suggested';
+  const existingLinks = await all('SELECT id, matterId FROM work_metadata_matter_links WHERE sourceType=? AND sourceId=? AND status=?', [sourceType, sourceId, 'confirmed']);
+  const linkId = genId('WML');
+  await run('BEGIN TRANSACTION');
+  try {
+    await run(
+      "UPDATE work_metadata_matter_links SET status='unlinked', unlinkedBy=?, unlinkedAt=?, updatedAt=? WHERE sourceType=? AND sourceId=? AND status='confirmed'",
+      [req.user.userId || '', now, now, sourceType, sourceId],
+    );
+    await run(
+      `INSERT INTO work_metadata_matter_links
+       (id,sourceType,sourceId,matterId,suggestedMatterId,confidence,reason,status,confirmedBy,confirmedAt,unlinkedBy,unlinkedAt,createdAt,updatedAt)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [linkId, sourceType, sourceId, matter.id, suggestionMatterId, confidence === null || confidence === undefined ? null : Number(confidence), reason || '', 'confirmed', req.user.userId || '', now, '', '', now, now],
+    );
+    await run('COMMIT');
+  } catch (err) {
+    await run('ROLLBACK').catch(() => {});
+    throw err;
+  }
+  await recordAuditEvent(req, {
+    action: auditAction,
+    entityType,
+    entityId: sourceId,
+    matterId: matter.id,
+    clientId: matter.clientId || '',
+    metadata: {
+      sourceType,
+      sourceId,
+      connectedAccountId: connectedAccountId || '',
+      matterId: matter.id,
+      suggestedMatterId: suggestionMatterId,
+      confidence: confidence === null || confidence === undefined ? null : Number(confidence),
+      reason: reason || '',
+      confirmationSource,
+      previousMatterIds: existingLinks.map(link => link.matterId).filter(Boolean),
+    },
+  }).catch(() => {});
+  return { ok: true };
+}
+
+async function unlinkWorkMetadataMatter(req, { sourceType, sourceId, connectedAccountId, auditAction, entityType }) {
+  const now = new Date().toISOString();
+  const existingLinks = await all(
+    `SELECT wml.id, wml.matterId, m.clientId
+     FROM work_metadata_matter_links wml
+     LEFT JOIN matters m ON m.id=wml.matterId
+     WHERE wml.sourceType=? AND wml.sourceId=? AND wml.status=?`,
+    [sourceType, sourceId, 'confirmed'],
+  );
+  await run(
+    "UPDATE work_metadata_matter_links SET status='unlinked', unlinkedBy=?, unlinkedAt=?, updatedAt=? WHERE sourceType=? AND sourceId=? AND status='confirmed'",
+    [req.user.userId || '', now, now, sourceType, sourceId],
+  );
+  await recordAuditEvent(req, {
+    action: auditAction,
+    entityType,
+    entityId: sourceId,
+    matterId: existingLinks[0]?.matterId || '',
+    clientId: existingLinks[0]?.clientId || '',
+    metadata: {
+      sourceType,
+      sourceId,
+      connectedAccountId: connectedAccountId || '',
+      previousMatterIds: existingLinks.map(link => link.matterId).filter(Boolean),
+      unlinkedCount: existingLinks.length,
+    },
+  }).catch(() => {});
+  return { ok: true };
+}
+
 app.get('/api/connected-accounts', authenticate, requireStaff, async (req, res) => {
   const accounts = await oauth.getConnectedAccounts(req.user.userId);
   res.json(accounts);
@@ -1715,6 +1862,39 @@ app.get('/api/work-email/messages/:id/matches', authenticate, requireStaff, asyn
   }]);
 });
 
+app.post('/api/work-email/messages/:id/confirm-matter', authenticate, requireStaff, async (req, res) => {
+  const row = await get('SELECT * FROM work_email_messages WHERE id=? AND userId=?', [req.params.id, req.user.userId]);
+  if (!row) return res.status(404).json({ error: 'Work email message not found.' });
+  const result = await confirmWorkMetadataMatter(req, {
+    sourceType: 'email',
+    sourceId: row.id,
+    connectedAccountId: row.connectedAccountId,
+    suggestedMatterId: row.matchedMatterId || '',
+    confidence: row.matchConfidence,
+    reason: row.matchReason || '',
+    selectedMatterId: req.body?.matterId,
+    auditAction: 'work_email_match_confirmed',
+    entityType: 'work_email_message',
+  });
+  if (!result.ok) return res.status(result.status).json({ error: result.error });
+  const updated = await workEmailMessageWithConfirmation(row.id, req.user.userId);
+  res.json(publicWorkEmailMessage(updated));
+});
+
+app.post('/api/work-email/messages/:id/unlink-matter', authenticate, requireStaff, async (req, res) => {
+  const row = await get('SELECT * FROM work_email_messages WHERE id=? AND userId=?', [req.params.id, req.user.userId]);
+  if (!row) return res.status(404).json({ error: 'Work email message not found.' });
+  await unlinkWorkMetadataMatter(req, {
+    sourceType: 'email',
+    sourceId: row.id,
+    connectedAccountId: row.connectedAccountId,
+    auditAction: 'work_email_match_unlinked',
+    entityType: 'work_email_message',
+  });
+  const updated = await workEmailMessageWithConfirmation(row.id, req.user.userId);
+  res.json(publicWorkEmailMessage(updated));
+});
+
 app.get('/api/work-email/messages', authenticate, requireStaff, async (req, res) => {
   const filters = ['wem.userId=?'];
   const params = [req.user.userId];
@@ -1733,11 +1913,14 @@ app.get('/api/work-email/messages', authenticate, requireStaff, async (req, res)
   }
   const limit = Math.min(Math.max(Number(req.query.limit || 25), 1), 100);
   const rows = await all(
-    `SELECT wem.*, ca.email accountEmail, ca.provider accountProvider, m.title matchedMatterTitle, c.name matchedClientName
+    `SELECT wem.*, ca.email accountEmail, ca.provider accountProvider, m.title matchedMatterTitle, c.name matchedClientName,
+       wml.matterId confirmedMatterId, cm.title confirmedMatterTitle, cc.name confirmedClientName,
+       wml.confirmedAt confirmedAt, wml.confirmedBy confirmedBy, wml.status confirmationStatus
      FROM work_email_messages wem
      LEFT JOIN connected_accounts ca ON ca.id=wem.connectedAccountId
      LEFT JOIN matters m ON m.id=wem.matchedMatterId
      LEFT JOIN clients c ON c.id=m.clientId
+     ${activeMetadataLinkJoin('email', 'wem')}
      WHERE ${filters.join(' AND ')}
      ORDER BY COALESCE(wem.receivedAt, wem.importedAt) DESC, wem.importedAt DESC
      LIMIT ?`,
@@ -1850,6 +2033,39 @@ app.get('/api/work-calendar/events/:id/matches', authenticate, requireStaff, asy
   }]);
 });
 
+app.post('/api/work-calendar/events/:id/confirm-matter', authenticate, requireStaff, async (req, res) => {
+  const row = await get('SELECT * FROM work_calendar_events WHERE id=? AND userId=?', [req.params.id, req.user.userId]);
+  if (!row) return res.status(404).json({ error: 'Work calendar event not found.' });
+  const result = await confirmWorkMetadataMatter(req, {
+    sourceType: 'calendar',
+    sourceId: row.id,
+    connectedAccountId: row.connectedAccountId,
+    suggestedMatterId: row.matchedMatterId || '',
+    confidence: row.matchConfidence,
+    reason: row.matchReason || '',
+    selectedMatterId: req.body?.matterId,
+    auditAction: 'work_calendar_match_confirmed',
+    entityType: 'work_calendar_event',
+  });
+  if (!result.ok) return res.status(result.status).json({ error: result.error });
+  const updated = await workCalendarEventWithConfirmation(row.id, req.user.userId);
+  res.json(publicCalendarEvent(updated));
+});
+
+app.post('/api/work-calendar/events/:id/unlink-matter', authenticate, requireStaff, async (req, res) => {
+  const row = await get('SELECT * FROM work_calendar_events WHERE id=? AND userId=?', [req.params.id, req.user.userId]);
+  if (!row) return res.status(404).json({ error: 'Work calendar event not found.' });
+  await unlinkWorkMetadataMatter(req, {
+    sourceType: 'calendar',
+    sourceId: row.id,
+    connectedAccountId: row.connectedAccountId,
+    auditAction: 'work_calendar_match_unlinked',
+    entityType: 'work_calendar_event',
+  });
+  const updated = await workCalendarEventWithConfirmation(row.id, req.user.userId);
+  res.json(publicCalendarEvent(updated));
+});
+
 app.get('/api/work-calendar/events', authenticate, requireStaff, async (req, res) => {
   const filters = ['wce.userId=?'];
   const params = [req.user.userId];
@@ -1868,11 +2084,14 @@ app.get('/api/work-calendar/events', authenticate, requireStaff, async (req, res
   }
   const limit = Math.min(Math.max(Number(req.query.limit || 25), 1), 100);
   const rows = await all(
-    `SELECT wce.*, ca.email accountEmail, ca.provider accountProvider, m.title matchedMatterTitle, c.name matchedClientName
+    `SELECT wce.*, ca.email accountEmail, ca.provider accountProvider, m.title matchedMatterTitle, c.name matchedClientName,
+       wml.matterId confirmedMatterId, cm.title confirmedMatterTitle, cc.name confirmedClientName,
+       wml.confirmedAt confirmedAt, wml.confirmedBy confirmedBy, wml.status confirmationStatus
      FROM work_calendar_events wce
      LEFT JOIN connected_accounts ca ON ca.id=wce.connectedAccountId
      LEFT JOIN matters m ON m.id=wce.matchedMatterId
      LEFT JOIN clients c ON c.id=m.clientId
+     ${activeMetadataLinkJoin('calendar', 'wce')}
      WHERE ${filters.join(' AND ')}
      ORDER BY COALESCE(wce.startTime, wce.importedAt) DESC, wce.importedAt DESC
      LIMIT ?`,

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote } from '@tabler/icons-react';
-import { api, applyChecklistTemplate, createChecklistTemplate, createMatterChecklistItem, deleteChecklistTemplate, deleteClientAvatar, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getInvoiceDetails, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, updateChecklistTemplate, updateMatterChecklistItem, uploadClientAvatar, uploadUserAvatar } from '../lib/apiClient.js';
+import { api, applyChecklistTemplate, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, createMatterChecklistItem, deleteChecklistTemplate, deleteClientAvatar, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getInvoiceDetails, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateMatterChecklistItem, uploadClientAvatar, uploadUserAvatar } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, safeHttpUrl, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText, invoiceDueDistanceDays } from '../components/ui.jsx';
@@ -161,23 +161,29 @@ export function ConnectedAccounts({ notify }) {
   const [accounts, setAccounts] = useState([]);
   const [messages, setMessages] = useState([]);
   const [calendarEvents, setCalendarEvents] = useState([]);
+  const [matters, setMatters] = useState([]);
+  const [emailMatterSelections, setEmailMatterSelections] = useState({});
+  const [calendarMatterSelections, setCalendarMatterSelections] = useState({});
   const [loading, setLoading] = useState(false);
   const [busyProvider, setBusyProvider] = useState('');
   const [busyId, setBusyId] = useState('');
   const [syncingId, setSyncingId] = useState('');
   const [calendarSyncingId, setCalendarSyncingId] = useState('');
+  const [metadataBusyId, setMetadataBusyId] = useState('');
 
   async function load() {
     setLoading(true);
     try {
-      const [accountResponse, messageResponse, calendarResponse] = await Promise.all([
+      const [accountResponse, messageResponse, calendarResponse, matterResponse] = await Promise.all([
         listConnectedAccounts(),
         getWorkEmailMessages({ limit: 20 }),
         getWorkCalendarEvents({ limit: 20 }),
+        api('/matters'),
       ]);
       setAccounts(listFromResponse(accountResponse, 'accounts'));
       setMessages(listFromResponse(messageResponse, 'messages'));
       setCalendarEvents(listFromResponse(calendarResponse, 'events'));
+      setMatters(listFromResponse(matterResponse, 'matters'));
     } catch (err) {
       notify({ type: 'danger', message: err.message });
     } finally {
@@ -239,6 +245,132 @@ export function ConnectedAccounts({ notify }) {
     }
   }
 
+  function matterOptionLabel(matter) {
+    return `${matter.reference || matter.id} - ${matter.title || 'Untitled matter'}${matter.clientName ? ` (${matter.clientName})` : ''}`;
+  }
+
+  function selectedMatterValue(item, selections) {
+    return selections[item.id] ?? item.confirmedMatterId ?? item.matchedMatterId ?? '';
+  }
+
+  async function confirmEmailMatter(message) {
+    const matterId = selectedMatterValue(message, emailMatterSelections);
+    if (!matterId) return notify({ type: 'warning', message: 'Select a matter before confirming.' });
+    setMetadataBusyId(`email:${message.id}`);
+    try {
+      await confirmWorkEmailMatter(message.id, matterId);
+      notify({ type: 'success', message: 'Email metadata matter link confirmed.' });
+      await load();
+    } catch (err) {
+      notify({ type: 'danger', message: err.message });
+    } finally {
+      setMetadataBusyId('');
+    }
+  }
+
+  async function unlinkEmailMatter(message) {
+    setMetadataBusyId(`email:${message.id}`);
+    try {
+      await unlinkWorkEmailMatter(message.id);
+      setEmailMatterSelections(current => ({ ...current, [message.id]: message.matchedMatterId || '' }));
+      notify({ type: 'success', message: 'Email metadata matter link removed.' });
+      await load();
+    } catch (err) {
+      notify({ type: 'danger', message: err.message });
+    } finally {
+      setMetadataBusyId('');
+    }
+  }
+
+  async function confirmCalendarMatter(event) {
+    const matterId = selectedMatterValue(event, calendarMatterSelections);
+    if (!matterId) return notify({ type: 'warning', message: 'Select a matter before confirming.' });
+    setMetadataBusyId(`calendar:${event.id}`);
+    try {
+      await confirmWorkCalendarMatter(event.id, matterId);
+      notify({ type: 'success', message: 'Calendar metadata matter link confirmed.' });
+      await load();
+    } catch (err) {
+      notify({ type: 'danger', message: err.message });
+    } finally {
+      setMetadataBusyId('');
+    }
+  }
+
+  async function unlinkCalendarMatter(event) {
+    setMetadataBusyId(`calendar:${event.id}`);
+    try {
+      await unlinkWorkCalendarMatter(event.id);
+      setCalendarMatterSelections(current => ({ ...current, [event.id]: event.matchedMatterId || '' }));
+      notify({ type: 'success', message: 'Calendar metadata matter link removed.' });
+      await load();
+    } catch (err) {
+      notify({ type: 'danger', message: err.message });
+    } finally {
+      setMetadataBusyId('');
+    }
+  }
+
+  function renderMatterConfirmation(item, type) {
+    const isEmail = type === 'email';
+    const selections = isEmail ? emailMatterSelections : calendarMatterSelections;
+    const setSelections = isEmail ? setEmailMatterSelections : setCalendarMatterSelections;
+    const busyKey = `${type}:${item.id}`;
+    const busy = metadataBusyId === busyKey;
+    const selectedValue = selectedMatterValue(item, selections);
+    return (
+      <div style={{ display: 'grid', gap: 8, minWidth: 220 }}>
+        <div style={{ display: 'grid', gap: 2 }}>
+          <span style={{ fontSize: 12, color: theme.muted, fontWeight: 700 }}>Suggested</span>
+          {item.matchedMatterId ? (
+            <>
+              <strong>{item.matchedMatterTitle || item.matchedMatterId}</strong>
+              <small style={styles.mutedText}>{item.matchReason || 'Suggested match'}</small>
+            </>
+          ) : <span style={styles.mutedText}>No suggestion</span>}
+        </div>
+        <div style={{ display: 'grid', gap: 2 }}>
+          <span style={{ fontSize: 12, color: theme.muted, fontWeight: 700 }}>Confirmed</span>
+          {item.confirmedMatterId ? (
+            <>
+              <strong>{item.confirmedMatterTitle || item.confirmedMatterId}</strong>
+              <small style={styles.mutedText}>{item.confirmationSource === 'manual_override' ? 'Manual override' : 'Confirmed suggestion'}{item.confirmedAt ? ` / ${connectedAccountDateTime(item.confirmedAt)}` : ''}</small>
+            </>
+          ) : <span style={styles.mutedText}>Not confirmed</span>}
+        </div>
+        <select
+          aria-label={`Select matter for ${isEmail ? 'email message' : 'calendar event'} confirmation`}
+          style={styles.input}
+          value={selectedValue}
+          onChange={event => setSelections(current => ({ ...current, [item.id]: event.target.value }))}
+        >
+          <option value="">Select matter</option>
+          {matters.map(matter => <option key={matter.id} value={matter.id}>{matterOptionLabel(matter)}</option>)}
+        </select>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            style={styles.tinyButton}
+            disabled={busy || !selectedValue}
+            onClick={() => isEmail ? confirmEmailMatter(item) : confirmCalendarMatter(item)}
+          >
+            {busy ? 'Saving...' : item.confirmedMatterId ? 'Change matter' : 'Confirm matter'}
+          </button>
+          {item.confirmedMatterId && (
+            <button
+              type="button"
+              style={styles.dangerTinyButton}
+              disabled={busy}
+              onClick={() => isEmail ? unlinkEmailMatter(item) : unlinkCalendarMatter(item)}
+            >
+              Unlink
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   const rows = accounts.map(account => [
     connectedProviderLabel(account.provider),
     account.email || <span style={styles.mutedText}>No email</span>,
@@ -272,12 +404,7 @@ export function ConnectedAccounts({ notify }) {
     </div>,
     connectedAccountDateTime(message.receivedAt),
     message.hasAttachments ? 'Yes' : 'No',
-    message.matchedMatterId ? (
-      <div style={{ display: 'grid', gap: 2 }}>
-        <strong>{message.matchedMatterTitle || message.matchedMatterId}</strong>
-        <small style={styles.mutedText}>{message.matchReason || 'Suggested match'}</small>
-      </div>
-    ) : <span style={styles.mutedText}>No suggestion</span>,
+    renderMatterConfirmation(message, 'email'),
   ]);
 
   const calendarEventRows = calendarEvents.map(event => [
@@ -290,12 +417,7 @@ export function ConnectedAccounts({ notify }) {
       <span>{event.startTime ? new Date(event.startTime).toLocaleString() : '-'}</span>
       {event.meetingLink ? <small><a href={event.meetingLink} target="_blank" rel="noopener noreferrer" style={{ color: theme.link }}>Meeting link</a></small> : null}
     </div>,
-    event.matchedMatterId ? (
-      <div style={{ display: 'grid', gap: 2 }}>
-        <strong>{event.matchedMatterTitle || event.matchedMatterId}</strong>
-        <small style={styles.mutedText}>{event.matchReason || 'Suggested match'}</small>
-      </div>
-    ) : <span style={styles.mutedText}>No suggestion</span>,
+    renderMatterConfirmation(event, 'calendar'),
   ]);
 
   return (
@@ -304,6 +426,9 @@ export function ConnectedAccounts({ notify }) {
         <div style={{ display: 'grid', gap: 12 }}>
           <div style={{ ...styles.alert, padding: 10, borderRadius: 6 }}>
             Metadata only. Email bodies and attachments are not imported. Calendar events are not created, edited, or deleted.
+          </div>
+          <div style={{ ...styles.alert, padding: 10, borderRadius: 6 }}>
+            Confirming a match links metadata to a matter. It does not import email bodies, attachments, or create calendar/court events.
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button type="button" style={styles.primaryButton} onClick={() => connect('google')} disabled={Boolean(busyProvider)}>
@@ -326,14 +451,14 @@ export function ConnectedAccounts({ notify }) {
         {loading
           ? <div style={styles.mutedText}>Loading email metadata...</div>
           : messages.length
-            ? <Table columns={['Account', 'Sender', 'Subject', 'Received', 'Attachments', 'Suggested matter']} rows={messageRows} />
+            ? <Table columns={['Account', 'Sender', 'Subject', 'Received', 'Attachments', 'Matter confirmation']} rows={messageRows} />
             : <Empty title="No email metadata synced." text="Use Sync email metadata now on a connected account." />}
       </Card>
       <Card title="Calendar Metadata" hint={`${calendarEvents.length} recent event${calendarEvents.length === 1 ? '' : 's'}`}>
         {loading
           ? <div style={styles.mutedText}>Loading calendar metadata...</div>
           : calendarEvents.length
-            ? <Table columns={['Account', 'Subject', 'Time', 'Suggested matter']} rows={calendarEventRows} />
+            ? <Table columns={['Account', 'Subject', 'Time', 'Matter confirmation']} rows={calendarEventRows} />
             : <Empty title="No calendar metadata synced." text="Use Sync calendar metadata now on a connected account." />}
       </Card>
     </div>

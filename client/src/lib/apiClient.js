@@ -272,8 +272,12 @@ export const syncConnectedAccountEmailMetadata = id => api(`/connected-accounts/
 export const syncConnectedAccountCalendarMetadata = id => api(`/connected-accounts/${encodeURIComponent(id)}/sync-calendar-metadata`, { method: 'POST', body: {} });
 export const getWorkEmailMessages = (filters = {}) => api(queryPath('/work-email/messages', filters));
 export const getWorkEmailMessageMatches = id => api(`/work-email/messages/${encodeURIComponent(id)}/matches`);
+export const confirmWorkEmailMatter = (messageId, matterId) => api(`/work-email/messages/${encodeURIComponent(messageId)}/confirm-matter`, { method: 'POST', body: matterId ? { matterId } : {} });
+export const unlinkWorkEmailMatter = messageId => api(`/work-email/messages/${encodeURIComponent(messageId)}/unlink-matter`, { method: 'POST', body: {} });
 export const getWorkCalendarEvents = (filters = {}) => api(queryPath('/work-calendar/events', filters));
 export const getWorkCalendarEventMatches = id => api(`/work-calendar/events/${encodeURIComponent(id)}/matches`);
+export const confirmWorkCalendarMatter = (eventId, matterId) => api(`/work-calendar/events/${encodeURIComponent(eventId)}/confirm-matter`, { method: 'POST', body: matterId ? { matterId } : {} });
+export const unlinkWorkCalendarMatter = eventId => api(`/work-calendar/events/${encodeURIComponent(eventId)}/unlink-matter`, { method: 'POST', body: {} });
 export const getConversations = (params = {}) => api(queryPath('/conversations', params));
 export const createConversation = data => api('/conversations', { method: 'POST', body: data });
 export const getConversationMessages = conversationId => api(`/conversations/${conversationId}/messages`);
