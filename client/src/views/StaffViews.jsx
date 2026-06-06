@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote } from '@tabler/icons-react';
-import { api, applyChecklistTemplate, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, createMatterChecklistItem, deleteChecklistTemplate, deleteClientAvatar, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getInvoiceDetails, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateMatterChecklistItem, uploadClientAvatar, uploadUserAvatar } from '../lib/apiClient.js';
+import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote, IconMail, IconPaperclip, IconExternalLink } from '@tabler/icons-react';
+import { api, applyChecklistTemplate, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, createMatterChecklistItem, deleteChecklistTemplate, deleteClientAvatar, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getInvoiceDetails, getMatterWorkMetadataLinks, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateMatterChecklistItem, uploadClientAvatar, uploadUserAvatar } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, safeHttpUrl, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText, invoiceDueDistanceDays } from '../components/ui.jsx';
@@ -1352,6 +1352,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   const [tooltip, setTooltip] = useState(null);
   const [loading, setLoading] = useState(false);
   const [cockpitOpen, setCockpitOpen] = useState(false);
+  const [workMetadataLinks, setWorkMetadataLinks] = useState([]);
   // PRODUCT-16M: client-side Matter list filters (UI convenience only; no fetch/API/selection/semantics change).
   const [matterSearch, setMatterSearch] = useState('');
   const [matterStage, setMatterStage] = useState('open');
@@ -1400,12 +1401,14 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   async function loadDetail(id) {
     setLoading(true);
     try {
-      const [matter, smartTips] = await Promise.all([
+      const [matter, smartTips, links] = await Promise.all([
         api(`/matters/${id}`),
         api(`/matters/${id}/suggestions`),
+        getMatterWorkMetadataLinks(id).catch(() => []),
       ]);
       setDetail(matter);
       setSuggestions(Array.isArray(smartTips) ? smartTips : []);
+      setWorkMetadataLinks(Array.isArray(links) ? links : []);
       onMatterOpened?.(id);
     } catch (err) {
       notify({ type: 'danger', message: err.message });
@@ -1683,6 +1686,39 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
                       <IconNote size={14} stroke={1.75} /> Note
                     </button>
                   </div>
+                  {workMetadataLinks.length > 0 && (
+                    <section aria-label="Linked metadata" style={{ border: `1px solid ${theme.line}`, background: '#fff', borderRadius: 10, padding: 14, display: 'grid', gap: 10 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                        <div style={{ display: 'grid', gap: 2 }}>
+                          <strong style={{ fontSize: 13 }}>Linked metadata <span style={{ color: theme.muted, fontSize: 12, fontWeight: 400 }}>({workMetadataLinks.length})</span></strong>
+                          <span style={{ color: theme.muted, fontSize: 12 }}>Confirmed email and calendar metadata linked to this matter.</span>
+                        </div>
+                        <a href="/connected-accounts" style={{ ...styles.ghostButton, fontSize: 12, padding: '4px 10px', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}><IconExternalLink size={14} stroke={1.75} /> View all</a>
+                      </div>
+                      <div style={{ display: 'grid', gap: 8 }}>
+                        {workMetadataLinks.map(link => (
+                          <div key={link.linkId} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 10px', border: `1px solid ${theme.line}`, borderRadius: 8, background: '#F9FAFB' }}>
+                            <div style={{ flexShrink: 0, marginTop: 2 }}>
+                              {link.sourceType === 'email' ? <IconMail size={16} stroke={1.75} style={{ color: '#697386' }} /> : <IconCalendarEvent size={16} stroke={1.75} style={{ color: '#697386' }} />}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0, display: 'grid', gap: 3 }}>
+                              <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{link.subject || '(No subject)'}</div>
+                              <div style={{ fontSize: 12, color: theme.muted, display: 'flex', flexWrap: 'wrap', gap: '2px 12px' }}>
+                                {link.sourceType === 'email' && link.sender && <span>From: {link.sender}</span>}
+                                {link.sourceType === 'calendar' && link.organizer && <span>Organizer: {link.organizer}</span>}
+                                {link.sourceType === 'email' && link.receivedAt && <span>{new Date(link.receivedAt).toLocaleString()}</span>}
+                                {link.sourceType === 'calendar' && link.startTime && <span>{new Date(link.startTime).toLocaleString()}</span>}
+                                {link.sourceType === 'email' && Number(link.hasAttachments) > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><IconPaperclip size={12} stroke={1.75} /> Attachments</span>}
+                                {link.sourceType === 'calendar' && link.meetingLink && <MeetingLink href={safeHttpUrl(link.meetingLink)} />}
+                                <span style={{ color: '#9CA3AF' }}>{link.accountProvider} &middot; {link.accountEmail}</span>
+                              </div>
+                              <div style={{ fontSize: 11, color: '#9CA3AF' }}>Confirmed by {link.confirmedBy || 'System'} &middot; {link.confirmedAt ? new Date(link.confirmedAt).toLocaleString() : ''}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
                   <section aria-label="Matter cockpit" style={{ border: `1px solid ${theme.line}`, background: '#fff', borderRadius: 10, padding: 14, display: 'grid', gap: 10 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
                       <div style={{ display: 'grid', gap: 2 }}>

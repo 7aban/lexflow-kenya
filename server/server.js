@@ -3212,6 +3212,36 @@ app.get('/api/matters/:id/suggestions', async (req, res) => {
 
   res.json(suggestions);
 });
+app.get('/api/matters/:id/work-metadata-links', requireStaff, async (req, res) => {
+  if (!(await canAccessMatter(req, req.params.id))) {
+    await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Matter access denied' });
+  }
+  const rows = await all(`
+    SELECT
+      wml.id AS linkId,
+      wml.sourceType,
+      wml.sourceId AS sourceRecordId,
+      CASE WHEN wml.sourceType='email' THEN wem.subject WHEN wml.sourceType='calendar' THEN wce.subject END AS subject,
+      CASE WHEN wml.sourceType='email' THEN wem.sender END AS sender,
+      CASE WHEN wml.sourceType='calendar' THEN wce.organizer END AS organizer,
+      CASE WHEN wml.sourceType='email' THEN wem.receivedAt END AS receivedAt,
+      CASE WHEN wml.sourceType='calendar' THEN wce.startTime END AS startTime,
+      CASE WHEN wml.sourceType='email' THEN wem.hasAttachments END AS hasAttachments,
+      CASE WHEN wml.sourceType='calendar' THEN wce.meetingLink END AS meetingLink,
+      ca.email AS accountEmail,
+      ca.provider AS accountProvider,
+      wml.confirmedBy,
+      wml.confirmedAt
+    FROM work_metadata_matter_links wml
+    LEFT JOIN work_email_messages wem ON wml.sourceType='email' AND wml.sourceId=wem.id
+    LEFT JOIN work_calendar_events wce ON wml.sourceType='calendar' AND wml.sourceId=wce.id
+    LEFT JOIN connected_accounts ca ON ca.id=COALESCE(wem.connectedAccountId,wce.connectedAccountId)
+    WHERE wml.matterId=? AND wml.status='confirmed'
+    ORDER BY wml.confirmedAt DESC
+  `, [req.params.id]);
+  res.json(rows);
+});
 app.post('/api/matters', requireAdvocateOrAdmin, validate(createMatterValidation), async (req, res) => {
   const id = genId('M');
   const reference = req.body.reference || `LEX-${new Date().getFullYear()}-${String(Date.now()).slice(-5)}`;

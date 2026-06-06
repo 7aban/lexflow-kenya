@@ -274,6 +274,7 @@ export const getWorkEmailMessages = (filters = {}) => api(queryPath('/work-email
 export const getWorkEmailMessageMatches = id => api(`/work-email/messages/${encodeURIComponent(id)}/matches`);
 export const confirmWorkEmailMatter = (messageId, matterId) => api(`/work-email/messages/${encodeURIComponent(messageId)}/confirm-matter`, { method: 'POST', body: matterId ? { matterId } : {} });
 export const unlinkWorkEmailMatter = messageId => api(`/work-email/messages/${encodeURIComponent(messageId)}/unlink-matter`, { method: 'POST', body: {} });
+export const getMatterWorkMetadataLinks = matterId => api(`/matters/${encodeURIComponent(matterId)}/work-metadata-links`);
 export const getWorkCalendarEvents = (filters = {}) => api(queryPath('/work-calendar/events', filters));
 export const getWorkCalendarEventMatches = id => api(`/work-calendar/events/${encodeURIComponent(id)}/matches`);
 export const confirmWorkCalendarMatter = (eventId, matterId) => api(`/work-calendar/events/${encodeURIComponent(eventId)}/confirm-matter`, { method: 'POST', body: matterId ? { matterId } : {} });
