@@ -32,6 +32,7 @@ const defaultReminderTemplates = [
 
 async function createSchema() {
   const tables = [
+    'work_metadata_matter_links', 'work_email_messages', 'work_calendar_events', 'connected_account_sync_state', 'connected_account_tokens', 'connected_accounts',
     'audit_logs', 'notifications', 'payment_proofs', 'payments', 'receipt_sequences', 'expenses', 'disbursements', 'invoice_items', 'invoices',
      'messages', 'conversations', 'client_activity', 'case_notes', 'documents', 'signature_assets', 'folders', 'appearances', 'time_entries', 'tasks', 'deadlines', 'document_templates', 'checklist_template_items', 'checklist_templates', 'matter_checklist_items', 'document_requests', 'matters', 'clients',
     'users', 'integrations_log', 'firm_settings', 'reminder_settings', 'reminder_templates', 'reminder_logs',
@@ -74,6 +75,12 @@ async function createSchema() {
   await run(`CREATE TABLE invitations (id TEXT PRIMARY KEY, email TEXT NOT NULL, clientId TEXT, token TEXT UNIQUE NOT NULL, status TEXT DEFAULT 'pending', createdBy TEXT, createdAt TEXT, expiresAt TEXT)`);
   await run(`CREATE TABLE audit_logs (id TEXT PRIMARY KEY, userId TEXT, userName TEXT, role TEXT, action TEXT, entityType TEXT, entityId TEXT, summary TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE notifications (id TEXT PRIMARY KEY, userId TEXT NOT NULL, type TEXT, matterId TEXT, clientId TEXT, title TEXT, body TEXT, createdAt TEXT, readAt TEXT)`);
+  await run(`CREATE TABLE connected_accounts (id TEXT PRIMARY KEY, userId TEXT NOT NULL, provider TEXT NOT NULL CHECK(provider IN ('google','microsoft')), providerAccountId TEXT, email TEXT, displayName TEXT, scopes TEXT, status TEXT NOT NULL DEFAULT 'connected', connectedAt TEXT NOT NULL, disconnectedAt TEXT, lastSyncAt TEXT, lastError TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
+  await run(`CREATE TABLE connected_account_tokens (id TEXT PRIMARY KEY, connectedAccountId TEXT NOT NULL, accessTokenEncrypted TEXT, refreshTokenEncrypted TEXT, tokenType TEXT, expiresAt TEXT, scope TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
+  await run(`CREATE TABLE work_email_messages (id TEXT PRIMARY KEY, connectedAccountId TEXT NOT NULL, userId TEXT NOT NULL, provider TEXT NOT NULL, providerAccountId TEXT, providerMessageId TEXT NOT NULL, providerThreadId TEXT, sender TEXT, recipientsSummary TEXT, subject TEXT, snippet TEXT, receivedAt TEXT, hasAttachments INTEGER DEFAULT 0, labelsJson TEXT, foldersJson TEXT, matchedMatterId TEXT, matchConfidence REAL, matchReason TEXT, importedAt TEXT NOT NULL, updatedAt TEXT, UNIQUE(connectedAccountId, providerMessageId))`);
+  await run(`CREATE TABLE connected_account_sync_state (id TEXT PRIMARY KEY, connectedAccountId TEXT NOT NULL, syncType TEXT NOT NULL, cursorJson TEXT, lastAttemptAt TEXT, lastSuccessAt TEXT, lastError TEXT, lastImportedCount INTEGER DEFAULT 0, createdAt TEXT NOT NULL, updatedAt TEXT, UNIQUE(connectedAccountId, syncType))`);
+  await run(`CREATE TABLE work_calendar_events (id TEXT PRIMARY KEY, connectedAccountId TEXT NOT NULL, userId TEXT NOT NULL, provider TEXT NOT NULL, providerAccountId TEXT, providerEventId TEXT NOT NULL, calendarId TEXT, calendarName TEXT, subject TEXT, startTime TEXT, endTime TEXT, location TEXT, meetingLink TEXT, organizer TEXT, attendeesSummary TEXT, descriptionSnippet TEXT, providerUpdatedAt TEXT, matchedMatterId TEXT, matchConfidence REAL, matchReason TEXT, importedAt TEXT NOT NULL, updatedAt TEXT, UNIQUE(connectedAccountId, providerEventId))`);
+  await run(`CREATE TABLE work_metadata_matter_links (id TEXT PRIMARY KEY, sourceType TEXT NOT NULL, sourceId TEXT NOT NULL, matterId TEXT NOT NULL, suggestedMatterId TEXT, confidence REAL, reason TEXT, status TEXT NOT NULL, confirmedBy TEXT, confirmedAt TEXT, unlinkedBy TEXT, unlinkedAt TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
 }
 
 async function insertAudit(action, entityType, entityId, summary, userName = 'Demo Seeder', role = 'admin') {
@@ -86,6 +93,305 @@ async function seededPdfBuffer(label) {
   const page = pdf.addPage([400, 400]);
   page.drawText(String(label || 'Seeded Demo PDF'), { x: 24, y: 200, size: 14, font });
   return Buffer.from(await pdf.save());
+}
+
+async function seedIntegrationMetadata({ admin, matters }) {
+  const matterByReference = new Map(matters.map(matter => [matter.reference, matter]));
+  const requireMatter = reference => {
+    const matter = matterByReference.get(reference);
+    if (!matter) throw new Error(`Demo integration metadata matter ${reference} was not seeded`);
+    return matter;
+  };
+  const stamp = minutesAgo => new Date(today.getTime() - minutesAgo * 60000).toISOString();
+  const futureStamp = daysFromNowValue => new Date(today.getTime() + daysFromNowValue * 86400000).toISOString();
+  const googleScopes = [
+    'openid',
+    'email',
+    'profile',
+    'https://www.googleapis.com/auth/gmail.metadata',
+    'https://www.googleapis.com/auth/calendar.readonly',
+  ].join(' ');
+  const microsoftScopes = 'openid email profile offline_access User.Read Mail.ReadBasic Calendars.ReadBasic';
+  const accounts = [
+    {
+      id: 'demo-connected-account-google-metadata',
+      provider: 'google',
+      providerAccountId: 'demo-google-metadata-seed',
+      email: 'demo-google-metadata@example.test',
+      displayName: 'Demo Google Workspace',
+      scopes: googleScopes,
+      connectedAt: stamp(180),
+    },
+    {
+      id: 'demo-connected-account-microsoft-metadata',
+      provider: 'microsoft',
+      providerAccountId: 'demo-microsoft-metadata-seed',
+      email: 'demo-microsoft-metadata@example.test',
+      displayName: 'Demo Microsoft 365',
+      scopes: microsoftScopes,
+      connectedAt: stamp(170),
+    },
+  ];
+
+  for (const account of accounts) {
+    await run(
+      `INSERT INTO connected_accounts
+       (id,userId,provider,providerAccountId,email,displayName,scopes,status,connectedAt,disconnectedAt,lastSyncAt,lastError,createdAt,updatedAt)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [account.id, admin.id, account.provider, account.providerAccountId, account.email, account.displayName, account.scopes, 'connected', account.connectedAt, null, null, '', account.connectedAt, account.connectedAt],
+    );
+  }
+
+  const estateMatter = requireMatter('LEX-2026-0001');
+  const fleetMatter = requireMatter('LEX-2026-0002');
+  const debtMatter = requireMatter('LEX-2026-0003');
+  const housingMatter = requireMatter('LEX-2026-0005');
+  const medicalMatter = requireMatter('LEX-2026-0007');
+  const googleAccount = accounts[0];
+  const microsoftAccount = accounts[1];
+
+  const emailRows = [
+    {
+      id: 'demo-work-email-lex-2026-0001-confirmed',
+      account: googleAccount,
+      providerMessageId: 'demo-email-confirmed-lex-2026-0001',
+      providerThreadId: 'demo-thread-lex-2026-0001',
+      sender: 'probate.registry@example.test',
+      recipientsSummary: 'demo-google-metadata@example.test; sarah.mwangi@achokilaw.co.ke',
+      subject: 'LEX-2026-0001 registry update for Estate Administration',
+      snippet: 'Metadata-only registry update references LEX-2026-0001 and the estate administration status.',
+      receivedAt: stamp(18),
+      hasAttachments: 1,
+      labelsJson: JSON.stringify(['INBOX', 'IMPORTANT', 'DEMO_METADATA']),
+      foldersJson: JSON.stringify(['Inbox']),
+      matter: estateMatter,
+      matchConfidence: 0.95,
+      matchReason: 'Reference match: LEX-2026-0001',
+    },
+    {
+      id: 'demo-work-email-lex-2026-0002-suggested',
+      account: microsoftAccount,
+      providerMessageId: 'demo-email-suggested-lex-2026-0002',
+      providerThreadId: 'demo-thread-lex-2026-0002',
+      sender: 'legal@kamaulogistics.co.ke',
+      recipientsSummary: 'demo-microsoft-metadata@example.test; sarah.mwangi@achokilaw.co.ke',
+      subject: 'Fleet leasing contract review follow-up',
+      snippet: 'Kamau Logistics asks for comments on the Fleet Leasing Contract Review engagement.',
+      receivedAt: stamp(42),
+      hasAttachments: 0,
+      labelsJson: JSON.stringify(['INBOX', 'DEMO_METADATA']),
+      foldersJson: JSON.stringify(['Inbox']),
+      matter: fleetMatter,
+      matchConfidence: 0.74,
+      matchReason: 'Client email domain match: kamaulogistics.co.ke',
+    },
+    {
+      id: 'demo-work-email-lex-2026-0003-suggested',
+      account: googleAccount,
+      providerMessageId: 'demo-email-suggested-lex-2026-0003',
+      providerThreadId: 'demo-thread-lex-2026-0003',
+      sender: 'clerk.milimani@example.test',
+      recipientsSummary: 'demo-google-metadata@example.test; michael.oduor@achokilaw.co.ke',
+      subject: 'Mention date query MCCC/E401/2025',
+      snippet: 'Metadata-only registry note references MCCC/E401/2025 for the debt recovery matter.',
+      receivedAt: stamp(75),
+      hasAttachments: 0,
+      labelsJson: JSON.stringify(['INBOX', 'COURT', 'DEMO_METADATA']),
+      foldersJson: JSON.stringify(['Inbox']),
+      matter: debtMatter,
+      matchConfidence: 0.92,
+      matchReason: 'Case number match: MCCC/E401/2025',
+    },
+    {
+      id: 'demo-work-email-unmatched-admin-bulletin',
+      account: microsoftAccount,
+      providerMessageId: 'demo-email-unmatched-admin-bulletin',
+      providerThreadId: 'demo-thread-admin-bulletin',
+      sender: 'training@example.test',
+      recipientsSummary: 'demo-microsoft-metadata@example.test',
+      subject: 'CLE bulletin - June practice management',
+      snippet: 'General CPD newsletter and office administration update.',
+      receivedAt: stamp(130),
+      hasAttachments: 0,
+      labelsJson: JSON.stringify(['INBOX', 'NEWSLETTER', 'DEMO_METADATA']),
+      foldersJson: JSON.stringify(['Inbox']),
+      matter: null,
+      matchConfidence: null,
+      matchReason: null,
+    },
+  ];
+
+  for (const message of emailRows) {
+    await run(
+      `INSERT INTO work_email_messages
+       (id,connectedAccountId,userId,provider,providerAccountId,providerMessageId,providerThreadId,sender,recipientsSummary,subject,snippet,receivedAt,hasAttachments,labelsJson,foldersJson,matchedMatterId,matchConfidence,matchReason,importedAt,updatedAt)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        message.id,
+        message.account.id,
+        admin.id,
+        message.account.provider,
+        message.account.providerAccountId,
+        message.providerMessageId,
+        message.providerThreadId,
+        message.sender,
+        message.recipientsSummary,
+        message.subject,
+        message.snippet,
+        message.receivedAt,
+        message.hasAttachments,
+        message.labelsJson,
+        message.foldersJson,
+        message.matter?.id || null,
+        message.matchConfidence,
+        message.matchReason,
+        message.receivedAt,
+        message.receivedAt,
+      ],
+    );
+  }
+
+  const calendarRows = [
+    {
+      id: 'demo-work-calendar-lex-2026-0005-confirmed',
+      account: microsoftAccount,
+      providerEventId: 'demo-calendar-confirmed-lex-2026-0005',
+      calendarId: 'primary',
+      calendarName: 'Demo Work Calendar',
+      subject: 'CHRPET/E045/2025 procurement review conference',
+      startTime: futureStamp(1),
+      endTime: futureStamp(1 + (90 / 1440)),
+      location: 'Milimani Constitutional and Human Rights Division',
+      meetingLink: 'https://meet.example.test/lexflow-demo-housing-review',
+      organizer: 'demo-microsoft-metadata@example.test',
+      attendeesSummary: 'sarah.mwangi@achokilaw.co.ke; procurement.secretariat@example.test',
+      descriptionSnippet: 'Metadata-only preview for procurement review coordination.',
+      providerUpdatedAt: stamp(26),
+      matter: housingMatter,
+      matchConfidence: 0.92,
+      matchReason: 'Case number match: CHRPET/E045/2025',
+    },
+    {
+      id: 'demo-work-calendar-lex-2026-0007-suggested',
+      account: googleAccount,
+      providerEventId: 'demo-calendar-suggested-lex-2026-0007',
+      calendarId: 'primary',
+      calendarName: 'Demo Work Calendar',
+      subject: 'HCCC/E771/2025 medical negligence defence strategy check-in',
+      startTime: futureStamp(2),
+      endTime: futureStamp(2 + (60 / 1440)),
+      location: 'Boardroom 2',
+      meetingLink: '',
+      organizer: 'achieng.otieno@achokilaw.co.ke',
+      attendeesSummary: 'demo-google-metadata@example.test; admin@lakeviewmedical.co.ke',
+      descriptionSnippet: 'Metadata-only preview for strategy coordination.',
+      providerUpdatedAt: stamp(34),
+      matter: medicalMatter,
+      matchConfidence: 0.92,
+      matchReason: 'Case number match: HCCC/E771/2025',
+    },
+    {
+      id: 'demo-work-calendar-lex-2026-0001-suggested',
+      account: googleAccount,
+      providerEventId: 'demo-calendar-suggested-lex-2026-0001',
+      calendarId: 'primary',
+      calendarName: 'Demo Work Calendar',
+      subject: 'LEX-2026-0001 probate registry planning',
+      startTime: futureStamp(3),
+      endTime: futureStamp(3 + (45 / 1440)),
+      location: 'High Court Family Division registry',
+      meetingLink: '',
+      organizer: 'sarah.mwangi@achokilaw.co.ke',
+      attendeesSummary: 'demo-google-metadata@example.test; probate.registry@example.test',
+      descriptionSnippet: 'Metadata-only preview for estate administration planning.',
+      providerUpdatedAt: stamp(48),
+      matter: estateMatter,
+      matchConfidence: 0.95,
+      matchReason: 'Reference match: LEX-2026-0001',
+    },
+    {
+      id: 'demo-work-calendar-unmatched-weekly-ops',
+      account: microsoftAccount,
+      providerEventId: 'demo-calendar-unmatched-weekly-ops',
+      calendarId: 'primary',
+      calendarName: 'Demo Work Calendar',
+      subject: 'Weekly operations and admin meeting',
+      startTime: futureStamp(4),
+      endTime: futureStamp(4 + (30 / 1440)),
+      location: 'Nairobi office',
+      meetingLink: 'https://meet.example.test/lexflow-demo-ops',
+      organizer: 'operations@example.test',
+      attendeesSummary: 'demo-microsoft-metadata@example.test; office-admin@example.test',
+      descriptionSnippet: 'Metadata-only preview for internal operations.',
+      providerUpdatedAt: stamp(82),
+      matter: null,
+      matchConfidence: null,
+      matchReason: null,
+    },
+  ];
+
+  for (const event of calendarRows) {
+    await run(
+      `INSERT INTO work_calendar_events
+       (id,connectedAccountId,userId,provider,providerAccountId,providerEventId,calendarId,calendarName,subject,startTime,endTime,location,meetingLink,organizer,attendeesSummary,descriptionSnippet,providerUpdatedAt,matchedMatterId,matchConfidence,matchReason,importedAt,updatedAt)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        event.id,
+        event.account.id,
+        admin.id,
+        event.account.provider,
+        event.account.providerAccountId,
+        event.providerEventId,
+        event.calendarId,
+        event.calendarName,
+        event.subject,
+        event.startTime,
+        event.endTime,
+        event.location,
+        event.meetingLink,
+        event.organizer,
+        event.attendeesSummary,
+        event.descriptionSnippet,
+        event.providerUpdatedAt,
+        event.matter?.id || null,
+        event.matchConfidence,
+        event.matchReason,
+        event.providerUpdatedAt,
+        event.providerUpdatedAt,
+      ],
+    );
+  }
+
+  const confirmedAt = stamp(12);
+  const confirmedLinks = [
+    {
+      id: 'demo-work-metadata-link-email-lex-2026-0001',
+      sourceType: 'email',
+      sourceId: emailRows[0].id,
+      matterId: estateMatter.id,
+      suggestedMatterId: estateMatter.id,
+      confidence: emailRows[0].matchConfidence,
+      reason: emailRows[0].matchReason,
+    },
+    {
+      id: 'demo-work-metadata-link-calendar-lex-2026-0005',
+      sourceType: 'calendar',
+      sourceId: calendarRows[0].id,
+      matterId: housingMatter.id,
+      suggestedMatterId: housingMatter.id,
+      confidence: calendarRows[0].matchConfidence,
+      reason: calendarRows[0].matchReason,
+    },
+  ];
+
+  for (const link of confirmedLinks) {
+    await run(
+      `INSERT INTO work_metadata_matter_links
+       (id,sourceType,sourceId,matterId,suggestedMatterId,confidence,reason,status,confirmedBy,confirmedAt,unlinkedBy,unlinkedAt,createdAt,updatedAt)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [link.id, link.sourceType, link.sourceId, link.matterId, link.suggestedMatterId, link.confidence, link.reason, 'confirmed', admin.id, confirmedAt, null, null, confirmedAt, confirmedAt],
+    );
+  }
 }
 
 async function main() {
@@ -461,6 +767,8 @@ async function main() {
   const noticeDocSize = `${Math.max(1, Math.round(noticeDocContent.length / 1024))} KB`;
   await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [id('DOC'), '', 'court-recess-guidance.pdf', 'Court recess guidance.pdf', 'PDF', 'application/pdf', today.toISOString().slice(0, 10), noticeDocSize, noticeDocContent, 'firm', '', '', recessNotice, 1, admin.id]);
+
+  await seedIntegrationMetadata({ admin, matters });
 
   const auditItems = [
     ['create', 'client', clients[0].id, 'Created demo client records'],

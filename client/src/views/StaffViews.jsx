@@ -425,6 +425,9 @@ export function ConnectedAccounts({ notify }) {
       <Card title="Connected Accounts" hint="Authorize external provider access for future integrations">
         <div style={{ display: 'grid', gap: 12 }}>
           <div style={{ ...styles.alert, padding: 10, borderRadius: 6 }}>
+            Demo metadata only; no provider tokens are stored for demo accounts. Email bodies and attachments are not imported.
+          </div>
+          <div style={{ ...styles.alert, padding: 10, borderRadius: 6 }}>
             Metadata only. Email bodies and attachments are not imported. Calendar events are not created, edited, or deleted.
           </div>
           <div style={{ ...styles.alert, padding: 10, borderRadius: 6 }}>
