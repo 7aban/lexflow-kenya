@@ -477,3 +477,13 @@ export const deleteClientAvatar = (clientId) => api(`/clients/${clientId}/avatar
 
 export const getMessageAvatar = (conversationId, messageId) =>
   fetchAvatarPathObjectUrl(`/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/avatar`);
+
+// HR Leave Requests
+export const getHrLeaveRequests = (params = {}) => api(queryPath('/hr/leave-requests', params));
+export const getHrLeaveRequest = id => api(`/hr/leave-requests/${encodeURIComponent(id)}`);
+export const approveHrLeaveRequest = (id, payload) => api(`/hr/leave-requests/${encodeURIComponent(id)}/approve`, { method: 'PATCH', body: payload || {} });
+export const rejectHrLeaveRequest = (id, payload) => api(`/hr/leave-requests/${encodeURIComponent(id)}/reject`, { method: 'PATCH', body: payload || {} });
+export const cancelHrLeaveRequestAdmin = id => api(`/hr/leave-requests/${encodeURIComponent(id)}/cancel`, { method: 'PATCH', body: {} });
+export const getMyLeaveRequests = () => api('/hr/me/leave-requests');
+export const createMyLeaveRequest = payload => api('/hr/me/leave-requests', { method: 'POST', body: payload });
+export const cancelMyLeaveRequest = id => api(`/hr/me/leave-requests/${encodeURIComponent(id)}/cancel`, { method: 'PATCH', body: {} });

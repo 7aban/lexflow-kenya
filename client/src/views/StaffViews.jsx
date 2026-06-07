@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote, IconMail, IconPaperclip, IconExternalLink } from '@tabler/icons-react';
-import { api, applyChecklistTemplate, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, createHrStaffProfile, createMatterChecklistItem, deleteChecklistTemplate, deleteClientAvatar, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getHrStaff, getHrStaffProfile, getInvoiceDetails, getMatterWorkMetadataLinks, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrStaffProfile, updateMatterChecklistItem, uploadClientAvatar, uploadUserAvatar } from '../lib/apiClient.js';
+import { api, applyChecklistTemplate, approveHrLeaveRequest, cancelHrLeaveRequestAdmin, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, createHrStaffProfile, createMatterChecklistItem, deleteChecklistTemplate, deleteClientAvatar, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getHrLeaveRequests, getHrStaff, getHrStaffProfile, getInvoiceDetails, getMatterWorkMetadataLinks, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, rejectHrLeaveRequest, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrStaffProfile, updateMatterChecklistItem, uploadClientAvatar, uploadUserAvatar } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, safeHttpUrl, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText, invoiceDueDistanceDays } from '../components/ui.jsx';
@@ -3265,6 +3265,29 @@ function hrStaffName(staffUser) {
   return staffUser?.fullName || staffUser?.email || 'Staff member';
 }
 
+const LEAVE_TYPE_LABELS = {
+  annual: 'Annual',
+  sick: 'Sick',
+  compassionate: 'Compassionate',
+  maternity: 'Maternity',
+  paternity: 'Paternity',
+  study_exam: 'Study/Exam',
+  unpaid: 'Unpaid',
+  other: 'Other',
+};
+
+const LEAVE_STATUS_ACTIONS = {
+  pending: ['amber', ['approve', 'reject', 'cancel']],
+  approved: ['green', []],
+  rejected: ['red', []],
+  cancelled: ['grey', []],
+};
+
+function leaveStatusTone(status) {
+  const tones = { pending: 'amber', approved: 'green', rejected: 'red', cancelled: 'grey' };
+  return tones[status] || 'blue';
+}
+
 export function HR({ notify }) {
   const [staff, setStaff] = useState([]);
   const [selectedUserId, setSelectedUserId] = useState('');
@@ -3274,6 +3297,12 @@ export function HR({ notify }) {
   const [profileLoading, setProfileLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState('');
+  const [hrTab, setHrTab] = useState('profiles');
+  const [leaveRequests, setLeaveRequests] = useState([]);
+  const [leaveLoading, setLeaveLoading] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('');
+  const [actioningId, setActioningId] = useState('');
+  const [decisionNotes, setDecisionNotes] = useState({});
 
   useEffect(() => { loadStaff(); }, []);
   useEffect(() => {
@@ -3283,6 +3312,10 @@ export function HR({ notify }) {
       setForm(emptyHrProfileForm);
     }
   }, [selectedUserId]);
+
+  useEffect(() => {
+    if (hrTab === 'leaves') loadLeaveRequests();
+  }, [hrTab, statusFilter]);
 
   async function loadStaff(preferredUserId = selectedUserId) {
     setLoading(true);
@@ -3319,6 +3352,20 @@ export function HR({ notify }) {
     }
   }
 
+  async function loadLeaveRequests() {
+    setLeaveLoading(true);
+    try {
+      const params = {};
+      if (statusFilter) params.status = statusFilter;
+      const data = await getHrLeaveRequests(params);
+      setLeaveRequests(Array.isArray(data) ? data : []);
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setLeaveLoading(false);
+    }
+  }
+
   async function submit(event) {
     event.preventDefault();
     if (!selectedUserId) return;
@@ -3340,85 +3387,156 @@ export function HR({ notify }) {
     }
   }
 
+  async function handleLeaveAction(id, action) {
+    setActioningId(`${action}:${id}`);
+    try {
+      const note = decisionNotes[id] || '';
+      if (action === 'approve') await approveHrLeaveRequest(id, { decisionNote: note });
+      else if (action === 'reject') await rejectHrLeaveRequest(id, { decisionNote: note });
+      else if (action === 'cancel') await cancelHrLeaveRequestAdmin(id);
+      notify?.({ type: 'success', message: `Leave request ${action}d.` });
+      setDecisionNotes(current => { const next = { ...current }; delete next[id]; return next; });
+      await loadLeaveRequests();
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setActioningId('');
+    }
+  }
+
   const selectedStaff = selectedRecord?.staff || staff.find(member => member.userId === selectedUserId);
   const selectedProfile = selectedRecord?.profile || null;
   const profileCount = staff.filter(member => member.profile).length;
   const staffEmptyText = loading ? 'Loading staff...' : 'No staff users found.';
 
   return (
-    <div className="lf-split-grid" style={styles.splitGrid}>
-      <Card title="Staff HR profiles" hint={`${profileCount} of ${staff.length} staff profiled`}>
-        <div style={{ ...styles.alert, marginBottom: 12 }}>Leave, contracts, salary records, documents, and offboarding are not enabled in this phase.</div>
-        {loadError && <div style={{ ...styles.alert, ...styles.alertDanger, marginBottom: 12 }}>{loadError}</div>}
-        {loading ? (
-          <Skeleton rows={2} />
-        ) : (
-          <Table
-            columns={['Name', 'Email', 'Role', 'HR Status', 'Job Title', 'Action']}
-            rows={staff.map(member => [
-              <div key={`${member.userId}-name`} style={{ display: 'grid', gap: 2 }}>
-                <strong>{hrStaffName(member)}</strong>
-                <span style={{ color: theme.muted, fontSize: 12 }}>{member.isActive ? 'Active user' : 'Inactive user'}</span>
-              </div>,
-              member.email || '-',
-              member.role || '-',
-              <Badge key={`${member.userId}-status`} tone={hrStatusTone(member.profile?.hrStatus)}>{member.profile ? hrStatusLabel(member.profile.hrStatus) : 'No profile'}</Badge>,
-              member.profile?.jobTitle || '-',
-              <button key={`${member.userId}-select`} type="button" style={selectedUserId === member.userId ? styles.primaryButton : styles.ghostButton} onClick={() => setSelectedUserId(member.userId)}>Select</button>,
-            ])}
-            empty={staffEmptyText}
-          />
-        )}
-      </Card>
+    <div style={styles.pageStack}>
+      <div style={styles.tabList}>
+        <button type="button" onClick={() => setHrTab('profiles')} style={{ ...styles.tabButton, ...(hrTab === 'profiles' ? styles.tabActive : {}) }}>Staff Profiles</button>
+        <button type="button" onClick={() => setHrTab('leaves')} style={{ ...styles.tabButton, ...(hrTab === 'leaves' ? styles.tabActive : {}) }}>Leave Requests</button>
+      </div>
 
-      <Card title={selectedStaff ? `${selectedProfile ? 'Edit' : 'Create'} HR profile` : 'HR profile'} hint={selectedStaff ? hrStaffName(selectedStaff) : 'Select a staff member'}>
-        {profileLoading ? (
-          <Skeleton rows={1} />
-        ) : selectedStaff ? (
-          <>
-            {!selectedProfile && <Empty title="No HR profile yet." text="Complete the form to create one for this staff member." />}
-            <form onSubmit={submit} style={{ ...styles.formGrid, marginTop: selectedProfile ? 0 : 12 }}>
-              <Field label="Staff member">
-                <select style={styles.input} value={selectedUserId} onChange={e => setSelectedUserId(e.target.value)}>
-                  {staff.map(member => <option key={member.userId} value={member.userId}>{hrStaffName(member)}</option>)}
-                </select>
-              </Field>
-              <Field label="Job title"><input style={styles.input} value={form.jobTitle} onChange={e => setForm({ ...form, jobTitle: e.target.value })} /></Field>
-              <Field label="Department"><input style={styles.input} value={form.department} onChange={e => setForm({ ...form, department: e.target.value })} /></Field>
-              <Field label="Practice team"><input style={styles.input} value={form.practiceTeam} onChange={e => setForm({ ...form, practiceTeam: e.target.value })} /></Field>
-              <Field label="Employment type">
-                <select style={styles.input} value={form.employmentType} onChange={e => setForm({ ...form, employmentType: e.target.value })}>
-                  <option value="">Not set</option>
-                  {hrEmploymentTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                </select>
-              </Field>
-              <Field label="Start date"><input type="date" style={styles.input} value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })} /></Field>
-              <Field label="Contract end date"><input type="date" style={styles.input} value={form.contractEndDate} onChange={e => setForm({ ...form, contractEndDate: e.target.value })} /></Field>
-              <Field label="Supervisor">
-                <select style={styles.input} value={form.supervisorUserId} onChange={e => setForm({ ...form, supervisorUserId: e.target.value })}>
-                  <option value="">Not set</option>
-                  {staff.map(member => <option key={member.userId} value={member.userId}>{hrStaffName(member)}</option>)}
-                </select>
-              </Field>
-              <Field label="Work email"><input type="email" style={styles.input} value={form.workEmail} onChange={e => setForm({ ...form, workEmail: e.target.value })} /></Field>
-              <Field label="Work phone"><input type="tel" style={styles.input} value={form.workPhone} onChange={e => setForm({ ...form, workPhone: e.target.value })} /></Field>
-              <Field label="Emergency contact name"><input style={styles.input} value={form.emergencyContactName} onChange={e => setForm({ ...form, emergencyContactName: e.target.value })} /></Field>
-              <Field label="Emergency contact phone"><input type="tel" style={styles.input} value={form.emergencyContactPhone} onChange={e => setForm({ ...form, emergencyContactPhone: e.target.value })} /></Field>
-              <Field label="HR status">
-                <select style={styles.input} value={form.hrStatus} onChange={e => setForm({ ...form, hrStatus: e.target.value })}>
-                  {hrStatuses.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                </select>
-              </Field>
-              <Field label="Admin notes">
-                <textarea rows={4} style={{ ...styles.input, minHeight: 104, resize: 'vertical' }} value={form.adminNotes} onChange={e => setForm({ ...form, adminNotes: e.target.value })} />
-              </Field>
-              <button style={styles.primaryButton} disabled={saving}>{saving ? 'Saving...' : selectedProfile ? 'Save HR profile' : 'Create HR profile'}</button>
-            </form>
-          </>
-        ) : (
-          <Empty title="No staff selected." text="Select a staff user to create or edit an HR profile." />
-        )}
-      </Card>
+      {hrTab === 'profiles' && (
+        <div className="lf-split-grid" style={styles.splitGrid}>
+          <Card title="Staff HR profiles" hint={`${profileCount} of ${staff.length} staff profiled`}>
+            {loadError && <div style={{ ...styles.alert, ...styles.alertDanger, marginBottom: 12 }}>{loadError}</div>}
+            {loading ? (
+              <Skeleton rows={2} />
+            ) : (
+              <Table
+                columns={['Name', 'Email', 'Role', 'HR Status', 'Job Title', 'Action']}
+                rows={staff.map(member => [
+                  <div key={`${member.userId}-name`} style={{ display: 'grid', gap: 2 }}>
+                    <strong>{hrStaffName(member)}</strong>
+                    <span style={{ color: theme.muted, fontSize: 12 }}>{member.isActive ? 'Active user' : 'Inactive user'}</span>
+                  </div>,
+                  member.email || '-',
+                  member.role || '-',
+                  <Badge key={`${member.userId}-status`} tone={hrStatusTone(member.profile?.hrStatus)}>{member.profile ? hrStatusLabel(member.profile.hrStatus) : 'No profile'}</Badge>,
+                  member.profile?.jobTitle || '-',
+                  <button key={`${member.userId}-select`} type="button" style={selectedUserId === member.userId ? styles.primaryButton : styles.ghostButton} onClick={() => setSelectedUserId(member.userId)}>Select</button>,
+                ])}
+                empty={staffEmptyText}
+              />
+            )}
+          </Card>
+
+          <Card title={selectedStaff ? `${selectedProfile ? 'Edit' : 'Create'} HR profile` : 'HR profile'} hint={selectedStaff ? hrStaffName(selectedStaff) : 'Select a staff member'}>
+            {profileLoading ? (
+              <Skeleton rows={1} />
+            ) : selectedStaff ? (
+              <>
+                {!selectedProfile && <Empty title="No HR profile yet." text="Complete the form to create one for this staff member." />}
+                <form onSubmit={submit} style={{ ...styles.formGrid, marginTop: selectedProfile ? 0 : 12 }}>
+                  <Field label="Staff member">
+                    <select style={styles.input} value={selectedUserId} onChange={e => setSelectedUserId(e.target.value)}>
+                      {staff.map(member => <option key={member.userId} value={member.userId}>{hrStaffName(member)}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Job title"><input style={styles.input} value={form.jobTitle} onChange={e => setForm({ ...form, jobTitle: e.target.value })} /></Field>
+                  <Field label="Department"><input style={styles.input} value={form.department} onChange={e => setForm({ ...form, department: e.target.value })} /></Field>
+                  <Field label="Practice team"><input style={styles.input} value={form.practiceTeam} onChange={e => setForm({ ...form, practiceTeam: e.target.value })} /></Field>
+                  <Field label="Employment type">
+                    <select style={styles.input} value={form.employmentType} onChange={e => setForm({ ...form, employmentType: e.target.value })}>
+                      <option value="">Not set</option>
+                      {hrEmploymentTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Start date"><input type="date" style={styles.input} value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })} /></Field>
+                  <Field label="Contract end date"><input type="date" style={styles.input} value={form.contractEndDate} onChange={e => setForm({ ...form, contractEndDate: e.target.value })} /></Field>
+                  <Field label="Supervisor">
+                    <select style={styles.input} value={form.supervisorUserId} onChange={e => setForm({ ...form, supervisorUserId: e.target.value })}>
+                      <option value="">Not set</option>
+                      {staff.map(member => <option key={member.userId} value={member.userId}>{hrStaffName(member)}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Work email"><input type="email" style={styles.input} value={form.workEmail} onChange={e => setForm({ ...form, workEmail: e.target.value })} /></Field>
+                  <Field label="Work phone"><input type="tel" style={styles.input} value={form.workPhone} onChange={e => setForm({ ...form, workPhone: e.target.value })} /></Field>
+                  <Field label="Emergency contact name"><input style={styles.input} value={form.emergencyContactName} onChange={e => setForm({ ...form, emergencyContactName: e.target.value })} /></Field>
+                  <Field label="Emergency contact phone"><input type="tel" style={styles.input} value={form.emergencyContactPhone} onChange={e => setForm({ ...form, emergencyContactPhone: e.target.value })} /></Field>
+                  <Field label="HR status">
+                    <select style={styles.input} value={form.hrStatus} onChange={e => setForm({ ...form, hrStatus: e.target.value })}>
+                      {hrStatuses.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Admin notes">
+                    <textarea rows={4} style={{ ...styles.input, minHeight: 104, resize: 'vertical' }} value={form.adminNotes} onChange={e => setForm({ ...form, adminNotes: e.target.value })} />
+                  </Field>
+                  <button style={styles.primaryButton} disabled={saving}>{saving ? 'Saving...' : selectedProfile ? 'Save HR profile' : 'Create HR profile'}</button>
+                </form>
+              </>
+            ) : (
+              <Empty title="No staff selected." text="Select a staff user to create or edit an HR profile." />
+            )}
+          </Card>
+        </div>
+      )}
+
+      {hrTab === 'leaves' && (
+        <Card title="Leave Requests" hint={`${leaveRequests.length} request${leaveRequests.length === 1 ? '' : ''}`}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: theme.ink }}>Filter:</span>
+            {['', 'pending', 'approved', 'rejected', 'cancelled'].map(s => (
+              <button key={s} type="button" style={statusFilter === s ? styles.primaryButton : styles.ghostButton} onClick={() => setStatusFilter(s)}>
+                {s ? s.charAt(0).toUpperCase() + s.slice(1) : 'All'}
+              </button>
+            ))}
+          </div>
+          {leaveLoading ? (
+            <Skeleton rows={2} />
+          ) : leaveRequests.length === 0 ? (
+            <Empty title="No leave requests." text="Staff leave requests will appear here once submitted." />
+          ) : (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {leaveRequests.map(req => (
+                <div key={req.id} style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: 12, background: '#fff', display: 'grid', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                    <div style={{ display: 'grid', gap: 2 }}>
+                      <strong style={{ fontSize: 14 }}>{req.fullName} — {LEAVE_TYPE_LABELS[req.leaveType] || req.leaveType}</strong>
+                      <span style={{ fontSize: 12, color: theme.muted }}>{req.startDate} → {req.endDate} · {req.days} day{Number(req.days) === 1 ? '' : 's'}</span>
+                      <span style={{ fontSize: 11, color: '#9CA3AF' }}>{req.email} · {req.role}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <Badge tone={leaveStatusTone(req.status)}>{req.status.charAt(0).toUpperCase() + req.status.slice(1)}</Badge>
+                    </div>
+                  </div>
+                  {req.reason ? <div style={{ fontSize: 12, color: theme.ink, background: '#F9FAFB', borderRadius: 6, padding: '6px 10px' }}>{req.reason}</div> : null}
+                  {req.decisionNote ? <div style={{ fontSize: 12, color: theme.muted, fontStyle: 'italic', background: '#F9FAFB', borderRadius: 6, padding: '6px 10px' }}>Note: {req.decisionNote}</div> : null}
+                  {req.status === 'pending' && (
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <input style={{ ...styles.input, width: 200, fontSize: 12, padding: '4px 8px' }} placeholder="Optional decision note" value={decisionNotes[req.id] || ''} onChange={e => setDecisionNotes(current => ({ ...current, [req.id]: e.target.value }))} />
+                      <button type="button" style={{ ...styles.tinyButton, background: '#D1FAE5', color: '#065F46', border: '1px solid #A7F3D0' }} disabled={actioningId === `approve:${req.id}`} onClick={() => handleLeaveAction(req.id, 'approve')}>{actioningId === `approve:${req.id}` ? '...' : 'Approve'}</button>
+                      <button type="button" style={{ ...styles.tinyButton, background: '#FEE2E2', color: '#991B1B', border: '1px solid #FECACA' }} disabled={actioningId === `reject:${req.id}`} onClick={() => handleLeaveAction(req.id, 'reject')}>{actioningId === `reject:${req.id}` ? '...' : 'Reject'}</button>
+                      <button type="button" style={{ ...styles.dangerTinyButton }} disabled={actioningId === `cancel:${req.id}`} onClick={() => handleLeaveAction(req.id, 'cancel')}>{actioningId === `cancel:${req.id}` ? '...' : 'Cancel'}</button>
+                    </div>
+                  )}
+                  <div style={{ fontSize: 11, color: '#9CA3AF' }}>Requested: {new Date(req.requestedAt).toLocaleString()}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
     </div>
   );
 }

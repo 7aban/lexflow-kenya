@@ -176,6 +176,8 @@ const HR_PROFILE_FIELDS = [
   'hrStatus',
   'adminNotes',
 ];
+const ALLOWED_LEAVE_TYPES = new Set(['annual','sick','compassionate','maternity','paternity','study_exam','unpaid','other']);
+const ALLOWED_LEAVE_STATUSES = new Set(['pending','approved','rejected','cancelled']);
 const HR_AUDIT_SENSITIVE_FIELDS = new Set(['adminNotes', 'emergencyContactName', 'emergencyContactPhone']);
 const HR_FIELD_LIMITS = {
   jobTitle: 120,
@@ -320,6 +322,89 @@ function hrAuditMetadata(user, changedFields = []) {
   };
 }
 
+function normalizeLeaveType(value) {
+  const text = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return ALLOWED_LEAVE_TYPES.has(text) ? text : null;
+}
+
+function normalizeIsoDate(value) {
+  if (!value || typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
+  const date = new Date(trimmed + 'T00:00:00');
+  if (Number.isNaN(date.getTime())) return null;
+  return trimmed;
+}
+
+function calculateLeaveDays(startDate, endDate) {
+  const s = new Date(startDate + 'T00:00:00');
+  const e = new Date(endDate + 'T00:00:00');
+  const diff = Math.round((e.getTime() - s.getTime()) / 86400000) + 1;
+  return diff > 0 ? diff : 0;
+}
+
+function normalizeLeaveReason(value) {
+  if (value === undefined || value === null) return '';
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (text.length > 2000) return null;
+  return text;
+}
+
+function normalizeDecisionNote(value) {
+  if (value === undefined || value === null) return '';
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (text.length > 2000) return null;
+  return text;
+}
+
+function publicLeaveRequest(row = {}) {
+  return {
+    id: row.id || '',
+    userId: row.userId || '',
+    leaveType: row.leaveType || '',
+    startDate: row.startDate || '',
+    endDate: row.endDate || '',
+    days: Number(row.days) || 0,
+    reason: row.reason || '',
+    status: row.status || 'pending',
+    requestedAt: row.requestedAt || '',
+    decidedBy: row.decidedBy || '',
+    decidedAt: row.decidedAt || '',
+    decisionNote: row.decisionNote || '',
+    cancelledBy: row.cancelledBy || '',
+    cancelledAt: row.cancelledAt || '',
+    createdAt: row.createdAt || '',
+    updatedAt: row.updatedAt || '',
+    fullName: row.fullName || '',
+    email: row.email || '',
+    role: row.role || '',
+  };
+}
+
+function publicLeaveRequestSummary(row = {}) {
+  return {
+    id: row.id || '',
+    userId: row.userId || '',
+    leaveType: row.leaveType || '',
+    startDate: row.startDate || '',
+    endDate: row.endDate || '',
+    days: Number(row.days) || 0,
+    status: row.status || 'pending',
+    requestedAt: row.requestedAt || '',
+    decidedBy: row.decidedBy || '',
+    decidedAt: row.decidedAt || '',
+    cancelledBy: row.cancelledBy || '',
+    cancelledAt: row.cancelledAt || '',
+    createdAt: row.createdAt || '',
+    updatedAt: row.updatedAt || '',
+    fullName: row.fullName || '',
+    email: row.email || '',
+    role: row.role || '',
+  };
+}
+
 async function ensureClientUserSupport() {
   const schema = await get("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'");
   if (schema?.sql && !schema.sql.includes("'client'")) {
@@ -389,6 +474,27 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS document_requests (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, clientId TEXT NOT NULL, staffUserId TEXT NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', createdAt TEXT NOT NULL, respondedAt TEXT, responseDocumentId TEXT, cancelledAt TEXT, cancelledBy TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS signature_assets (id TEXT PRIMARY KEY, ownerType TEXT NOT NULL CHECK(ownerType IN ('user','firm')), ownerId TEXT, assetType TEXT NOT NULL CHECK(assetType IN ('signature','stamp')), label TEXT NOT NULL, mimeType TEXT NOT NULL, content BLOB NOT NULL, size INTEGER, isDefault INTEGER DEFAULT 0, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT, deletedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS hr_staff_profiles (id TEXT PRIMARY KEY, userId TEXT NOT NULL UNIQUE, jobTitle TEXT, department TEXT, practiceTeam TEXT, employmentType TEXT, startDate TEXT, contractEndDate TEXT, supervisorUserId TEXT, workEmail TEXT, workPhone TEXT, emergencyContactName TEXT, emergencyContactPhone TEXT, hrStatus TEXT NOT NULL DEFAULT 'active', adminNotes TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, createdBy TEXT, updatedBy TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS hr_leave_requests (
+id TEXT PRIMARY KEY,
+userId TEXT NOT NULL,
+leaveType TEXT NOT NULL CHECK(leaveType IN ('annual','sick','compassionate','maternity','paternity','study_exam','unpaid','other')),
+startDate TEXT NOT NULL,
+endDate TEXT NOT NULL,
+days REAL NOT NULL,
+reason TEXT DEFAULT '',
+status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected','cancelled')),
+requestedAt TEXT NOT NULL,
+decidedBy TEXT,
+decidedAt TEXT,
+decisionNote TEXT DEFAULT '',
+cancelledBy TEXT,
+cancelledAt TEXT,
+createdAt TEXT NOT NULL,
+updatedAt TEXT
+)`);
+  await run('CREATE INDEX IF NOT EXISTS idx_hr_leave_requests_userId ON hr_leave_requests(userId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_hr_leave_requests_status ON hr_leave_requests(status)');
+  await run('CREATE INDEX IF NOT EXISTS idx_hr_leave_requests_userId_status ON hr_leave_requests(userId, status)');
 
   await ensureClientUserSupport();
   await ensureColumn('matter_checklist_items', 'dueDate', 'TEXT');
@@ -2411,6 +2517,170 @@ app.patch('/api/hr/staff/:userId/profile', requireAdmin, async (req, res) => {
     }).catch(() => {});
     const profile = await get('SELECT * FROM hr_staff_profiles WHERE id=?', [existing.id]);
     res.json({ staff: publicHrStaffUser(staff.user), profile: publicHrProfile(profile) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// --- HR Leave Request routes ---
+
+// Admin routes
+app.get('/api/hr/leave-requests', requireAdmin, async (req, res) => {
+  try {
+    const { status, userId } = req.query;
+    const conditions = [];
+    const params = [];
+    if (status && ALLOWED_LEAVE_STATUSES.has(status)) {
+      conditions.push('l.status=?');
+      params.push(status);
+    }
+    if (userId && typeof userId === 'string' && userId.trim()) {
+      conditions.push('l.userId=?');
+      params.push(userId.trim());
+    }
+    let where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+    where += ' AND u.role IN (\'admin\',\'advocate\',\'assistant\')';
+    const rows = await all(`SELECT l.*, u.fullName, u.email, u.role
+      FROM hr_leave_requests l
+      JOIN users u ON u.id=l.userId
+      ${where}
+      ORDER BY l.requestedAt DESC`, params);
+    res.json(rows.map(r => publicLeaveRequest(r)));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/hr/leave-requests/:id', requireAdmin, async (req, res) => {
+  try {
+    const row = await get(`SELECT l.*, u.fullName, u.email, u.role
+      FROM hr_leave_requests l
+      JOIN users u ON u.id=l.userId
+      WHERE l.id=?`, [req.params.id]);
+    if (!row) return res.status(404).json({ error: 'Leave request not found' });
+    res.json(publicLeaveRequest(row));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch('/api/hr/leave-requests/:id/approve', requireAdmin, async (req, res) => {
+  try {
+    const row = await get('SELECT * FROM hr_leave_requests WHERE id=?', [req.params.id]);
+    if (!row) return res.status(404).json({ error: 'Leave request not found' });
+    if (row.status !== 'pending') return res.status(400).json({ error: 'Only pending requests can be approved' });
+    const decisionNote = normalizeDecisionNote(req.body?.decisionNote);
+    if (decisionNote === null) return res.status(400).json({ error: 'decisionNote must not exceed 2000 characters' });
+    const now = new Date().toISOString();
+    await run('UPDATE hr_leave_requests SET status=?, decidedBy=?, decidedAt=?, decisionNote=?, updatedAt=? WHERE id=?', ['approved', req.user.userId, now, decisionNote, now, req.params.id]);
+    await recordAuditEvent(req, {
+      action: 'leave_approved',
+      entityType: 'hr_leave_request',
+      entityId: row.id,
+      metadata: { requestId: row.id, userId: row.userId, leaveType: row.leaveType, startDate: row.startDate, endDate: row.endDate, days: row.days, status: 'approved' },
+    }).catch(() => {});
+    const updated = await get(`SELECT l.*, u.fullName, u.email, u.role FROM hr_leave_requests l JOIN users u ON u.id=l.userId WHERE l.id=?`, [req.params.id]);
+    res.json(publicLeaveRequest(updated));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch('/api/hr/leave-requests/:id/reject', requireAdmin, async (req, res) => {
+  try {
+    const row = await get('SELECT * FROM hr_leave_requests WHERE id=?', [req.params.id]);
+    if (!row) return res.status(404).json({ error: 'Leave request not found' });
+    if (row.status !== 'pending') return res.status(400).json({ error: 'Only pending requests can be rejected' });
+    const decisionNote = normalizeDecisionNote(req.body?.decisionNote);
+    if (decisionNote === null) return res.status(400).json({ error: 'decisionNote must not exceed 2000 characters' });
+    const now = new Date().toISOString();
+    await run('UPDATE hr_leave_requests SET status=?, decidedBy=?, decidedAt=?, decisionNote=?, updatedAt=? WHERE id=?', ['rejected', req.user.userId, now, decisionNote, now, req.params.id]);
+    await recordAuditEvent(req, {
+      action: 'leave_rejected',
+      entityType: 'hr_leave_request',
+      entityId: row.id,
+      metadata: { requestId: row.id, userId: row.userId, leaveType: row.leaveType, startDate: row.startDate, endDate: row.endDate, days: row.days, status: 'rejected' },
+    }).catch(() => {});
+    const updated = await get(`SELECT l.*, u.fullName, u.email, u.role FROM hr_leave_requests l JOIN users u ON u.id=l.userId WHERE l.id=?`, [req.params.id]);
+    res.json(publicLeaveRequest(updated));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch('/api/hr/leave-requests/:id/cancel', requireAdmin, async (req, res) => {
+  try {
+    const row = await get('SELECT * FROM hr_leave_requests WHERE id=?', [req.params.id]);
+    if (!row) return res.status(404).json({ error: 'Leave request not found' });
+    if (row.status !== 'pending') return res.status(400).json({ error: 'Only pending requests can be cancelled' });
+    const now = new Date().toISOString();
+    await run('UPDATE hr_leave_requests SET status=?, cancelledBy=?, cancelledAt=?, updatedAt=? WHERE id=?', ['cancelled', req.user.userId, now, now, req.params.id]);
+    await recordAuditEvent(req, {
+      action: 'leave_cancelled',
+      entityType: 'hr_leave_request',
+      entityId: row.id,
+      metadata: { requestId: row.id, userId: row.userId, leaveType: row.leaveType, startDate: row.startDate, endDate: row.endDate, days: row.days, status: 'cancelled' },
+    }).catch(() => {});
+    const updated = await get(`SELECT l.*, u.fullName, u.email, u.role FROM hr_leave_requests l JOIN users u ON u.id=l.userId WHERE l.id=?`, [req.params.id]);
+    res.json(publicLeaveRequest(updated));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Self-service routes
+app.get('/api/hr/me/leave-requests', requireStaff, async (req, res) => {
+  try {
+    const rows = await all(`SELECT l.*, u.fullName, u.email, u.role
+      FROM hr_leave_requests l
+      JOIN users u ON u.id=l.userId
+      WHERE l.userId=?
+      ORDER BY l.requestedAt DESC`, [req.user.userId]);
+    res.json(rows.map(r => publicLeaveRequestSummary(r)));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/hr/me/leave-requests', requireStaff, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const userId = req.user.userId;
+
+    const leaveType = normalizeLeaveType(body.leaveType);
+    if (!leaveType) return res.status(400).json({ error: 'Invalid leaveType. Allowed: ' + [...ALLOWED_LEAVE_TYPES].join(', ') });
+
+    const startDate = normalizeIsoDate(body.startDate);
+    if (!startDate) return res.status(400).json({ error: 'startDate is required and must be YYYY-MM-DD' });
+
+    const endDate = normalizeIsoDate(body.endDate);
+    if (!endDate) return res.status(400).json({ error: 'endDate is required and must be YYYY-MM-DD' });
+
+    if (endDate < startDate) return res.status(400).json({ error: 'endDate must be on or after startDate' });
+
+    const days = calculateLeaveDays(startDate, endDate);
+
+    const reason = normalizeLeaveReason(body.reason);
+    if (reason === null) return res.status(400).json({ error: 'reason must not exceed 2000 characters' });
+
+    const id = genId('LVR');
+    const now = new Date().toISOString();
+    await run(`INSERT INTO hr_leave_requests (id,userId,leaveType,startDate,endDate,days,reason,status,requestedAt,createdAt,updatedAt)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)`, [id, userId, leaveType, startDate, endDate, days, reason, 'pending', now, now, '']);
+
+    await recordAuditEvent(req, {
+      action: 'leave_requested',
+      entityType: 'hr_leave_request',
+      entityId: id,
+      metadata: { requestId: id, userId, leaveType, startDate, endDate, days, status: 'pending' },
+    }).catch(() => {});
+
+    const row = await get(`SELECT l.*, u.fullName, u.email, u.role FROM hr_leave_requests l JOIN users u ON u.id=l.userId WHERE l.id=?`, [id]);
+    res.status(201).json(publicLeaveRequest(row));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch('/api/hr/me/leave-requests/:id/cancel', requireStaff, async (req, res) => {
+  try {
+    const row = await get('SELECT * FROM hr_leave_requests WHERE id=? AND userId=?', [req.params.id, req.user.userId]);
+    if (!row) return res.status(404).json({ error: 'Leave request not found' });
+    if (row.status !== 'pending') return res.status(400).json({ error: 'Only pending requests can be cancelled' });
+    const now = new Date().toISOString();
+    await run('UPDATE hr_leave_requests SET status=?, cancelledBy=?, cancelledAt=?, updatedAt=? WHERE id=?', ['cancelled', req.user.userId, now, now, req.params.id]);
+    await recordAuditEvent(req, {
+      action: 'leave_cancelled',
+      entityType: 'hr_leave_request',
+      entityId: row.id,
+      metadata: { requestId: row.id, userId: row.userId, leaveType: row.leaveType, startDate: row.startDate, endDate: row.endDate, days: row.days, status: 'cancelled' },
+    }).catch(() => {});
+    const updated = await get(`SELECT l.*, u.fullName, u.email, u.role FROM hr_leave_requests l JOIN users u ON u.id=l.userId WHERE l.id=?`, [req.params.id]);
+    res.json(publicLeaveRequest(updated));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

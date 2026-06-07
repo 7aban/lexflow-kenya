@@ -16,6 +16,7 @@ import DeadlineCenter from './views/DeadlineCenter.jsx';
 import Invitations from './views/Invitations.jsx';
 import { Clients, ConnectedAccounts, Dashboard, FirmSettings, HR, Invoices, Matters, Tasks, Users } from './views/StaffViews.jsx';
 import DocumentStudio from './views/DocumentStudio.jsx';
+import MyLeave from './views/MyLeave.jsx';
 import Reports from './views/Reports.jsx';
 
 const navIcons = {
@@ -51,7 +52,7 @@ const navGroups = [
   { title: 'Overview', items: [['Dashboard', ['admin', 'advocate', 'assistant']], ['Performance', ['admin']], ['Reports', ['admin']]] },
   { title: 'Relationships', items: [['Clients', ['admin', 'advocate', 'assistant']], ['Invitations', ['admin']]] },
   { title: 'Matters', items: [['Matters', ['admin', 'advocate', 'assistant']]] },
-  { title: 'Work', items: [['Tasks', ['admin', 'advocate', 'assistant']], ['Deadlines', ['admin', 'advocate', 'assistant']]] },
+  { title: 'Work', items: [['Tasks', ['admin', 'advocate', 'assistant']], ['Deadlines', ['admin', 'advocate', 'assistant']], ['My Leave', ['advocate', 'assistant']]] },
   { title: 'Document Studio', items: [['Document Studio', ['admin', 'advocate']]] },
   { title: 'Finance', items: [['Invoices', ['admin']]] },
   { title: 'Communications', items: [['Communications', ['admin', 'advocate', 'assistant']]] },
@@ -681,6 +682,7 @@ export default function App() {
             {(!loading || bootstrapped) && view === 'Firm Settings' && isAdmin && <FirmSettings settings={firm} clients={data.clients} reload={refresh} notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Connected Accounts' && <ConnectedAccounts notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Users' && isAdmin && <Users clients={data.clients} notify={setToast} />}
+            {(!loading || bootstrapped) && view === 'My Leave' && <MyLeave notify={setToast} />}
             {(!loading || bootstrapped) && view === 'HR' && isAdmin && <HR notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Invitations' && isAdmin && <Invitations clients={data.clients} notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Audit Log' && isAdmin && <AuditLog notify={setToast} navigate={setView} />}
