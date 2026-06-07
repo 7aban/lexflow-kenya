@@ -346,6 +346,8 @@ export const createFolder = (matterId, data) => api(`/matters/${matterId}/folder
 export const updateFolder = (folderId, data) => api(`/folders/${folderId}`, { method: 'PATCH', body: data });
 export const deleteFolder = folderId => api(`/folders/${folderId}`, { method: 'DELETE' });
 export const getMatterDocuments = (matterId, folderId = 'all') => api(`/matters/${matterId}/documents${folderId && folderId !== 'all' ? `?folderId=${encodeURIComponent(folderId)}` : ''}`);
+// TIMELINE-30B: read-only unified matter timeline (staff-only on the backend).
+export const getMatterTimeline = (matterId, params = {}) => api(queryPath(`/matters/${encodeURIComponent(matterId)}/timeline`, params));
 export const listDocumentTemplates = () => api('/document-templates');
 export const generateDocumentFromTemplate = (matterId, templateId) =>
   api(`/matters/${matterId}/document-templates/${templateId}/generate`, {

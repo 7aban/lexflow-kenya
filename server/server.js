@@ -4953,6 +4953,120 @@ app.get('/api/matters/:id', async (req, res) => {
   if (req.user.role !== 'client') payload.checklistItems = checklistItems;
   res.json(payload);
 });
+
+// TIMELINE-30B: unified, read-only, staff-only matter timeline aggregated from existing data.
+const MATTER_TIMELINE_TYPES = new Set(['matter_opened', 'note', 'task', 'appearance', 'document', 'time_entry', 'invoice', 'deadline', 'payment', 'checklist']);
+const MATTER_TIMELINE_DEFAULT_LIMIT = 200;
+const MATTER_TIMELINE_MAX_LIMIT = 500;
+
+function timelineSummaryText(value, max = 200) {
+  if (typeof value !== 'string') return '';
+  const text = value.trim();
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+// Builds a safe, normalized, descending-sorted event list for one matter.
+// `showMoney` controls whether monetary fields are included (billing visibility).
+async function buildMatterTimeline(matterId, { showMoney }) {
+  const events = [];
+  const push = (date, type, title, summary, actor, sourceId, sourceType, metadata = {}) => {
+    events.push({ id: `${type}:${sourceId}`, type, title, date: date || '', summary: summary || '', actor: actor || '', sourceId: sourceId || '', sourceType, matterId, metadata });
+  };
+
+  const matter = await get('SELECT id, reference, title, openDate, assignedTo, paralegal FROM matters WHERE id=?', [matterId]);
+  if (matter && matter.openDate) {
+    push(matter.openDate, 'matter_opened', 'Matter opened', timelineSummaryText(matter.reference || matter.title || ''), matter.assignedTo || matter.paralegal || '', matter.id, 'matter', { reference: matter.reference || '' });
+  }
+
+  const [notes, tasks, appearances, documents, timeEntries, invoices, deadlines, payments, checklist] = await Promise.all([
+    all('SELECT id, content, author, createdAt FROM case_notes WHERE matterId=?', [matterId]),
+    all('SELECT id, title, completed, assignee, dueDate FROM tasks WHERE matterId=?', [matterId]),
+    all('SELECT id, title, date, time, type, location, attorney FROM appearances WHERE matterId=?', [matterId]),
+    all('SELECT id, name, displayName, type, mimeType, source, clientVisible, date, generatedAt, uploadedBy, generatedBy FROM documents WHERE matterId=? AND deletedAt IS NULL', [matterId]),
+    all('SELECT id, date, hours, activity, attorney, rate, billable FROM time_entries WHERE matterId=?', [matterId]),
+    all('SELECT id, number, status, date, dueDate, amount FROM invoices WHERE matterId=?', [matterId]),
+    all('SELECT id, title, type, dueDate, status, owner, createdAt FROM deadlines WHERE matterId=?', [matterId]),
+    all('SELECT id, method, reference, date, amount, createdBy, createdAt FROM payments WHERE matterId=?', [matterId]),
+    all('SELECT id, title, completed, dueDate, assignee, createdAt, completedAt, completedBy FROM matter_checklist_items WHERE matterId=?', [matterId]),
+  ]);
+
+  for (const n of notes) {
+    push(n.createdAt, 'note', 'Case note recorded', timelineSummaryText(n.content), n.author || '', n.id, 'case_note', {});
+  }
+  for (const t of tasks) {
+    const status = t.completed ? 'completed' : 'open';
+    push(t.dueDate, 'task', t.completed ? 'Task completed' : 'Task due', timelineSummaryText(t.title), t.assignee || '', t.id, 'task', { status });
+  }
+  for (const a of appearances) {
+    push(a.date, 'appearance', 'Court appearance', timelineSummaryText([a.title || a.type, a.time, a.location].filter(Boolean).join(' · ')), a.attorney || '', a.id, 'appearance', { type: a.type || '', location: a.location || '', time: a.time || '' });
+  }
+  for (const d of documents) {
+    push(d.date || d.generatedAt, 'document', d.generatedAt ? 'Document generated' : 'Document added', timelineSummaryText(d.displayName || d.name), d.uploadedBy || d.generatedBy || '', d.id, 'document', {
+      name: d.displayName || d.name || '',
+      type: d.type || '',
+      mimeType: d.mimeType || '',
+      source: d.source || '',
+      clientVisible: Number(d.clientVisible || 0) === 1,
+    });
+  }
+  for (const te of timeEntries) {
+    const hours = Number(te.hours);
+    const meta = { activity: te.activity || '', billable: Number(te.billable ?? 1) === 1 };
+    if (Number.isFinite(hours)) meta.hours = hours;
+    if (showMoney && te.rate !== null && te.rate !== undefined) meta.rate = Number(te.rate);
+    push(te.date, 'time_entry', 'Time logged', timelineSummaryText([Number.isFinite(hours) ? `${hours.toFixed(1)}h` : '', te.activity].filter(Boolean).join(' · ')), te.attorney || '', te.id, 'time_entry', meta);
+  }
+  for (const inv of invoices) {
+    const meta = { number: inv.number || '', status: inv.status || '', dueDate: inv.dueDate || '' };
+    if (showMoney && inv.amount !== null && inv.amount !== undefined) meta.amount = Number(inv.amount);
+    push(inv.date, 'invoice', 'Invoice issued', timelineSummaryText([inv.number, inv.status].filter(Boolean).join(' · ')), '', inv.id, 'invoice', meta);
+  }
+  for (const dl of deadlines) {
+    push(dl.dueDate, 'deadline', 'Deadline', timelineSummaryText([dl.title, dl.status].filter(Boolean).join(' · ')), dl.owner || '', dl.id, 'deadline', { type: dl.type || '', status: dl.status || '' });
+  }
+  for (const p of payments) {
+    const meta = { method: p.method || '', reference: p.reference || '' };
+    if (showMoney && p.amount !== null && p.amount !== undefined) meta.amount = Number(p.amount);
+    push(p.date || p.createdAt, 'payment', 'Payment recorded', timelineSummaryText([p.method, p.reference].filter(Boolean).join(' · ')), p.createdBy || '', p.id, 'payment', meta);
+  }
+  for (const c of checklist) {
+    const status = c.completed ? 'completed' : 'open';
+    push(c.completedAt || c.createdAt, 'checklist', c.completed ? 'Checklist item completed' : 'Checklist item added', timelineSummaryText(c.title), (c.completed ? c.completedBy : c.assignee) || '', c.id, 'matter_checklist_item', { status });
+  }
+
+  const parse = (v) => { const t = Date.parse(v); return Number.isNaN(t) ? null : t; };
+  return events
+    .filter(e => parse(e.date) !== null)
+    .sort((a, b) => {
+      const at = parse(a.date), bt = parse(b.date);
+      if (bt !== at) return bt - at;
+      return `${a.sourceType}${a.sourceId}${a.title}`.localeCompare(`${b.sourceType}${b.sourceId}${b.title}`);
+    });
+}
+
+app.get('/api/matters/:id/timeline', async (req, res) => {
+  try {
+    if (req.user.role === 'client') return res.status(403).json({ error: 'Staff access required' });
+    const matter = await get('SELECT id FROM matters WHERE id=?', [req.params.id]);
+    if (!matter) return res.status(404).json({ error: 'Matter not found' });
+    if (!(await canAccessMatter(req, req.params.id))) {
+      await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: req.params.id, metadata: { reason: 'insufficient permissions', route: 'matter_timeline' } }).catch(() => {});
+      return res.status(403).json({ error: 'Matter access denied' });
+    }
+    const typeFilter = typeof req.query.type === 'string' && req.query.type ? req.query.type : '';
+    if (typeFilter && !MATTER_TIMELINE_TYPES.has(typeFilter)) return res.status(400).json({ error: 'Invalid type filter' });
+    let limit = parseInt(req.query.limit, 10);
+    if (!Number.isFinite(limit) || limit <= 0) limit = MATTER_TIMELINE_DEFAULT_LIMIT;
+    if (limit > MATTER_TIMELINE_MAX_LIMIT) limit = MATTER_TIMELINE_MAX_LIMIT;
+
+    const showMoney = await isBillingVisibleFor(req);
+    let events = await buildMatterTimeline(req.params.id, { showMoney });
+    if (typeFilter) events = events.filter(e => e.type === typeFilter);
+    events = events.slice(0, limit);
+    res.json({ matterId: req.params.id, count: events.length, events });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/matters/:id/suggestions', async (req, res) => {
   if (req.user.role === 'client') return res.status(403).json({ error: 'Staff access required' });
   const matter = await get('SELECT m.*, c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.id=?', [req.params.id]);
