@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote, IconMail, IconPaperclip, IconExternalLink } from '@tabler/icons-react';
-import { api, applyChecklistTemplate, approveHrLeaveRequest, cancelHrLeaveRequestAdmin, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, createHrStaffProfile, createMatterChecklistItem, deleteChecklistTemplate, deleteClientAvatar, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getHrLeaveRequests, getHrStaff, getHrStaffProfile, getInvoiceDetails, getMatterWorkMetadataLinks, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, rejectHrLeaveRequest, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrStaffProfile, updateMatterChecklistItem, uploadClientAvatar, uploadUserAvatar } from '../lib/apiClient.js';
+import { api, applyChecklistTemplate, approveHrLeaveRequest, cancelHrLeaveRequestAdmin, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, createHrLeaveBalanceAdjustment, createHrStaffProfile, createMatterChecklistItem, deleteChecklistTemplate, deleteClientAvatar, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getHrDashboard, getHrLeaveBalances, getHrLeaveRequests, getHrStaff, getHrStaffProfile, getInvoiceDetails, getMatterWorkMetadataLinks, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, rejectHrLeaveRequest, setHrLeaveEntitlement, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrStaffProfile, updateMatterChecklistItem, uploadClientAvatar, uploadUserAvatar } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, safeHttpUrl, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText, invoiceDueDistanceDays } from '../components/ui.jsx';
@@ -3288,6 +3288,17 @@ function leaveStatusTone(status) {
   return tones[status] || 'blue';
 }
 
+const BALANCE_LEAVE_TYPES = [
+  { value: 'annual', label: 'Annual' },
+  { value: 'sick', label: 'Sick' },
+  { value: 'compassionate', label: 'Compassionate' },
+  { value: 'maternity', label: 'Maternity' },
+  { value: 'paternity', label: 'Paternity' },
+  { value: 'study_exam', label: 'Study/Exam' },
+  { value: 'unpaid', label: 'Unpaid' },
+  { value: 'other', label: 'Other' },
+];
+
 export function HR({ notify }) {
   const [staff, setStaff] = useState([]);
   const [selectedUserId, setSelectedUserId] = useState('');
@@ -3297,14 +3308,30 @@ export function HR({ notify }) {
   const [profileLoading, setProfileLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState('');
-  const [hrTab, setHrTab] = useState('profiles');
+  const [hrTab, setHrTab] = useState('dashboard');
   const [leaveRequests, setLeaveRequests] = useState([]);
   const [leaveLoading, setLeaveLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
   const [actioningId, setActioningId] = useState('');
   const [decisionNotes, setDecisionNotes] = useState({});
+  const [dashboard, setDashboard] = useState(null);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [dashYear, setDashYear] = useState(String(new Date().getFullYear()));
+  const [balances, setBalances] = useState([]);
+  const [balancesLoading, setBalancesLoading] = useState(false);
+  const [balYear, setBalYear] = useState(String(new Date().getFullYear()));
+  const [balFilterUser, setBalFilterUser] = useState('');
+  const [balFilterType, setBalFilterType] = useState('');
+  const [editEntitlement, setEditEntitlement] = useState({ userId: '', leaveType: 'annual', year: String(new Date().getFullYear()), days: '' });
+  const [adjustment, setAdjustment] = useState({ userId: '', leaveType: 'annual', year: String(new Date().getFullYear()), days: '', reason: '' });
+  const [entitlementSaving, setEntitlementSaving] = useState(false);
+  const [adjustmentSaving, setAdjustmentSaving] = useState(false);
 
   useEffect(() => { loadStaff(); }, []);
+  useEffect(() => {
+    if (hrTab === 'dashboard') loadDashboard();
+    if (hrTab === 'balances') loadBalances();
+  }, [hrTab]);
   useEffect(() => {
     if (selectedUserId) loadSelectedProfile(selectedUserId);
     else {
@@ -3316,6 +3343,33 @@ export function HR({ notify }) {
   useEffect(() => {
     if (hrTab === 'leaves') loadLeaveRequests();
   }, [hrTab, statusFilter]);
+
+  async function loadDashboard() {
+    setDashboardLoading(true);
+    try {
+      const data = await getHrDashboard(dashYear);
+      setDashboard(data);
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setDashboardLoading(false);
+    }
+  }
+
+  async function loadBalances() {
+    setBalancesLoading(true);
+    try {
+      const params = { year: balYear };
+      if (balFilterUser) params.userId = balFilterUser;
+      if (balFilterType) params.leaveType = balFilterType;
+      const data = await getHrLeaveBalances(params);
+      setBalances(Array.isArray(data) ? data : []);
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setBalancesLoading(false);
+    }
+  }
 
   async function loadStaff(preferredUserId = selectedUserId) {
     setLoading(true);
@@ -3404,6 +3458,52 @@ export function HR({ notify }) {
     }
   }
 
+  async function handleSetEntitlement() {
+    if (!editEntitlement.userId || !editEntitlement.leaveType || !editEntitlement.year) {
+      notify?.({ type: 'warning', message: 'Select a staff user, leave type, and year.' });
+      return;
+    }
+    const days = Number(editEntitlement.days);
+    if (isNaN(days) || days < 0 || days > 365) {
+      notify?.({ type: 'warning', message: 'Entitlement days must be between 0 and 365.' });
+      return;
+    }
+    setEntitlementSaving(true);
+    try {
+      await setHrLeaveEntitlement(editEntitlement.userId, editEntitlement.leaveType, editEntitlement.year, { entitlementDays: days });
+      notify?.({ type: 'success', message: 'Entitlement saved.' });
+      setEditEntitlement({ ...editEntitlement, days: '' });
+      await loadBalances();
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setEntitlementSaving(false);
+    }
+  }
+
+  async function handleCreateAdjustment() {
+    if (!adjustment.userId || !adjustment.leaveType || !adjustment.year) {
+      notify?.({ type: 'warning', message: 'Select a staff user, leave type, and year.' });
+      return;
+    }
+    const days = Number(adjustment.days);
+    if (isNaN(days) || days === 0 || days < -365 || days > 365) {
+      notify?.({ type: 'warning', message: 'Adjustment days must be a non-zero number between -365 and 365.' });
+      return;
+    }
+    setAdjustmentSaving(true);
+    try {
+      await createHrLeaveBalanceAdjustment({ userId: adjustment.userId, leaveType: adjustment.leaveType, year: Number(adjustment.year), days, reason: adjustment.reason || undefined });
+      notify?.({ type: 'success', message: 'Adjustment created.' });
+      setAdjustment({ ...adjustment, days: '', reason: '' });
+      await loadBalances();
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setAdjustmentSaving(false);
+    }
+  }
+
   const selectedStaff = selectedRecord?.staff || staff.find(member => member.userId === selectedUserId);
   const selectedProfile = selectedRecord?.profile || null;
   const profileCount = staff.filter(member => member.profile).length;
@@ -3412,9 +3512,173 @@ export function HR({ notify }) {
   return (
     <div style={styles.pageStack}>
       <div style={styles.tabList}>
+        <button type="button" onClick={() => setHrTab('dashboard')} style={{ ...styles.tabButton, ...(hrTab === 'dashboard' ? styles.tabActive : {}) }}>Dashboard</button>
+        <button type="button" onClick={() => setHrTab('balances')} style={{ ...styles.tabButton, ...(hrTab === 'balances' ? styles.tabActive : {}) }}>Leave Balances</button>
         <button type="button" onClick={() => setHrTab('profiles')} style={{ ...styles.tabButton, ...(hrTab === 'profiles' ? styles.tabActive : {}) }}>Staff Profiles</button>
         <button type="button" onClick={() => setHrTab('leaves')} style={{ ...styles.tabButton, ...(hrTab === 'leaves' ? styles.tabActive : {}) }}>Leave Requests</button>
       </div>
+
+      {hrTab === 'dashboard' && (
+        <Card title="HR Dashboard" hint={`Year ${dashYear}`}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: theme.ink }}>Year:</span>
+            <input type="number" style={{ ...styles.input, width: 100 }} value={dashYear} onChange={e => setDashYear(e.target.value)} min={2000} max={2100} />
+            <button type="button" style={styles.primaryButton} onClick={() => loadDashboard()}>Refresh</button>
+          </div>
+          {dashboardLoading ? (
+            <div style={{ color: theme.muted, padding: 12 }}>Loading...</div>
+          ) : dashboard ? (
+            <div style={{ display: 'grid', gap: 12 }}>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                <div style={{ background: '#EFF6FF', borderRadius: 8, padding: '12px 16px', flex: '1 1 140px' }}>
+                  <div style={{ fontSize: 11, color: '#1E40AF', fontWeight: 600 }}>Staff</div>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: '#1E3A5F' }}>{dashboard.staffCount}</div>
+                  <div style={{ fontSize: 11, color: '#6B7280' }}>{dashboard.activeStaffCount} active</div>
+                </div>
+                <div style={{ background: '#FEF2F2', borderRadius: 8, padding: '12px 16px', flex: '1 1 140px' }}>
+                  <div style={{ fontSize: 11, color: '#991B1B', fontWeight: 600 }}>No Profile</div>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: '#1E3A5F' }}>{dashboard.staffWithoutProfiles}</div>
+                </div>
+                <div style={{ background: '#FFFBEB', borderRadius: 8, padding: '12px 16px', flex: '1 1 140px' }}>
+                  <div style={{ fontSize: 11, color: '#92400E', fontWeight: 600 }}>Pending Leave</div>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: '#1E3A5F' }}>{dashboard.pendingLeaveCount}</div>
+                </div>
+                <div style={{ background: '#F0FDF4', borderRadius: 8, padding: '12px 16px', flex: '1 1 140px' }}>
+                  <div style={{ fontSize: 11, color: '#065F46', fontWeight: 600 }}>On Leave Today</div>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: '#1E3A5F' }}>{dashboard.staffCurrentlyOnLeave}</div>
+                </div>
+                <div style={{ background: '#F5F3FF', borderRadius: 8, padding: '12px 16px', flex: '1 1 140px' }}>
+                  <div style={{ fontSize: 11, color: '#5B21B6', fontWeight: 600 }}>Upcoming</div>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: '#1E3A5F' }}>{dashboard.upcomingApprovedLeaveCount}</div>
+                </div>
+                <div style={{ background: '#FFF1F2', borderRadius: 8, padding: '12px 16px', flex: '1 1 140px' }}>
+                  <div style={{ fontSize: 11, color: '#9F1239', fontWeight: 600 }}>Low Annual Balance</div>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: '#1E3A5F' }}>{dashboard.lowAnnualBalanceCount}</div>
+                </div>
+              </div>
+              {dashboard.hrStatusCounts && Object.keys(dashboard.hrStatusCounts).length > 0 && (
+                <div style={{ fontSize: 13, color: theme.muted }}>
+                  <strong>HR Status counts:</strong> {Object.entries(dashboard.hrStatusCounts).map(([k, v]) => `${k}: ${v}`).join(', ')}
+                </div>
+              )}
+              {dashboard.recentPendingLeaveRequests && dashboard.recentPendingLeaveRequests.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: theme.ink }}>Recent Pending Requests</div>
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    {dashboard.recentPendingLeaveRequests.slice(0, 10).map(r => (
+                      <div key={r.id} style={{ fontSize: 12, color: theme.ink, background: '#F9FAFB', borderRadius: 6, padding: '6px 10px', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
+                        <span><strong>{r.fullName}</strong> — {BALANCE_LEAVE_TYPES.find(lt => lt.value === r.leaveType)?.label || r.leaveType} ({r.days} day{Number(r.days) === 1 ? '' : 's'})</span>
+                        <span style={{ color: theme.muted }}>{r.startDate} → {r.endDate}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ color: theme.muted, padding: 12 }}>No dashboard data.</div>
+          )}
+        </Card>
+      )}
+
+      {hrTab === 'balances' && (
+        <div style={{ display: 'grid', gap: 12 }}>
+          <Card title="Leave Balances" hint="Computed from entitlements, adjustments, and approved leave">
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: theme.ink }}>Year:</span>
+              <input type="number" style={{ ...styles.input, width: 100 }} value={balYear} onChange={e => setBalYear(e.target.value)} min={2000} max={2100} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: theme.ink }}>User:</span>
+              <select style={{ ...styles.input, width: 200 }} value={balFilterUser} onChange={e => setBalFilterUser(e.target.value)}>
+                <option value="">All staff</option>
+                {staff.map(m => <option key={m.userId} value={m.userId}>{m.fullName}</option>)}
+              </select>
+              <span style={{ fontSize: 13, fontWeight: 600, color: theme.ink }}>Type:</span>
+              <select style={{ ...styles.input, width: 140 }} value={balFilterType} onChange={e => setBalFilterType(e.target.value)}>
+                <option value="">All types</option>
+                {BALANCE_LEAVE_TYPES.map(lt => <option key={lt.value} value={lt.value}>{lt.label}</option>)}
+              </select>
+              <button type="button" style={styles.primaryButton} onClick={() => loadBalances()}>Refresh</button>
+            </div>
+            {balancesLoading ? (
+              <div style={{ color: theme.muted, padding: 12 }}>Loading...</div>
+            ) : balances.length === 0 ? (
+              <Empty title="No balances." text="Set entitlements to see computed balances." />
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ background: '#F9FAFB', borderBottom: `2px solid ${theme.line}` }}>
+                      <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: theme.muted }}>Staff</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: theme.muted }}>Leave Type</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: theme.muted }}>Entitlement</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: theme.muted }}>Adjustments</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: theme.muted }}>Approved Used</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: theme.muted }}>Pending</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: theme.muted }}>Remaining</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: theme.muted }}>Projected</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {balances.map((b, i) => (
+                      <tr key={`${b.userId}-${b.leaveType}`} style={{ borderBottom: `1px solid ${theme.line}`, background: i % 2 === 0 ? '#fff' : '#F9FAFB' }}>
+                        <td style={{ padding: '8px 10px' }}><strong>{b.fullName}</strong><br /><span style={{ fontSize: 11, color: theme.muted }}>{b.email}</span></td>
+                        <td style={{ padding: '8px 10px' }}>{BALANCE_LEAVE_TYPES.find(lt => lt.value === b.leaveType)?.label || b.leaveType}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right' }}>{b.entitlementDays}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', color: b.adjustmentDays < 0 ? '#DC2626' : '#059669' }}>{b.adjustmentDays > 0 ? '+' : ''}{b.adjustmentDays}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right' }}>{b.approvedUsedDays}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', color: '#D97706' }}>{b.pendingRequestedDays > 0 ? b.pendingRequestedDays : '-'}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: b.remainingDays < 0 ? '#DC2626' : b.remainingDays <= 5 ? '#D97706' : '#059669' }}>{b.remainingDays}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: b.projectedRemainingDays < 0 ? '#DC2626' : b.projectedRemainingDays <= 5 ? '#D97706' : '#059669' }}>{b.projectedRemainingDays}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+
+          <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr' }}>
+            <Card title="Set Entitlement" hint="Set leave entitlement for a staff user">
+              <div style={{ display: 'grid', gap: 8 }}>
+                <select style={styles.input} value={editEntitlement.userId} onChange={e => setEditEntitlement({ ...editEntitlement, userId: e.target.value })}>
+                  <option value="">Select staff...</option>
+                  {staff.map(m => <option key={m.userId} value={m.userId}>{m.fullName}</option>)}
+                </select>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <select style={{ ...styles.input, flex: 1 }} value={editEntitlement.leaveType} onChange={e => setEditEntitlement({ ...editEntitlement, leaveType: e.target.value })}>
+                    {BALANCE_LEAVE_TYPES.map(lt => <option key={lt.value} value={lt.value}>{lt.label}</option>)}
+                  </select>
+                  <input type="number" style={{ ...styles.input, width: 100 }} placeholder="Year" value={editEntitlement.year} onChange={e => setEditEntitlement({ ...editEntitlement, year: e.target.value })} min={2000} max={2100} />
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input type="number" style={{ ...styles.input, flex: 1 }} placeholder="Entitlement days (0-365)" value={editEntitlement.days} onChange={e => setEditEntitlement({ ...editEntitlement, days: e.target.value })} min={0} max={365} />
+                  <button type="button" style={styles.primaryButton} disabled={entitlementSaving} onClick={handleSetEntitlement}>{entitlementSaving ? 'Saving...' : 'Set'}</button>
+                </div>
+              </div>
+            </Card>
+
+            <Card title="Create Adjustment" hint="Positive or negative balance adjustment">
+              <div style={{ display: 'grid', gap: 8 }}>
+                <select style={styles.input} value={adjustment.userId} onChange={e => setAdjustment({ ...adjustment, userId: e.target.value })}>
+                  <option value="">Select staff...</option>
+                  {staff.map(m => <option key={m.userId} value={m.userId}>{m.fullName}</option>)}
+                </select>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <select style={{ ...styles.input, flex: 1 }} value={adjustment.leaveType} onChange={e => setAdjustment({ ...adjustment, leaveType: e.target.value })}>
+                    {BALANCE_LEAVE_TYPES.map(lt => <option key={lt.value} value={lt.value}>{lt.label}</option>)}
+                  </select>
+                  <input type="number" style={{ ...styles.input, width: 100 }} placeholder="Year" value={adjustment.year} onChange={e => setAdjustment({ ...adjustment, year: e.target.value })} min={2000} max={2100} />
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input type="number" style={{ ...styles.input, flex: 1 }} placeholder="Days (-365 to 365)" value={adjustment.days} onChange={e => setAdjustment({ ...adjustment, days: e.target.value })} min={-365} max={365} />
+                  <button type="button" style={styles.primaryButton} disabled={adjustmentSaving} onClick={handleCreateAdjustment}>{adjustmentSaving ? 'Saving...' : 'Add'}</button>
+                </div>
+                <input style={styles.input} placeholder="Optional reason (max 1000 chars)" value={adjustment.reason} onChange={e => setAdjustment({ ...adjustment, reason: e.target.value })} />
+              </div>
+            </Card>
+          </div>
+        </div>
+      )}
 
       {hrTab === 'profiles' && (
         <div className="lf-split-grid" style={styles.splitGrid}>

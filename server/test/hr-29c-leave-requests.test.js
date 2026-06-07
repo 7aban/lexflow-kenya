@@ -441,11 +441,20 @@ describe('HR-29C leave requests and approval workflow', () => {
     expect(colNames).not.toContain('medical_notes');
   });
 
-  test('27. No leave balances table or entitlement side effects', async () => {
+  test('27. Leave approval does not create entitlement/adjustment rows or other HR side effects', async () => {
+    const entsAfter = await dbGet("SELECT COUNT(*) AS cnt FROM hr_leave_entitlements WHERE userId=? AND leaveType=?", [advocateUserId, 'annual']);
+    expect(entsAfter.cnt).toBe(0);
+
+    const adjsAfter = await dbGet("SELECT COUNT(*) AS cnt FROM hr_leave_balance_adjustments WHERE userId=? AND leaveType=?", [advocateUserId, 'annual']);
+    expect(adjsAfter.cnt).toBe(0);
+
     const tables = await dbAll("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name");
     const tableNames = tables.map(t => t.name);
-    expect(tableNames).not.toContain('hr_leave_balances');
-    expect(tableNames).not.toContain('leave_entitlements');
-    expect(tableNames).not.toContain('hr_leave_entitlements');
+    expect(tableNames).not.toContain('hr_contracts');
+    expect(tableNames).not.toContain('hr_salary');
+    expect(tableNames).not.toContain('hr_documents');
+    expect(tableNames).not.toContain('hr_offboarding');
+    expect(tableNames).not.toContain('hr_notifications');
+    expect(tableNames).not.toContain('leave_balances');
   });
 });

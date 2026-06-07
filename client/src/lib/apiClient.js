@@ -487,3 +487,12 @@ export const cancelHrLeaveRequestAdmin = id => api(`/hr/leave-requests/${encodeU
 export const getMyLeaveRequests = () => api('/hr/me/leave-requests');
 export const createMyLeaveRequest = payload => api('/hr/me/leave-requests', { method: 'POST', body: payload });
 export const cancelMyLeaveRequest = id => api(`/hr/me/leave-requests/${encodeURIComponent(id)}/cancel`, { method: 'PATCH', body: {} });
+
+// HR Leave Balances and Dashboard
+export const getHrDashboard = (year) => api(queryPath('/hr/dashboard', { year }));
+export const getHrLeaveBalances = (params = {}) => api(queryPath('/hr/leave-balances', params));
+export const setHrLeaveEntitlement = (userId, leaveType, year, payload) =>
+  api(`/hr/leave-entitlements/${encodeURIComponent(userId)}/${encodeURIComponent(leaveType)}/${encodeURIComponent(year)}`, { method: 'PUT', body: payload });
+export const createHrLeaveBalanceAdjustment = (payload) =>
+  api('/hr/leave-balance-adjustments', { method: 'POST', body: payload });
+export const getMyLeaveBalances = (year) => api(queryPath('/hr/me/leave-balances', { year }));

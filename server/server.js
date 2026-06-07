@@ -496,6 +496,34 @@ updatedAt TEXT
   await run('CREATE INDEX IF NOT EXISTS idx_hr_leave_requests_status ON hr_leave_requests(status)');
   await run('CREATE INDEX IF NOT EXISTS idx_hr_leave_requests_userId_status ON hr_leave_requests(userId, status)');
 
+  await run(`CREATE TABLE IF NOT EXISTS hr_leave_entitlements (
+id TEXT PRIMARY KEY,
+userId TEXT NOT NULL,
+leaveType TEXT NOT NULL CHECK(leaveType IN ('annual','sick','compassionate','maternity','paternity','study_exam','unpaid','other')),
+year INTEGER NOT NULL,
+entitlementDays REAL NOT NULL DEFAULT 0,
+createdAt TEXT NOT NULL,
+updatedAt TEXT,
+createdBy TEXT,
+updatedBy TEXT,
+UNIQUE(userId, leaveType, year)
+)`);
+  await run('CREATE INDEX IF NOT EXISTS idx_hr_leave_entitlements_user_year ON hr_leave_entitlements(userId, year)');
+  await run('CREATE INDEX IF NOT EXISTS idx_hr_leave_entitlements_year_type ON hr_leave_entitlements(year, leaveType)');
+
+  await run(`CREATE TABLE IF NOT EXISTS hr_leave_balance_adjustments (
+id TEXT PRIMARY KEY,
+userId TEXT NOT NULL,
+leaveType TEXT NOT NULL CHECK(leaveType IN ('annual','sick','compassionate','maternity','paternity','study_exam','unpaid','other')),
+year INTEGER NOT NULL,
+days REAL NOT NULL,
+reason TEXT DEFAULT '',
+createdAt TEXT NOT NULL,
+createdBy TEXT
+)`);
+  await run('CREATE INDEX IF NOT EXISTS idx_hr_leave_balance_adjustments_user_year ON hr_leave_balance_adjustments(userId, year)');
+  await run('CREATE INDEX IF NOT EXISTS idx_hr_leave_balance_adjustments_year_type ON hr_leave_balance_adjustments(year, leaveType)');
+
   await ensureClientUserSupport();
   await ensureColumn('matter_checklist_items', 'dueDate', 'TEXT');
   await ensureColumn('matter_checklist_items', 'assignee', 'TEXT');
@@ -2681,6 +2709,233 @@ app.patch('/api/hr/me/leave-requests/:id/cancel', requireStaff, async (req, res)
     }).catch(() => {});
     const updated = await get(`SELECT l.*, u.fullName, u.email, u.role FROM hr_leave_requests l JOIN users u ON u.id=l.userId WHERE l.id=?`, [req.params.id]);
     res.json(publicLeaveRequest(updated));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// --- HR Leave Balances and Dashboard ---
+
+const ALLOWED_LEAVE_TYPES_ARRAY = ['annual','sick','compassionate','maternity','paternity','study_exam','unpaid','other'];
+
+function validateYear(year) {
+  const y = parseInt(year, 10);
+  if (isNaN(y) || y < 2000 || y > 2100) return null;
+  return y;
+}
+
+async function computeLeaveBalance(userId, leaveType, year) {
+  const entitlement = await get('SELECT entitlementDays FROM hr_leave_entitlements WHERE userId=? AND leaveType=? AND year=?', [userId, leaveType, year]);
+  const entitlementDays = entitlement ? entitlement.entitlementDays : 0;
+
+  const adjRow = await get('SELECT COALESCE(SUM(days),0) AS total FROM hr_leave_balance_adjustments WHERE userId=? AND leaveType=? AND year=?', [userId, leaveType, year]);
+  const adjustmentDays = adjRow ? adjRow.total : 0;
+
+  const approvedRow = await get("SELECT COALESCE(SUM(days),0) AS total FROM hr_leave_requests WHERE userId=? AND leaveType=? AND status='approved' AND CAST(strftime('%Y',startDate) AS INTEGER)=?", [userId, leaveType, year]);
+  const approvedUsedDays = approvedRow ? approvedRow.total : 0;
+
+  const pendingRow = await get("SELECT COALESCE(SUM(days),0) AS total FROM hr_leave_requests WHERE userId=? AND leaveType=? AND status='pending' AND CAST(strftime('%Y',startDate) AS INTEGER)=?", [userId, leaveType, year]);
+  const pendingRequestedDays = pendingRow ? pendingRow.total : 0;
+
+  const remaining = entitlementDays + adjustmentDays - approvedUsedDays;
+  const projectedRemaining = remaining - pendingRequestedDays;
+
+  return { entitlementDays, adjustmentDays, approvedUsedDays, pendingRequestedDays, remainingDays: remaining, projectedRemainingDays: projectedRemaining };
+}
+
+async function getHrStaffUserOrReject(userId) {
+  const user = await get('SELECT id,email,fullName,role,isActive FROM users WHERE id=?', [userId]);
+  if (!user) return { error: 'User not found', status: 404 };
+  if (!HR_STAFF_ROLES.has(user.role)) return { error: 'User is not a staff member', status: 403 };
+  return { user };
+}
+
+// Admin: Dashboard
+app.get('/api/hr/dashboard', requireAdmin, async (req, res) => {
+  try {
+    const year = validateYear(req.query.year || new Date().getFullYear());
+    if (!year) return res.status(400).json({ error: 'Invalid year. Must be between 2000 and 2100.' });
+
+    const staffCountRow = await get("SELECT COUNT(*) AS count FROM users WHERE role IN ('admin','advocate','assistant')");
+    const staffCount = staffCountRow ? staffCountRow.count : 0;
+
+    const activeStaffCountRow = await get("SELECT COUNT(*) AS count FROM users WHERE role IN ('admin','advocate','assistant') AND isActive=1");
+    const activeStaffCount = activeStaffCountRow ? activeStaffCountRow.count : 0;
+
+    const staffWithoutProfilesRow = await get("SELECT COUNT(*) AS count FROM users WHERE role IN ('admin','advocate','assistant') AND id NOT IN (SELECT userId FROM hr_staff_profiles)");
+    const staffWithoutProfiles = staffWithoutProfilesRow ? staffWithoutProfilesRow.count : 0;
+
+    const pendingLeaveCountRow = await get("SELECT COUNT(*) AS count FROM hr_leave_requests WHERE status='pending'");
+    const pendingLeaveCount = pendingLeaveCountRow ? pendingLeaveCountRow.count : 0;
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const onLeaveTodayRow = await get("SELECT COUNT(*) AS count FROM hr_leave_requests WHERE status='approved' AND startDate<=? AND endDate>=?", [todayStr, todayStr]);
+    const staffCurrentlyOnLeave = onLeaveTodayRow ? onLeaveTodayRow.count : 0;
+
+    const upcomingApprovedRow = await get("SELECT COUNT(*) AS count FROM hr_leave_requests WHERE status='approved' AND startDate>?", [todayStr]);
+    const upcomingApprovedLeaveCount = upcomingApprovedRow ? upcomingApprovedRow.count : 0;
+
+    const lowBalanceRows = await all(`SELECT e.userId, e.leaveType, e.year, e.entitlementDays,
+      COALESCE((SELECT SUM(days) FROM hr_leave_balance_adjustments WHERE userId=e.userId AND leaveType=e.leaveType AND year=e.year),0) AS adjDays,
+      COALESCE((SELECT SUM(days) FROM hr_leave_requests WHERE userId=e.userId AND leaveType=e.leaveType AND status='approved' AND CAST(strftime('%Y',startDate) AS INTEGER)=e.year),0) AS usedDays
+      FROM hr_leave_entitlements e WHERE e.leaveType='annual'`);
+    let lowAnnualBalanceCount = 0;
+    for (const r of lowBalanceRows) {
+      const remaining = r.entitlementDays + r.adjDays - r.usedDays;
+      if (remaining <= 5) lowAnnualBalanceCount++;
+    }
+
+    const hrStatusRows = await all("SELECT hrStatus, COUNT(*) AS count FROM hr_staff_profiles GROUP BY hrStatus");
+    const hrStatusCounts = {};
+    for (const r of hrStatusRows) {
+      hrStatusCounts[r.hrStatus] = r.count;
+    }
+
+    const recentPending = await all(`SELECT l.id, l.leaveType, l.startDate, l.endDate, l.days, l.status, l.requestedAt, u.fullName, u.email, u.role
+      FROM hr_leave_requests l JOIN users u ON u.id=l.userId WHERE l.status='pending' ORDER BY l.requestedAt DESC LIMIT 20`);
+
+    res.json({
+      staffCount,
+      activeStaffCount,
+      staffWithoutProfiles,
+      pendingLeaveCount,
+      staffCurrentlyOnLeave,
+      upcomingApprovedLeaveCount,
+      lowAnnualBalanceCount,
+      hrStatusCounts,
+      recentPendingLeaveRequests: recentPending.map(r => ({
+        id: r.id, leaveType: r.leaveType, startDate: r.startDate, endDate: r.endDate,
+        days: r.days, status: r.status, requestedAt: r.requestedAt,
+        fullName: r.fullName, email: r.email, role: r.role,
+      })),
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Admin: List computed leave balances
+app.get('/api/hr/leave-balances', requireAdmin, async (req, res) => {
+  try {
+    const year = validateYear(req.query.year || new Date().getFullYear());
+    if (!year) return res.status(400).json({ error: 'Invalid year. Must be between 2000 and 2100.' });
+
+    const { userId, leaveType } = req.query;
+    let users;
+    if (userId) {
+      const u = await get('SELECT id,email,fullName,role,isActive FROM users WHERE id=?', [userId]);
+      if (!u || !HR_STAFF_ROLES.has(u.role)) return res.status(404).json({ error: 'Staff user not found' });
+      users = [u];
+    } else {
+      users = await all("SELECT id,email,fullName,role,isActive FROM users WHERE role IN ('admin','advocate','assistant') ORDER BY fullName COLLATE NOCASE ASC");
+    }
+
+    const leaveTypes = leaveType ? [leaveType] : ALLOWED_LEAVE_TYPES_ARRAY;
+    const results = [];
+    for (const u of users) {
+      for (const lt of leaveTypes) {
+        if (!ALLOWED_LEAVE_TYPES.has(lt)) continue;
+        const balance = await computeLeaveBalance(u.id, lt, year);
+        results.push({ userId: u.id, fullName: u.fullName, email: u.email, role: u.role, leaveType: lt, year, ...balance });
+      }
+    }
+    res.json(results);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Admin: Set/upsert entitlement
+app.put('/api/hr/leave-entitlements/:userId/:leaveType/:year', requireAdmin, async (req, res) => {
+  try {
+    const { userId, leaveType: rawLeaveType, year: rawYear } = req.params;
+    const staff = await getHrStaffUserOrReject(userId);
+    if (staff.error) return res.status(staff.status).json({ error: staff.error });
+
+    const leaveType = normalizeLeaveType(rawLeaveType);
+    if (!leaveType) return res.status(400).json({ error: 'Invalid leaveType. Allowed: ' + ALLOWED_LEAVE_TYPES_ARRAY.join(', ') });
+
+    const year = validateYear(rawYear);
+    if (!year) return res.status(400).json({ error: 'Invalid year. Must be between 2000 and 2100.' });
+
+    const entitlementDays = Number(req.body.entitlementDays);
+    if (isNaN(entitlementDays) || entitlementDays < 0 || entitlementDays > 365) {
+      return res.status(400).json({ error: 'entitlementDays must be a number between 0 and 365' });
+    }
+
+    const now = new Date().toISOString();
+    const existing = await get('SELECT id FROM hr_leave_entitlements WHERE userId=? AND leaveType=? AND year=?', [userId, leaveType, year]);
+    let rowId;
+    if (existing) {
+      await run('UPDATE hr_leave_entitlements SET entitlementDays=?, updatedAt=?, updatedBy=? WHERE id=?', [entitlementDays, now, req.user.userId, existing.id]);
+      rowId = existing.id;
+    } else {
+      rowId = genId('HLE');
+      await run('INSERT INTO hr_leave_entitlements (id,userId,leaveType,year,entitlementDays,createdAt,updatedAt,createdBy,updatedBy) VALUES (?,?,?,?,?,?,?,?,?)', [rowId, userId, leaveType, year, entitlementDays, now, '', req.user.userId, '']);
+    }
+
+    await recordAuditEvent(req, {
+      action: 'leave_entitlement_set',
+      entityType: 'hr_leave_entitlement',
+      entityId: rowId,
+      metadata: { userId, leaveType, year, entitlementDays, rowId },
+    }).catch(() => {});
+
+    const balance = await computeLeaveBalance(userId, leaveType, year);
+    const user = await get('SELECT id,email,fullName,role FROM users WHERE id=?', [userId]);
+    res.json({ userId, fullName: user.fullName, email: user.email, role: user.role, leaveType, year, ...balance });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Admin: Create balance adjustment
+app.post('/api/hr/leave-balance-adjustments', requireAdmin, async (req, res) => {
+  try {
+    const { userId, leaveType: rawLeaveType, year: rawYear, days, reason } = req.body;
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
+
+    const staff = await getHrStaffUserOrReject(userId);
+    if (staff.error) return res.status(staff.status).json({ error: staff.error });
+
+    const leaveType = normalizeLeaveType(rawLeaveType);
+    if (!leaveType) return res.status(400).json({ error: 'Invalid leaveType. Allowed: ' + ALLOWED_LEAVE_TYPES_ARRAY.join(', ') });
+
+    const year = validateYear(rawYear);
+    if (!year) return res.status(400).json({ error: 'Invalid year. Must be between 2000 and 2100.' });
+
+    const daysNum = Number(days);
+    if (isNaN(daysNum) || daysNum === 0) return res.status(400).json({ error: 'days must be a non-zero number' });
+    if (daysNum < -365 || daysNum > 365) return res.status(400).json({ error: 'days must be between -365 and 365' });
+
+    if (reason !== undefined && reason !== null && typeof reason === 'string' && reason.length > 1000) {
+      return res.status(400).json({ error: 'reason must not exceed 1000 characters' });
+    }
+
+    const now = new Date().toISOString();
+    const id = genId('HLB');
+    await run('INSERT INTO hr_leave_balance_adjustments (id,userId,leaveType,year,days,reason,createdAt,createdBy) VALUES (?,?,?,?,?,?,?,?)',
+      [id, userId, leaveType, year, daysNum, reason || '', now, req.user.userId]);
+
+    await recordAuditEvent(req, {
+      action: 'leave_balance_adjusted',
+      entityType: 'hr_leave_balance_adjustment',
+      entityId: id,
+      metadata: { userId, leaveType, year, days: daysNum, adjustmentId: id },
+    }).catch(() => {});
+
+    const balance = await computeLeaveBalance(userId, leaveType, year);
+    const user = await get('SELECT id,email,fullName,role FROM users WHERE id=?', [userId]);
+    res.json({ userId, fullName: user.fullName, email: user.email, role: user.role, leaveType, year, ...balance });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Self-service: My leave balances
+app.get('/api/hr/me/leave-balances', requireStaff, async (req, res) => {
+  try {
+    if (req.user.role === 'client') return res.status(403).json({ error: 'Clients cannot access leave balances' });
+    const year = validateYear(req.query.year || new Date().getFullYear());
+    if (!year) return res.status(400).json({ error: 'Invalid year. Must be between 2000 and 2100.' });
+
+    const userId = req.user.userId;
+    const results = [];
+    for (const lt of ALLOWED_LEAVE_TYPES_ARRAY) {
+      const balance = await computeLeaveBalance(userId, lt, year);
+      results.push({ leaveType: lt, year, ...balance });
+    }
+    res.json(results);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

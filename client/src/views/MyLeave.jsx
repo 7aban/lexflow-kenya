@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getMyLeaveRequests, createMyLeaveRequest, cancelMyLeaveRequest } from '../lib/apiClient.js';
+import { getMyLeaveRequests, createMyLeaveRequest, cancelMyLeaveRequest, getMyLeaveBalances } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Card, Empty } from '../components/ui.jsx';
 
@@ -40,8 +40,23 @@ export default function MyLeave({ notify }) {
   const [form, setForm] = useState({ leaveType: 'annual', startDate: '', endDate: '', reason: '' });
   const [submitting, setSubmitting] = useState(false);
   const [tab, setTab] = useState('list');
+  const [myBalances, setMyBalances] = useState([]);
+  const [balLoading, setBalLoading] = useState(false);
+  const [balYear, setBalYear] = useState(String(new Date().getFullYear()));
 
-  useEffect(() => { loadRequests(); }, []);
+  useEffect(() => { loadRequests(); loadBalances(); }, []);
+
+  async function loadBalances() {
+    setBalLoading(true);
+    try {
+      const data = await getMyLeaveBalances(balYear);
+      setMyBalances(Array.isArray(data) ? data : []);
+    } catch (err) {
+      // silent fail for balance summary
+    } finally {
+      setBalLoading(false);
+    }
+  }
 
   async function loadRequests() {
     setLoading(true);
@@ -87,6 +102,48 @@ export default function MyLeave({ notify }) {
 
   return (
     <div style={styles.pageStack}>
+      <Card title="My Leave Balances" hint={`Year ${balYear}`}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: theme.ink }}>Year:</span>
+          <input type="number" style={{ ...styles.input, width: 100 }} value={balYear} onChange={e => setBalYear(e.target.value)} min={2000} max={2100} />
+          <button type="button" style={styles.primaryButton} onClick={() => loadBalances()}>Refresh</button>
+        </div>
+        {balLoading ? (
+          <div style={{ color: theme.muted, padding: 8, fontSize: 13 }}>Loading...</div>
+        ) : myBalances.length === 0 ? (
+          <div style={{ color: theme.muted, padding: 8, fontSize: 13 }}>No balance data for this year.</div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: '#F9FAFB', borderBottom: `2px solid ${theme.line}` }}>
+                  <th style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 600, color: theme.muted }}>Leave Type</th>
+                  <th style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600, color: theme.muted }}>Entitlement</th>
+                  <th style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600, color: theme.muted }}>Adjustments</th>
+                  <th style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600, color: theme.muted }}>Approved Used</th>
+                  <th style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600, color: theme.muted }}>Pending</th>
+                  <th style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600, color: theme.muted }}>Remaining</th>
+                  <th style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600, color: theme.muted }}>Projected</th>
+                </tr>
+              </thead>
+              <tbody>
+                {myBalances.map((b, i) => (
+                  <tr key={b.leaveType} style={{ borderBottom: `1px solid ${theme.line}`, background: i % 2 === 0 ? '#fff' : '#F9FAFB' }}>
+                    <td style={{ padding: '6px 8px', fontWeight: 500 }}>{LEAVE_TYPES.find(lt => lt.value === b.leaveType)?.label || b.leaveType}</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right' }}>{b.entitlementDays}</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right', color: b.adjustmentDays < 0 ? '#DC2626' : '#059669' }}>{b.adjustmentDays > 0 ? '+' : ''}{b.adjustmentDays}</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right' }}>{b.approvedUsedDays}</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right', color: '#D97706' }}>{b.pendingRequestedDays > 0 ? b.pendingRequestedDays : '-'}</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600, color: b.remainingDays < 0 ? '#DC2626' : b.remainingDays <= 5 ? '#D97706' : '#059669' }}>{b.remainingDays}</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600, color: b.projectedRemainingDays < 0 ? '#DC2626' : b.projectedRemainingDays <= 5 ? '#D97706' : '#059669' }}>{b.projectedRemainingDays}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
       <div style={styles.tabList}>
         <button type="button" onClick={() => setTab('list')} style={{ ...styles.tabButton, ...(tab === 'list' ? styles.tabActive : {}) }}>My Leave Requests</button>
         <button type="button" onClick={() => setTab('new')} style={{ ...styles.tabButton, ...(tab === 'new' ? styles.tabActive : {}) }}>New Request</button>
