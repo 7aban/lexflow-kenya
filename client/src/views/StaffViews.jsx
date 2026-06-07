@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote, IconMail, IconPaperclip, IconExternalLink } from '@tabler/icons-react';
-import { api, applyChecklistTemplate, approveHrLeaveRequest, cancelHrLeaveRequestAdmin, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, createHrContract, createHrLeaveBalanceAdjustment, createHrStaffProfile, createMatterChecklistItem, deleteChecklistTemplate, deleteClientAvatar, deleteHrDocument, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadHrDocumentContent, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getHrContracts, getHrDashboard, getHrDocuments, getHrLeaveBalances, getHrLeaveRequests, getHrStaff, getHrStaffProfile, getInvoiceDetails, getMatterWorkMetadataLinks, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, rejectHrLeaveRequest, setHrLeaveEntitlement, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrContract, updateHrDocument, updateHrStaffProfile, updateMatterChecklistItem, uploadClientAvatar, uploadHrDocument, uploadUserAvatar } from '../lib/apiClient.js';
+import { api, applyChecklistTemplate, approveHrLeaveRequest, cancelHrLeaveRequestAdmin, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, cancelOffboardingCase, completeOffboardingCase, createHrContract, createHrLeaveBalanceAdjustment, createHrStaffProfile, createMatterChecklistItem, createOffboardingCase, deleteChecklistTemplate, deleteClientAvatar, deleteHrDocument, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadHrDocumentContent, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getHrContracts, getHrDashboard, getHrDocuments, getHrLeaveBalances, getHrLeaveRequests, getHrStaff, getHrStaffProfile, getOffboardingAssignedMatters, getOffboardingCase, getOffboardingCases, getInvoiceDetails, getMatterWorkMetadataLinks, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, rejectHrLeaveRequest, setHrLeaveEntitlement, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrContract, updateHrDocument, updateHrStaffProfile, updateMatterChecklistItem, updateOffboardingCase, updateOffboardingChecklistItem, uploadClientAvatar, uploadHrDocument, uploadUserAvatar } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, safeHttpUrl, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText, invoiceDueDistanceDays } from '../components/ui.jsx';
@@ -3351,6 +3351,34 @@ function hrContractStatusTone(status) {
   return 'blue';
 }
 
+// HR-29F: offboarding labels/options (admin-only)
+const HR_OFFBOARDING_REASON_OPTIONS = [
+  { value: 'resignation', label: 'Resignation' },
+  { value: 'termination', label: 'Termination' },
+  { value: 'end_of_contract', label: 'End of contract' },
+  { value: 'retirement', label: 'Retirement' },
+  { value: 'redundancy', label: 'Redundancy' },
+  { value: 'transfer', label: 'Transfer' },
+  { value: 'other', label: 'Other' },
+];
+const HR_OFFBOARDING_REASON_LABELS = Object.fromEntries(HR_OFFBOARDING_REASON_OPTIONS.map(o => [o.value, o.label]));
+const HR_OFFBOARDING_STATUS_LABELS = { open: 'Open', in_progress: 'In progress', completed: 'Completed', cancelled: 'Cancelled' };
+const HR_OFFBOARDING_CHECKLIST_STATUS_OPTIONS = [
+  { value: 'pending', label: 'Pending' },
+  { value: 'in_progress', label: 'In progress' },
+  { value: 'done', label: 'Done' },
+  { value: 'skipped', label: 'Skipped' },
+  { value: 'na', label: 'N/A' },
+];
+const emptyOffboardingForm = { userId: '', exitType: '', exitDate: '', reasonCategory: '', notes: '' };
+
+function offboardingStatusTone(status) {
+  if (status === 'completed') return 'green';
+  if (status === 'cancelled') return 'grey';
+  if (status === 'in_progress') return 'amber';
+  return 'blue';
+}
+
 export function HR({ notify }) {
   const [staff, setStaff] = useState([]);
   const [selectedUserId, setSelectedUserId] = useState('');
@@ -3396,6 +3424,18 @@ export function HR({ notify }) {
   const [contractEditingId, setContractEditingId] = useState('');
   const [contractSaving, setContractSaving] = useState(false);
   const [contractUserDocs, setContractUserDocs] = useState([]);
+  // HR-29F: staff offboarding (admin-only)
+  const [offboardingCases, setOffboardingCases] = useState([]);
+  const [offboardingLoading, setOffboardingLoading] = useState(false);
+  const [offboardingStatusFilter, setOffboardingStatusFilter] = useState('');
+  const [offboardingForm, setOffboardingForm] = useState(emptyOffboardingForm);
+  const [offboardingCreating, setOffboardingCreating] = useState(false);
+  const [selectedCaseId, setSelectedCaseId] = useState('');
+  const [selectedCase, setSelectedCase] = useState(null);
+  const [caseLoading, setCaseLoading] = useState(false);
+  const [assignedMatters, setAssignedMatters] = useState(null);
+  const [offboardingActioning, setOffboardingActioning] = useState('');
+  const [reassignChoices, setReassignChoices] = useState({});
 
   useEffect(() => { loadStaff(); }, []);
   useEffect(() => {
@@ -3403,6 +3443,7 @@ export function HR({ notify }) {
     if (hrTab === 'balances') loadBalances();
     if (hrTab === 'documents') loadDocuments();
     if (hrTab === 'contracts') loadContracts();
+    if (hrTab === 'offboarding') loadOffboardingCases();
   }, [hrTab]);
   useEffect(() => {
     if (selectedUserId) loadSelectedProfile(selectedUserId);
@@ -3423,6 +3464,34 @@ export function HR({ notify }) {
   useEffect(() => {
     if (hrTab === 'contracts') loadContracts();
   }, [contractFilterUser, contractFilterStatus]);
+
+  useEffect(() => {
+    if (hrTab === 'offboarding') loadOffboardingCases();
+  }, [offboardingStatusFilter]);
+
+  // HR-29F: load the selected case detail + its assigned-matter review.
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCaseDetail() {
+      if (!selectedCaseId) { setSelectedCase(null); setAssignedMatters(null); return; }
+      setCaseLoading(true);
+      try {
+        const [caseData, matters] = await Promise.all([
+          getOffboardingCase(selectedCaseId),
+          getOffboardingAssignedMatters(selectedCaseId).catch(() => null),
+        ]);
+        if (cancelled) return;
+        setSelectedCase(caseData);
+        setAssignedMatters(matters);
+      } catch (err) {
+        if (!cancelled) { setSelectedCase(null); setAssignedMatters(null); notify?.({ type: 'danger', message: err.message }); }
+      } finally {
+        if (!cancelled) setCaseLoading(false);
+      }
+    }
+    loadCaseDetail();
+    return () => { cancelled = true; };
+  }, [selectedCaseId]);
 
   // HR-29E: when the contract form targets a staff user, load that user's active
   // contract/other HR documents so they can be linked. Empty if no user selected.
@@ -3630,6 +3699,133 @@ export function HR({ notify }) {
     }
   }
 
+  // HR-29F: offboarding -------------------------------------------------------
+  async function loadOffboardingCases() {
+    setOffboardingLoading(true);
+    try {
+      const params = {};
+      if (offboardingStatusFilter) params.status = offboardingStatusFilter;
+      const data = await getOffboardingCases(params);
+      setOffboardingCases(Array.isArray(data) ? data : []);
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setOffboardingLoading(false);
+    }
+  }
+
+  async function refreshSelectedCase() {
+    if (!selectedCaseId) return;
+    try {
+      const [caseData, matters] = await Promise.all([
+        getOffboardingCase(selectedCaseId),
+        getOffboardingAssignedMatters(selectedCaseId).catch(() => null),
+      ]);
+      setSelectedCase(caseData);
+      setAssignedMatters(matters);
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    }
+  }
+
+  async function handleCreateOffboarding(event) {
+    event.preventDefault();
+    if (!offboardingForm.userId) { notify?.({ type: 'warning', message: 'Select a staff member.' }); return; }
+    setOffboardingCreating(true);
+    try {
+      const payload = {
+        userId: offboardingForm.userId,
+        exitType: offboardingForm.exitType || undefined,
+        exitDate: offboardingForm.exitDate || undefined,
+        reasonCategory: offboardingForm.reasonCategory || undefined,
+        notes: offboardingForm.notes || undefined,
+      };
+      const created = await createOffboardingCase(payload);
+      notify?.({ type: 'success', message: 'Offboarding case created.' });
+      setOffboardingForm(emptyOffboardingForm);
+      await loadOffboardingCases();
+      if (created?.id) setSelectedCaseId(created.id);
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setOffboardingCreating(false);
+    }
+  }
+
+  async function handleUpdateOffboardingField(patch) {
+    if (!selectedCaseId) return;
+    try {
+      await updateOffboardingCase(selectedCaseId, patch);
+      notify?.({ type: 'success', message: 'Offboarding case updated.' });
+      await refreshSelectedCase();
+      await loadOffboardingCases();
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    }
+  }
+
+  async function handleChecklistChange(itemId, status, notes) {
+    if (!selectedCaseId) return;
+    setOffboardingActioning(`checklist:${itemId}`);
+    try {
+      const payload = { status };
+      if (notes !== undefined) payload.notes = notes;
+      await updateOffboardingChecklistItem(selectedCaseId, itemId, payload);
+      await refreshSelectedCase();
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setOffboardingActioning('');
+    }
+  }
+
+  async function handleReassignMatter(matterId) {
+    const target = reassignChoices[matterId];
+    if (!target) { notify?.({ type: 'warning', message: 'Choose an advocate to reassign to.' }); return; }
+    setOffboardingActioning(`reassign:${matterId}`);
+    try {
+      await reassignMatter(matterId, target);
+      notify?.({ type: 'success', message: `Matter reassigned to ${target}.` });
+      setReassignChoices(current => { const next = { ...current }; delete next[matterId]; return next; });
+      await refreshSelectedCase();
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setOffboardingActioning('');
+    }
+  }
+
+  async function handleCompleteOffboarding() {
+    if (!selectedCaseId) return;
+    setOffboardingActioning('complete');
+    try {
+      await completeOffboardingCase(selectedCaseId);
+      notify?.({ type: 'success', message: 'Offboarding completed.' });
+      await refreshSelectedCase();
+      await loadOffboardingCases();
+      await loadStaff(selectedUserId);
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setOffboardingActioning('');
+    }
+  }
+
+  async function handleCancelOffboarding() {
+    if (!selectedCaseId) return;
+    setOffboardingActioning('cancel');
+    try {
+      await cancelOffboardingCase(selectedCaseId);
+      notify?.({ type: 'success', message: 'Offboarding cancelled.' });
+      await refreshSelectedCase();
+      await loadOffboardingCases();
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setOffboardingActioning('');
+    }
+  }
+
   async function loadStaff(preferredUserId = selectedUserId) {
     setLoading(true);
     try {
@@ -3777,6 +3973,7 @@ export function HR({ notify }) {
         <button type="button" onClick={() => setHrTab('leaves')} style={{ ...styles.tabButton, ...(hrTab === 'leaves' ? styles.tabActive : {}) }}>Leave Requests</button>
         <button type="button" onClick={() => setHrTab('documents')} style={{ ...styles.tabButton, ...(hrTab === 'documents' ? styles.tabActive : {}) }}>Documents</button>
         <button type="button" onClick={() => setHrTab('contracts')} style={{ ...styles.tabButton, ...(hrTab === 'contracts' ? styles.tabActive : {}) }}>Contracts</button>
+        <button type="button" onClick={() => setHrTab('offboarding')} style={{ ...styles.tabButton, ...(hrTab === 'offboarding' ? styles.tabActive : {}) }}>Offboarding</button>
       </div>
 
       {hrTab === 'dashboard' && (
@@ -4206,6 +4403,161 @@ export function HR({ notify }) {
                 empty="No contract records."
               />
             )}
+          </Card>
+        </div>
+      )}
+
+      {hrTab === 'offboarding' && (
+        <div className="lf-split-grid" style={styles.splitGrid}>
+          <div style={{ display: 'grid', gap: 16 }}>
+            <Card title="Start offboarding" hint="Admin-only. No user is deleted; records are preserved.">
+              <form onSubmit={handleCreateOffboarding} style={styles.formGrid}>
+                <Field label="Staff member">
+                  <select style={styles.input} value={offboardingForm.userId} onChange={e => setOffboardingForm({ ...offboardingForm, userId: e.target.value })}>
+                    <option value="">Select staff member</option>
+                    {staff.map(member => <option key={member.userId} value={member.userId}>{hrStaffName(member)}{member.isActive ? '' : ' (inactive)'}</option>)}
+                  </select>
+                </Field>
+                <Field label="Exit type"><input style={styles.input} maxLength={60} value={offboardingForm.exitType} onChange={e => setOffboardingForm({ ...offboardingForm, exitType: e.target.value })} placeholder="e.g. Voluntary" /></Field>
+                <Field label="Reason category">
+                  <select style={styles.input} value={offboardingForm.reasonCategory} onChange={e => setOffboardingForm({ ...offboardingForm, reasonCategory: e.target.value })}>
+                    <option value="">Not set</option>
+                    {HR_OFFBOARDING_REASON_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </Field>
+                <Field label="Exit date"><input type="date" style={styles.input} value={offboardingForm.exitDate} onChange={e => setOffboardingForm({ ...offboardingForm, exitDate: e.target.value })} /></Field>
+                <Field label="Notes"><textarea rows={3} maxLength={2000} style={{ ...styles.input, minHeight: 72, resize: 'vertical' }} value={offboardingForm.notes} onChange={e => setOffboardingForm({ ...offboardingForm, notes: e.target.value })} /></Field>
+                <button style={styles.primaryButton} disabled={offboardingCreating}>{offboardingCreating ? 'Creating...' : 'Start offboarding'}</button>
+              </form>
+            </Card>
+
+            <Card title="Offboarding cases" hint={`${offboardingCases.length} case${offboardingCases.length === 1 ? '' : 's'}`}>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                {['', 'open', 'in_progress', 'completed', 'cancelled'].map(s => (
+                  <button key={s} type="button" style={offboardingStatusFilter === s ? styles.primaryButton : styles.ghostButton} onClick={() => setOffboardingStatusFilter(s)}>
+                    {s ? HR_OFFBOARDING_STATUS_LABELS[s] : 'All'}
+                  </button>
+                ))}
+              </div>
+              {offboardingLoading ? (
+                <Skeleton rows={2} />
+              ) : offboardingCases.length === 0 ? (
+                <Empty title="No offboarding cases." text="Start one from the form above." />
+              ) : (
+                <Table
+                  columns={['Staff', 'Status', 'Type / reason', 'Exit date', 'Started', 'Action']}
+                  rows={offboardingCases.map(c => [
+                    c.staff?.fullName || c.userId,
+                    <Badge key={`${c.id}-st`} tone={offboardingStatusTone(c.status)}>{HR_OFFBOARDING_STATUS_LABELS[c.status] || c.status}</Badge>,
+                    <span key={`${c.id}-tr`} style={{ fontSize: 12, color: theme.muted }}>{c.exitType || '—'}{c.reasonCategory ? ` · ${HR_OFFBOARDING_REASON_LABELS[c.reasonCategory] || c.reasonCategory}` : ''}</span>,
+                    c.exitDate || '—',
+                    c.startedAt ? new Date(c.startedAt).toLocaleDateString() : '—',
+                    <button key={`${c.id}-sel`} type="button" style={selectedCaseId === c.id ? styles.primaryButton : styles.ghostButton} onClick={() => setSelectedCaseId(c.id)}>Open</button>,
+                  ])}
+                  empty="No offboarding cases."
+                />
+              )}
+            </Card>
+          </div>
+
+          <Card title={selectedCase ? `Offboarding — ${selectedCase.staff?.fullName || ''}` : 'Offboarding case'} hint={selectedCase ? (HR_OFFBOARDING_STATUS_LABELS[selectedCase.status] || selectedCase.status) : 'Select a case'}>
+            {caseLoading ? (
+              <Skeleton rows={3} />
+            ) : !selectedCase ? (
+              <Empty title="No case selected." text="Select a case to review and complete offboarding." />
+            ) : (() => {
+              const finalised = selectedCase.status === 'completed' || selectedCase.status === 'cancelled';
+              const activeCount = assignedMatters ? assignedMatters.activeAssignedCount : null;
+              const advocateOptions = staff.filter(m => m.role === 'advocate' && m.isActive && m.userId !== selectedCase.userId);
+              return (
+                <div style={{ display: 'grid', gap: 16 }}>
+                  <div style={{ fontSize: 12, color: theme.muted, background: '#F9FAFB', borderRadius: 6, padding: '8px 10px' }}>
+                    Closed and on-hold matters remain historical. Paralegal references are shown for review but not automatically changed in this phase.
+                  </div>
+
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <Badge tone={offboardingStatusTone(selectedCase.status)}>{HR_OFFBOARDING_STATUS_LABELS[selectedCase.status] || selectedCase.status}</Badge>
+                      <span style={{ fontSize: 12, color: theme.muted }}>{selectedCase.staff?.email} · {selectedCase.staff?.role} · {selectedCase.staff?.isActive ? 'Active' : 'Inactive'}</span>
+                    </div>
+                    {!finalised && (
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <select aria-label="Case status" style={{ ...styles.input, width: 'auto', minWidth: 130 }} value={selectedCase.status} onChange={e => handleUpdateOffboardingField({ status: e.target.value })}>
+                          <option value="open">Open</option>
+                          <option value="in_progress">In progress</option>
+                        </select>
+                        <select aria-label="Reason category" style={{ ...styles.input, width: 'auto', minWidth: 150 }} value={selectedCase.reasonCategory || ''} onChange={e => handleUpdateOffboardingField({ reasonCategory: e.target.value })}>
+                          <option value="">Reason: not set</option>
+                          {HR_OFFBOARDING_REASON_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <h4 style={{ margin: '0 0 8px', fontSize: 13, color: theme.ink }}>Checklist</h4>
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      {(selectedCase.checklist || []).map(item => (
+                        <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', border: `1px solid ${theme.line}`, borderRadius: 6, padding: '6px 10px' }}>
+                          <span style={{ fontSize: 13 }}>{item.label}</span>
+                          <select aria-label={`${item.label} status`} disabled={finalised || offboardingActioning === `checklist:${item.id}`} style={{ ...styles.input, width: 'auto', minWidth: 120, fontSize: 12, padding: '4px 8px' }} value={item.status} onChange={e => handleChecklistChange(item.id, e.target.value)}>
+                            {HR_OFFBOARDING_CHECKLIST_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                          </select>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 style={{ margin: '0 0 8px', fontSize: 13, color: theme.ink }}>Assigned matters review</h4>
+                    {!assignedMatters ? (
+                      <div style={{ color: theme.muted, fontSize: 12 }}>Loading matter review…</div>
+                    ) : (
+                      <>
+                        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 8, fontSize: 12 }}>
+                          <span><strong>{assignedMatters.activeAssignedCount}</strong> active assigned</span>
+                          <span><strong>{assignedMatters.closedOrOnHoldAssignedCount}</strong> closed / on-hold</span>
+                          <span><strong>{assignedMatters.paralegalReferenceCount}</strong> paralegal references</span>
+                        </div>
+                        {assignedMatters.activeAssignedMatters && assignedMatters.activeAssignedMatters.length > 0 ? (
+                          <div style={{ display: 'grid', gap: 6 }}>
+                            {assignedMatters.activeAssignedMatters.map(m => (
+                              <div key={m.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', border: `1px solid ${theme.line}`, borderRadius: 6, padding: '6px 10px' }}>
+                                <span style={{ fontSize: 12 }}><strong>{m.reference || m.id}</strong> — {m.title} <span style={{ color: theme.muted }}>({m.stage}{m.clientName ? ` · ${m.clientName}` : ''})</span></span>
+                                {!finalised && (
+                                  <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                                    <select aria-label={`Reassign ${m.reference || m.id}`} style={{ ...styles.input, width: 'auto', minWidth: 140, fontSize: 12, padding: '4px 8px' }} value={reassignChoices[m.id] || ''} onChange={e => setReassignChoices(cur => ({ ...cur, [m.id]: e.target.value }))}>
+                                      <option value="">Reassign to…</option>
+                                      {advocateOptions.map(a => <option key={a.userId} value={a.fullName}>{a.fullName}</option>)}
+                                    </select>
+                                    <button type="button" style={{ ...styles.tinyButton }} disabled={offboardingActioning === `reassign:${m.id}` || !reassignChoices[m.id]} onClick={() => handleReassignMatter(m.id)}>{offboardingActioning === `reassign:${m.id}` ? '...' : 'Reassign'}</button>
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={{ color: theme.muted, fontSize: 12 }}>No active assigned matters.</div>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  {!finalised && (
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <button type="button" style={styles.primaryButton} disabled={offboardingActioning === 'complete' || (activeCount !== null && activeCount > 0)} onClick={handleCompleteOffboarding}>
+                        {offboardingActioning === 'complete' ? 'Completing...' : 'Complete offboarding'}
+                      </button>
+                      <button type="button" style={styles.dangerTinyButton} disabled={offboardingActioning === 'cancel'} onClick={handleCancelOffboarding}>
+                        {offboardingActioning === 'cancel' ? '...' : 'Cancel case'}
+                      </button>
+                      {activeCount !== null && activeCount > 0 ? <span style={{ fontSize: 12, color: theme.muted }}>Reassign all active matters before completing.</span> : null}
+                      <span style={{ fontSize: 12, color: theme.muted }}>Completion sets HR status to “exited”; the account is deactivated only when “Deactivate account” is marked done.</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </Card>
         </div>
       )}

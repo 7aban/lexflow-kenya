@@ -213,6 +213,26 @@ const HR_DOCUMENT_FILENAME_MAX = 220;
 const HR_CONTRACT_NOTES_MAX = 2000;
 const HR_CONTRACT_DATE_FIELDS = ['startDate', 'endDate', 'probationEndDate', 'renewalDate'];
 
+// HR-29F: staff offboarding workflow (admin-only; orchestrates matter-reassignment review + deactivation)
+const HR_OFFBOARDING_STATUSES = new Set(['open', 'in_progress', 'completed', 'cancelled']);
+const HR_OFFBOARDING_REASONS = new Set(['resignation', 'termination', 'end_of_contract', 'retirement', 'redundancy', 'transfer', 'other']);
+const HR_OFFBOARDING_CHECKLIST_STATUSES = new Set(['pending', 'in_progress', 'done', 'skipped', 'na']);
+const HR_OFFBOARDING_NOTES_MAX = 2000;
+const HR_OFFBOARDING_EXITTYPE_MAX = 60;
+// Standard checklist seeded on case creation (itemKey -> label). Order preserved.
+const HR_OFFBOARDING_CHECKLIST_TEMPLATE = [
+  ['review_assigned_matters', 'Review assigned matters'],
+  ['reassign_active_matters', 'Reassign active matters'],
+  ['review_pending_leave', 'Review pending leave'],
+  ['review_contracts_documents', 'Review contracts and HR documents'],
+  ['deactivate_account', 'Deactivate account'],
+  ['return_firm_property', 'Return firm property'],
+  ['final_dues_note', 'Final dues note'],
+  ['close_hr_file', 'Close HR file'],
+];
+// Matter stages that count as "active" for offboarding (mirrors dashboard.js active-matter logic).
+const HR_OFFBOARDING_INACTIVE_STAGES = ['Closed', 'On Hold'];
+
 function isIsoDateText(value) {
   return !value || /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
@@ -427,6 +447,100 @@ function hrContractAuditMetadata(contract, user) {
     renewalDate: contract.renewalDate || '',
     documentId: contract.documentId || '',
   };
+}
+
+// HR-29F helpers ----------------------------------------------------------
+
+function publicOffboardingChecklistItem(row = null) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    offboardingCaseId: row.offboardingCaseId,
+    itemKey: row.itemKey || '',
+    label: row.label || '',
+    status: row.status || 'pending',
+    completedBy: row.completedBy || '',
+    completedAt: row.completedAt || '',
+    notes: row.notes || '',
+    createdAt: row.createdAt || '',
+    updatedAt: row.updatedAt || '',
+  };
+}
+
+// Build the public case shape. `staffRow` carries the joined users columns (or the
+// staff user record); `checklist` is an optional array of checklist rows.
+function publicOffboardingCase(row = null, checklist = undefined) {
+  if (!row) return null;
+  const out = {
+    id: row.id,
+    userId: row.userId,
+    status: row.status || 'open',
+    exitType: row.exitType || '',
+    exitDate: row.exitDate || '',
+    reasonCategory: row.reasonCategory || '',
+    notes: row.notes || '',
+    startedBy: row.startedBy || '',
+    startedAt: row.startedAt || '',
+    completedBy: row.completedBy || '',
+    completedAt: row.completedAt || '',
+    cancelledBy: row.cancelledBy || '',
+    cancelledAt: row.cancelledAt || '',
+    createdAt: row.createdAt || '',
+    updatedAt: row.updatedAt || '',
+    staff: {
+      userId: row.userId,
+      fullName: row.staffName || '',
+      email: row.staffEmail || '',
+      role: row.staffRole || '',
+      isActive: Boolean(row.staffIsActive ?? row.staffActive ?? 1),
+    },
+  };
+  if (row.checklistTotal !== undefined) out.checklistTotal = Number(row.checklistTotal) || 0;
+  if (row.checklistDone !== undefined) out.checklistDone = Number(row.checklistDone) || 0;
+  if (Array.isArray(checklist)) out.checklist = checklist.map(publicOffboardingChecklistItem);
+  return out;
+}
+
+function offboardingAuditMetadata(extra = {}) {
+  // Whitelist of non-sensitive keys allowed in offboarding audit metadata.
+  const allowed = ['caseId', 'userId', 'status', 'exitType', 'reasonCategory', 'exitDate', 'itemKey', 'itemStatus', 'activeMatterCount', 'paralegalReferenceCount', 'deactivated'];
+  const meta = {};
+  for (const key of allowed) {
+    if (extra[key] !== undefined) meta[key] = extra[key];
+  }
+  return meta;
+}
+
+const HR_OFFBOARDING_CASE_SELECT = `
+  oc.*,
+  u.fullName staffName, u.email staffEmail, u.role staffRole, u.isActive staffIsActive,
+  (SELECT COUNT(*) FROM hr_offboarding_checklist_items ci WHERE ci.offboardingCaseId = oc.id) checklistTotal,
+  (SELECT COUNT(*) FROM hr_offboarding_checklist_items ci WHERE ci.offboardingCaseId = oc.id AND ci.status = 'done') checklistDone`;
+
+async function getOffboardingCaseRow(id) {
+  return get(
+    `SELECT ${HR_OFFBOARDING_CASE_SELECT} FROM hr_offboarding_cases oc JOIN users u ON u.id = oc.userId WHERE oc.id = ?`,
+    [id],
+  );
+}
+
+async function loadFullOffboardingCase(id) {
+  const row = await getOffboardingCaseRow(id);
+  if (!row) return null;
+  const checklist = await all('SELECT * FROM hr_offboarding_checklist_items WHERE offboardingCaseId = ? ORDER BY createdAt ASC, id ASC', [id]);
+  return publicOffboardingCase(row, checklist);
+}
+
+// Count active assigned matters for a staff member (by fullName), mirroring the
+// app's active-matter definition (excludes Closed and On Hold).
+async function countActiveAssignedMatters(fullName) {
+  if (!fullName) return 0;
+  const placeholders = HR_OFFBOARDING_INACTIVE_STAGES.map(() => '?').join(',');
+  const row = await get(
+    `SELECT COUNT(*) AS cnt FROM matters WHERE assignedTo = ? AND COALESCE(stage,'') NOT IN (${placeholders})`,
+    [fullName, ...HR_OFFBOARDING_INACTIVE_STAGES],
+  );
+  return row ? Number(row.cnt) || 0 : 0;
 }
 
 function normalizeLeaveType(value) {
@@ -673,6 +787,41 @@ updatedBy TEXT
   await run('CREATE INDEX IF NOT EXISTS idx_hr_contract_records_status ON hr_contract_records(status)');
   await run('CREATE INDEX IF NOT EXISTS idx_hr_contract_records_endDate ON hr_contract_records(endDate)');
   await run('CREATE INDEX IF NOT EXISTS idx_hr_contract_records_documentId ON hr_contract_records(documentId)');
+
+  // HR-29F: staff offboarding cases + checklist items
+  await run(`CREATE TABLE IF NOT EXISTS hr_offboarding_cases (
+id TEXT PRIMARY KEY,
+userId TEXT NOT NULL,
+status TEXT NOT NULL DEFAULT 'open',
+exitType TEXT,
+exitDate TEXT,
+reasonCategory TEXT,
+notes TEXT,
+startedBy TEXT NOT NULL,
+startedAt TEXT NOT NULL,
+completedBy TEXT,
+completedAt TEXT,
+cancelledBy TEXT,
+cancelledAt TEXT,
+createdAt TEXT NOT NULL,
+updatedAt TEXT
+)`);
+  await run('CREATE INDEX IF NOT EXISTS idx_hr_offboarding_cases_userId ON hr_offboarding_cases(userId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_hr_offboarding_cases_status ON hr_offboarding_cases(status)');
+
+  await run(`CREATE TABLE IF NOT EXISTS hr_offboarding_checklist_items (
+id TEXT PRIMARY KEY,
+offboardingCaseId TEXT NOT NULL,
+itemKey TEXT NOT NULL,
+label TEXT NOT NULL,
+status TEXT NOT NULL DEFAULT 'pending',
+completedBy TEXT,
+completedAt TEXT,
+notes TEXT,
+createdAt TEXT NOT NULL,
+updatedAt TEXT
+)`);
+  await run('CREATE INDEX IF NOT EXISTS idx_hr_offboarding_checklist_caseId ON hr_offboarding_checklist_items(offboardingCaseId)');
 
   await ensureClientUserSupport();
   await ensureColumn('matter_checklist_items', 'dueDate', 'TEXT');
@@ -3038,6 +3187,320 @@ app.patch('/api/hr/contracts/:id', requireAdmin, async (req, res) => {
       [existing.id],
     );
     res.json(publicHrContract(row));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// --- HR Offboarding routes (HR-29F) ---
+// Admin-only. Orchestrates matter-reassignment review, HR status update, checklist
+// tracking, and optional account deactivation. Never deletes users or HR records.
+
+app.get('/api/hr/offboarding', requireAdmin, async (req, res) => {
+  try {
+    const { status, userId } = req.query;
+    const conditions = [];
+    const params = [];
+    if (status) {
+      if (!HR_OFFBOARDING_STATUSES.has(status)) return res.status(400).json({ error: 'Invalid status' });
+      conditions.push('oc.status = ?'); params.push(status);
+    }
+    if (userId) { conditions.push('oc.userId = ?'); params.push(userId); }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const rows = await all(
+      `SELECT ${HR_OFFBOARDING_CASE_SELECT} FROM hr_offboarding_cases oc JOIN users u ON u.id = oc.userId ${where} ORDER BY oc.createdAt DESC`,
+      params,
+    );
+    res.json(rows.map(row => publicOffboardingCase(row)));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/hr/offboarding/:id', requireAdmin, async (req, res) => {
+  try {
+    const full = await loadFullOffboardingCase(req.params.id);
+    if (!full) return res.status(404).json({ error: 'Offboarding case not found' });
+    res.json(full);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/hr/offboarding', requireAdmin, async (req, res) => {
+  try {
+    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    const { userId, exitType, exitDate, reasonCategory, notes } = body;
+
+    const staff = await getHrStaffUser(userId);
+    if (staff.error) return res.status(staff.status).json({ error: staff.error });
+
+    const existing = await get("SELECT id FROM hr_offboarding_cases WHERE userId = ? AND status IN ('open','in_progress')", [staff.user.id]);
+    if (existing) return res.status(409).json({ error: 'An open offboarding case already exists for this staff user' });
+
+    let cleanExitType = '';
+    if (exitType !== undefined && exitType !== null) {
+      if (typeof exitType !== 'string') return res.status(400).json({ error: 'exitType must be a string' });
+      cleanExitType = exitType.trim();
+      if (cleanExitType.length > HR_OFFBOARDING_EXITTYPE_MAX) return res.status(400).json({ error: `exitType must not exceed ${HR_OFFBOARDING_EXITTYPE_MAX} characters` });
+    }
+    let cleanExitDate = '';
+    if (exitDate !== undefined && exitDate !== null && exitDate !== '') {
+      if (!isValidHrDate(exitDate)) return res.status(400).json({ error: 'exitDate must be a valid YYYY-MM-DD date' });
+      cleanExitDate = exitDate.trim();
+    }
+    let cleanReason = '';
+    if (reasonCategory !== undefined && reasonCategory !== null && reasonCategory !== '') {
+      if (!HR_OFFBOARDING_REASONS.has(reasonCategory)) return res.status(400).json({ error: 'Invalid reasonCategory' });
+      cleanReason = reasonCategory;
+    }
+    let cleanNotes = '';
+    if (notes !== undefined && notes !== null) {
+      if (typeof notes !== 'string') return res.status(400).json({ error: 'notes must be a string' });
+      cleanNotes = notes.trim();
+      if (cleanNotes.length > HR_OFFBOARDING_NOTES_MAX) return res.status(400).json({ error: `notes must not exceed ${HR_OFFBOARDING_NOTES_MAX} characters` });
+    }
+
+    const id = genId('HROB');
+    const now = new Date().toISOString();
+    await run(
+      `INSERT INTO hr_offboarding_cases (id, userId, status, exitType, exitDate, reasonCategory, notes, startedBy, startedAt, createdAt, updatedAt)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      [id, staff.user.id, 'open', cleanExitType, cleanExitDate, cleanReason, cleanNotes, req.user.userId, now, now, null],
+    );
+    for (const [itemKey, label] of HR_OFFBOARDING_CHECKLIST_TEMPLATE) {
+      await run(
+        `INSERT INTO hr_offboarding_checklist_items (id, offboardingCaseId, itemKey, label, status, createdAt, updatedAt) VALUES (?,?,?,?,?,?,?)`,
+        [genId('HROBI'), id, itemKey, label, 'pending', now, null],
+      );
+    }
+    await recordAuditEvent(req, {
+      action: 'staff_offboarding_started',
+      entityType: 'hr_offboarding_case',
+      entityId: id,
+      metadata: offboardingAuditMetadata({ caseId: id, userId: staff.user.id, status: 'open', exitType: cleanExitType, reasonCategory: cleanReason, exitDate: cleanExitDate }),
+    }).catch(() => {});
+    const full = await loadFullOffboardingCase(id);
+    res.status(201).json(full);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch('/api/hr/offboarding/:id', requireAdmin, async (req, res) => {
+  try {
+    const existing = await get('SELECT * FROM hr_offboarding_cases WHERE id = ?', [req.params.id]);
+    if (!existing) return res.status(404).json({ error: 'Offboarding case not found' });
+    if (existing.status === 'completed' || existing.status === 'cancelled') {
+      return res.status(409).json({ error: 'Completed or cancelled offboarding cases cannot be modified' });
+    }
+
+    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    const updates = {};
+    if (body.status !== undefined) {
+      // Only open/in_progress transitions allowed here; completion/cancellation use dedicated routes.
+      if (!['open', 'in_progress'].includes(body.status)) return res.status(400).json({ error: 'Use the complete or cancel routes to finalize a case' });
+      updates.status = body.status;
+    }
+    if (body.exitType !== undefined) {
+      if (body.exitType === null) updates.exitType = '';
+      else if (typeof body.exitType !== 'string') return res.status(400).json({ error: 'exitType must be a string' });
+      else { const v = body.exitType.trim(); if (v.length > HR_OFFBOARDING_EXITTYPE_MAX) return res.status(400).json({ error: `exitType must not exceed ${HR_OFFBOARDING_EXITTYPE_MAX} characters` }); updates.exitType = v; }
+    }
+    if (body.exitDate !== undefined) {
+      if (body.exitDate === null || body.exitDate === '') updates.exitDate = '';
+      else if (!isValidHrDate(body.exitDate)) return res.status(400).json({ error: 'exitDate must be a valid YYYY-MM-DD date' });
+      else updates.exitDate = body.exitDate.trim();
+    }
+    if (body.reasonCategory !== undefined) {
+      if (body.reasonCategory === null || body.reasonCategory === '') updates.reasonCategory = '';
+      else if (!HR_OFFBOARDING_REASONS.has(body.reasonCategory)) return res.status(400).json({ error: 'Invalid reasonCategory' });
+      else updates.reasonCategory = body.reasonCategory;
+    }
+    if (body.notes !== undefined) {
+      if (body.notes === null) updates.notes = '';
+      else if (typeof body.notes !== 'string') return res.status(400).json({ error: 'notes must be a string' });
+      else { const v = body.notes.trim(); if (v.length > HR_OFFBOARDING_NOTES_MAX) return res.status(400).json({ error: `notes must not exceed ${HR_OFFBOARDING_NOTES_MAX} characters` }); updates.notes = v; }
+    }
+
+    const fields = Object.keys(updates);
+    if (!fields.length) return res.status(400).json({ error: 'No supported offboarding fields supplied' });
+
+    const now = new Date().toISOString();
+    const assignments = fields.map(f => `${f} = ?`).join(', ');
+    await run(`UPDATE hr_offboarding_cases SET ${assignments}, updatedAt = ? WHERE id = ?`, [...fields.map(f => updates[f]), now, existing.id]);
+    await recordAuditEvent(req, {
+      action: 'staff_offboarding_updated',
+      entityType: 'hr_offboarding_case',
+      entityId: existing.id,
+      metadata: offboardingAuditMetadata({ caseId: existing.id, userId: existing.userId, status: updates.status || existing.status, exitType: updates.exitType !== undefined ? updates.exitType : existing.exitType, reasonCategory: updates.reasonCategory !== undefined ? updates.reasonCategory : existing.reasonCategory, exitDate: updates.exitDate !== undefined ? updates.exitDate : existing.exitDate }),
+    }).catch(() => {});
+    const full = await loadFullOffboardingCase(existing.id);
+    res.json(full);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch('/api/hr/offboarding/:id/checklist/:itemId', requireAdmin, async (req, res) => {
+  try {
+    const caseRow = await get('SELECT * FROM hr_offboarding_cases WHERE id = ?', [req.params.id]);
+    if (!caseRow) return res.status(404).json({ error: 'Offboarding case not found' });
+    const item = await get('SELECT * FROM hr_offboarding_checklist_items WHERE id = ? AND offboardingCaseId = ?', [req.params.itemId, req.params.id]);
+    if (!item) return res.status(404).json({ error: 'Checklist item not found' });
+    if (caseRow.status === 'completed' || caseRow.status === 'cancelled') {
+      return res.status(409).json({ error: 'Completed or cancelled offboarding cases cannot be modified' });
+    }
+
+    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    const { status, notes } = body;
+    if (!HR_OFFBOARDING_CHECKLIST_STATUSES.has(status)) return res.status(400).json({ error: 'Invalid checklist status' });
+    let cleanNotes = item.notes || '';
+    if (notes !== undefined) {
+      if (notes === null) cleanNotes = '';
+      else if (typeof notes !== 'string') return res.status(400).json({ error: 'notes must be a string' });
+      else { cleanNotes = notes.trim(); if (cleanNotes.length > HR_OFFBOARDING_NOTES_MAX) return res.status(400).json({ error: `notes must not exceed ${HR_OFFBOARDING_NOTES_MAX} characters` }); }
+    }
+
+    const now = new Date().toISOString();
+    const completedBy = status === 'done' ? req.user.userId : null;
+    const completedAt = status === 'done' ? now : null;
+    await run(
+      'UPDATE hr_offboarding_checklist_items SET status = ?, notes = ?, completedBy = ?, completedAt = ?, updatedAt = ? WHERE id = ?',
+      [status, cleanNotes, completedBy, completedAt, now, item.id],
+    );
+    await recordAuditEvent(req, {
+      action: 'staff_offboarding_checklist_updated',
+      entityType: 'hr_offboarding_checklist_item',
+      entityId: item.id,
+      metadata: offboardingAuditMetadata({ caseId: caseRow.id, userId: caseRow.userId, itemKey: item.itemKey, itemStatus: status }),
+    }).catch(() => {});
+    const full = await loadFullOffboardingCase(caseRow.id);
+    res.json(full);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/hr/offboarding/:id/assigned-matters', requireAdmin, async (req, res) => {
+  try {
+    const caseRow = await get('SELECT * FROM hr_offboarding_cases WHERE id = ?', [req.params.id]);
+    if (!caseRow) return res.status(404).json({ error: 'Offboarding case not found' });
+    const staffUser = await get('SELECT id, fullName, email, role FROM users WHERE id = ?', [caseRow.userId]);
+    if (!staffUser) return res.status(404).json({ error: 'Staff user not found' });
+    const fullName = staffUser.fullName || '';
+    const placeholders = HR_OFFBOARDING_INACTIVE_STAGES.map(() => '?').join(',');
+
+    const activeMatters = fullName
+      ? await all(
+          `SELECT m.id, m.reference, m.title, m.stage, m.assignedTo, c.name clientName
+           FROM matters m LEFT JOIN clients c ON c.id = m.clientId
+           WHERE m.assignedTo = ? AND COALESCE(m.stage,'') NOT IN (${placeholders})
+           ORDER BY m.openDate DESC, m.reference`,
+          [fullName, ...HR_OFFBOARDING_INACTIVE_STAGES],
+        )
+      : [];
+    const closedOrOnHoldRow = fullName
+      ? await get(`SELECT COUNT(*) AS cnt FROM matters WHERE assignedTo = ? AND COALESCE(stage,'') IN (${placeholders})`, [fullName, ...HR_OFFBOARDING_INACTIVE_STAGES])
+      : { cnt: 0 };
+    const paralegalRow = fullName
+      ? await get('SELECT COUNT(*) AS cnt FROM matters WHERE paralegal = ?', [fullName])
+      : { cnt: 0 };
+
+    res.json({
+      caseId: caseRow.id,
+      userId: staffUser.id,
+      staffName: fullName,
+      activeAssignedMatters: activeMatters,
+      activeAssignedCount: activeMatters.length,
+      closedOrOnHoldAssignedCount: Number(closedOrOnHoldRow.cnt) || 0,
+      paralegalReferenceCount: Number(paralegalRow.cnt) || 0,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/hr/offboarding/:id/complete', requireAdmin, async (req, res) => {
+  try {
+    const caseRow = await get('SELECT * FROM hr_offboarding_cases WHERE id = ?', [req.params.id]);
+    if (!caseRow) return res.status(404).json({ error: 'Offboarding case not found' });
+    if (caseRow.status === 'completed') return res.status(409).json({ error: 'Offboarding case is already completed' });
+    if (caseRow.status === 'cancelled') return res.status(409).json({ error: 'Cancelled offboarding cases cannot be completed' });
+
+    const staffUser = await get('SELECT id, fullName, email, role, isActive FROM users WHERE id = ?', [caseRow.userId]);
+    if (!staffUser) return res.status(404).json({ error: 'Staff user not found' });
+
+    // Server-side re-check: block completion while active assigned matters remain.
+    const activeMatterCount = await countActiveAssignedMatters(staffUser.fullName || '');
+    if (activeMatterCount > 0) {
+      return res.status(409).json({ error: `Reassign all active matters before completing offboarding (${activeMatterCount} remaining)`, activeMatterCount });
+    }
+
+    // Determine whether deactivation is requested via the checklist.
+    const deactivateItem = await get("SELECT status FROM hr_offboarding_checklist_items WHERE offboardingCaseId = ? AND itemKey = 'deactivate_account'", [caseRow.id]);
+    const wantsDeactivation = Boolean(deactivateItem && deactivateItem.status === 'done');
+
+    // Apply deactivation safeguards BEFORE making any changes (so a blocked deactivation
+    // does not partially complete the case).
+    if (wantsDeactivation) {
+      if (staffUser.id === req.user.userId) {
+        return res.status(400).json({ error: 'You cannot deactivate your own account via offboarding' });
+      }
+      if (staffUser.role === 'admin') {
+        const activeAdminCount = await get("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND isActive = 1");
+        if ((activeAdminCount?.count || 0) <= 1) {
+          return res.status(400).json({ error: 'Cannot deactivate the last active admin' });
+        }
+      }
+    }
+
+    const now = new Date().toISOString();
+    let deactivated = false;
+
+    // 1. Optional deactivation (offboarding path bumps tokenVersion to terminate live sessions;
+    //    does NOT touch the shared toggle-active route).
+    if (wantsDeactivation && staffUser.isActive !== 0) {
+      await run('UPDATE users SET isActive = 0, tokenVersion = COALESCE(tokenVersion, 1) + 1 WHERE id = ?', [staffUser.id]);
+      deactivated = true;
+    }
+
+    // 2. Set HR profile hrStatus = 'exited' (create a minimal profile if none exists).
+    const profile = await get('SELECT id FROM hr_staff_profiles WHERE userId = ?', [staffUser.id]);
+    if (profile) {
+      await run('UPDATE hr_staff_profiles SET hrStatus = ?, updatedAt = ?, updatedBy = ? WHERE id = ?', ['exited', now, req.user.userId, profile.id]);
+    } else {
+      await run(
+        `INSERT INTO hr_staff_profiles (id, userId, hrStatus, createdAt, updatedAt, createdBy, updatedBy) VALUES (?,?,?,?,?,?,?)`,
+        [genId('HRP'), staffUser.id, 'exited', now, null, req.user.userId, null],
+      );
+    }
+
+    // 3. Mark the case completed.
+    await run('UPDATE hr_offboarding_cases SET status = ?, completedBy = ?, completedAt = ?, updatedAt = ? WHERE id = ?', ['completed', req.user.userId, now, now, caseRow.id]);
+
+    await recordAuditEvent(req, {
+      action: 'staff_offboarding_completed',
+      entityType: 'hr_offboarding_case',
+      entityId: caseRow.id,
+      metadata: offboardingAuditMetadata({ caseId: caseRow.id, userId: staffUser.id, status: 'completed', activeMatterCount, deactivated }),
+    }).catch(() => {});
+    if (deactivated) {
+      await recordAuditEvent(req, {
+        action: 'user_deactivated_from_hr',
+        entityType: 'user',
+        entityId: staffUser.id,
+        metadata: offboardingAuditMetadata({ caseId: caseRow.id, userId: staffUser.id, deactivated: true }),
+      }).catch(() => {});
+    }
+    const full = await loadFullOffboardingCase(caseRow.id);
+    res.json(full);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/hr/offboarding/:id/cancel', requireAdmin, async (req, res) => {
+  try {
+    const caseRow = await get('SELECT * FROM hr_offboarding_cases WHERE id = ?', [req.params.id]);
+    if (!caseRow) return res.status(404).json({ error: 'Offboarding case not found' });
+    if (caseRow.status === 'completed') return res.status(409).json({ error: 'Completed offboarding cases cannot be cancelled' });
+    if (caseRow.status === 'cancelled') return res.status(409).json({ error: 'Offboarding case is already cancelled' });
+
+    const now = new Date().toISOString();
+    await run('UPDATE hr_offboarding_cases SET status = ?, cancelledBy = ?, cancelledAt = ?, updatedAt = ? WHERE id = ?', ['cancelled', req.user.userId, now, now, caseRow.id]);
+    await recordAuditEvent(req, {
+      action: 'staff_offboarding_cancelled',
+      entityType: 'hr_offboarding_case',
+      entityId: caseRow.id,
+      metadata: offboardingAuditMetadata({ caseId: caseRow.id, userId: caseRow.userId, status: 'cancelled' }),
+    }).catch(() => {});
+    const full = await loadFullOffboardingCase(caseRow.id);
+    res.json(full);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

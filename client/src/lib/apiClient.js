@@ -508,3 +508,15 @@ export const getHrContracts = (params = {}) => api(queryPath('/hr/contracts', pa
 export const getHrContract = (id) => api(`/hr/contracts/${encodeURIComponent(id)}`);
 export const createHrContract = (payload) => api('/hr/contracts', { method: 'POST', body: payload });
 export const updateHrContract = (id, payload) => api(`/hr/contracts/${encodeURIComponent(id)}`, { method: 'PATCH', body: payload });
+
+// HR-29F: Staff offboarding workflow (admin-only)
+export const getOffboardingCases = (params = {}) => api(queryPath('/hr/offboarding', params));
+export const getOffboardingCase = (id) => api(`/hr/offboarding/${encodeURIComponent(id)}`);
+export const createOffboardingCase = (payload) => api('/hr/offboarding', { method: 'POST', body: payload });
+export const updateOffboardingCase = (id, payload) => api(`/hr/offboarding/${encodeURIComponent(id)}`, { method: 'PATCH', body: payload });
+export const updateOffboardingChecklistItem = (caseId, itemId, payload) => api(`/hr/offboarding/${encodeURIComponent(caseId)}/checklist/${encodeURIComponent(itemId)}`, { method: 'PATCH', body: payload });
+export const getOffboardingAssignedMatters = (caseId) => api(`/hr/offboarding/${encodeURIComponent(caseId)}/assigned-matters`);
+export const completeOffboardingCase = (caseId) => api(`/hr/offboarding/${encodeURIComponent(caseId)}/complete`, { method: 'POST', body: {} });
+export const cancelOffboardingCase = (caseId) => api(`/hr/offboarding/${encodeURIComponent(caseId)}/cancel`, { method: 'POST', body: {} });
+// Thin helper for the existing reassign route (route shape unchanged).
+export const reassignMatter = (matterId, assignedTo) => api(`/matters/${encodeURIComponent(matterId)}/reassign`, { method: 'PATCH', body: { assignedTo } });
