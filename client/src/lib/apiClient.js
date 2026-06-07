@@ -374,6 +374,13 @@ export const saveExtractedPdf = (documentId, ranges, filename, matterId) =>
     method: 'POST',
     body: { matterId, documentId, ranges, filename, clientVisible: false },
   });
+export const splitPdfPages = (documentId, order, filename) =>
+  postDownloadWithAuth('/document-tools/split-pdf', { documentId, order, filename }, filename || 'reordered-pages.pdf');
+export const saveSplitPdf = (documentId, order, filename, matterId) =>
+  api('/document-tools/split-pdf/save', {
+    method: 'POST',
+    body: { matterId, documentId, order, filename, clientVisible: false },
+  });
 export const deletePdfPages = (documentId, pages, filename) =>
   postDownloadWithAuth('/document-tools/delete-pdf-pages', { documentId, pages, filename }, filename || 'pages-removed.pdf');
 export const saveDeletedPdf = (documentId, pages, filename, matterId) =>

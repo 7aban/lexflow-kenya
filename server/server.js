@@ -538,6 +538,47 @@ function parsePageRanges(input, pageCount) {
   return { indices: pages.map(page => page - 1) };
 }
 
+// PRODUCT-27D: parse a user-entered page sequence for the split / reorder tool.
+// Unlike parsePageRanges, this PRESERVES the exact order entered and ALLOWS
+// repeats, so a user can intentionally duplicate a page. Supports comma-separated
+// page numbers and simple ascending ranges, e.g. "3,1,2" or "1-3,5".
+function parsePageOrder(input, pageCount) {
+  if (typeof input !== 'string') return { error: 'Enter a page order such as 3,1,2 or 1-3,5' };
+  const trimmed = input.trim();
+  if (!trimmed) return { error: 'Enter a page order such as 3,1,2 or 1-3,5' };
+  if (!Number.isInteger(pageCount) || pageCount < 1) return { error: 'The PDF has no pages to reorder' };
+
+  const pages = [];
+  for (const rawToken of trimmed.split(',')) {
+    const token = rawToken.trim();
+    if (!token) return { error: 'Page order contains an empty value' };
+    if (token.includes('-')) {
+      const parts = token.split('-').map(part => part.trim());
+      if (parts.length !== 2 || !/^\d+$/.test(parts[0]) || !/^\d+$/.test(parts[1])) {
+        return { error: `"${token}" is not a valid page range` };
+      }
+      const start = Number(parts[0]);
+      const end = Number(parts[1]);
+      if (start < 1 || end < 1) return { error: 'Page numbers must be 1 or greater' };
+      if (end < start) return { error: `"${token}" is a reversed range` };
+      if (end > pageCount) return { error: `Page ${end} is out of range — the PDF has ${pageCount} page(s)` };
+      for (let page = start; page <= end; page++) pages.push(page);
+    } else {
+      if (!/^\d+$/.test(token)) return { error: `"${token}" is not a valid page number` };
+      const page = Number(token);
+      if (page < 1) return { error: 'Page numbers must be 1 or greater' };
+      if (page > pageCount) return { error: `Page ${page} is out of range — the PDF has ${pageCount} page(s)` };
+      pages.push(page);
+    }
+  }
+
+  if (!pages.length) return { error: 'Enter a page order such as 3,1,2 or 1-3,5' };
+  // Repeats are allowed, so cap on the resulting (output) page count.
+  if (pages.length > MAX_EXTRACT_PDF_PAGES) return { error: `Select no more than ${MAX_EXTRACT_PDF_PAGES} pages` };
+
+  return { pages, indices: pages.map(page => page - 1) };
+}
+
 async function matterFolders(matterId, req = null) {
   if (req?.user?.role === 'client') {
     const visibleCount = await get(`SELECT COUNT(*) documentCount FROM documents d WHERE d.matterId=? AND d.deletedAt IS NULL AND ${clientDocumentVisibilitySql('d')}`, [matterId, req.user.clientId || '']);
@@ -4727,6 +4768,182 @@ app.post('/api/document-tools/extract-pdf-pages/save', requireAdvocateOrAdmin, a
     res.json(publicDocument(resultDoc));
   } catch {
     res.status(500).json({ error: 'Unable to save extracted PDF' });
+  }
+});
+
+// PRODUCT-27D: Split / reorder pages — copy the pages of one matter PDF into a
+// new PDF in a caller-supplied order. Pages may be reordered, selected, or
+// repeated. The source document is never modified. Mirrors the extract tool.
+app.post('/api/document-tools/split-pdf', requireStaff, async (req, res) => {
+  try {
+    const { documentId, order: rawOrder, filename: rawFilename } = req.body || {};
+
+    if (!documentId) return res.status(400).json({ error: 'documentId is required' });
+    if (typeof rawOrder !== 'string' || !rawOrder.trim()) return res.status(400).json({ error: 'order is required' });
+
+    const doc = await get('SELECT * FROM documents WHERE id=? AND deletedAt IS NULL', [documentId]);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    if (!(await canAccessDocument(req, doc)) || !doc.matterId || !(await canAccessMatter(req, doc.matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: documentId, matterId: doc.matterId || '', clientId: await documentAuditClientId(doc, req), metadata: { reason: 'insufficient permissions', context: documentAuditContext(doc), route: 'document_tool_split_pdf' } }).catch(() => {});
+      return res.status(403).json({ error: 'Document access denied' });
+    }
+    if (doc.mimeType !== 'application/pdf') return res.status(400).json({ error: 'Only PDF documents can be reordered' });
+
+    const inputContent = Buffer.isBuffer(doc.content) ? doc.content : Buffer.from(doc.content || '');
+    if (inputContent.length > MAX_MERGE_PDF_INPUT_BYTES) return res.status(413).json({ error: 'Document exceeds the 20 MB input limit' });
+
+    const outputFilename = cleanPdfDownloadName(rawFilename || 'reordered-pages.pdf');
+
+    let sourcePdf;
+    try {
+      sourcePdf = await PDFLibDocument.load(inputContent, { ignoreEncryption: false });
+    } catch {
+      return res.status(400).json({ error: 'Could not read PDF — it may be corrupt or encrypted' });
+    }
+
+    const parsed = parsePageOrder(rawOrder, sourcePdf.getPageCount());
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+
+    let outputBuffer;
+    try {
+      const outputPdf = await PDFLibDocument.create();
+      const copiedPages = await outputPdf.copyPages(sourcePdf, parsed.indices);
+      copiedPages.forEach(page => outputPdf.addPage(page));
+      outputBuffer = Buffer.from(await outputPdf.save());
+    } catch {
+      return res.status(400).json({ error: 'Could not reorder the requested pages' });
+    }
+
+    if (outputBuffer.length > 50 * 1024 * 1024) return res.status(413).json({ error: 'Reordered PDF exceeds the 50 MB output limit' });
+
+    const clientId = await documentAuditClientId(doc, req);
+    await recordAuditEvent(req, {
+      action: 'document_tool_split_pdf_downloaded',
+      entityType: 'document_tool',
+      entityId: documentId,
+      matterId: doc.matterId || '',
+      clientId,
+      metadata: {
+        route: 'document_tool_split_pdf',
+        sourceDocumentId: documentId,
+        sourceMatterId: doc.matterId || '',
+        order: rawOrder.trim(),
+        pageCount: sourcePdf.getPageCount(),
+        outputPageCount: parsed.indices.length,
+        inputBytes: inputContent.length,
+        outputBytes: outputBuffer.length,
+        filename: outputFilename,
+      },
+    }).catch(() => {});
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(outputBuffer);
+  } catch {
+    res.status(500).json({ error: 'Unable to reorder PDF pages' });
+  }
+});
+
+app.post('/api/document-tools/split-pdf/save', requireAdvocateOrAdmin, async (req, res) => {
+  try {
+    const { matterId, documentId, order: rawOrder, filename: rawFilename } = req.body || {};
+
+    if (!documentId) return res.status(400).json({ error: 'documentId is required' });
+    if (!matterId) return res.status(400).json({ error: 'matterId is required' });
+    if (typeof rawOrder !== 'string' || !rawOrder.trim()) return res.status(400).json({ error: 'order is required' });
+
+    const matter = await get('SELECT * FROM matters WHERE id=?', [matterId]);
+    if (!matter) return res.status(404).json({ error: 'Matter not found' });
+    if (!(await canAccessMatter(req, matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: matterId, metadata: { reason: 'insufficient permissions', route: 'document_tool_split_pdf_save' } }).catch(() => {});
+      return res.status(403).json({ error: 'Matter access denied' });
+    }
+
+    const doc = await get('SELECT * FROM documents WHERE id=? AND deletedAt IS NULL', [documentId]);
+    if (!doc) return res.status(404).json({ error: 'Document not found' });
+    if (!(await canAccessDocument(req, doc)) || !doc.matterId || !(await canAccessMatter(req, doc.matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: documentId, matterId: doc.matterId || '', clientId: await documentAuditClientId(doc, req), metadata: { reason: 'insufficient permissions', context: documentAuditContext(doc), route: 'document_tool_split_pdf_save' } }).catch(() => {});
+      return res.status(403).json({ error: 'Document access denied' });
+    }
+    if (doc.mimeType !== 'application/pdf') return res.status(400).json({ error: 'Only PDF documents can be reordered' });
+    if (doc.matterId !== matterId) return res.status(400).json({ error: 'Document must belong to the target matter' });
+
+    const inputContent = Buffer.isBuffer(doc.content) ? doc.content : Buffer.from(doc.content || '');
+    if (inputContent.length > MAX_MERGE_PDF_INPUT_BYTES) return res.status(413).json({ error: 'Document exceeds the 20 MB input limit' });
+
+    const outputFilename = cleanPdfDownloadName(rawFilename || 'reordered-pages.pdf');
+
+    let sourcePdf;
+    try {
+      sourcePdf = await PDFLibDocument.load(inputContent, { ignoreEncryption: false });
+    } catch {
+      return res.status(400).json({ error: 'Could not read PDF — it may be corrupt or encrypted' });
+    }
+
+    const parsed = parsePageOrder(rawOrder, sourcePdf.getPageCount());
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+
+    let outputBuffer;
+    try {
+      const outputPdf = await PDFLibDocument.create();
+      const copiedPages = await outputPdf.copyPages(sourcePdf, parsed.indices);
+      copiedPages.forEach(page => outputPdf.addPage(page));
+      outputBuffer = Buffer.from(await outputPdf.save());
+    } catch {
+      return res.status(400).json({ error: 'Could not reorder the requested pages' });
+    }
+
+    if (outputBuffer.length > 50 * 1024 * 1024) return res.status(413).json({ error: 'Reordered PDF exceeds the 50 MB output limit' });
+
+    const documentIdNew = genId('DOC');
+    const cleanName = cleanDocumentName(outputFilename);
+    const size = `${Math.max(1, Math.round(outputBuffer.length / 1024))} KB`;
+
+    await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+      documentIdNew,
+      matterId,
+      cleanName,
+      cleanName,
+      'PDF',
+      'application/pdf',
+      today(),
+      size,
+      outputBuffer,
+      'document_tool',
+      null,
+      null,
+      null,
+      0,
+      req.user.userId || '',
+    ]);
+
+    const resultDoc = await get(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=?`, [documentIdNew]);
+
+    await recordAuditEvent(req, {
+      action: 'document_tool_split_pdf_saved',
+      entityType: 'document_tool',
+      entityId: documentIdNew,
+      matterId,
+      clientId: await documentAuditClientId(resultDoc, req),
+      metadata: {
+        sourceDocumentId: documentId,
+        targetMatterId: matterId,
+        outputDocumentId: documentIdNew,
+        order: rawOrder.trim(),
+        pageCount: sourcePdf.getPageCount(),
+        outputPageCount: parsed.indices.length,
+        inputBytes: inputContent.length,
+        outputBytes: outputBuffer.length,
+        filename: cleanName,
+        clientVisible: false,
+      },
+    }).catch(() => {});
+
+    res.json(publicDocument(resultDoc));
+  } catch {
+    res.status(500).json({ error: 'Unable to save reordered PDF' });
   }
 });
 

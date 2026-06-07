@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { API_BASE, api, fileToDataUrl, fetchDocumentArrayBuffer, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, readSession, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf, deletePdfPages, saveDeletedPdf, numberPdfPages, saveNumberedPdf, createCourtBundle, saveCourtBundle, stampPdf, saveStampedPdf, tenthLinePdf, saveTenthLinedPdf } from '../lib/apiClient.js';
+import { API_BASE, api, fileToDataUrl, fetchDocumentArrayBuffer, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, readSession, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf, splitPdfPages, saveSplitPdf, deletePdfPages, saveDeletedPdf, numberPdfPages, saveNumberedPdf, createCourtBundle, saveCourtBundle, stampPdf, saveStampedPdf, tenthLinePdf, saveTenthLinedPdf } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Skeleton } from '../components/ui.jsx';
 import DocumentToolCards from './document-studio/DocumentToolCards.jsx';
@@ -108,6 +108,20 @@ export default function DocumentStudio({ notify }) {
   const [extractSaveError, setExtractSaveError] = useState(null);
   const [extractSaveSuccess, setExtractSaveSuccess] = useState('');
 
+  const [splitMatterId, setSplitMatterId] = useState('');
+  const [splitDocuments, setSplitDocuments] = useState([]);
+  const [splitDocsLoading, setSplitDocsLoading] = useState(false);
+  const [splitDocsError, setSplitDocsError] = useState(null);
+  const [splitDocumentId, setSplitDocumentId] = useState('');
+  const [splitOrder, setSplitOrder] = useState('');
+  const [splitFilename, setSplitFilename] = useState('reordered-pages.pdf');
+  const [splitLoading, setSplitLoading] = useState(false);
+  const [splitError, setSplitError] = useState(null);
+  const [splitSuccess, setSplitSuccess] = useState('');
+  const [splitSaveLoading, setSplitSaveLoading] = useState(false);
+  const [splitSaveError, setSplitSaveError] = useState(null);
+  const [splitSaveSuccess, setSplitSaveSuccess] = useState('');
+
   const [deleteMatterId, setDeleteMatterId] = useState('');
   const [deleteDocuments, setDeleteDocuments] = useState([]);
   const [deleteDocsLoading, setDeleteDocsLoading] = useState(false);
@@ -212,6 +226,7 @@ export default function DocumentStudio({ notify }) {
   const mergePanelRef = useRef(null);
   const rotatePanelRef = useRef(null);
   const extractPanelRef = useRef(null);
+  const splitPanelRef = useRef(null);
   const deletePanelRef = useRef(null);
   const paginatePanelRef = useRef(null);
   const bundlePanelRef = useRef(null);
@@ -269,6 +284,20 @@ export default function DocumentStudio({ notify }) {
       setExtractSaveSuccess('');
     }
   }, [extractMatterId]);
+
+  useEffect(() => {
+    if (splitMatterId) {
+      loadSplitDocuments(splitMatterId);
+    } else {
+      setSplitDocuments([]);
+      setSplitDocumentId('');
+      setSplitDocsError(null);
+      setSplitError(null);
+      setSplitSuccess('');
+      setSplitSaveError(null);
+      setSplitSaveSuccess('');
+    }
+  }, [splitMatterId]);
 
   useEffect(() => {
     if (deleteMatterId) {
@@ -652,6 +681,81 @@ export default function DocumentStudio({ notify }) {
       notify?.({ type: 'danger', message });
     } finally {
       setExtractSaveLoading(false);
+    }
+  }
+
+  async function loadSplitDocuments(matterId) {
+    setSplitDocsLoading(true);
+    setSplitDocsError(null);
+    setSplitError(null);
+    setSplitSuccess('');
+    setSplitSaveError(null);
+    setSplitSaveSuccess('');
+    setSplitDocumentId('');
+    try {
+      const docs = await getMatterDocuments(matterId);
+      setSplitDocuments((Array.isArray(docs) ? docs : []).filter(doc => doc.mimeType === 'application/pdf'));
+    } catch (err) {
+      setSplitDocuments([]);
+      setSplitDocsError(err.message || 'Could not load matter documents.');
+    } finally {
+      setSplitDocsLoading(false);
+    }
+  }
+
+  async function runSplitPdf() {
+    setSplitError(null);
+    setSplitSuccess('');
+    setSplitSaveError(null);
+    setSplitSaveSuccess('');
+    if (!splitDocumentId) {
+      setSplitError('Select a PDF document.');
+      return;
+    }
+    if (!splitOrder.trim()) {
+      setSplitError('Enter the new page order such as 3,1,2.');
+      return;
+    }
+    setSplitLoading(true);
+    try {
+      await splitPdfPages(splitDocumentId, splitOrder.trim(), splitFilename);
+      setSplitSuccess('Reordered PDF downloaded.');
+      notify?.({ type: 'success', message: 'Reordered PDF downloaded.' });
+    } catch (err) {
+      const message = err.message || 'Could not reorder pages.';
+      setSplitError(message);
+      notify?.({ type: 'danger', message });
+    } finally {
+      setSplitLoading(false);
+    }
+  }
+
+  async function runSplitSave() {
+    setSplitSaveError(null);
+    setSplitSaveSuccess('');
+    if (!splitDocumentId) {
+      setSplitSaveError('Select a PDF document.');
+      return;
+    }
+    if (!splitMatterId) {
+      setSplitSaveError('Select a matter first.');
+      return;
+    }
+    if (!splitOrder.trim()) {
+      setSplitSaveError('Enter the new page order such as 3,1,2.');
+      return;
+    }
+    setSplitSaveLoading(true);
+    try {
+      await saveSplitPdf(splitDocumentId, splitOrder.trim(), splitFilename, splitMatterId);
+      setSplitSaveSuccess('Saved to matter documents. Open the matter Documents tab to view it.');
+      notify?.({ type: 'success', message: 'Saved to matter documents. Open the matter Documents tab to view it.' });
+    } catch (err) {
+      const message = err.message || 'Could not save reordered PDF.';
+      setSplitSaveError(message);
+      notify?.({ type: 'danger', message });
+    } finally {
+      setSplitSaveLoading(false);
     }
   }
 
@@ -1215,6 +1319,8 @@ export default function DocumentStudio({ notify }) {
   const canRotateSave = !!rotateDocumentId && !rotateSaveLoading && !rotateDocsLoading && !!rotateMatterId;
   const canExtract = !!extractDocumentId && !!extractRanges.trim() && !extractLoading && !extractDocsLoading;
   const canExtractSave = !!extractDocumentId && !!extractRanges.trim() && !extractSaveLoading && !extractDocsLoading && !!extractMatterId;
+  const canSplit = !!splitDocumentId && !!splitOrder.trim() && !splitLoading && !splitDocsLoading;
+  const canSplitSave = !!splitDocumentId && !!splitOrder.trim() && !splitSaveLoading && !splitDocsLoading && !!splitMatterId;
   const canDelete = !!deleteDocumentId && !!deletePages.trim() && !deleteLoading && !deleteDocsLoading;
   const canDeleteSave = !!deleteDocumentId && !!deletePages.trim() && !deleteSaveLoading && !deleteDocsLoading && !!deleteMatterId;
   const canPaginate = !!paginateDocumentId && !paginateLoading && !paginateDocsLoading;
@@ -1390,6 +1496,7 @@ export default function DocumentStudio({ notify }) {
               onOpenMerge={() => handleSelectTool('merge')}
               onOpenRotate={() => handleSelectTool('rotate')}
               onOpenExtract={() => handleSelectTool('extract')}
+              onOpenSplit={() => handleSelectTool('split')}
               onOpenDelete={() => handleSelectTool('delete')}
               onOpenPaginate={() => handleSelectTool('paginate')}
                onOpenBundle={() => handleSelectTool('bundle')}
@@ -1728,6 +1835,106 @@ export default function DocumentStudio({ notify }) {
             {extractSuccess && <Alert tone="success">{extractSuccess}</Alert>}
             {extractSaveError && <Alert tone="danger">{extractSaveError}</Alert>}
             {extractSaveSuccess && <Alert tone="success">{extractSaveSuccess}</Alert>}
+          </div>
+          )}
+
+          {selectedTool === 'split' && (
+          <div
+            ref={splitPanelRef}
+            style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 16, display: 'grid', gap: 14, minWidth: 0 }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                <strong style={{ fontSize: 14, color: theme.ink }}>Split / reorder pages</strong>
+                <span style={{ fontSize: 12, color: theme.muted }}>Copy pages into a new order then download or save</span>
+              </div>
+              <Badge tone="green">Available</Badge>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, alignItems: 'end', minWidth: 0 }}>
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Matter</span>
+                <select
+                  style={styles.input}
+                  value={splitMatterId}
+                  onChange={event => { setSplitMatterId(event.target.value); setSplitError(null); setSplitSuccess(''); setSplitSaveError(null); setSplitSaveSuccess(''); }}
+                  disabled={mattersLoading || splitLoading || splitSaveLoading}
+                >
+                  <option value="">{mattersLoading ? 'Loading matters...' : 'Select a matter'}</option>
+                  {matters.map(m => (
+                    <option key={m.id} value={m.id}>{matterLabel(m)}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>PDF document</span>
+                <select
+                  style={styles.input}
+                  value={splitDocumentId}
+                  onChange={event => { setSplitDocumentId(event.target.value); setSplitError(null); setSplitSuccess(''); setSplitSaveError(null); setSplitSaveSuccess(''); }}
+                  disabled={!splitMatterId || splitDocsLoading || splitLoading || splitSaveLoading}
+                >
+                  <option value="">
+                    {!splitMatterId ? 'Select a matter first' : splitDocsLoading ? 'Loading documents...' : splitDocuments.length === 0 ? 'No PDFs found' : '— Select a PDF —'}
+                  </option>
+                  {splitDocuments.map(doc => (
+                    <option key={doc.id} value={doc.id}>
+                      {doc.displayName || doc.name || doc.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Page order</span>
+                <input
+                  style={styles.input}
+                  value={splitOrder}
+                  onChange={event => { setSplitOrder(event.target.value); setSplitError(null); setSplitSuccess(''); setSplitSaveError(null); setSplitSaveSuccess(''); }}
+                  placeholder="3,1,2"
+                  disabled={splitLoading || splitSaveLoading}
+                />
+                <span style={{ fontSize: 11, color: theme.muted, marginTop: 4 }}>Enter the new page order, for example 3,1,2 or 1-3,5.</span>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Output filename</span>
+                <input
+                  style={styles.input}
+                  value={splitFilename}
+                  onChange={event => setSplitFilename(event.target.value)}
+                  placeholder="reordered-pages.pdf"
+                  disabled={splitLoading || splitSaveLoading}
+                />
+              </label>
+
+              <button
+                type="button"
+                style={{ ...styles.primaryButton, minHeight: 36, opacity: canSplit ? 1 : 0.65, cursor: canSplit ? 'pointer' : 'not-allowed' }}
+                onClick={runSplitPdf}
+                disabled={!canSplit}
+              >
+                {splitLoading ? 'Reordering...' : 'Apply and Download'}
+              </button>
+
+              {splitMatterId && (
+                <button
+                  type="button"
+                  style={{ ...styles.ghostButton, minHeight: 36, opacity: canSplitSave ? 1 : 0.65, cursor: canSplitSave ? 'pointer' : 'not-allowed' }}
+                  onClick={runSplitSave}
+                  disabled={!canSplitSave}
+                >
+                  {splitSaveLoading ? 'Saving...' : 'Save to matter documents'}
+                </button>
+              )}
+            </div>
+
+            {splitDocsError && <Alert tone="danger">{splitDocsError}</Alert>}
+            {splitError && <Alert tone="danger">{splitError}</Alert>}
+            {splitSuccess && <Alert tone="success">{splitSuccess}</Alert>}
+            {splitSaveError && <Alert tone="danger">{splitSaveError}</Alert>}
+            {splitSaveSuccess && <Alert tone="success">{splitSaveSuccess}</Alert>}
           </div>
           )}
 
