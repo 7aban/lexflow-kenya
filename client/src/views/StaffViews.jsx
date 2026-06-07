@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote, IconMail, IconPaperclip, IconExternalLink } from '@tabler/icons-react';
-import { api, applyChecklistTemplate, approveHrLeaveRequest, cancelHrLeaveRequestAdmin, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, cancelOffboardingCase, completeOffboardingCase, createHrContract, createHrLeaveBalanceAdjustment, createHrStaffProfile, createMatterChecklistItem, createOffboardingCase, deleteChecklistTemplate, deleteClientAvatar, deleteHrDocument, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadHrDocumentContent, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getHrContracts, getHrDashboard, getHrDocuments, getHrLeaveBalances, getHrLeaveRequests, getHrStaff, getHrStaffProfile, getOffboardingAssignedMatters, getOffboardingCase, getOffboardingCases, getInvoiceDetails, getMatterTimeline, getMatterWorkMetadataLinks, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, rejectHrLeaveRequest, setHrLeaveEntitlement, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrContract, updateHrDocument, updateHrStaffProfile, updateMatterChecklistItem, updateOffboardingCase, updateOffboardingChecklistItem, uploadClientAvatar, uploadHrDocument, uploadUserAvatar } from '../lib/apiClient.js';
+import { api, applyChecklistTemplate, approveHrLeaveRequest, cancelHrLeaveRequestAdmin, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, cancelOffboardingCase, completeOffboardingCase, createHrContract, createHrLeaveBalanceAdjustment, createHrStaffProfile, createMatterChecklistItem, createOffboardingCase, deleteChecklistTemplate, deleteClientAvatar, deleteHrDocument, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadHrDocumentContent, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getHrContracts, getHrDashboard, getHrDocuments, getHrLeaveBalances, getHrLeaveRequests, getHrStaff, getHrStaffProfile, getOffboardingAssignedMatters, getOffboardingCase, getOffboardingCases, getClientSnapshot, getInvoiceDetails, getMatterTimeline, getMatterWorkMetadataLinks, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, rejectHrLeaveRequest, setHrLeaveEntitlement, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrContract, updateHrDocument, updateHrStaffProfile, updateMatterChecklistItem, updateOffboardingCase, updateOffboardingChecklistItem, uploadClientAvatar, uploadHrDocument, uploadUserAvatar } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, safeHttpUrl, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText, invoiceDueDistanceDays } from '../components/ui.jsx';
@@ -1251,6 +1251,8 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   // PRODUCT-16L: client-side Client directory filters (UI convenience only; no fetch/API/semantics change).
   const [clientSearch, setClientSearch] = useState('');
   const [clientType, setClientType] = useState('all');
+  // CLIENT-31C: which client's concise read-only snapshot card is open (null = none).
+  const [snapshotClientId, setSnapshotClientId] = useState(null);
   useEffect(() => { if (isAdmin) loadUsers(); }, [isAdmin]);
   useEffect(() => {
     if (!focus?.clientId) return;
@@ -1338,8 +1340,130 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
     if (!filteredClients.length) return;
     downloadCsv('lexflow-clients.csv', ['Name', 'Type', 'Contact', 'Email', 'Phone', 'Status'], filteredClients.map(c => [c.name || '', c.type || '', c.contact || '', c.email || '', c.phone || '', c.status || 'Active']));
   }
-  return <div className="lf-split-grid" style={styles.splitGrid}><Card title={editing ? 'Edit client' : 'New client'} hint={editing ? 'Save client changes and communication preference' : 'Intake record'}><form onSubmit={submit} style={styles.formGrid}><Field label="Name"><input required style={styles.input} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field><Field label="Type"><select style={styles.input} value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}><option>Individual</option><option>Company</option></select></Field><Field label="Contact"><input style={styles.input} value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} /></Field><Field label="Email"><input style={styles.input} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field><Field label="Phone"><input style={styles.input} value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></Field><Field label="Reminders"><select style={styles.input} value={form.remindersEnabled ? 'on' : 'off'} onChange={e => setForm({ ...form, remindersEnabled: e.target.value === 'on' })}><option value="on">On</option><option value="off">Off for this client</option></select></Field><Field label="Preferred Channel"><select style={styles.input} value={form.preferredChannel} onChange={e => setForm({ ...form, preferredChannel: e.target.value })}><option value="firm_default">Firm default</option><option value="both">WhatsApp and Email</option><option value="whatsapp">WhatsApp only</option><option value="email">Email only</option><option value="none">None</option></select></Field><button style={styles.primaryButton}>{editing ? 'Save changes' : 'Create client'}</button>{editing && <button type="button" style={styles.ghostButton} onClick={() => { setEditing(null); setForm(emptyClientForm); }}>Cancel</button>}</form></Card><Card title="Client directory" hint={`Showing ${filteredClients.length} of ${clients.length} clients`}><div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}><input type="search" aria-label="Search clients by name, email, or phone" placeholder="Search clients…" value={clientSearch} onChange={e => setClientSearch(e.target.value)} style={{ flex: 1, minWidth: 150, border: `1px solid ${theme.line}`, borderRadius: 6, padding: '7px 11px', background: '#fff', fontSize: 13, outline: 'none' }} /><select aria-label="Filter clients by type" value={clientType} onChange={e => setClientType(e.target.value)} style={{ ...styles.input, width: 'auto', minWidth: 128 }}><option value="all">All types</option><option value="Individual">Individual</option><option value="Company">Company</option></select><button type="button" style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 12px' }} onClick={exportClients} disabled={!filteredClients.length} title="Download the filtered clients as a CSV file">Export CSV</button></div><div className="lf-client-cards"><Table columns={['Photo', 'Name', 'Type', 'Email', 'Phone', 'Status', 'Reminders', 'Portal', 'Actions']} rows={filteredClients.map(c => [<ClientAvatar key={`client-avatar-${c.id}`} clientId={c.id} hasAvatar={c.hasAvatar} fullName={c.name} size={28} />, <div key={`client-name-${c.id}`} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}><span onMouseMove={e => setTooltip({ x: e.clientX, y: e.clientY, title: c.name, lines: [`${c.type || 'Client'} / ${c.status || 'Active'}`, `${matters.filter(m => m.clientId === c.id).length} matter(s)`, `Joined ${c.joinDate || '-'}`], initial: (c.name || 'C').slice(0, 1) })} onMouseLeave={() => setTooltip(null)} style={styles.hoverName}>{c.name}</span>{isAdmin && c.clientUserId && <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 2 }}><label style={{ cursor: 'pointer' }}><span style={{ ...styles.tinyButton, display: 'inline-block' }}>{c.hasAvatar ? 'Change photo' : 'Upload photo'}</span><input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} onChange={e => { handleClientAvatarUpload(c, e.target.files?.[0]); e.target.value = ''; }} /></label>{c.hasAvatar && <button type="button" style={styles.tinyButton} onClick={() => handleClientAvatarRemove(c)}>Remove photo</button>}</div>}</div>, c.type, c.email || '-', c.phone || '-', <Badge key={`${c.id}-status`} tone="green">{c.status || 'Active'}</Badge>, reminderCell(c), portalCell(c), canManage ? <ActionGroup key={`${c.id}-actions`} actions={[[ 'Edit', () => startEdit(c)], ['Delete', () => setConfirm({ title: 'Delete client?', message: 'Are you sure you want to delete this client? This will also remove all related matters.', onConfirm: () => deleteClient(c) })]]} /> : '-'])} rowIds={filteredClients.map(c => `client-${c.id}`)} empty={clientEmptyText} /></div></Card><ProfileTooltip tooltip={tooltip} /><ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} /></div>;
-}export function Matters({ data, canManage, reload, notify, focus, onMatterOpened }) {
+  return <><ClientSnapshotCard clientId={snapshotClientId} onClose={() => setSnapshotClientId(null)} /><div className="lf-split-grid" style={styles.splitGrid}><Card title={editing ? 'Edit client' : 'New client'} hint={editing ? 'Save client changes and communication preference' : 'Intake record'}><form onSubmit={submit} style={styles.formGrid}><Field label="Name"><input required style={styles.input} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field><Field label="Type"><select style={styles.input} value={form.type} onChange={e => setForm({ ...form, type: e.target.value })}><option>Individual</option><option>Company</option></select></Field><Field label="Contact"><input style={styles.input} value={form.contact} onChange={e => setForm({ ...form, contact: e.target.value })} /></Field><Field label="Email"><input style={styles.input} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field><Field label="Phone"><input style={styles.input} value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></Field><Field label="Reminders"><select style={styles.input} value={form.remindersEnabled ? 'on' : 'off'} onChange={e => setForm({ ...form, remindersEnabled: e.target.value === 'on' })}><option value="on">On</option><option value="off">Off for this client</option></select></Field><Field label="Preferred Channel"><select style={styles.input} value={form.preferredChannel} onChange={e => setForm({ ...form, preferredChannel: e.target.value })}><option value="firm_default">Firm default</option><option value="both">WhatsApp and Email</option><option value="whatsapp">WhatsApp only</option><option value="email">Email only</option><option value="none">None</option></select></Field><button style={styles.primaryButton}>{editing ? 'Save changes' : 'Create client'}</button>{editing && <button type="button" style={styles.ghostButton} onClick={() => { setEditing(null); setForm(emptyClientForm); }}>Cancel</button>}</form></Card><Card title="Client directory" hint={`Showing ${filteredClients.length} of ${clients.length} clients`}><div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}><input type="search" aria-label="Search clients by name, email, or phone" placeholder="Search clients…" value={clientSearch} onChange={e => setClientSearch(e.target.value)} style={{ flex: 1, minWidth: 150, border: `1px solid ${theme.line}`, borderRadius: 6, padding: '7px 11px', background: '#fff', fontSize: 13, outline: 'none' }} /><select aria-label="Filter clients by type" value={clientType} onChange={e => setClientType(e.target.value)} style={{ ...styles.input, width: 'auto', minWidth: 128 }}><option value="all">All types</option><option value="Individual">Individual</option><option value="Company">Company</option></select><button type="button" style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 12px' }} onClick={exportClients} disabled={!filteredClients.length} title="Download the filtered clients as a CSV file">Export CSV</button></div><div className="lf-client-cards"><Table columns={['Photo', 'Name', 'Type', 'Email', 'Phone', 'Status', 'Reminders', 'Portal', 'Actions']} rows={filteredClients.map(c => [<ClientAvatar key={`client-avatar-${c.id}`} clientId={c.id} hasAvatar={c.hasAvatar} fullName={c.name} size={28} />, <div key={`client-name-${c.id}`} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}><span onMouseMove={e => setTooltip({ x: e.clientX, y: e.clientY, title: c.name, lines: [`${c.type || 'Client'} / ${c.status || 'Active'}`, `${matters.filter(m => m.clientId === c.id).length} matter(s)`, `Joined ${c.joinDate || '-'}`], initial: (c.name || 'C').slice(0, 1) })} onMouseLeave={() => setTooltip(null)} onClick={() => setSnapshotClientId(c.id)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSnapshotClientId(c.id); } }} role="button" tabIndex={0} title="Open client snapshot" style={{ ...styles.hoverName, cursor: 'pointer' }}>{c.name}</span>{isAdmin && c.clientUserId && <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 2 }}><label style={{ cursor: 'pointer' }}><span style={{ ...styles.tinyButton, display: 'inline-block' }}>{c.hasAvatar ? 'Change photo' : 'Upload photo'}</span><input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} onChange={e => { handleClientAvatarUpload(c, e.target.files?.[0]); e.target.value = ''; }} /></label>{c.hasAvatar && <button type="button" style={styles.tinyButton} onClick={() => handleClientAvatarRemove(c)}>Remove photo</button>}</div>}</div>, c.type, c.email || '-', c.phone || '-', <Badge key={`${c.id}-status`} tone="green">{c.status || 'Active'}</Badge>, reminderCell(c), portalCell(c), canManage ? <ActionGroup key={`${c.id}-actions`} actions={[[ 'Edit', () => startEdit(c)], ['Delete', () => setConfirm({ title: 'Delete client?', message: 'Are you sure you want to delete this client? This will also remove all related matters.', onConfirm: () => deleteClient(c) })]]} /> : '-'])} rowIds={filteredClients.map(c => `client-${c.id}`)} empty={clientEmptyText} /></div></Card><ProfileTooltip tooltip={tooltip} /><ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} /></div></>;
+}
+// CLIENT-31C: concise, read-only client snapshot card. Lazy-fetches the staff-only
+// /api/clients/:id/snapshot aggregation; renders compact sections with badges/small
+// cards only. Billing section is hidden when the firm masks billing for the viewer.
+const SNAPSHOT_FLAG_TONE = { danger: 'red', warning: 'amber', info: 'blue' };
+function SnapshotSection({ title, children }) {
+  return <div style={{ marginTop: 12 }}><div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, color: theme.muted, marginBottom: 6 }}>{title}</div>{children}</div>;
+}
+function SnapshotStat({ label, value }) {
+  return <div style={{ background: theme.surface || '#F9FAFB', border: `1px solid ${theme.line}`, borderRadius: 8, padding: '8px 10px', minWidth: 96 }}><div style={{ fontSize: 11, color: theme.muted }}>{label}</div><div style={{ fontSize: 15, fontWeight: 600, color: '#111827' }}>{value}</div></div>;
+}
+function ClientSnapshotCard({ clientId, onClose }) {
+  const [snapshot, setSnapshot] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (!clientId) { setSnapshot(null); setError(''); return undefined; }
+    let active = true;
+    setLoading(true);
+    setError('');
+    setSnapshot(null);
+    getClientSnapshot(clientId)
+      .then(data => { if (active) setSnapshot(data); })
+      .catch(err => { if (active) setError(err.message || 'Unable to load client snapshot.'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [clientId]);
+  if (!clientId) return null;
+  const closeAction = <button type="button" style={styles.tinyButton} onClick={onClose} aria-label="Close client snapshot">Close</button>;
+  const c = snapshot?.client;
+  const title = c?.name ? `Client snapshot · ${c.name}` : 'Client snapshot';
+  return (
+    <Card title={title} hint="Read-only overview from existing matter, billing and obligation data" action={closeAction}>
+      {loading && <div style={{ fontSize: 13, color: theme.muted, padding: '4px 0' }}>Loading client snapshot…</div>}
+      {error && !loading && <div style={{ fontSize: 13, color: theme.red, background: theme.redBg, border: `1px solid ${theme.red}`, borderRadius: 8, padding: '8px 10px' }}>{error}</div>}
+      {snapshot && !loading && (
+        <div>
+          <SnapshotSection title="Identity & contact">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+              {c.type && <Badge tone="blue">{c.type}</Badge>}
+              <Badge tone={c.status === 'Inactive' ? 'red' : 'green'}>{c.status || 'Active'}</Badge>
+              <Badge tone={c.conflictCleared ? 'green' : 'amber'}>{c.conflictCleared ? 'Conflict cleared' : 'Conflict not cleared'}</Badge>
+              {c.joinDate && <span style={{ fontSize: 12, color: theme.muted }}>Joined {c.joinDate}</span>}
+            </div>
+            <div style={{ fontSize: 13, color: '#111827', display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+              {c.contact && <span>{c.contact}</span>}
+              {c.email && <a href={`mailto:${c.email}`} style={styles.link}>{c.email}</a>}
+              {c.phone && <a href={`tel:${c.phone}`} style={styles.link}>{c.phone}</a>}
+              {!c.contact && !c.email && !c.phone && <span style={{ color: theme.muted }}>No contact details on file.</span>}
+            </div>
+          </SnapshotSection>
+
+          <SnapshotSection title="Matters">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              <SnapshotStat label="Active" value={snapshot.matters.activeCount} />
+              <SnapshotStat label="Total" value={snapshot.matters.totalCount} />
+            </div>
+            {snapshot.matters.nextAppearance ? (
+              <div style={{ fontSize: 12, color: '#111827', marginTop: 6 }}>
+                Next appearance: <strong>{snapshot.matters.nextAppearance.date}</strong>
+                {snapshot.matters.nextAppearance.time ? ` ${snapshot.matters.nextAppearance.time}` : ''}
+                {snapshot.matters.nextAppearance.court ? ` · ${snapshot.matters.nextAppearance.court}` : ''}
+                {snapshot.matters.nextAppearance.matterTitle ? ` (${snapshot.matters.nextAppearance.matterTitle})` : ''}
+              </div>
+            ) : <div style={{ fontSize: 12, color: theme.muted, marginTop: 6 }}>No upcoming appearance.</div>}
+          </SnapshotSection>
+
+          <SnapshotSection title="Obligations">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              <SnapshotStat label="Open deadlines" value={snapshot.obligations.openDeadlinesCount} />
+              <SnapshotStat label="Pending doc requests" value={snapshot.obligations.pendingDocumentRequestsCount} />
+            </div>
+            {snapshot.obligations.nextDeadline ? (
+              <div style={{ fontSize: 12, color: '#111827', marginTop: 6 }}>
+                Next deadline: <strong>{snapshot.obligations.nextDeadline.title || 'Deadline'}</strong> due {snapshot.obligations.nextDeadline.dueDate || '-'}
+                {snapshot.obligations.nextDeadline.matterTitle ? ` (${snapshot.obligations.nextDeadline.matterTitle})` : ''}
+              </div>
+            ) : <div style={{ fontSize: 12, color: theme.muted, marginTop: 6 }}>No open deadlines.</div>}
+          </SnapshotSection>
+
+          {snapshot.billing.visible ? (
+            <SnapshotSection title="Billing">
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                <SnapshotStat label="Outstanding" value={kes(snapshot.billing.outstandingBalance)} />
+                <SnapshotStat label="Overdue invoices" value={snapshot.billing.overdueInvoiceCount} />
+                <SnapshotStat label="Proofs to review" value={snapshot.billing.pendingPaymentProofCount} />
+              </div>
+            </SnapshotSection>
+          ) : (
+            <SnapshotSection title="Billing">
+              <div style={{ fontSize: 12, color: theme.muted }}>Billing details hidden by firm settings.</div>
+            </SnapshotSection>
+          )}
+
+          <SnapshotSection title="Recent documents">
+            {snapshot.recentDocuments.length ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {snapshot.recentDocuments.map(d => (
+                  <div key={d.id} style={{ fontSize: 12, color: '#111827', display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                    <span style={{ fontWeight: 600 }}>{d.displayName || d.name || 'Document'}</span>
+                    {d.date && <span style={{ color: theme.muted }}>{d.date}</span>}
+                    {d.matterTitle && <span style={{ color: theme.muted }}>· {d.matterTitle}</span>}
+                  </div>
+                ))}
+              </div>
+            ) : <div style={{ fontSize: 12, color: theme.muted }}>No documents yet.</div>}
+          </SnapshotSection>
+
+          <SnapshotSection title="Attention">
+            {snapshot.attentionFlags.length ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {snapshot.attentionFlags.map(flag => (
+                  <span key={flag.key} title={flag.detail || ''}><Badge tone={SNAPSHOT_FLAG_TONE[flag.severity] || 'blue'}>{flag.label}</Badge></span>
+                ))}
+              </div>
+            ) : <div style={{ fontSize: 12, color: theme.muted }}>No attention items.</div>}
+          </SnapshotSection>
+        </div>
+      )}
+    </Card>
+  );
+}
+export function Matters({ data, canManage, reload, notify, focus, onMatterOpened }) {
   const [selectedId, setSelectedId] = useState('');
   const [detail, setDetail] = useState(null);
   const [suggestions, setSuggestions] = useState([]);

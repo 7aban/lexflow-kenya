@@ -432,6 +432,8 @@ export const saveTenthLinedPdf = (documentId, startNumber, filename, matterId) =
 export const moveDocument = (docId, folderId) => api(`/documents/${docId}`, { method: 'PATCH', body: { folderId } });
 export const updateDocument = (docId, data) => api(`/documents/${docId}`, { method: 'PATCH', body: data });
 export const getClientActivity = (clientId, limit = 100) => api(`/clients/${clientId}/activity?limit=${encodeURIComponent(limit)}`);
+// CLIENT-31C: concise staff-only client snapshot (read-only aggregation).
+export const getClientSnapshot = (clientId) => api(`/clients/${encodeURIComponent(clientId)}/snapshot`);
 export const updateReminderTemplate = (id, data) => api(`/reminder-templates/${id}`, { method: 'PUT', body: data });
 export const getReminderLogs = (limit = 100) => api(`/reminder-logs?limit=${encodeURIComponent(limit)}`);
 

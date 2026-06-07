@@ -4907,6 +4907,174 @@ app.get('/api/clients/:id/activity', requireStaff, async (req, res) => {
     ORDER BY ca.createdAt DESC
     LIMIT ?`, [req.params.id, limit]));
 });
+// CLIENT-31C: concise, staff-only, READ-ONLY client snapshot aggregated from
+// existing data only (no schema/tables/writes). Advocates are scoped by the
+// existing canAccessClient model and billing figures honour isBillingVisibleFor.
+app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
+  const clientId = req.params.id;
+  const clientRow = await get('SELECT * FROM clients WHERE id=?', [clientId]);
+  if (!clientRow) return res.status(404).json({ error: 'Client not found' });
+  if (!(await canAccessClient(req, clientId))) {
+    await recordAuditEvent(req, { action: 'forbidden_client_access', entityType: 'client', entityId: clientId, clientId, metadata: { reason: 'insufficient permissions', route: 'client_snapshot' } }).catch(() => {});
+    return res.status(403).json({ error: 'Client access denied' });
+  }
+
+  const todayDate = today();
+  const matters = await all('SELECT id, title, stage FROM matters WHERE clientId=?', [clientId]);
+  const matterIds = matters.map(m => m.id);
+  const matterTitleById = new Map(matters.map(m => [m.id, m.title || '']));
+  const matterPlaceholders = matterIds.map(() => '?').join(',');
+  const activeCount = matters.filter(m => m.stage !== 'Closed' && m.stage !== 'On Hold').length;
+  const totalCount = matters.length;
+
+  // Next appearance (court date) across this client's matters, today or later.
+  let nextAppearance = null;
+  if (matterIds.length) {
+    const ap = await get(`SELECT a.id, a.matterId, a.title, a.type, a.date, a.time, m.court court
+      FROM appearances a JOIN matters m ON m.id=a.matterId
+      WHERE a.matterId IN (${matterPlaceholders}) AND a.date >= ?
+      ORDER BY a.date ASC, a.time ASC LIMIT 1`, [...matterIds, todayDate]);
+    if (ap) {
+      nextAppearance = {
+        id: ap.id,
+        matterId: ap.matterId,
+        matterTitle: matterTitleById.get(ap.matterId) || '',
+        date: ap.date || '',
+        time: ap.time || '',
+        court: ap.court || '',
+        purpose: ap.title || ap.type || '',
+      };
+    }
+  }
+
+  // Open deadlines (status != 'Done'), scoped by matter OR client linkage.
+  const deadlineWhere = matterIds.length
+    ? `(clientId=? OR matterId IN (${matterPlaceholders}))`
+    : 'clientId=?';
+  const deadlineParams = matterIds.length ? [clientId, ...matterIds] : [clientId];
+  const openDeadlineRows = await all(`SELECT id, matterId, title, dueDate, status FROM deadlines
+    WHERE status != 'Done' AND ${deadlineWhere}
+    ORDER BY dueDate ASC`, deadlineParams);
+  const seenDeadlineIds = new Set();
+  const openDeadlines = openDeadlineRows.filter(d => {
+    if (seenDeadlineIds.has(d.id)) return false;
+    seenDeadlineIds.add(d.id);
+    return true;
+  });
+  const openDeadlinesCount = openDeadlines.length;
+  const nextDeadlineRow = openDeadlines[0] || null;
+  const nextDeadline = nextDeadlineRow ? {
+    id: nextDeadlineRow.id,
+    matterId: nextDeadlineRow.matterId || '',
+    matterTitle: matterTitleById.get(nextDeadlineRow.matterId) || '',
+    title: nextDeadlineRow.title || '',
+    dueDate: nextDeadlineRow.dueDate || '',
+    priority: null, // deadlines table has no priority column today
+    status: nextDeadlineRow.status || 'Open',
+  } : null;
+
+  // Pending client document requests.
+  const docReqWhere = matterIds.length
+    ? `(clientId=? OR matterId IN (${matterPlaceholders}))`
+    : 'clientId=?';
+  const docReqRow = await get(`SELECT COUNT(*) count FROM document_requests
+    WHERE status='pending' AND ${docReqWhere}`, deadlineParams);
+  const pendingDocumentRequestsCount = Number(docReqRow?.count || 0);
+
+  // Billing rollup (masked for advocates when firm disables billing visibility).
+  const billingVisible = await isBillingVisibleFor(req);
+  const invoiceWhere = matterIds.length
+    ? `(clientId=? OR matterId IN (${matterPlaceholders}))`
+    : 'clientId=?';
+  const invoiceRows = await all(`SELECT id, amount, status, dueDate FROM invoices WHERE ${invoiceWhere}`, deadlineParams);
+  const seenInvoiceIds = new Set();
+  let outstandingBalance = 0;
+  let overdueInvoiceCount = 0;
+  for (const inv of invoiceRows) {
+    if (seenInvoiceIds.has(inv.id)) continue;
+    seenInvoiceIds.add(inv.id);
+    const summary = await invoicePaymentSummary(inv.id, inv.amount);
+    outstandingBalance += summary.balance;
+    // Derived-overdue mirrors the client UI isInvoiceOverdue: unpaid + past due.
+    if (inv.status !== 'Paid' && inv.dueDate && inv.dueDate < todayDate && summary.balance > 0) {
+      overdueInvoiceCount += 1;
+    }
+  }
+  outstandingBalance = Math.round(outstandingBalance * 100) / 100;
+
+  const proofRow = await get(`SELECT COUNT(*) count FROM payment_proofs
+    WHERE status='Pending' AND ${invoiceWhere}`, deadlineParams);
+  const pendingPaymentProofCount = Number(proofRow?.count || 0);
+
+  const billing = billingVisible
+    ? { visible: true, outstandingBalance, overdueInvoiceCount, pendingPaymentProofCount }
+    : { visible: false, outstandingBalance: null, overdueInvoiceCount: null, pendingPaymentProofCount: null };
+
+  // Recent documents — safe metadata only (never content/BLOB/base64).
+  let recentDocuments = [];
+  if (matterIds.length) {
+    const docs = await all(`SELECT id, matterId, name, displayName, type, mimeType, date, source, clientVisible
+      FROM documents
+      WHERE matterId IN (${matterPlaceholders}) AND deletedAt IS NULL
+      ORDER BY date DESC LIMIT 5`, matterIds);
+    recentDocuments = docs.map(d => ({
+      id: d.id,
+      matterId: d.matterId || '',
+      matterTitle: matterTitleById.get(d.matterId) || '',
+      name: d.name || '',
+      displayName: d.displayName || '',
+      type: d.type || '',
+      mimeType: d.mimeType || '',
+      date: d.date || '',
+      source: d.source || '',
+      clientVisible: Number(d.clientVisible || 0) === 1,
+    }));
+  }
+
+  // Attention flags — derived only from data already gathered above.
+  const conflictCleared = Number(clientRow.conflictCleared || 0) === 1;
+  const attentionFlags = [];
+  if (billingVisible && overdueInvoiceCount > 0) {
+    attentionFlags.push({ key: 'overdue_invoices', label: 'Overdue invoices', severity: 'danger', detail: `${overdueInvoiceCount} invoice(s) past due` });
+  }
+  if (billingVisible && outstandingBalance > 0) {
+    attentionFlags.push({ key: 'unpaid_fees', label: 'Unpaid fees', severity: 'warning', detail: `${money(outstandingBalance)} outstanding` });
+  }
+  if (nextDeadline && nextDeadline.dueDate && nextDeadline.dueDate <= addDays(7)) {
+    attentionFlags.push({ key: 'upcoming_deadline', label: 'Upcoming deadline', severity: 'warning', detail: `${nextDeadline.title || 'Deadline'} due ${nextDeadline.dueDate}` });
+  }
+  if (billingVisible && pendingPaymentProofCount > 0) {
+    attentionFlags.push({ key: 'pending_payment_proof', label: 'Payment proof to review', severity: 'info', detail: `${pendingPaymentProofCount} awaiting review` });
+  }
+  if (pendingDocumentRequestsCount > 0) {
+    attentionFlags.push({ key: 'pending_document_request', label: 'Pending document request', severity: 'info', detail: `${pendingDocumentRequestsCount} awaiting client` });
+  }
+  if (!conflictCleared) {
+    attentionFlags.push({ key: 'conflict_not_cleared', label: 'Conflict not cleared', severity: 'warning', detail: 'Conflict check not recorded as cleared' });
+  }
+  if (activeCount === 0) {
+    attentionFlags.push({ key: 'no_active_matter', label: 'No active matter', severity: 'info', detail: 'No active matters for this client' });
+  }
+
+  res.json({
+    client: {
+      id: clientRow.id,
+      name: clientRow.name || '',
+      type: clientRow.type || '',
+      status: clientRow.status || '',
+      joinDate: clientRow.joinDate || '',
+      contact: clientRow.contact || '',
+      email: clientRow.email || '',
+      phone: clientRow.phone || '',
+      conflictCleared,
+    },
+    matters: { activeCount, totalCount, nextAppearance },
+    obligations: { openDeadlinesCount, nextDeadline, pendingDocumentRequestsCount },
+    billing,
+    recentDocuments,
+    attentionFlags,
+  });
+});
 app.delete('/api/clients/:id', requireAdvocateOrAdmin, async (req, res) => {
   const client = await get('SELECT * FROM clients WHERE id=?', [req.params.id]);
   const matters = await all('SELECT id FROM matters WHERE clientId=?', [req.params.id]);
