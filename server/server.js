@@ -195,6 +195,24 @@ const HR_FIELD_LIMITS = {
   adminNotes: 2000,
 };
 
+// HR-29E: contracts and HR document records (admin-only, separate from matter documents)
+const HR_DOCUMENT_TYPES = new Set(['contract', 'id', 'kra_pin', 'practising_certificate', 'academic_certificate', 'leave_support', 'other']);
+const HR_DOCUMENT_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+]);
+const HR_CONTRACT_TYPES = new Set(['permanent', 'fixed_term', 'consultancy', 'internship', 'pupilage', 'secondment', 'other']);
+const HR_CONTRACT_STATUSES = new Set(['active', 'expired', 'terminated', 'superseded']);
+const MAX_HR_DOCUMENT_BYTES = 10 * 1024 * 1024;
+const HR_DOCUMENT_TITLE_MAX = 160;
+const HR_DOCUMENT_FILENAME_MAX = 220;
+const HR_CONTRACT_NOTES_MAX = 2000;
+const HR_CONTRACT_DATE_FIELDS = ['startDate', 'endDate', 'probationEndDate', 'renewalDate'];
+
 function isIsoDateText(value) {
   return !value || /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
@@ -319,6 +337,95 @@ function hrAuditMetadata(user, changedFields = []) {
     staffRole: user.role || '',
     changedFieldCount: changedFields.length,
     changedFields: safeChangedFields.join(','),
+  };
+}
+
+// HR-29E helpers ----------------------------------------------------------
+
+// Strict YYYY-MM-DD validator that rejects impossible calendar dates (e.g. 2026-13-45, 2026-02-30).
+function isValidHrDate(value) {
+  if (typeof value !== 'string') return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const dt = new Date(Date.UTC(year, month - 1, day));
+  return dt.getUTCFullYear() === year && dt.getUTCMonth() === month - 1 && dt.getUTCDate() === day;
+}
+
+function publicHrDocument(row = null) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    userId: row.userId,
+    documentType: row.documentType || '',
+    title: row.title || '',
+    fileName: row.fileName || '',
+    mimeType: row.mimeType || '',
+    size: row.size || '',
+    isActive: Boolean(row.isActive),
+    uploadedBy: row.uploadedBy || '',
+    uploadedAt: row.uploadedAt || '',
+    deletedBy: row.deletedBy || '',
+    deletedAt: row.deletedAt || '',
+    createdAt: row.createdAt || '',
+    updatedAt: row.updatedAt || '',
+    staffName: row.staffName || undefined,
+    staffEmail: row.staffEmail || undefined,
+    staffRole: row.staffRole || undefined,
+  };
+}
+
+function publicHrContract(row = null) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    userId: row.userId,
+    contractType: row.contractType || '',
+    startDate: row.startDate || '',
+    endDate: row.endDate || '',
+    probationEndDate: row.probationEndDate || '',
+    renewalDate: row.renewalDate || '',
+    status: row.status || 'active',
+    documentId: row.documentId || '',
+    notes: row.notes || '',
+    createdAt: row.createdAt || '',
+    updatedAt: row.updatedAt || '',
+    createdBy: row.createdBy || '',
+    updatedBy: row.updatedBy || '',
+    staff: {
+      userId: row.userId,
+      fullName: row.staffName || '',
+      email: row.staffEmail || '',
+      role: row.staffRole || '',
+    },
+    document: row.documentId && row.docId
+      ? {
+          id: row.docId,
+          documentType: row.docType || '',
+          title: row.docTitle || '',
+          fileName: row.docFileName || '',
+          mimeType: row.docMimeType || '',
+          size: row.docSize || '',
+          isActive: Boolean(row.docIsActive),
+        }
+      : null,
+  };
+}
+
+function hrContractAuditMetadata(contract, user) {
+  return {
+    contractId: contract.id || '',
+    userId: user.id || contract.userId || '',
+    contractType: contract.contractType || '',
+    status: contract.status || '',
+    startDate: contract.startDate || '',
+    endDate: contract.endDate || '',
+    probationEndDate: contract.probationEndDate || '',
+    renewalDate: contract.renewalDate || '',
+    documentId: contract.documentId || '',
   };
 }
 
@@ -523,6 +630,49 @@ createdBy TEXT
 )`);
   await run('CREATE INDEX IF NOT EXISTS idx_hr_leave_balance_adjustments_user_year ON hr_leave_balance_adjustments(userId, year)');
   await run('CREATE INDEX IF NOT EXISTS idx_hr_leave_balance_adjustments_year_type ON hr_leave_balance_adjustments(year, leaveType)');
+
+  // HR-29E: HR document records (separate storage from matter documents) and contract records
+  await run(`CREATE TABLE IF NOT EXISTS hr_documents (
+id TEXT PRIMARY KEY,
+userId TEXT NOT NULL,
+documentType TEXT NOT NULL,
+title TEXT NOT NULL,
+fileName TEXT NOT NULL,
+mimeType TEXT NOT NULL,
+size TEXT,
+content BLOB NOT NULL,
+isActive INTEGER NOT NULL DEFAULT 1,
+uploadedBy TEXT NOT NULL,
+uploadedAt TEXT NOT NULL,
+deletedBy TEXT,
+deletedAt TEXT,
+createdAt TEXT NOT NULL,
+updatedAt TEXT
+)`);
+  await run('CREATE INDEX IF NOT EXISTS idx_hr_documents_userId ON hr_documents(userId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_hr_documents_userId_active ON hr_documents(userId, isActive)');
+  await run('CREATE INDEX IF NOT EXISTS idx_hr_documents_type ON hr_documents(documentType)');
+
+  await run(`CREATE TABLE IF NOT EXISTS hr_contract_records (
+id TEXT PRIMARY KEY,
+userId TEXT NOT NULL,
+contractType TEXT NOT NULL,
+startDate TEXT,
+endDate TEXT,
+probationEndDate TEXT,
+renewalDate TEXT,
+status TEXT NOT NULL DEFAULT 'active',
+documentId TEXT,
+notes TEXT,
+createdAt TEXT NOT NULL,
+updatedAt TEXT,
+createdBy TEXT NOT NULL,
+updatedBy TEXT
+)`);
+  await run('CREATE INDEX IF NOT EXISTS idx_hr_contract_records_userId ON hr_contract_records(userId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_hr_contract_records_status ON hr_contract_records(status)');
+  await run('CREATE INDEX IF NOT EXISTS idx_hr_contract_records_endDate ON hr_contract_records(endDate)');
+  await run('CREATE INDEX IF NOT EXISTS idx_hr_contract_records_documentId ON hr_contract_records(documentId)');
 
   await ensureClientUserSupport();
   await ensureColumn('matter_checklist_items', 'dueDate', 'TEXT');
@@ -2545,6 +2695,349 @@ app.patch('/api/hr/staff/:userId/profile', requireAdmin, async (req, res) => {
     }).catch(() => {});
     const profile = await get('SELECT * FROM hr_staff_profiles WHERE id=?', [existing.id]);
     res.json({ staff: publicHrStaffUser(staff.user), profile: publicHrProfile(profile) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// --- HR Document records (HR-29E) ---
+// Admin-only. Stored separately from matter documents; never exposed to staff self-service or the client portal.
+
+const HR_DOCUMENT_LIST_COLUMNS = `
+  d.id, d.userId, d.documentType, d.title, d.fileName, d.mimeType, d.size,
+  d.isActive, d.uploadedBy, d.uploadedAt, d.deletedBy, d.deletedAt, d.createdAt, d.updatedAt,
+  u.fullName staffName, u.email staffEmail, u.role staffRole`;
+
+app.get('/api/hr/documents', requireAdmin, async (req, res) => {
+  try {
+    const { userId, documentType, includeInactive } = req.query;
+    const conditions = ["u.role IN ('admin','advocate','assistant')"];
+    const params = [];
+    if (userId) { conditions.push('d.userId = ?'); params.push(userId); }
+    if (documentType) {
+      if (!HR_DOCUMENT_TYPES.has(documentType)) return res.status(400).json({ error: 'Invalid documentType' });
+      conditions.push('d.documentType = ?'); params.push(documentType);
+    }
+    const wantInactive = includeInactive === 'true' || includeInactive === '1';
+    if (!wantInactive) conditions.push('d.isActive = 1');
+    const rows = await all(
+      `SELECT ${HR_DOCUMENT_LIST_COLUMNS}
+       FROM hr_documents d
+       JOIN users u ON u.id = d.userId
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY d.uploadedAt DESC, d.createdAt DESC`,
+      params,
+    );
+    res.json(rows.map(publicHrDocument));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/hr/documents', requireAdmin, async (req, res) => {
+  try {
+    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    const { userId, documentType, title, fileName, mimeType, contentBase64 } = body;
+
+    const staff = await getHrStaffUser(userId);
+    if (staff.error) return res.status(staff.status).json({ error: staff.error });
+
+    if (!HR_DOCUMENT_TYPES.has(documentType)) return res.status(400).json({ error: 'Invalid documentType' });
+    if (typeof mimeType !== 'string' || !HR_DOCUMENT_MIME_TYPES.has(mimeType)) return res.status(400).json({ error: 'Invalid mimeType' });
+
+    const cleanTitle = typeof title === 'string' ? title.trim() : '';
+    if (!cleanTitle) return res.status(400).json({ error: 'title is required' });
+    if (cleanTitle.length > HR_DOCUMENT_TITLE_MAX) return res.status(400).json({ error: `title must not exceed ${HR_DOCUMENT_TITLE_MAX} characters` });
+
+    const cleanFileName = typeof fileName === 'string' ? fileName.trim() : '';
+    if (!cleanFileName) return res.status(400).json({ error: 'fileName is required' });
+    if (cleanFileName.length > HR_DOCUMENT_FILENAME_MAX) return res.status(400).json({ error: `fileName must not exceed ${HR_DOCUMENT_FILENAME_MAX} characters` });
+
+    let buffer;
+    try {
+      buffer = decodeAttachmentData({ data: contentBase64 });
+    } catch (decodeErr) {
+      return res.status(400).json({ error: decodeErr.message || 'Invalid document content' });
+    }
+    if (buffer.length > MAX_HR_DOCUMENT_BYTES) return res.status(413).json({ error: 'HR document exceeds the 10 MB limit' });
+
+    const id = genId('HRD');
+    const now = new Date().toISOString();
+    const size = `${Math.max(1, Math.round(buffer.length / 1024))} KB`;
+    await run(
+      `INSERT INTO hr_documents (id, userId, documentType, title, fileName, mimeType, size, content, isActive, uploadedBy, uploadedAt, deletedBy, deletedAt, createdAt, updatedAt)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [id, staff.user.id, documentType, cleanTitle, cleanFileName, mimeType, size, buffer, 1, req.user.userId, now, null, null, now, null],
+    );
+    await recordAuditEvent(req, {
+      action: 'hr_document_uploaded',
+      entityType: 'hr_document',
+      entityId: id,
+      metadata: { documentId: id, userId: staff.user.id, documentType, mimeType, size },
+    }).catch(() => {});
+    const row = await get(
+      `SELECT ${HR_DOCUMENT_LIST_COLUMNS} FROM hr_documents d JOIN users u ON u.id = d.userId WHERE d.id = ?`,
+      [id],
+    );
+    res.status(201).json(publicHrDocument(row));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/hr/documents/:id/content', requireAdmin, async (req, res) => {
+  try {
+    const doc = await get('SELECT * FROM hr_documents WHERE id = ?', [req.params.id]);
+    if (!doc) return res.status(404).json({ error: 'HR document not found' });
+    if (!doc.isActive) return res.status(404).json({ error: 'HR document is inactive' });
+    const content = Buffer.isBuffer(doc.content) ? doc.content : Buffer.from(doc.content || '');
+    res.setHeader('Content-Type', doc.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${cleanDocumentName(doc.fileName || doc.title || doc.id)}"`);
+    res.send(content);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch('/api/hr/documents/:id', requireAdmin, async (req, res) => {
+  try {
+    const doc = await get('SELECT * FROM hr_documents WHERE id = ?', [req.params.id]);
+    if (!doc) return res.status(404).json({ error: 'HR document not found' });
+
+    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    const updates = {};
+    if (body.title !== undefined) {
+      const cleanTitle = typeof body.title === 'string' ? body.title.trim() : '';
+      if (!cleanTitle) return res.status(400).json({ error: 'title is required' });
+      if (cleanTitle.length > HR_DOCUMENT_TITLE_MAX) return res.status(400).json({ error: `title must not exceed ${HR_DOCUMENT_TITLE_MAX} characters` });
+      updates.title = cleanTitle;
+    }
+    if (body.documentType !== undefined) {
+      if (!HR_DOCUMENT_TYPES.has(body.documentType)) return res.status(400).json({ error: 'Invalid documentType' });
+      updates.documentType = body.documentType;
+    }
+    if (body.isActive !== undefined) {
+      if (typeof body.isActive !== 'boolean' && body.isActive !== 0 && body.isActive !== 1) return res.status(400).json({ error: 'isActive must be a boolean' });
+      updates.isActive = body.isActive === true || body.isActive === 1 ? 1 : 0;
+    }
+    const fields = Object.keys(updates);
+    if (!fields.length) return res.status(400).json({ error: 'No supported HR document fields supplied' });
+
+    const now = new Date().toISOString();
+    const assignments = fields.map(field => `${field} = ?`).join(', ');
+    const values = fields.map(field => updates[field]);
+    await run(`UPDATE hr_documents SET ${assignments}, updatedAt = ? WHERE id = ?`, [...values, now, doc.id]);
+    await recordAuditEvent(req, {
+      action: 'hr_document_updated',
+      entityType: 'hr_document',
+      entityId: doc.id,
+      metadata: { documentId: doc.id, userId: doc.userId, documentType: updates.documentType || doc.documentType, changedFields: fields.join(',') },
+    }).catch(() => {});
+    const row = await get(
+      `SELECT ${HR_DOCUMENT_LIST_COLUMNS} FROM hr_documents d JOIN users u ON u.id = d.userId WHERE d.id = ?`,
+      [doc.id],
+    );
+    res.json(publicHrDocument(row));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/hr/documents/:id', requireAdmin, async (req, res) => {
+  try {
+    const doc = await get('SELECT * FROM hr_documents WHERE id = ?', [req.params.id]);
+    if (!doc) return res.status(404).json({ error: 'HR document not found' });
+    const now = new Date().toISOString();
+    await run(
+      'UPDATE hr_documents SET isActive = 0, deletedBy = ?, deletedAt = ?, updatedAt = ? WHERE id = ?',
+      [req.user.userId, now, now, doc.id],
+    );
+    await recordAuditEvent(req, {
+      action: 'hr_document_deleted',
+      entityType: 'hr_document',
+      entityId: doc.id,
+      metadata: { documentId: doc.id, userId: doc.userId, documentType: doc.documentType, mimeType: doc.mimeType, size: doc.size || '' },
+    }).catch(() => {});
+    const row = await get(
+      `SELECT ${HR_DOCUMENT_LIST_COLUMNS} FROM hr_documents d JOIN users u ON u.id = d.userId WHERE d.id = ?`,
+      [doc.id],
+    );
+    res.json(publicHrDocument(row));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// --- HR Contract records (HR-29E) ---
+// Admin-only. No salary/allowance fields; notes are never written to audit metadata.
+
+const HR_CONTRACT_SELECT = `
+  c.*,
+  u.fullName staffName, u.email staffEmail, u.role staffRole,
+  hd.id docId, hd.documentType docType, hd.title docTitle, hd.fileName docFileName,
+  hd.mimeType docMimeType, hd.size docSize, hd.isActive docIsActive`;
+
+async function validateHrContractLinkedDocument(documentId, userId) {
+  const doc = await get('SELECT id, userId, isActive FROM hr_documents WHERE id = ?', [documentId]);
+  if (!doc) return 'documentId must reference an HR document';
+  if (doc.userId !== userId) return 'documentId must reference an HR document for the same staff user';
+  if (!doc.isActive) return 'documentId must reference an active HR document';
+  return null;
+}
+
+app.get('/api/hr/contracts', requireAdmin, async (req, res) => {
+  try {
+    const { userId, status } = req.query;
+    const conditions = [];
+    const params = [];
+    if (userId) { conditions.push('c.userId = ?'); params.push(userId); }
+    if (status) {
+      if (!HR_CONTRACT_STATUSES.has(status)) return res.status(400).json({ error: 'Invalid status' });
+      conditions.push('c.status = ?'); params.push(status);
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const rows = await all(
+      `SELECT ${HR_CONTRACT_SELECT}
+       FROM hr_contract_records c
+       JOIN users u ON u.id = c.userId
+       LEFT JOIN hr_documents hd ON hd.id = c.documentId
+       ${where}
+       ORDER BY c.createdAt DESC`,
+      params,
+    );
+    res.json(rows.map(publicHrContract));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/hr/contracts/:id', requireAdmin, async (req, res) => {
+  try {
+    const row = await get(
+      `SELECT ${HR_CONTRACT_SELECT}
+       FROM hr_contract_records c
+       JOIN users u ON u.id = c.userId
+       LEFT JOIN hr_documents hd ON hd.id = c.documentId
+       WHERE c.id = ?`,
+      [req.params.id],
+    );
+    if (!row) return res.status(404).json({ error: 'Contract record not found' });
+    res.json(publicHrContract(row));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/hr/contracts', requireAdmin, async (req, res) => {
+  try {
+    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    const { userId, contractType, status, documentId, notes } = body;
+
+    const staff = await getHrStaffUser(userId);
+    if (staff.error) return res.status(staff.status).json({ error: staff.error });
+
+    if (!HR_CONTRACT_TYPES.has(contractType)) return res.status(400).json({ error: 'Invalid contractType' });
+
+    const contractStatus = status === undefined || status === null || status === '' ? 'active' : status;
+    if (!HR_CONTRACT_STATUSES.has(contractStatus)) return res.status(400).json({ error: 'Invalid status' });
+
+    const dates = {};
+    for (const field of HR_CONTRACT_DATE_FIELDS) {
+      const value = body[field];
+      if (value === undefined || value === null || value === '') { dates[field] = ''; continue; }
+      if (!isValidHrDate(value)) return res.status(400).json({ error: `${field} must be a valid YYYY-MM-DD date` });
+      dates[field] = value.trim();
+    }
+
+    let cleanNotes = '';
+    if (notes !== undefined && notes !== null) {
+      if (typeof notes !== 'string') return res.status(400).json({ error: 'notes must be a string' });
+      cleanNotes = notes.trim();
+      if (cleanNotes.length > HR_CONTRACT_NOTES_MAX) return res.status(400).json({ error: `notes must not exceed ${HR_CONTRACT_NOTES_MAX} characters` });
+    }
+
+    let linkedDocumentId = '';
+    if (documentId) {
+      const linkError = await validateHrContractLinkedDocument(documentId, staff.user.id);
+      if (linkError) return res.status(400).json({ error: linkError });
+      linkedDocumentId = documentId;
+    }
+
+    const id = genId('HRC');
+    const now = new Date().toISOString();
+    await run(
+      `INSERT INTO hr_contract_records (id, userId, contractType, startDate, endDate, probationEndDate, renewalDate, status, documentId, notes, createdAt, updatedAt, createdBy, updatedBy)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [id, staff.user.id, contractType, dates.startDate, dates.endDate, dates.probationEndDate, dates.renewalDate, contractStatus, linkedDocumentId, cleanNotes, now, null, req.user.userId, null],
+    );
+    await recordAuditEvent(req, {
+      action: 'hr_contract_recorded',
+      entityType: 'hr_contract',
+      entityId: id,
+      metadata: hrContractAuditMetadata({ id, userId: staff.user.id, contractType, status: contractStatus, ...dates, documentId: linkedDocumentId }, staff.user),
+    }).catch(() => {});
+    const row = await get(
+      `SELECT ${HR_CONTRACT_SELECT}
+       FROM hr_contract_records c
+       JOIN users u ON u.id = c.userId
+       LEFT JOIN hr_documents hd ON hd.id = c.documentId
+       WHERE c.id = ?`,
+      [id],
+    );
+    res.status(201).json(publicHrContract(row));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch('/api/hr/contracts/:id', requireAdmin, async (req, res) => {
+  try {
+    const existing = await get('SELECT * FROM hr_contract_records WHERE id = ?', [req.params.id]);
+    if (!existing) return res.status(404).json({ error: 'Contract record not found' });
+
+    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    const updates = {};
+
+    if (body.contractType !== undefined) {
+      if (!HR_CONTRACT_TYPES.has(body.contractType)) return res.status(400).json({ error: 'Invalid contractType' });
+      updates.contractType = body.contractType;
+    }
+    if (body.status !== undefined) {
+      if (!HR_CONTRACT_STATUSES.has(body.status)) return res.status(400).json({ error: 'Invalid status' });
+      updates.status = body.status;
+    }
+    for (const field of HR_CONTRACT_DATE_FIELDS) {
+      if (body[field] === undefined) continue;
+      const value = body[field];
+      if (value === null || value === '') { updates[field] = ''; continue; }
+      if (!isValidHrDate(value)) return res.status(400).json({ error: `${field} must be a valid YYYY-MM-DD date` });
+      updates[field] = value.trim();
+    }
+    if (body.notes !== undefined) {
+      if (body.notes === null) { updates.notes = ''; }
+      else if (typeof body.notes !== 'string') { return res.status(400).json({ error: 'notes must be a string' }); }
+      else {
+        const cleanNotes = body.notes.trim();
+        if (cleanNotes.length > HR_CONTRACT_NOTES_MAX) return res.status(400).json({ error: `notes must not exceed ${HR_CONTRACT_NOTES_MAX} characters` });
+        updates.notes = cleanNotes;
+      }
+    }
+    if (body.documentId !== undefined) {
+      if (body.documentId === null || body.documentId === '') {
+        updates.documentId = '';
+      } else {
+        const linkError = await validateHrContractLinkedDocument(body.documentId, existing.userId);
+        if (linkError) return res.status(400).json({ error: linkError });
+        updates.documentId = body.documentId;
+      }
+    }
+
+    const fields = Object.keys(updates);
+    if (!fields.length) return res.status(400).json({ error: 'No supported contract fields supplied' });
+
+    const now = new Date().toISOString();
+    const assignments = fields.map(field => `${field} = ?`).join(', ');
+    const values = fields.map(field => updates[field]);
+    await run(`UPDATE hr_contract_records SET ${assignments}, updatedAt = ?, updatedBy = ? WHERE id = ?`, [...values, now, req.user.userId, existing.id]);
+
+    const merged = { ...existing, ...updates };
+    await recordAuditEvent(req, {
+      action: 'hr_contract_updated',
+      entityType: 'hr_contract',
+      entityId: existing.id,
+      metadata: hrContractAuditMetadata(merged, { id: existing.userId }),
+    }).catch(() => {});
+    const row = await get(
+      `SELECT ${HR_CONTRACT_SELECT}
+       FROM hr_contract_records c
+       JOIN users u ON u.id = c.userId
+       LEFT JOIN hr_documents hd ON hd.id = c.documentId
+       WHERE c.id = ?`,
+      [existing.id],
+    );
+    res.json(publicHrContract(row));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

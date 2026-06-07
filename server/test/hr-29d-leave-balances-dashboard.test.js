@@ -611,14 +611,22 @@ describe('HR-29D leave balances and dashboard', () => {
     expect(afterProfile2 ? afterProfile2.hrStatus : null).toBe(asstBeforeStatus);
   });
 
-  test('30. No contracts/salary/HR documents/offboarding tables or fields are introduced in this phase', async () => {
+  test('30. No salary/offboarding tables or fields are introduced; balance actions create no HR document/contract rows', async () => {
     const tables = await dbAll("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name");
     const tableNames = tables.map(t => t.name);
     expect(tableNames).not.toContain('hr_contracts');
     expect(tableNames).not.toContain('hr_salary');
-    expect(tableNames).not.toContain('hr_documents');
     expect(tableNames).not.toContain('hr_offboarding');
     expect(tableNames).not.toContain('hr_notifications');
+
+    // HR-29E intentionally introduced hr_documents and hr_contract_records as a
+    // separate phase. The continuing guarantee here is that HR-29D entitlement
+    // and balance actions do not create HR document rows or contract records for
+    // the staff user, and never mutate those records.
+    const hrDocs = await dbGet("SELECT COUNT(*) AS cnt FROM hr_documents WHERE userId=?", [advocateUserId]);
+    expect(hrDocs.cnt).toBe(0);
+    const hrContracts = await dbGet("SELECT COUNT(*) AS cnt FROM hr_contract_records WHERE userId=?", [advocateUserId]);
+    expect(hrContracts.cnt).toBe(0);
 
     const entColumns = await dbAll("PRAGMA table_info(hr_leave_entitlements)");
     const entColNames = entColumns.map(c => c.name);

@@ -452,9 +452,17 @@ describe('HR-29C leave requests and approval workflow', () => {
     const tableNames = tables.map(t => t.name);
     expect(tableNames).not.toContain('hr_contracts');
     expect(tableNames).not.toContain('hr_salary');
-    expect(tableNames).not.toContain('hr_documents');
     expect(tableNames).not.toContain('hr_offboarding');
     expect(tableNames).not.toContain('hr_notifications');
     expect(tableNames).not.toContain('leave_balances');
+
+    // HR-29E intentionally introduced hr_documents and hr_contract_records as a
+    // separate phase. The continuing guarantee here is that HR-29C leave-request
+    // actions do not create HR document rows or contract records for the staff
+    // user, and never mutate those records.
+    const hrDocs = await dbGet("SELECT COUNT(*) AS cnt FROM hr_documents WHERE userId=?", [advocateUserId]);
+    expect(hrDocs.cnt).toBe(0);
+    const hrContracts = await dbGet("SELECT COUNT(*) AS cnt FROM hr_contract_records WHERE userId=?", [advocateUserId]);
+    expect(hrContracts.cnt).toBe(0);
   });
 });

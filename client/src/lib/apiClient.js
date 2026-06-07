@@ -496,3 +496,15 @@ export const setHrLeaveEntitlement = (userId, leaveType, year, payload) =>
 export const createHrLeaveBalanceAdjustment = (payload) =>
   api('/hr/leave-balance-adjustments', { method: 'POST', body: payload });
 export const getMyLeaveBalances = (year) => api(queryPath('/hr/me/leave-balances', { year }));
+
+// HR-29E: Contracts and HR document records (admin-only)
+export const getHrDocuments = (params = {}) => api(queryPath('/hr/documents', params));
+export const uploadHrDocument = (payload) => api('/hr/documents', { method: 'POST', body: payload });
+export const updateHrDocument = (id, payload) => api(`/hr/documents/${encodeURIComponent(id)}`, { method: 'PATCH', body: payload });
+export const deleteHrDocument = (id) => api(`/hr/documents/${encodeURIComponent(id)}`, { method: 'DELETE' });
+export const downloadHrDocumentContent = (id, filename) =>
+  downloadWithAuth(`${API_BASE}/hr/documents/${encodeURIComponent(id)}/content`, filename || 'hr-document');
+export const getHrContracts = (params = {}) => api(queryPath('/hr/contracts', params));
+export const getHrContract = (id) => api(`/hr/contracts/${encodeURIComponent(id)}`);
+export const createHrContract = (payload) => api('/hr/contracts', { method: 'POST', body: payload });
+export const updateHrContract = (id, payload) => api(`/hr/contracts/${encodeURIComponent(id)}`, { method: 'PATCH', body: payload });

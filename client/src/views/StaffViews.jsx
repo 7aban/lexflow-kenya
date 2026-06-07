@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote, IconMail, IconPaperclip, IconExternalLink } from '@tabler/icons-react';
-import { api, applyChecklistTemplate, approveHrLeaveRequest, cancelHrLeaveRequestAdmin, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, createHrLeaveBalanceAdjustment, createHrStaffProfile, createMatterChecklistItem, deleteChecklistTemplate, deleteClientAvatar, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getHrDashboard, getHrLeaveBalances, getHrLeaveRequests, getHrStaff, getHrStaffProfile, getInvoiceDetails, getMatterWorkMetadataLinks, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, rejectHrLeaveRequest, setHrLeaveEntitlement, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrStaffProfile, updateMatterChecklistItem, uploadClientAvatar, uploadUserAvatar } from '../lib/apiClient.js';
+import { api, applyChecklistTemplate, approveHrLeaveRequest, cancelHrLeaveRequestAdmin, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, createHrContract, createHrLeaveBalanceAdjustment, createHrStaffProfile, createMatterChecklistItem, deleteChecklistTemplate, deleteClientAvatar, deleteHrDocument, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadHrDocumentContent, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getHrContracts, getHrDashboard, getHrDocuments, getHrLeaveBalances, getHrLeaveRequests, getHrStaff, getHrStaffProfile, getInvoiceDetails, getMatterWorkMetadataLinks, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, rejectHrLeaveRequest, setHrLeaveEntitlement, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrContract, updateHrDocument, updateHrStaffProfile, updateMatterChecklistItem, uploadClientAvatar, uploadHrDocument, uploadUserAvatar } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, safeHttpUrl, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText, invoiceDueDistanceDays } from '../components/ui.jsx';
@@ -3221,6 +3221,19 @@ const emptyHrProfileForm = {
   adminNotes: '',
 };
 
+// HR-29E: contract record form (no salary/allowance fields)
+const emptyHrContractForm = {
+  userId: '',
+  contractType: 'permanent',
+  startDate: '',
+  endDate: '',
+  probationEndDate: '',
+  renewalDate: '',
+  status: 'active',
+  documentId: '',
+  notes: '',
+};
+
 const hrEmploymentTypes = [
   ['advocate', 'Advocate'],
   ['associate', 'Associate'],
@@ -3299,6 +3312,45 @@ const BALANCE_LEAVE_TYPES = [
   { value: 'other', label: 'Other' },
 ];
 
+// HR-29E: contract and HR document type labels (admin-only)
+const HR_DOCUMENT_TYPE_OPTIONS = [
+  { value: 'contract', label: 'Contract' },
+  { value: 'id', label: 'ID' },
+  { value: 'kra_pin', label: 'KRA PIN' },
+  { value: 'practising_certificate', label: 'Practising Certificate' },
+  { value: 'academic_certificate', label: 'Academic Certificate' },
+  { value: 'leave_support', label: 'Leave Support' },
+  { value: 'other', label: 'Other' },
+];
+const HR_DOCUMENT_TYPE_LABELS = Object.fromEntries(HR_DOCUMENT_TYPE_OPTIONS.map(o => [o.value, o.label]));
+const HR_CONTRACT_TYPE_OPTIONS = [
+  { value: 'permanent', label: 'Permanent' },
+  { value: 'fixed_term', label: 'Fixed Term' },
+  { value: 'consultancy', label: 'Consultancy' },
+  { value: 'internship', label: 'Internship' },
+  { value: 'pupilage', label: 'Pupilage' },
+  { value: 'secondment', label: 'Secondment' },
+  { value: 'other', label: 'Other' },
+];
+const HR_CONTRACT_TYPE_LABELS = Object.fromEntries(HR_CONTRACT_TYPE_OPTIONS.map(o => [o.value, o.label]));
+const HR_CONTRACT_STATUS_OPTIONS = [
+  { value: 'active', label: 'Active' },
+  { value: 'expired', label: 'Expired' },
+  { value: 'terminated', label: 'Terminated' },
+  { value: 'superseded', label: 'Superseded' },
+];
+const HR_CONTRACT_STATUS_LABELS = Object.fromEntries(HR_CONTRACT_STATUS_OPTIONS.map(o => [o.value, o.label]));
+// HR document MIME types accepted by the backend (PDF, PNG, JPEG, DOC, DOCX).
+const HR_DOCUMENT_ACCEPT = '.pdf,.png,.jpg,.jpeg,.doc,.docx,application/pdf,image/png,image/jpeg,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const HR_DOCUMENT_ALLOWED_MIME = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/jpg', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']);
+
+function hrContractStatusTone(status) {
+  if (status === 'active') return 'green';
+  if (status === 'expired') return 'amber';
+  if (status === 'terminated' || status === 'superseded') return 'grey';
+  return 'blue';
+}
+
 export function HR({ notify }) {
   const [staff, setStaff] = useState([]);
   const [selectedUserId, setSelectedUserId] = useState('');
@@ -3326,11 +3378,31 @@ export function HR({ notify }) {
   const [adjustment, setAdjustment] = useState({ userId: '', leaveType: 'annual', year: String(new Date().getFullYear()), days: '', reason: '' });
   const [entitlementSaving, setEntitlementSaving] = useState(false);
   const [adjustmentSaving, setAdjustmentSaving] = useState(false);
+  // HR-29E: HR document records (admin-only, separate from matter documents)
+  const [documents, setDocuments] = useState([]);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [docFilterUser, setDocFilterUser] = useState('');
+  const [docFilterType, setDocFilterType] = useState('');
+  const [docIncludeInactive, setDocIncludeInactive] = useState(false);
+  const [docUpload, setDocUpload] = useState({ userId: '', documentType: 'contract', title: '', file: null, fileName: '', mimeType: '' });
+  const [docUploading, setDocUploading] = useState(false);
+  const [docActioningId, setDocActioningId] = useState('');
+  // HR-29E: contract records (admin-only)
+  const [contracts, setContracts] = useState([]);
+  const [contractsLoading, setContractsLoading] = useState(false);
+  const [contractFilterUser, setContractFilterUser] = useState('');
+  const [contractFilterStatus, setContractFilterStatus] = useState('');
+  const [contractForm, setContractForm] = useState(emptyHrContractForm);
+  const [contractEditingId, setContractEditingId] = useState('');
+  const [contractSaving, setContractSaving] = useState(false);
+  const [contractUserDocs, setContractUserDocs] = useState([]);
 
   useEffect(() => { loadStaff(); }, []);
   useEffect(() => {
     if (hrTab === 'dashboard') loadDashboard();
     if (hrTab === 'balances') loadBalances();
+    if (hrTab === 'documents') loadDocuments();
+    if (hrTab === 'contracts') loadContracts();
   }, [hrTab]);
   useEffect(() => {
     if (selectedUserId) loadSelectedProfile(selectedUserId);
@@ -3343,6 +3415,33 @@ export function HR({ notify }) {
   useEffect(() => {
     if (hrTab === 'leaves') loadLeaveRequests();
   }, [hrTab, statusFilter]);
+
+  useEffect(() => {
+    if (hrTab === 'documents') loadDocuments();
+  }, [docFilterUser, docFilterType, docIncludeInactive]);
+
+  useEffect(() => {
+    if (hrTab === 'contracts') loadContracts();
+  }, [contractFilterUser, contractFilterStatus]);
+
+  // HR-29E: when the contract form targets a staff user, load that user's active
+  // contract/other HR documents so they can be linked. Empty if no user selected.
+  useEffect(() => {
+    let cancelled = false;
+    async function loadLinkableDocs() {
+      if (!contractForm.userId) { setContractUserDocs([]); return; }
+      try {
+        const rows = await getHrDocuments({ userId: contractForm.userId });
+        if (cancelled) return;
+        const linkable = (Array.isArray(rows) ? rows : []).filter(d => d.isActive && (d.documentType === 'contract' || d.documentType === 'other'));
+        setContractUserDocs(linkable);
+      } catch {
+        if (!cancelled) setContractUserDocs([]);
+      }
+    }
+    loadLinkableDocs();
+    return () => { cancelled = true; };
+  }, [contractForm.userId]);
 
   async function loadDashboard() {
     setDashboardLoading(true);
@@ -3368,6 +3467,166 @@ export function HR({ notify }) {
       notify?.({ type: 'danger', message: err.message });
     } finally {
       setBalancesLoading(false);
+    }
+  }
+
+  // HR-29E: HR document records ------------------------------------------------
+  async function loadDocuments() {
+    setDocumentsLoading(true);
+    try {
+      const params = {};
+      if (docFilterUser) params.userId = docFilterUser;
+      if (docFilterType) params.documentType = docFilterType;
+      if (docIncludeInactive) params.includeInactive = 'true';
+      const data = await getHrDocuments(params);
+      setDocuments(Array.isArray(data) ? data : []);
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setDocumentsLoading(false);
+    }
+  }
+
+  function handleDocFile(file) {
+    if (!file) { setDocUpload(current => ({ ...current, file: null, fileName: '', mimeType: '' })); return; }
+    if (!HR_DOCUMENT_ALLOWED_MIME.has(file.type)) {
+      notify?.({ type: 'danger', message: 'Only PDF, PNG, JPEG, DOC, or DOCX files are accepted.' });
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      notify?.({ type: 'danger', message: 'File must be 10 MB or smaller.' });
+      return;
+    }
+    setDocUpload(current => ({ ...current, file, fileName: file.name, mimeType: file.type, title: current.title || file.name }));
+  }
+
+  async function handleUploadDocument(event) {
+    event.preventDefault();
+    if (!docUpload.userId) { notify?.({ type: 'warning', message: 'Select a staff member.' }); return; }
+    if (!docUpload.file) { notify?.({ type: 'warning', message: 'Choose a file to upload.' }); return; }
+    if (!docUpload.title.trim()) { notify?.({ type: 'warning', message: 'Enter a document title.' }); return; }
+    setDocUploading(true);
+    try {
+      const contentBase64 = await fileToDataUrl(docUpload.file);
+      await uploadHrDocument({
+        userId: docUpload.userId,
+        documentType: docUpload.documentType,
+        title: docUpload.title.trim(),
+        fileName: docUpload.fileName,
+        mimeType: docUpload.mimeType,
+        contentBase64,
+      });
+      notify?.({ type: 'success', message: 'HR document uploaded.' });
+      setDocUpload({ userId: docUpload.userId, documentType: 'contract', title: '', file: null, fileName: '', mimeType: '' });
+      await loadDocuments();
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setDocUploading(false);
+    }
+  }
+
+  async function handleDownloadDocument(doc) {
+    setDocActioningId(`download:${doc.id}`);
+    try {
+      await downloadHrDocumentContent(doc.id, doc.fileName || doc.title);
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setDocActioningId('');
+    }
+  }
+
+  async function handleDeleteDocument(doc) {
+    setDocActioningId(`delete:${doc.id}`);
+    try {
+      await deleteHrDocument(doc.id);
+      notify?.({ type: 'success', message: 'HR document deactivated.' });
+      await loadDocuments();
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setDocActioningId('');
+    }
+  }
+
+  async function handleReactivateDocument(doc) {
+    setDocActioningId(`reactivate:${doc.id}`);
+    try {
+      await updateHrDocument(doc.id, { isActive: true });
+      notify?.({ type: 'success', message: 'HR document reactivated.' });
+      await loadDocuments();
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setDocActioningId('');
+    }
+  }
+
+  // HR-29E: contract records ---------------------------------------------------
+  async function loadContracts() {
+    setContractsLoading(true);
+    try {
+      const params = {};
+      if (contractFilterUser) params.userId = contractFilterUser;
+      if (contractFilterStatus) params.status = contractFilterStatus;
+      const data = await getHrContracts(params);
+      setContracts(Array.isArray(data) ? data : []);
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setContractsLoading(false);
+    }
+  }
+
+  function resetContractForm() {
+    setContractEditingId('');
+    setContractForm(emptyHrContractForm);
+  }
+
+  function startEditContract(contract) {
+    setContractEditingId(contract.id);
+    setContractForm({
+      userId: contract.userId || '',
+      contractType: contract.contractType || 'permanent',
+      startDate: contract.startDate || '',
+      endDate: contract.endDate || '',
+      probationEndDate: contract.probationEndDate || '',
+      renewalDate: contract.renewalDate || '',
+      status: contract.status || 'active',
+      documentId: contract.documentId || '',
+      notes: contract.notes || '',
+    });
+  }
+
+  async function handleSaveContract(event) {
+    event.preventDefault();
+    if (!contractForm.userId) { notify?.({ type: 'warning', message: 'Select a staff member.' }); return; }
+    setContractSaving(true);
+    try {
+      const payload = {
+        contractType: contractForm.contractType,
+        startDate: contractForm.startDate || '',
+        endDate: contractForm.endDate || '',
+        probationEndDate: contractForm.probationEndDate || '',
+        renewalDate: contractForm.renewalDate || '',
+        status: contractForm.status,
+        documentId: contractForm.documentId || '',
+        notes: contractForm.notes || '',
+      };
+      if (contractEditingId) {
+        await updateHrContract(contractEditingId, payload);
+        notify?.({ type: 'success', message: 'Contract record updated.' });
+      } else {
+        await createHrContract({ userId: contractForm.userId, ...payload });
+        notify?.({ type: 'success', message: 'Contract record created.' });
+      }
+      resetContractForm();
+      await loadContracts();
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setContractSaving(false);
     }
   }
 
@@ -3516,6 +3775,8 @@ export function HR({ notify }) {
         <button type="button" onClick={() => setHrTab('balances')} style={{ ...styles.tabButton, ...(hrTab === 'balances' ? styles.tabActive : {}) }}>Leave Balances</button>
         <button type="button" onClick={() => setHrTab('profiles')} style={{ ...styles.tabButton, ...(hrTab === 'profiles' ? styles.tabActive : {}) }}>Staff Profiles</button>
         <button type="button" onClick={() => setHrTab('leaves')} style={{ ...styles.tabButton, ...(hrTab === 'leaves' ? styles.tabActive : {}) }}>Leave Requests</button>
+        <button type="button" onClick={() => setHrTab('documents')} style={{ ...styles.tabButton, ...(hrTab === 'documents' ? styles.tabActive : {}) }}>Documents</button>
+        <button type="button" onClick={() => setHrTab('contracts')} style={{ ...styles.tabButton, ...(hrTab === 'contracts' ? styles.tabActive : {}) }}>Contracts</button>
       </div>
 
       {hrTab === 'dashboard' && (
@@ -3800,6 +4061,153 @@ export function HR({ notify }) {
             </div>
           )}
         </Card>
+      )}
+
+      {hrTab === 'documents' && (
+        <div className="lf-split-grid" style={styles.splitGrid}>
+          <Card title="Upload HR document" hint="Stored privately; admin-only. Not linked to matters or the client portal.">
+            <form onSubmit={handleUploadDocument} style={styles.formGrid}>
+              <Field label="Staff member">
+                <select style={styles.input} value={docUpload.userId} onChange={e => setDocUpload({ ...docUpload, userId: e.target.value })}>
+                  <option value="">Select staff member</option>
+                  {staff.map(member => <option key={member.userId} value={member.userId}>{hrStaffName(member)}</option>)}
+                </select>
+              </Field>
+              <Field label="Document type">
+                <select style={styles.input} value={docUpload.documentType} onChange={e => setDocUpload({ ...docUpload, documentType: e.target.value })}>
+                  {HR_DOCUMENT_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </Field>
+              <Field label="Title"><input style={styles.input} maxLength={160} value={docUpload.title} onChange={e => setDocUpload({ ...docUpload, title: e.target.value })} placeholder="e.g. Employment contract 2026" /></Field>
+              <Field label="File">
+                <input type="file" accept={HR_DOCUMENT_ACCEPT} style={styles.input} onChange={e => handleDocFile(e.target.files?.[0] || null)} />
+              </Field>
+              {docUpload.fileName ? <div style={styles.formHelper}>Selected: {docUpload.fileName} ({docUpload.mimeType || 'unknown type'})</div> : null}
+              <div style={styles.formHelper}>Accepted: PDF, PNG, JPEG, DOC, DOCX. Maximum 10 MB.</div>
+              <button style={styles.primaryButton} disabled={docUploading}>{docUploading ? 'Uploading...' : 'Upload document'}</button>
+            </form>
+          </Card>
+
+          <Card title="HR documents" hint={`${documents.length} document${documents.length === 1 ? '' : 's'}`}>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+              <select aria-label="Filter documents by staff member" style={{ ...styles.input, width: 'auto', minWidth: 150 }} value={docFilterUser} onChange={e => setDocFilterUser(e.target.value)}>
+                <option value="">All staff</option>
+                {staff.map(member => <option key={member.userId} value={member.userId}>{hrStaffName(member)}</option>)}
+              </select>
+              <select aria-label="Filter documents by type" style={{ ...styles.input, width: 'auto', minWidth: 140 }} value={docFilterType} onChange={e => setDocFilterType(e.target.value)}>
+                <option value="">All types</option>
+                {HR_DOCUMENT_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                <input type="checkbox" checked={docIncludeInactive} onChange={e => setDocIncludeInactive(e.target.checked)} />
+                Include inactive
+              </label>
+            </div>
+            {documentsLoading ? (
+              <Skeleton rows={2} />
+            ) : documents.length === 0 ? (
+              <Empty title="No HR documents." text="Upload a document to get started." />
+            ) : (
+              <Table
+                columns={['Staff', 'Type', 'Title', 'File', 'Size', 'Uploaded', 'Status', 'Actions']}
+                rows={documents.map(doc => [
+                  doc.staffName || doc.userId,
+                  HR_DOCUMENT_TYPE_LABELS[doc.documentType] || doc.documentType,
+                  doc.title,
+                  <span key={`${doc.id}-file`} style={{ fontSize: 12, color: theme.muted }}>{doc.fileName}<br />{doc.mimeType}</span>,
+                  doc.size || '-',
+                  doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString() : '-',
+                  <Badge key={`${doc.id}-status`} tone={doc.isActive ? 'green' : 'grey'}>{doc.isActive ? 'Active' : 'Inactive'}</Badge>,
+                  <div key={`${doc.id}-actions`} style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <button type="button" style={styles.tinyButton} disabled={docActioningId === `download:${doc.id}` || !doc.isActive} onClick={() => handleDownloadDocument(doc)}>{docActioningId === `download:${doc.id}` ? '...' : 'Download'}</button>
+                    {doc.isActive
+                      ? <button type="button" style={styles.dangerTinyButton} disabled={docActioningId === `delete:${doc.id}`} onClick={() => handleDeleteDocument(doc)}>{docActioningId === `delete:${doc.id}` ? '...' : 'Deactivate'}</button>
+                      : <button type="button" style={styles.tinyButton} disabled={docActioningId === `reactivate:${doc.id}`} onClick={() => handleReactivateDocument(doc)}>{docActioningId === `reactivate:${doc.id}` ? '...' : 'Reactivate'}</button>}
+                  </div>,
+                ])}
+                empty="No HR documents."
+              />
+            )}
+          </Card>
+        </div>
+      )}
+
+      {hrTab === 'contracts' && (
+        <div className="lf-split-grid" style={styles.splitGrid}>
+          <Card title={contractEditingId ? 'Edit contract record' : 'Record contract'} hint="Admin-only. No salary or allowance details are stored.">
+            <form onSubmit={handleSaveContract} style={styles.formGrid}>
+              <Field label="Staff member">
+                <select style={styles.input} value={contractForm.userId} disabled={Boolean(contractEditingId)} onChange={e => setContractForm({ ...contractForm, userId: e.target.value, documentId: '' })}>
+                  <option value="">Select staff member</option>
+                  {staff.map(member => <option key={member.userId} value={member.userId}>{hrStaffName(member)}</option>)}
+                </select>
+              </Field>
+              <Field label="Contract type">
+                <select style={styles.input} value={contractForm.contractType} onChange={e => setContractForm({ ...contractForm, contractType: e.target.value })}>
+                  {HR_CONTRACT_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </Field>
+              <Field label="Start date"><input type="date" style={styles.input} value={contractForm.startDate} onChange={e => setContractForm({ ...contractForm, startDate: e.target.value })} /></Field>
+              <Field label="End date"><input type="date" style={styles.input} value={contractForm.endDate} onChange={e => setContractForm({ ...contractForm, endDate: e.target.value })} /></Field>
+              <Field label="Probation end date"><input type="date" style={styles.input} value={contractForm.probationEndDate} onChange={e => setContractForm({ ...contractForm, probationEndDate: e.target.value })} /></Field>
+              <Field label="Renewal date"><input type="date" style={styles.input} value={contractForm.renewalDate} onChange={e => setContractForm({ ...contractForm, renewalDate: e.target.value })} /></Field>
+              <Field label="Status">
+                <select style={styles.input} value={contractForm.status} onChange={e => setContractForm({ ...contractForm, status: e.target.value })}>
+                  {HR_CONTRACT_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </Field>
+              <Field label="Linked HR document">
+                <select style={styles.input} value={contractForm.documentId} onChange={e => setContractForm({ ...contractForm, documentId: e.target.value })} disabled={!contractForm.userId}>
+                  <option value="">None</option>
+                  {contractUserDocs.map(d => <option key={d.id} value={d.id}>{HR_DOCUMENT_TYPE_LABELS[d.documentType] || d.documentType}: {d.title}</option>)}
+                </select>
+              </Field>
+              {contractForm.userId && contractUserDocs.length === 0 ? <div style={styles.formHelper}>No active contract/other documents for this staff member to link.</div> : null}
+              <Field label="Notes">
+                <textarea rows={4} maxLength={2000} style={{ ...styles.input, minHeight: 96, resize: 'vertical' }} value={contractForm.notes} onChange={e => setContractForm({ ...contractForm, notes: e.target.value })} />
+              </Field>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button style={styles.primaryButton} disabled={contractSaving}>{contractSaving ? 'Saving...' : contractEditingId ? 'Save contract' : 'Record contract'}</button>
+                {contractEditingId ? <button type="button" style={styles.ghostButton} onClick={resetContractForm}>Cancel edit</button> : null}
+              </div>
+            </form>
+          </Card>
+
+          <Card title="Contract records" hint={`${contracts.length} record${contracts.length === 1 ? '' : 's'}`}>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+              <select aria-label="Filter contracts by staff member" style={{ ...styles.input, width: 'auto', minWidth: 150 }} value={contractFilterUser} onChange={e => setContractFilterUser(e.target.value)}>
+                <option value="">All staff</option>
+                {staff.map(member => <option key={member.userId} value={member.userId}>{hrStaffName(member)}</option>)}
+              </select>
+              <select aria-label="Filter contracts by status" style={{ ...styles.input, width: 'auto', minWidth: 140 }} value={contractFilterStatus} onChange={e => setContractFilterStatus(e.target.value)}>
+                <option value="">All statuses</option>
+                {HR_CONTRACT_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            {contractsLoading ? (
+              <Skeleton rows={2} />
+            ) : contracts.length === 0 ? (
+              <Empty title="No contract records." text="Record a contract to get started." />
+            ) : (
+              <Table
+                columns={['Staff', 'Type', 'Dates', 'Status', 'Linked document', 'Action']}
+                rows={contracts.map(contract => [
+                  contract.staff?.fullName || contract.userId,
+                  HR_CONTRACT_TYPE_LABELS[contract.contractType] || contract.contractType,
+                  <span key={`${contract.id}-dates`} style={{ fontSize: 12, color: theme.muted }}>
+                    {contract.startDate || '—'} → {contract.endDate || '—'}
+                    {contract.probationEndDate ? <><br />Probation ends {contract.probationEndDate}</> : null}
+                    {contract.renewalDate ? <><br />Renews {contract.renewalDate}</> : null}
+                  </span>,
+                  <Badge key={`${contract.id}-status`} tone={hrContractStatusTone(contract.status)}>{HR_CONTRACT_STATUS_LABELS[contract.status] || contract.status}</Badge>,
+                  contract.document ? `${HR_DOCUMENT_TYPE_LABELS[contract.document.documentType] || contract.document.documentType}: ${contract.document.title}` : '—',
+                  <button key={`${contract.id}-edit`} type="button" style={contractEditingId === contract.id ? styles.primaryButton : styles.ghostButton} onClick={() => startEditContract(contract)}>Edit</button>,
+                ])}
+                empty="No contract records."
+              />
+            )}
+          </Card>
+        </div>
       )}
     </div>
   );
