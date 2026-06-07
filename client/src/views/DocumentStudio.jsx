@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { API_BASE, api, fileToDataUrl, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, readSession, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf, deletePdfPages, saveDeletedPdf, numberPdfPages, saveNumberedPdf, createCourtBundle, saveCourtBundle, stampPdf, saveStampedPdf, tenthLinePdf, saveTenthLinedPdf } from '../lib/apiClient.js';
+import { API_BASE, api, fileToDataUrl, fetchDocumentArrayBuffer, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, readSession, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf, deletePdfPages, saveDeletedPdf, numberPdfPages, saveNumberedPdf, createCourtBundle, saveCourtBundle, stampPdf, saveStampedPdf, tenthLinePdf, saveTenthLinedPdf } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Skeleton } from '../components/ui.jsx';
 import DocumentToolCards from './document-studio/DocumentToolCards.jsx';
@@ -183,6 +183,8 @@ export default function DocumentStudio({ notify }) {
   const [stampSaveSuccess, setStampSaveSuccess] = useState('');
 
   const [stampSelectedAssetUrl, setStampSelectedAssetUrl] = useState('');
+  // PRODUCT-27C: raw bytes of the selected PDF for client-side click-to-place preview.
+  const [stampPdfData, setStampPdfData] = useState(null);
 
   const [tenthMatterId, setTenthMatterId] = useState('');
   const [tenthDocuments, setTenthDocuments] = useState([]);
@@ -323,6 +325,22 @@ export default function DocumentStudio({ notify }) {
       setStampSaveSuccess('');
     }
   }, [stampMatterId]);
+
+  // PRODUCT-27C: fetch the selected PDF's bytes for the click-to-place preview,
+  // re-fetching only when the chosen document changes. Reset the page on change.
+  useEffect(() => {
+    if (!stampDocumentId) {
+      setStampPdfData(null);
+      return undefined;
+    }
+    let active = true;
+    setStampPdfData(null);
+    setStampPageNumber(1);
+    fetchDocumentArrayBuffer(stampDocumentId)
+      .then(buffer => { if (active) setStampPdfData(buffer); })
+      .catch(() => { if (active) setStampPdfData(null); });
+    return () => { active = false; };
+  }, [stampDocumentId]);
 
   useEffect(() => {
     if (tenthMatterId) {
@@ -2369,6 +2387,9 @@ export default function DocumentStudio({ notify }) {
                 onWidthChange={event => { setStampWidth(Number(event.target.value)); setStampError(null); setStampSuccess(''); setStampSaveError(null); setStampSaveSuccess(''); }}
                 selectedAssetUrl={stampSelectedAssetUrl}
                 disabled={stampLoading || stampSaveLoading}
+                pdfData={stampPdfData}
+                pageNumber={stampPageNumber}
+                onPageChange={page => { setStampPageNumber(page); setStampError(null); setStampSuccess(''); setStampSaveError(null); setStampSaveSuccess(''); }}
               />
 
               <label style={{ ...styles.field, minWidth: 0 }}>

@@ -222,6 +222,33 @@ export async function postDownloadWithAuth(path, body = {}, fallbackFilename = '
   return blob;
 }
 
+// PRODUCT-27C: fetch a document's raw bytes (no browser download) so PDF.js can
+// render it client-side for click-to-place stamping. Uses the same Bearer-token
+// pattern as the other authenticated fetch helpers and returns an ArrayBuffer.
+export async function fetchDocumentArrayBuffer(documentId) {
+  const session = readSession();
+  if (!session?.token) throw new AuthExpiredError();
+
+  const response = await fetch(`${API_BASE}/documents/${encodeURIComponent(documentId)}/download`, {
+    headers: {
+      Authorization: `Bearer ${session.token}`,
+    },
+  });
+
+  if (response.status === 401) {
+    clearSession();
+    emitAuthFailure();
+    throw new AuthExpiredError();
+  }
+  if (!response.ok) {
+    const type = response.headers.get('content-type') || '';
+    const body = type.includes('application/json') ? await response.json().catch(() => ({})) : await response.text().catch(() => '');
+    throw new Error(body?.error || body || `Document fetch failed (${response.status})`);
+  }
+
+  return response.arrayBuffer();
+}
+
 export function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

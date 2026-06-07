@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { styles, theme } from '../../theme.jsx';
+import PdfStampCanvas from './PdfStampCanvas.jsx';
 
 const PRESETS = [
   { label: 'Top Left', x: 50, y: 742, width: 150 },
@@ -18,6 +19,9 @@ export default function StampPlacementHelper({
   onWidthChange,
   selectedAssetUrl,
   disabled,
+  pdfData,
+  pageNumber,
+  onPageChange,
 }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
@@ -33,6 +37,27 @@ export default function StampPlacementHelper({
 
   return (
     <div style={{ display: 'grid', gap: 12, minWidth: 0, gridColumn: '1 / -1' }}>
+      {pdfData && (
+        <div style={{ display: 'grid', gap: 8, minWidth: 0 }}>
+          <span style={{ fontSize: 12, color: theme.muted, fontWeight: 700 }}>Click to place</span>
+          <div style={{ fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
+            Click the PDF preview to place the top-left corner of the signature/stamp. Advanced coordinates remain editable below.
+          </div>
+          <PdfStampCanvas
+            pdfData={pdfData}
+            pageNumber={pageNumber}
+            stampX={stampX}
+            stampY={stampY}
+            stampWidth={stampWidth}
+            selectedAssetUrl={selectedAssetUrl}
+            onPageChange={onPageChange}
+            onXChange={onXChange}
+            onYChange={onYChange}
+            onWidthChange={onWidthChange}
+          />
+        </div>
+      )}
+
       <div style={{ border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
         A4 reference: 595 × 842 pt. PDF coordinates start from the bottom-left corner.
       </div>
