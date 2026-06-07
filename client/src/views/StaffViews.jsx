@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote, IconMail, IconPaperclip, IconExternalLink } from '@tabler/icons-react';
-import { api, applyChecklistTemplate, approveHrLeaveRequest, cancelHrLeaveRequestAdmin, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, cancelOffboardingCase, completeOffboardingCase, createHrContract, createHrLeaveBalanceAdjustment, createHrStaffProfile, createMatterChecklistItem, createOffboardingCase, deleteChecklistTemplate, deleteClientAvatar, deleteHrDocument, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadHrDocumentContent, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getHrContracts, getHrDashboard, getHrDocuments, getHrLeaveBalances, getHrLeaveRequests, getHrStaff, getHrStaffProfile, getOffboardingAssignedMatters, getOffboardingCase, getOffboardingCases, getInvoiceDetails, getMatterWorkMetadataLinks, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, rejectHrLeaveRequest, setHrLeaveEntitlement, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrContract, updateHrDocument, updateHrStaffProfile, updateMatterChecklistItem, updateOffboardingCase, updateOffboardingChecklistItem, uploadClientAvatar, uploadHrDocument, uploadUserAvatar } from '../lib/apiClient.js';
+import { api, applyChecklistTemplate, approveHrLeaveRequest, cancelHrLeaveRequestAdmin, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, cancelOffboardingCase, completeOffboardingCase, createHrContract, createHrLeaveBalanceAdjustment, createHrStaffProfile, createMatterChecklistItem, createOffboardingCase, deleteChecklistTemplate, deleteClientAvatar, deleteHrDocument, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadHrDocumentContent, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getHrContracts, getHrDashboard, getHrDocuments, getHrLeaveBalances, getHrLeaveRequests, getHrStaff, getHrStaffProfile, getOffboardingAssignedMatters, getOffboardingCase, getOffboardingCases, getInvoiceDetails, getMatterTimeline, getMatterWorkMetadataLinks, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, rejectHrLeaveRequest, setHrLeaveEntitlement, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrContract, updateHrDocument, updateHrStaffProfile, updateMatterChecklistItem, updateOffboardingCase, updateOffboardingChecklistItem, uploadClientAvatar, uploadHrDocument, uploadUserAvatar } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, safeHttpUrl, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText, invoiceDueDistanceDays } from '../components/ui.jsx';
@@ -5416,10 +5416,47 @@ function timelineToneColor(tone) {
   return theme.blue;
 }
 
+// TIMELINE-30C: map a backend timeline event (from GET /api/matters/:id/timeline)
+// to the existing card render shape. Backend already strips sensitive data and
+// sorts descending; we never render raw metadata.
+const TIMELINE_TYPE_DISPLAY = {
+  matter_opened: { source: 'Matter', tone: 'blue' },
+  note: { source: 'Note', tone: 'blue' },
+  task: { source: 'Task', tone: 'amber' },
+  appearance: { source: 'Court', tone: 'red' },
+  document: { source: 'Document', tone: 'blue' },
+  time_entry: { source: 'Time', tone: 'green' },
+  invoice: { source: 'Invoice', tone: 'amber' },
+  deadline: { source: 'Deadline', tone: 'amber' },
+  payment: { source: 'Payment', tone: 'green' },
+  checklist: { source: 'Checklist', tone: 'blue' },
+};
+
+function mapTimelineApiEvent(event) {
+  const display = TIMELINE_TYPE_DISPLAY[event.type] || { source: 'Activity', tone: 'blue' };
+  let tone = display.tone;
+  if ((event.type === 'task' || event.type === 'checklist') && event.metadata?.status === 'completed') tone = 'green';
+  const secondary = [event.summary, event.actor ? `· ${event.actor}` : ''].filter(Boolean).join(' ').trim();
+  return {
+    date: event.date,
+    parsed: parseDateValue(event.date),
+    source: display.source,
+    tone,
+    title: event.title,
+    secondary,
+  };
+}
+
 function MatterActivityTimeline({ detail }) {
   const [activityOpen, setActivityOpen] = useState(false);
+  // TIMELINE-30C: events now come from the backend route; the local aggregation
+  // below is kept as a fallback when the API errors or returns nothing.
+  const [apiEvents, setApiEvents] = useState(null);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const [timelineError, setTimelineError] = useState('');
+  const loadedMatterRef = useRef('');
 
-  const events = useMemo(() => {
+  const localEvents = useMemo(() => {
     const timeline = [];
     const addEvent = ({ date, source, tone = 'blue', title, detail: secondary }) => {
       timeline.push({
@@ -5523,6 +5560,42 @@ function MatterActivityTimeline({ detail }) {
     });
   }, [detail]);
 
+  // Reset cached API events when the matter changes.
+  useEffect(() => {
+    setApiEvents(null);
+    setTimelineError('');
+    loadedMatterRef.current = '';
+  }, [detail?.id]);
+
+  // Lazily load the authoritative timeline from the backend when the section is
+  // first expanded for a given matter (one fetch per matter).
+  useEffect(() => {
+    if (!activityOpen || !detail?.id || loadedMatterRef.current === detail.id) return;
+    let cancelled = false;
+    loadedMatterRef.current = detail.id;
+    setTimelineLoading(true);
+    setTimelineError('');
+    getMatterTimeline(detail.id)
+      .then(res => {
+        if (cancelled) return;
+        const list = Array.isArray(res?.events) ? res.events : [];
+        setApiEvents(list.map(mapTimelineApiEvent));
+      })
+      .catch(err => {
+        if (cancelled) return;
+        setTimelineError(err?.message || 'Unable to load the matter timeline.');
+        setApiEvents(null); // fall back to the local aggregation
+        loadedMatterRef.current = ''; // allow a retry on next expand
+      })
+      .finally(() => { if (!cancelled) setTimelineLoading(false); });
+    return () => { cancelled = true; };
+  }, [activityOpen, detail?.id]);
+
+  // Prefer the backend timeline (includes deadlines/payments and respects backend
+  // order); fall back to the local aggregation when the API errors or is empty.
+  const usingApiEvents = Array.isArray(apiEvents) && apiEvents.length > 0;
+  const events = usingApiEvents ? apiEvents : localEvents;
+
   return (
     <section aria-label="Matter Activity Timeline" style={{ border: `1px solid ${theme.line}`, borderRadius: 10, padding: 14, background: '#fff', display: 'grid', gap: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
@@ -5548,12 +5621,21 @@ function MatterActivityTimeline({ detail }) {
           <div style={{ border: `1px dashed ${theme.line}`, borderRadius: 8, padding: 12, color: theme.muted, fontSize: 13 }}>
             Review recent matter activity when you need file history or audit context.
           </div>
+        ) : timelineLoading && !usingApiEvents ? (
+          <div style={{ border: `1px dashed ${theme.line}`, borderRadius: 8, padding: 12, color: theme.muted, fontSize: 13 }}>
+            Loading matter timeline…
+          </div>
         ) : events.length === 0 ? (
           <div style={{ border: `1px dashed ${theme.line}`, borderRadius: 8, padding: 12, color: theme.muted, fontSize: 13 }}>
             No activity recorded for this matter yet.
           </div>
         ) : (
           <div style={{ display: 'grid', gap: 8 }}>
+            {timelineError ? (
+              <div style={{ border: `1px solid ${theme.amber}`, borderRadius: 8, padding: '8px 10px', background: '#FFFBEB', color: theme.ink, fontSize: 12 }}>
+                Showing activity from current matter records — the full timeline could not be loaded.
+              </div>
+            ) : null}
             {events.map((event, index) => (
               <div
                 key={`${event.source}-${event.title}-${event.date || 'undated'}-${index}`}
