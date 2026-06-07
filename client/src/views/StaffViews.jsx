@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote, IconMail, IconPaperclip, IconExternalLink } from '@tabler/icons-react';
-import { api, applyChecklistTemplate, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, createMatterChecklistItem, deleteChecklistTemplate, deleteClientAvatar, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getInvoiceDetails, getMatterWorkMetadataLinks, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateMatterChecklistItem, uploadClientAvatar, uploadUserAvatar } from '../lib/apiClient.js';
+import { api, applyChecklistTemplate, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, createHrStaffProfile, createMatterChecklistItem, deleteChecklistTemplate, deleteClientAvatar, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getHrStaff, getHrStaffProfile, getInvoiceDetails, getMatterWorkMetadataLinks, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrStaffProfile, updateMatterChecklistItem, uploadClientAvatar, uploadUserAvatar } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, safeHttpUrl, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText, invoiceDueDistanceDays } from '../components/ui.jsx';
@@ -3201,6 +3201,224 @@ function UserAvatar({ userId, hasAvatar, fullName, size = 28 }) {
       {src
         ? <img src={src} alt={fullName || ''} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} onError={() => setSrc(null)} />
         : initial}
+    </div>
+  );
+}
+
+const emptyHrProfileForm = {
+  jobTitle: '',
+  department: '',
+  practiceTeam: '',
+  employmentType: '',
+  startDate: '',
+  contractEndDate: '',
+  supervisorUserId: '',
+  workEmail: '',
+  workPhone: '',
+  emergencyContactName: '',
+  emergencyContactPhone: '',
+  hrStatus: 'active',
+  adminNotes: '',
+};
+
+const hrEmploymentTypes = [
+  ['advocate', 'Advocate'],
+  ['associate', 'Associate'],
+  ['pupil', 'Pupil'],
+  ['clerk', 'Clerk'],
+  ['assistant', 'Assistant'],
+  ['admin', 'Admin'],
+  ['consultant', 'Consultant'],
+  ['intern', 'Intern'],
+  ['other', 'Other'],
+];
+
+const hrStatuses = [
+  ['active', 'Active'],
+  ['on_leave', 'On leave'],
+  ['suspended', 'Suspended'],
+  ['exited', 'Exited'],
+];
+
+function hrStatusLabel(status) {
+  return hrStatuses.find(([value]) => value === status)?.[1] || 'No profile';
+}
+
+function hrStatusTone(status) {
+  if (status === 'active') return 'green';
+  if (status === 'on_leave') return 'amber';
+  if (status === 'suspended' || status === 'exited') return 'red';
+  return 'blue';
+}
+
+function hrProfileFormFrom(profile, staffUser) {
+  const values = { ...emptyHrProfileForm };
+  Object.keys(emptyHrProfileForm).forEach(field => {
+    values[field] = profile?.[field] || emptyHrProfileForm[field];
+  });
+  if (!values.workEmail) values.workEmail = staffUser?.email || '';
+  if (!values.hrStatus) values.hrStatus = 'active';
+  return values;
+}
+
+function hrStaffName(staffUser) {
+  return staffUser?.fullName || staffUser?.email || 'Staff member';
+}
+
+export function HR({ notify }) {
+  const [staff, setStaff] = useState([]);
+  const [selectedUserId, setSelectedUserId] = useState('');
+  const [selectedRecord, setSelectedRecord] = useState(null);
+  const [form, setForm] = useState(emptyHrProfileForm);
+  const [loading, setLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState('');
+
+  useEffect(() => { loadStaff(); }, []);
+  useEffect(() => {
+    if (selectedUserId) loadSelectedProfile(selectedUserId);
+    else {
+      setSelectedRecord(null);
+      setForm(emptyHrProfileForm);
+    }
+  }, [selectedUserId]);
+
+  async function loadStaff(preferredUserId = selectedUserId) {
+    setLoading(true);
+    try {
+      const rows = await getHrStaff();
+      const list = Array.isArray(rows) ? rows : [];
+      setStaff(list);
+      setLoadError(Array.isArray(rows) ? '' : 'The HR staff endpoint returned an unexpected response.');
+      const nextUserId = list.some(member => member.userId === preferredUserId) ? preferredUserId : (list[0]?.userId || '');
+      setSelectedUserId(nextUserId);
+    } catch (err) {
+      setStaff([]);
+      setLoadError(err.message);
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadSelectedProfile(userId) {
+    setProfileLoading(true);
+    try {
+      const record = await getHrStaffProfile(userId);
+      setSelectedRecord(record);
+      setForm(hrProfileFormFrom(record?.profile, record?.staff));
+      setLoadError('');
+    } catch (err) {
+      setSelectedRecord(null);
+      setForm(emptyHrProfileForm);
+      setLoadError(err.message);
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setProfileLoading(false);
+    }
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    if (!selectedUserId) return;
+    setSaving(true);
+    try {
+      const payload = { ...form };
+      const hasProfile = Boolean(selectedRecord?.profile?.id);
+      const saved = hasProfile
+        ? await updateHrStaffProfile(selectedUserId, payload)
+        : await createHrStaffProfile(selectedUserId, payload);
+      setSelectedRecord(saved);
+      setForm(hrProfileFormFrom(saved?.profile, saved?.staff));
+      notify?.({ type: 'success', message: hasProfile ? 'HR profile updated.' : 'HR profile created.' });
+      await loadStaff(selectedUserId);
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const selectedStaff = selectedRecord?.staff || staff.find(member => member.userId === selectedUserId);
+  const selectedProfile = selectedRecord?.profile || null;
+  const profileCount = staff.filter(member => member.profile).length;
+  const staffEmptyText = loading ? 'Loading staff...' : 'No staff users found.';
+
+  return (
+    <div className="lf-split-grid" style={styles.splitGrid}>
+      <Card title="Staff HR profiles" hint={`${profileCount} of ${staff.length} staff profiled`}>
+        <div style={{ ...styles.alert, marginBottom: 12 }}>Leave, contracts, salary records, documents, and offboarding are not enabled in this phase.</div>
+        {loadError && <div style={{ ...styles.alert, ...styles.alertDanger, marginBottom: 12 }}>{loadError}</div>}
+        {loading ? (
+          <Skeleton rows={2} />
+        ) : (
+          <Table
+            columns={['Name', 'Email', 'Role', 'HR Status', 'Job Title', 'Action']}
+            rows={staff.map(member => [
+              <div key={`${member.userId}-name`} style={{ display: 'grid', gap: 2 }}>
+                <strong>{hrStaffName(member)}</strong>
+                <span style={{ color: theme.muted, fontSize: 12 }}>{member.isActive ? 'Active user' : 'Inactive user'}</span>
+              </div>,
+              member.email || '-',
+              member.role || '-',
+              <Badge key={`${member.userId}-status`} tone={hrStatusTone(member.profile?.hrStatus)}>{member.profile ? hrStatusLabel(member.profile.hrStatus) : 'No profile'}</Badge>,
+              member.profile?.jobTitle || '-',
+              <button key={`${member.userId}-select`} type="button" style={selectedUserId === member.userId ? styles.primaryButton : styles.ghostButton} onClick={() => setSelectedUserId(member.userId)}>Select</button>,
+            ])}
+            empty={staffEmptyText}
+          />
+        )}
+      </Card>
+
+      <Card title={selectedStaff ? `${selectedProfile ? 'Edit' : 'Create'} HR profile` : 'HR profile'} hint={selectedStaff ? hrStaffName(selectedStaff) : 'Select a staff member'}>
+        {profileLoading ? (
+          <Skeleton rows={1} />
+        ) : selectedStaff ? (
+          <>
+            {!selectedProfile && <Empty title="No HR profile yet." text="Complete the form to create one for this staff member." />}
+            <form onSubmit={submit} style={{ ...styles.formGrid, marginTop: selectedProfile ? 0 : 12 }}>
+              <Field label="Staff member">
+                <select style={styles.input} value={selectedUserId} onChange={e => setSelectedUserId(e.target.value)}>
+                  {staff.map(member => <option key={member.userId} value={member.userId}>{hrStaffName(member)}</option>)}
+                </select>
+              </Field>
+              <Field label="Job title"><input style={styles.input} value={form.jobTitle} onChange={e => setForm({ ...form, jobTitle: e.target.value })} /></Field>
+              <Field label="Department"><input style={styles.input} value={form.department} onChange={e => setForm({ ...form, department: e.target.value })} /></Field>
+              <Field label="Practice team"><input style={styles.input} value={form.practiceTeam} onChange={e => setForm({ ...form, practiceTeam: e.target.value })} /></Field>
+              <Field label="Employment type">
+                <select style={styles.input} value={form.employmentType} onChange={e => setForm({ ...form, employmentType: e.target.value })}>
+                  <option value="">Not set</option>
+                  {hrEmploymentTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </Field>
+              <Field label="Start date"><input type="date" style={styles.input} value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })} /></Field>
+              <Field label="Contract end date"><input type="date" style={styles.input} value={form.contractEndDate} onChange={e => setForm({ ...form, contractEndDate: e.target.value })} /></Field>
+              <Field label="Supervisor">
+                <select style={styles.input} value={form.supervisorUserId} onChange={e => setForm({ ...form, supervisorUserId: e.target.value })}>
+                  <option value="">Not set</option>
+                  {staff.map(member => <option key={member.userId} value={member.userId}>{hrStaffName(member)}</option>)}
+                </select>
+              </Field>
+              <Field label="Work email"><input type="email" style={styles.input} value={form.workEmail} onChange={e => setForm({ ...form, workEmail: e.target.value })} /></Field>
+              <Field label="Work phone"><input type="tel" style={styles.input} value={form.workPhone} onChange={e => setForm({ ...form, workPhone: e.target.value })} /></Field>
+              <Field label="Emergency contact name"><input style={styles.input} value={form.emergencyContactName} onChange={e => setForm({ ...form, emergencyContactName: e.target.value })} /></Field>
+              <Field label="Emergency contact phone"><input type="tel" style={styles.input} value={form.emergencyContactPhone} onChange={e => setForm({ ...form, emergencyContactPhone: e.target.value })} /></Field>
+              <Field label="HR status">
+                <select style={styles.input} value={form.hrStatus} onChange={e => setForm({ ...form, hrStatus: e.target.value })}>
+                  {hrStatuses.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </Field>
+              <Field label="Admin notes">
+                <textarea rows={4} style={{ ...styles.input, minHeight: 104, resize: 'vertical' }} value={form.adminNotes} onChange={e => setForm({ ...form, adminNotes: e.target.value })} />
+              </Field>
+              <button style={styles.primaryButton} disabled={saving}>{saving ? 'Saving...' : selectedProfile ? 'Save HR profile' : 'Create HR profile'}</button>
+            </form>
+          </>
+        ) : (
+          <Empty title="No staff selected." text="Select a staff user to create or edit an HR profile." />
+        )}
+      </Card>
     </div>
   );
 }

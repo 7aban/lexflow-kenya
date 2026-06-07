@@ -292,6 +292,10 @@ export const deleteDeadline = id => api(`/deadlines/${id}`, { method: 'DELETE' }
 export const getComplianceGuidance = () => api('/compliance-guidance');
 export const getNotifications = () => api('/notifications');
 export const markNotificationsRead = data => api('/notifications/read', { method: 'POST', body: data });
+export const getHrStaff = () => api('/hr/staff');
+export const getHrStaffProfile = userId => api(`/hr/staff/${encodeURIComponent(userId)}/profile`);
+export const createHrStaffProfile = (userId, payload) => api(`/hr/staff/${encodeURIComponent(userId)}/profile`, { method: 'POST', body: payload });
+export const updateHrStaffProfile = (userId, payload) => api(`/hr/staff/${encodeURIComponent(userId)}/profile`, { method: 'PATCH', body: payload });
 export const listConnectedAccounts = () => api('/connected-accounts');
 export const startConnectedAccountOAuth = provider => api(`/connected-accounts/${encodeURIComponent(provider)}/start`, { method: 'POST', body: {} });
 export const disconnectConnectedAccount = id => api(`/connected-accounts/${encodeURIComponent(id)}/disconnect`, { method: 'POST', body: {} });

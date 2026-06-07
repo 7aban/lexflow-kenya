@@ -14,7 +14,7 @@ import ClientApp from './views/ClientApp.jsx';
 import Communications from './views/Communications.jsx';
 import DeadlineCenter from './views/DeadlineCenter.jsx';
 import Invitations from './views/Invitations.jsx';
-import { Clients, ConnectedAccounts, Dashboard, FirmSettings, Invoices, Matters, Tasks, Users } from './views/StaffViews.jsx';
+import { Clients, ConnectedAccounts, Dashboard, FirmSettings, HR, Invoices, Matters, Tasks, Users } from './views/StaffViews.jsx';
 import DocumentStudio from './views/DocumentStudio.jsx';
 import Reports from './views/Reports.jsx';
 
@@ -30,6 +30,7 @@ const navIcons = {
   Invoices: IconFileInvoice,
   Communications: IconMessages,
   Users: IconUsersGroup,
+  HR: IconUsersGroup,
   'Firm Settings': IconSettings,
   'Audit Log': IconListSearch,
   'Structured Audit': IconShield,
@@ -54,7 +55,7 @@ const navGroups = [
   { title: 'Document Studio', items: [['Document Studio', ['admin', 'advocate']]] },
   { title: 'Finance', items: [['Invoices', ['admin']]] },
   { title: 'Communications', items: [['Communications', ['admin', 'advocate', 'assistant']]] },
-  { title: 'Administration', items: [['Users', ['admin']], ['Firm Settings', ['admin']], ['Audit Log', ['admin']], ['Structured Audit', ['admin']]] },
+  { title: 'Administration', items: [['Users', ['admin']], ['HR', ['admin']], ['Firm Settings', ['admin']], ['Audit Log', ['admin']], ['Structured Audit', ['admin']]] },
   { title: 'Account', items: [['Connected Accounts', ['admin', 'advocate', 'assistant']]] },
   { title: 'Resources', items: [
     ['eFiling CTS', ['admin', 'advocate', 'assistant'], 'https://efiling.court.go.ke/auth'],
@@ -527,6 +528,7 @@ export default function App() {
     Performance: 'Managing partner view of advocate output, workload and court attendance.',
     'Firm Settings': 'Client-ready branding, invoice identity and contact details.',
     Users: 'Role-based access for advocates, assistants and administrators.',
+    HR: 'Admin-only staff HR profile records.',
     'Connected Accounts': 'Authorize future Google Workspace and Microsoft 365 integrations.',
     Invitations: 'Secure client portal onboarding links and invitation status.',
     'Audit Log': 'A secure activity trail for important changes and accountability.',
@@ -679,6 +681,7 @@ export default function App() {
             {(!loading || bootstrapped) && view === 'Firm Settings' && isAdmin && <FirmSettings settings={firm} clients={data.clients} reload={refresh} notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Connected Accounts' && <ConnectedAccounts notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Users' && isAdmin && <Users clients={data.clients} notify={setToast} />}
+            {(!loading || bootstrapped) && view === 'HR' && isAdmin && <HR notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Invitations' && isAdmin && <Invitations clients={data.clients} notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Audit Log' && isAdmin && <AuditLog notify={setToast} navigate={setView} />}
             {(!loading || bootstrapped) && view === 'Structured Audit' && isAdmin && <StructuredAuditLog notify={setToast} />}

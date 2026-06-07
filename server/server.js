@@ -158,6 +158,168 @@ function normalizeBillable(value, fallback = 1) {
   return null;
 }
 
+const HR_STAFF_ROLES = new Set(['admin', 'advocate', 'assistant']);
+const HR_EMPLOYMENT_TYPES = new Set(['advocate', 'associate', 'pupil', 'clerk', 'assistant', 'admin', 'consultant', 'intern', 'other']);
+const HR_STATUSES = new Set(['active', 'on_leave', 'suspended', 'exited']);
+const HR_PROFILE_FIELDS = [
+  'jobTitle',
+  'department',
+  'practiceTeam',
+  'employmentType',
+  'startDate',
+  'contractEndDate',
+  'supervisorUserId',
+  'workEmail',
+  'workPhone',
+  'emergencyContactName',
+  'emergencyContactPhone',
+  'hrStatus',
+  'adminNotes',
+];
+const HR_AUDIT_SENSITIVE_FIELDS = new Set(['adminNotes', 'emergencyContactName', 'emergencyContactPhone']);
+const HR_FIELD_LIMITS = {
+  jobTitle: 120,
+  department: 120,
+  practiceTeam: 120,
+  employmentType: 40,
+  startDate: 20,
+  contractEndDate: 20,
+  supervisorUserId: 80,
+  workEmail: 254,
+  workPhone: 80,
+  emergencyContactName: 160,
+  emergencyContactPhone: 80,
+  hrStatus: 40,
+  adminNotes: 2000,
+};
+
+function isIsoDateText(value) {
+  return !value || /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function normalizeHrText(field, value) {
+  if (value === undefined) return { supplied: false };
+  if (value === null) return { supplied: true, value: '' };
+  if (typeof value !== 'string') return { supplied: true, error: `${field} must be a string` };
+  const text = value.trim();
+  const max = HR_FIELD_LIMITS[field] || 200;
+  if (text.length > max) return { supplied: true, error: `${field} must not exceed ${max} characters` };
+  return { supplied: true, value: text };
+}
+
+function validateHrProfilePayload(body, { partial = false } = {}) {
+  const input = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  const unknown = Object.keys(input).filter(field => !HR_PROFILE_FIELDS.includes(field));
+  if (unknown.length) return { error: `Unsupported HR profile field: ${unknown[0]}` };
+
+  const value = {};
+  const changedFields = [];
+  for (const field of HR_PROFILE_FIELDS) {
+    const normalized = normalizeHrText(field, input[field]);
+    if (normalized.error) return { error: normalized.error };
+    if (normalized.supplied) {
+      value[field] = normalized.value;
+      changedFields.push(field);
+    } else if (!partial) {
+      value[field] = field === 'hrStatus' ? 'active' : '';
+    }
+  }
+
+  if (partial && !changedFields.length) return { error: 'No supported HR profile fields supplied' };
+
+  if (!partial || value.employmentType !== undefined) {
+    if (value.employmentType && !HR_EMPLOYMENT_TYPES.has(value.employmentType)) return { error: 'Invalid employmentType' };
+  }
+  if (!partial || value.hrStatus !== undefined) {
+    if (!value.hrStatus) value.hrStatus = 'active';
+    if (!HR_STATUSES.has(value.hrStatus)) return { error: 'Invalid hrStatus' };
+  }
+  for (const field of ['startDate', 'contractEndDate']) {
+    if (value[field] !== undefined && !isIsoDateText(value[field])) return { error: `${field} must use YYYY-MM-DD format` };
+  }
+
+  return { value, changedFields };
+}
+
+function publicHrStaffUser(row = {}) {
+  return {
+    userId: row.userId || row.id || '',
+    fullName: row.fullName || '',
+    email: row.email || '',
+    role: row.role || '',
+    isActive: Boolean(row.isActive ?? 1),
+  };
+}
+
+function publicHrProfile(row = null) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    userId: row.userId,
+    jobTitle: row.jobTitle || '',
+    department: row.department || '',
+    practiceTeam: row.practiceTeam || '',
+    employmentType: row.employmentType || '',
+    startDate: row.startDate || '',
+    contractEndDate: row.contractEndDate || '',
+    supervisorUserId: row.supervisorUserId || '',
+    workEmail: row.workEmail || '',
+    workPhone: row.workPhone || '',
+    emergencyContactName: row.emergencyContactName || '',
+    emergencyContactPhone: row.emergencyContactPhone || '',
+    hrStatus: row.hrStatus || 'active',
+    adminNotes: row.adminNotes || '',
+    createdAt: row.createdAt || '',
+    updatedAt: row.updatedAt || '',
+    createdBy: row.createdBy || '',
+    updatedBy: row.updatedBy || '',
+  };
+}
+
+function publicHrProfileSummary(row = {}) {
+  if (!row.profileId) return null;
+  return {
+    id: row.profileId,
+    userId: row.userId,
+    jobTitle: row.jobTitle || '',
+    department: row.department || '',
+    practiceTeam: row.practiceTeam || '',
+    employmentType: row.employmentType || '',
+    startDate: row.startDate || '',
+    contractEndDate: row.contractEndDate || '',
+    supervisorUserId: row.supervisorUserId || '',
+    workEmail: row.workEmail || '',
+    workPhone: row.workPhone || '',
+    hrStatus: row.hrStatus || 'active',
+    createdAt: row.profileCreatedAt || '',
+    updatedAt: row.profileUpdatedAt || '',
+  };
+}
+
+async function getHrStaffUser(userId) {
+  const user = await get('SELECT id,email,fullName,role,isActive FROM users WHERE id=?', [userId]);
+  if (!user) return { status: 404, error: 'Staff user not found' };
+  if (!HR_STAFF_ROLES.has(user.role)) return { status: 400, error: 'HR profiles are only available for staff users' };
+  return { user };
+}
+
+async function validateHrSupervisor(supervisorUserId) {
+  if (!supervisorUserId) return null;
+  const supervisor = await get('SELECT id,role FROM users WHERE id=?', [supervisorUserId]);
+  if (!supervisor || !HR_STAFF_ROLES.has(supervisor.role)) return 'supervisorUserId must reference a staff user';
+  return null;
+}
+
+function hrAuditMetadata(user, changedFields = []) {
+  const safeChangedFields = changedFields.filter(field => !HR_AUDIT_SENSITIVE_FIELDS.has(field));
+  return {
+    userId: user.id || '',
+    staffRole: user.role || '',
+    changedFieldCount: changedFields.length,
+    changedFields: safeChangedFields.join(','),
+  };
+}
+
 async function ensureClientUserSupport() {
   const schema = await get("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'");
   if (schema?.sql && !schema.sql.includes("'client'")) {
@@ -226,6 +388,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS document_templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, practiceArea TEXT, category TEXT, bodyMarkup TEXT, active INTEGER DEFAULT 1, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS document_requests (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, clientId TEXT NOT NULL, staffUserId TEXT NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', createdAt TEXT NOT NULL, respondedAt TEXT, responseDocumentId TEXT, cancelledAt TEXT, cancelledBy TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS signature_assets (id TEXT PRIMARY KEY, ownerType TEXT NOT NULL CHECK(ownerType IN ('user','firm')), ownerId TEXT, assetType TEXT NOT NULL CHECK(assetType IN ('signature','stamp')), label TEXT NOT NULL, mimeType TEXT NOT NULL, content BLOB NOT NULL, size INTEGER, isDefault INTEGER DEFAULT 0, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT, deletedAt TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS hr_staff_profiles (id TEXT PRIMARY KEY, userId TEXT NOT NULL UNIQUE, jobTitle TEXT, department TEXT, practiceTeam TEXT, employmentType TEXT, startDate TEXT, contractEndDate TEXT, supervisorUserId TEXT, workEmail TEXT, workPhone TEXT, emergencyContactName TEXT, emergencyContactPhone TEXT, hrStatus TEXT NOT NULL DEFAULT 'active', adminNotes TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, createdBy TEXT, updatedBy TEXT)`);
 
   await ensureClientUserSupport();
   await ensureColumn('matter_checklist_items', 'dueDate', 'TEXT');
@@ -2142,6 +2305,114 @@ app.get('/api/work-calendar/events', authenticate, requireStaff, async (req, res
 });
 
 app.use('/api', authenticate);
+
+app.get('/api/hr/staff', requireAdmin, async (_req, res) => {
+  const rows = await all(`
+    SELECT
+      u.id userId,
+      u.fullName,
+      u.email,
+      u.role,
+      u.isActive,
+      p.id profileId,
+      p.jobTitle,
+      p.department,
+      p.practiceTeam,
+      p.employmentType,
+      p.startDate,
+      p.contractEndDate,
+      p.supervisorUserId,
+      p.workEmail,
+      p.workPhone,
+      p.hrStatus,
+      p.createdAt profileCreatedAt,
+      p.updatedAt profileUpdatedAt
+    FROM users u
+    LEFT JOIN hr_staff_profiles p ON p.userId=u.id
+    WHERE u.role IN ('admin','advocate','assistant')
+    ORDER BY u.fullName COLLATE NOCASE ASC, u.email COLLATE NOCASE ASC
+  `);
+  res.json(rows.map(row => ({ ...publicHrStaffUser(row), profile: publicHrProfileSummary(row) })));
+});
+
+app.get('/api/hr/staff/:userId/profile', requireAdmin, async (req, res) => {
+  try {
+    const staff = await getHrStaffUser(req.params.userId);
+    if (staff.error) return res.status(staff.status).json({ error: staff.error });
+    const profile = await get('SELECT * FROM hr_staff_profiles WHERE userId=?', [staff.user.id]);
+    res.json({ staff: publicHrStaffUser(staff.user), profile: publicHrProfile(profile) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/hr/staff/:userId/profile', requireAdmin, async (req, res) => {
+  try {
+    const staff = await getHrStaffUser(req.params.userId);
+    if (staff.error) return res.status(staff.status).json({ error: staff.error });
+    const existing = await get('SELECT id FROM hr_staff_profiles WHERE userId=?', [staff.user.id]);
+    if (existing) return res.status(409).json({ error: 'HR profile already exists for this staff user' });
+    const parsed = validateHrProfilePayload(req.body);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    const supervisorError = await validateHrSupervisor(parsed.value.supervisorUserId);
+    if (supervisorError) return res.status(400).json({ error: supervisorError });
+
+    const id = genId('HRP');
+    const now = new Date().toISOString();
+    const values = HR_PROFILE_FIELDS.map(field => parsed.value[field] || '');
+    await run(`INSERT INTO hr_staff_profiles (
+      id,userId,jobTitle,department,practiceTeam,employmentType,startDate,contractEndDate,supervisorUserId,workEmail,workPhone,emergencyContactName,emergencyContactPhone,hrStatus,adminNotes,createdAt,updatedAt,createdBy,updatedBy
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+      id,
+      staff.user.id,
+      ...values,
+      now,
+      '',
+      req.user.userId,
+      '',
+    ]);
+    await recordAuditEvent(req, {
+      action: 'hr_profile_created',
+      entityType: 'hr_staff_profile',
+      entityId: id,
+      metadata: hrAuditMetadata(staff.user, parsed.changedFields),
+    }).catch(() => {});
+    const profile = await get('SELECT * FROM hr_staff_profiles WHERE id=?', [id]);
+    res.status(201).json({ staff: publicHrStaffUser(staff.user), profile: publicHrProfile(profile) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch('/api/hr/staff/:userId/profile', requireAdmin, async (req, res) => {
+  try {
+    const staff = await getHrStaffUser(req.params.userId);
+    if (staff.error) return res.status(staff.status).json({ error: staff.error });
+    const existing = await get('SELECT * FROM hr_staff_profiles WHERE userId=?', [staff.user.id]);
+    if (!existing) return res.status(404).json({ error: 'HR profile not found' });
+    const parsed = validateHrProfilePayload(req.body, { partial: true });
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+    if (parsed.value.supervisorUserId !== undefined) {
+      const supervisorError = await validateHrSupervisor(parsed.value.supervisorUserId);
+      if (supervisorError) return res.status(400).json({ error: supervisorError });
+    }
+
+    const now = new Date().toISOString();
+    const fields = Object.keys(parsed.value);
+    const assignments = fields.map(field => `${field}=?`).join(',');
+    const values = fields.map(field => parsed.value[field]);
+    await run(`UPDATE hr_staff_profiles SET ${assignments}, updatedAt=?, updatedBy=? WHERE id=?`, [
+      ...values,
+      now,
+      req.user.userId,
+      existing.id,
+    ]);
+    await recordAuditEvent(req, {
+      action: 'hr_profile_updated',
+      entityType: 'hr_staff_profile',
+      entityId: existing.id,
+      metadata: hrAuditMetadata(staff.user, parsed.changedFields),
+    }).catch(() => {});
+    const profile = await get('SELECT * FROM hr_staff_profiles WHERE id=?', [existing.id]);
+    res.json({ staff: publicHrStaffUser(staff.user), profile: publicHrProfile(profile) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 app.get('/api/auth/me', async (req, res) => {
   const user = await get('SELECT id,email,fullName,role,clientId,createdAt,(CASE WHEN avatar IS NOT NULL THEN 1 ELSE 0 END) hasAvatar FROM users WHERE id=?', [req.user.userId]);
