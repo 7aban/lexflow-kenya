@@ -4947,6 +4947,227 @@ app.post('/api/document-tools/split-pdf/save', requireAdvocateOrAdmin, async (re
   }
 });
 
+// PRODUCT-27E: Images to PDF — combine existing matter image documents (PNG/JPEG)
+// into a new PDF, one image per page, centred and scaled to fit within margins.
+// v1 uses existing uploaded image documents only (no browser upload). WebP is not
+// supported by pdf-lib's embedders and is rejected with a clear message. Original
+// image documents are never modified.
+const MAX_IMAGES_TO_PDF_COUNT = 10;
+const IMAGES_TO_PDF_ALLOWED_MIME = new Set(['image/png', 'image/jpeg', 'image/jpg']);
+const IMAGES_TO_PDF_MARGIN = 36; // 0.5 inch in PDF points
+const IMAGES_TO_PDF_PAGE_SIZES = { A4: [595.28, 841.89], Letter: [612, 792] }; // portrait points
+
+function normalizeImagesPageSize(raw) {
+  const key = String(raw || 'A4').trim().toUpperCase();
+  if (key === 'A4') return 'A4';
+  if (key === 'LETTER') return 'Letter';
+  return null;
+}
+
+async function buildImagesPdf(images, sizeKey) {
+  const [pageWidth, pageHeight] = IMAGES_TO_PDF_PAGE_SIZES[sizeKey];
+  const maxWidth = pageWidth - IMAGES_TO_PDF_MARGIN * 2;
+  const maxHeight = pageHeight - IMAGES_TO_PDF_MARGIN * 2;
+  const pdf = await PDFLibDocument.create();
+  for (const image of images) {
+    const embedded = image.mime === 'image/png'
+      ? await pdf.embedPng(image.content)
+      : await pdf.embedJpg(image.content);
+    const ratio = Math.min(maxWidth / embedded.width, maxHeight / embedded.height);
+    const drawWidth = embedded.width * ratio;
+    const drawHeight = embedded.height * ratio;
+    const page = pdf.addPage([pageWidth, pageHeight]);
+    page.drawImage(embedded, {
+      x: (pageWidth - drawWidth) / 2,
+      y: (pageHeight - drawHeight) / 2,
+      width: drawWidth,
+      height: drawHeight,
+    });
+  }
+  return Buffer.from(await pdf.save());
+}
+
+app.post('/api/document-tools/images-to-pdf', requireStaff, async (req, res) => {
+  try {
+    const documentIds = Array.isArray(req.body?.documentIds)
+      ? req.body.documentIds.map(id => String(id || '').trim()).filter(Boolean)
+      : null;
+
+    if (!documentIds) return res.status(400).json({ error: 'documentIds must be an array' });
+    if (documentIds.length < 1) return res.status(400).json({ error: 'Select at least 1 image document' });
+    if (documentIds.length > MAX_IMAGES_TO_PDF_COUNT) return res.status(400).json({ error: `Select no more than ${MAX_IMAGES_TO_PDF_COUNT} images` });
+    if (new Set(documentIds).size !== documentIds.length) return res.status(400).json({ error: 'Duplicate document IDs are not allowed' });
+
+    const sizeKey = normalizeImagesPageSize(req.body?.pageSize);
+    if (!sizeKey) return res.status(400).json({ error: 'pageSize must be A4 or Letter' });
+
+    const outputFilename = cleanPdfDownloadName(req.body?.filename || 'images.pdf');
+    const images = [];
+    let matterId = '';
+    let combinedInputBytes = 0;
+
+    for (const documentId of documentIds) {
+      const doc = await get('SELECT * FROM documents WHERE id=? AND deletedAt IS NULL', [documentId]);
+      if (!doc) return res.status(404).json({ error: 'Document not found' });
+      if (!(await canAccessDocument(req, doc)) || !doc.matterId || !(await canAccessMatter(req, doc.matterId))) {
+        await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: documentId, matterId: doc.matterId || '', clientId: await documentAuditClientId(doc, req), metadata: { reason: 'insufficient permissions', context: documentAuditContext(doc), route: 'document_tool_images_to_pdf' } }).catch(() => {});
+        return res.status(403).json({ error: 'Document access denied' });
+      }
+      if (!matterId) matterId = doc.matterId;
+      if (doc.matterId !== matterId) return res.status(400).json({ error: 'All images must belong to the same matter' });
+      const mime = String(doc.mimeType || '').toLowerCase();
+      if (mime === 'image/webp') return res.status(400).json({ error: 'WebP images are not supported for PDF conversion. Use PNG or JPEG.' });
+      if (!IMAGES_TO_PDF_ALLOWED_MIME.has(mime)) return res.status(400).json({ error: 'Only PNG and JPEG image documents can be converted' });
+
+      const content = Buffer.isBuffer(doc.content) ? doc.content : Buffer.from(doc.content || '');
+      combinedInputBytes += content.length;
+      if (combinedInputBytes > MAX_MERGE_PDF_INPUT_BYTES) return res.status(413).json({ error: 'Selected images exceed the 20 MB input limit' });
+      images.push({ ...doc, content, mime });
+    }
+
+    let outputBuffer;
+    try {
+      outputBuffer = await buildImagesPdf(images, sizeKey);
+    } catch {
+      return res.status(400).json({ error: 'One or more images could not be embedded into the PDF' });
+    }
+
+    if (outputBuffer.length > 50 * 1024 * 1024) return res.status(413).json({ error: 'Generated PDF exceeds the 50 MB output limit' });
+
+    const clientId = await documentAuditClientId(images[0], req);
+    await recordAuditEvent(req, {
+      action: 'document_tool_images_to_pdf_downloaded',
+      entityType: 'document_tool',
+      entityId: matterId,
+      matterId,
+      clientId,
+      metadata: {
+        route: 'document_tool_images_to_pdf',
+        sourceDocumentIds: documentIds,
+        sourceMatterId: matterId,
+        imageCount: images.length,
+        pageSize: sizeKey,
+        inputBytes: combinedInputBytes,
+        outputBytes: outputBuffer.length,
+        filename: outputFilename,
+      },
+    }).catch(() => {});
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(outputBuffer);
+  } catch {
+    res.status(500).json({ error: 'Unable to convert images to PDF' });
+  }
+});
+
+app.post('/api/document-tools/images-to-pdf/save', requireAdvocateOrAdmin, async (req, res) => {
+  try {
+    const { matterId, filename: rawFilename } = req.body || {};
+
+    if (!matterId) return res.status(400).json({ error: 'matterId is required' });
+
+    const matter = await get('SELECT * FROM matters WHERE id=?', [matterId]);
+    if (!matter) return res.status(404).json({ error: 'Matter not found' });
+    if (!(await canAccessMatter(req, matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: matterId, metadata: { reason: 'insufficient permissions', route: 'document_tool_images_to_pdf_save' } }).catch(() => {});
+      return res.status(403).json({ error: 'Matter access denied' });
+    }
+
+    const documentIds = Array.isArray(req.body?.documentIds)
+      ? req.body.documentIds.map(id => String(id || '').trim()).filter(Boolean)
+      : null;
+
+    if (!documentIds) return res.status(400).json({ error: 'documentIds must be an array' });
+    if (documentIds.length < 1) return res.status(400).json({ error: 'Select at least 1 image document' });
+    if (documentIds.length > MAX_IMAGES_TO_PDF_COUNT) return res.status(400).json({ error: `Select no more than ${MAX_IMAGES_TO_PDF_COUNT} images` });
+    if (new Set(documentIds).size !== documentIds.length) return res.status(400).json({ error: 'Duplicate document IDs are not allowed' });
+
+    const sizeKey = normalizeImagesPageSize(req.body?.pageSize);
+    if (!sizeKey) return res.status(400).json({ error: 'pageSize must be A4 or Letter' });
+
+    const outputFilename = cleanPdfDownloadName(rawFilename || 'images.pdf');
+    const images = [];
+    let combinedInputBytes = 0;
+
+    for (const documentId of documentIds) {
+      const doc = await get('SELECT * FROM documents WHERE id=? AND deletedAt IS NULL', [documentId]);
+      if (!doc) return res.status(404).json({ error: 'Document not found' });
+      if (!(await canAccessDocument(req, doc)) || !doc.matterId || !(await canAccessMatter(req, doc.matterId))) {
+        await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: documentId, matterId: doc.matterId || '', clientId: await documentAuditClientId(doc, req), metadata: { reason: 'insufficient permissions', context: documentAuditContext(doc), route: 'document_tool_images_to_pdf_save' } }).catch(() => {});
+        return res.status(403).json({ error: 'Document access denied' });
+      }
+      if (doc.matterId !== matterId) return res.status(400).json({ error: 'All images must belong to the target matter' });
+      const mime = String(doc.mimeType || '').toLowerCase();
+      if (mime === 'image/webp') return res.status(400).json({ error: 'WebP images are not supported for PDF conversion. Use PNG or JPEG.' });
+      if (!IMAGES_TO_PDF_ALLOWED_MIME.has(mime)) return res.status(400).json({ error: 'Only PNG and JPEG image documents can be converted' });
+
+      const content = Buffer.isBuffer(doc.content) ? doc.content : Buffer.from(doc.content || '');
+      combinedInputBytes += content.length;
+      if (combinedInputBytes > MAX_MERGE_PDF_INPUT_BYTES) return res.status(413).json({ error: 'Selected images exceed the 20 MB input limit' });
+      images.push({ ...doc, content, mime });
+    }
+
+    let outputBuffer;
+    try {
+      outputBuffer = await buildImagesPdf(images, sizeKey);
+    } catch {
+      return res.status(400).json({ error: 'One or more images could not be embedded into the PDF' });
+    }
+
+    if (outputBuffer.length > 50 * 1024 * 1024) return res.status(413).json({ error: 'Generated PDF exceeds the 50 MB output limit' });
+
+    const documentIdNew = genId('DOC');
+    const cleanName = cleanDocumentName(outputFilename);
+    const size = `${Math.max(1, Math.round(outputBuffer.length / 1024))} KB`;
+
+    await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+      documentIdNew,
+      matterId,
+      cleanName,
+      cleanName,
+      'PDF',
+      'application/pdf',
+      today(),
+      size,
+      outputBuffer,
+      'document_tool',
+      null,
+      null,
+      null,
+      0,
+      req.user.userId || '',
+    ]);
+
+    const resultDoc = await get(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=?`, [documentIdNew]);
+
+    await recordAuditEvent(req, {
+      action: 'document_tool_images_to_pdf_saved',
+      entityType: 'document_tool',
+      entityId: documentIdNew,
+      matterId,
+      clientId: await documentAuditClientId(resultDoc, req),
+      metadata: {
+        sourceDocumentIds: documentIds,
+        targetMatterId: matterId,
+        outputDocumentId: documentIdNew,
+        imageCount: images.length,
+        pageSize: sizeKey,
+        inputBytes: combinedInputBytes,
+        outputBytes: outputBuffer.length,
+        filename: cleanName,
+        clientVisible: false,
+      },
+    }).catch(() => {});
+
+    res.json(publicDocument(resultDoc));
+  } catch {
+    res.status(500).json({ error: 'Unable to save images PDF' });
+  }
+});
+
 // Stamp / sign PDF — place a stored signature or stamp image onto one page.
 // This is image placement only, not a certified electronic signature.
 

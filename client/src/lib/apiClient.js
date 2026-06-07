@@ -381,6 +381,13 @@ export const saveSplitPdf = (documentId, order, filename, matterId) =>
     method: 'POST',
     body: { matterId, documentId, order, filename, clientVisible: false },
   });
+export const imagesToPdf = (documentIds, filename, pageSize) =>
+  postDownloadWithAuth('/document-tools/images-to-pdf', { documentIds, filename, pageSize }, filename || 'images.pdf');
+export const saveImagesToPdf = (documentIds, filename, pageSize, matterId) =>
+  api('/document-tools/images-to-pdf/save', {
+    method: 'POST',
+    body: { matterId, documentIds, filename, pageSize, clientVisible: false },
+  });
 export const deletePdfPages = (documentId, pages, filename) =>
   postDownloadWithAuth('/document-tools/delete-pdf-pages', { documentId, pages, filename }, filename || 'pages-removed.pdf');
 export const saveDeletedPdf = (documentId, pages, filename, matterId) =>

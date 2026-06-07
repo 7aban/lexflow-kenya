@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { API_BASE, api, fileToDataUrl, fetchDocumentArrayBuffer, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, readSession, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf, splitPdfPages, saveSplitPdf, deletePdfPages, saveDeletedPdf, numberPdfPages, saveNumberedPdf, createCourtBundle, saveCourtBundle, stampPdf, saveStampedPdf, tenthLinePdf, saveTenthLinedPdf } from '../lib/apiClient.js';
+import { API_BASE, api, fileToDataUrl, fetchDocumentArrayBuffer, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, readSession, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf, splitPdfPages, saveSplitPdf, imagesToPdf, saveImagesToPdf, deletePdfPages, saveDeletedPdf, numberPdfPages, saveNumberedPdf, createCourtBundle, saveCourtBundle, stampPdf, saveStampedPdf, tenthLinePdf, saveTenthLinedPdf } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Skeleton } from '../components/ui.jsx';
 import DocumentToolCards from './document-studio/DocumentToolCards.jsx';
@@ -122,6 +122,20 @@ export default function DocumentStudio({ notify }) {
   const [splitSaveError, setSplitSaveError] = useState(null);
   const [splitSaveSuccess, setSplitSaveSuccess] = useState('');
 
+  const [imagesMatterId, setImagesMatterId] = useState('');
+  const [imagesDocuments, setImagesDocuments] = useState([]);
+  const [imagesDocsLoading, setImagesDocsLoading] = useState(false);
+  const [imagesDocsError, setImagesDocsError] = useState(null);
+  const [selectedImageDocumentIds, setSelectedImageDocumentIds] = useState([]);
+  const [imagesPageSize, setImagesPageSize] = useState('A4');
+  const [imagesFilename, setImagesFilename] = useState('images.pdf');
+  const [imagesLoading, setImagesLoading] = useState(false);
+  const [imagesError, setImagesError] = useState(null);
+  const [imagesSuccess, setImagesSuccess] = useState('');
+  const [imagesSaveLoading, setImagesSaveLoading] = useState(false);
+  const [imagesSaveError, setImagesSaveError] = useState(null);
+  const [imagesSaveSuccess, setImagesSaveSuccess] = useState('');
+
   const [deleteMatterId, setDeleteMatterId] = useState('');
   const [deleteDocuments, setDeleteDocuments] = useState([]);
   const [deleteDocsLoading, setDeleteDocsLoading] = useState(false);
@@ -227,6 +241,7 @@ export default function DocumentStudio({ notify }) {
   const rotatePanelRef = useRef(null);
   const extractPanelRef = useRef(null);
   const splitPanelRef = useRef(null);
+  const imagesPanelRef = useRef(null);
   const deletePanelRef = useRef(null);
   const paginatePanelRef = useRef(null);
   const bundlePanelRef = useRef(null);
@@ -298,6 +313,20 @@ export default function DocumentStudio({ notify }) {
       setSplitSaveSuccess('');
     }
   }, [splitMatterId]);
+
+  useEffect(() => {
+    if (imagesMatterId) {
+      loadImagesDocuments(imagesMatterId);
+    } else {
+      setImagesDocuments([]);
+      setSelectedImageDocumentIds([]);
+      setImagesDocsError(null);
+      setImagesError(null);
+      setImagesSuccess('');
+      setImagesSaveError(null);
+      setImagesSaveSuccess('');
+    }
+  }, [imagesMatterId]);
 
   useEffect(() => {
     if (deleteMatterId) {
@@ -756,6 +785,96 @@ export default function DocumentStudio({ notify }) {
       notify?.({ type: 'danger', message });
     } finally {
       setSplitSaveLoading(false);
+    }
+  }
+
+  async function loadImagesDocuments(matterId) {
+    setImagesDocsLoading(true);
+    setImagesDocsError(null);
+    setImagesError(null);
+    setImagesSuccess('');
+    setImagesSaveError(null);
+    setImagesSaveSuccess('');
+    setSelectedImageDocumentIds([]);
+    try {
+      const docs = await getMatterDocuments(matterId);
+      setImagesDocuments((Array.isArray(docs) ? docs : []).filter(doc => ['image/png', 'image/jpeg', 'image/jpg'].includes(String(doc.mimeType || '').toLowerCase())));
+    } catch (err) {
+      setImagesDocuments([]);
+      setImagesDocsError(err.message || 'Could not load matter documents.');
+    } finally {
+      setImagesDocsLoading(false);
+    }
+  }
+
+  function toggleImageDocument(documentId) {
+    setImagesError(null);
+    setImagesSuccess('');
+    setImagesSaveError(null);
+    setImagesSaveSuccess('');
+    setSelectedImageDocumentIds(current => {
+      if (current.includes(documentId)) return current.filter(id => id !== documentId);
+      if (current.length >= 10) {
+        setImagesError('Select no more than 10 images.');
+        return current;
+      }
+      return [...current, documentId];
+    });
+  }
+
+  async function runImagesToPdf() {
+    setImagesError(null);
+    setImagesSuccess('');
+    setImagesSaveError(null);
+    setImagesSaveSuccess('');
+    if (selectedImageDocumentIds.length < 1) {
+      setImagesError('Select at least 1 image document.');
+      return;
+    }
+    if (selectedImageDocumentIds.length > 10) {
+      setImagesError('Select no more than 10 images.');
+      return;
+    }
+    setImagesLoading(true);
+    try {
+      await imagesToPdf(selectedImageDocumentIds, imagesFilename, imagesPageSize);
+      setImagesSuccess('Images PDF downloaded.');
+      notify?.({ type: 'success', message: 'Images PDF downloaded.' });
+    } catch (err) {
+      const message = err.message || 'Could not convert images to PDF.';
+      setImagesError(message);
+      notify?.({ type: 'danger', message });
+    } finally {
+      setImagesLoading(false);
+    }
+  }
+
+  async function runImagesToPdfSave() {
+    setImagesSaveError(null);
+    setImagesSaveSuccess('');
+    if (selectedImageDocumentIds.length < 1) {
+      setImagesSaveError('Select at least 1 image document.');
+      return;
+    }
+    if (selectedImageDocumentIds.length > 10) {
+      setImagesSaveError('Select no more than 10 images.');
+      return;
+    }
+    if (!imagesMatterId) {
+      setImagesSaveError('Select a matter first.');
+      return;
+    }
+    setImagesSaveLoading(true);
+    try {
+      await saveImagesToPdf(selectedImageDocumentIds, imagesFilename, imagesPageSize, imagesMatterId);
+      setImagesSaveSuccess('Saved to matter documents. Open the matter Documents tab to view it.');
+      notify?.({ type: 'success', message: 'Saved to matter documents. Open the matter Documents tab to view it.' });
+    } catch (err) {
+      const message = err.message || 'Could not save images PDF.';
+      setImagesSaveError(message);
+      notify?.({ type: 'danger', message });
+    } finally {
+      setImagesSaveLoading(false);
     }
   }
 
@@ -1321,6 +1440,11 @@ export default function DocumentStudio({ notify }) {
   const canExtractSave = !!extractDocumentId && !!extractRanges.trim() && !extractSaveLoading && !extractDocsLoading && !!extractMatterId;
   const canSplit = !!splitDocumentId && !!splitOrder.trim() && !splitLoading && !splitDocsLoading;
   const canSplitSave = !!splitDocumentId && !!splitOrder.trim() && !splitSaveLoading && !splitDocsLoading && !!splitMatterId;
+  const selectedImageDocuments = selectedImageDocumentIds
+    .map(id => imagesDocuments.find(doc => doc.id === id))
+    .filter(Boolean);
+  const canImages = selectedImageDocumentIds.length >= 1 && selectedImageDocumentIds.length <= 10 && !imagesLoading && !imagesDocsLoading;
+  const canImagesSave = selectedImageDocumentIds.length >= 1 && selectedImageDocumentIds.length <= 10 && !imagesSaveLoading && !imagesDocsLoading && !!imagesMatterId;
   const canDelete = !!deleteDocumentId && !!deletePages.trim() && !deleteLoading && !deleteDocsLoading;
   const canDeleteSave = !!deleteDocumentId && !!deletePages.trim() && !deleteSaveLoading && !deleteDocsLoading && !!deleteMatterId;
   const canPaginate = !!paginateDocumentId && !paginateLoading && !paginateDocsLoading;
@@ -1500,6 +1624,7 @@ export default function DocumentStudio({ notify }) {
               onOpenDelete={() => handleSelectTool('delete')}
               onOpenPaginate={() => handleSelectTool('paginate')}
                onOpenBundle={() => handleSelectTool('bundle')}
+               onOpenImages={() => handleSelectTool('images')}
                onOpenStamp={() => handleSelectTool('stamp')}
                onOpenTenth={() => handleSelectTool('tenth')}
                selectedTool={selectedTool}
@@ -1935,6 +2060,126 @@ export default function DocumentStudio({ notify }) {
             {splitSuccess && <Alert tone="success">{splitSuccess}</Alert>}
             {splitSaveError && <Alert tone="danger">{splitSaveError}</Alert>}
             {splitSaveSuccess && <Alert tone="success">{splitSaveSuccess}</Alert>}
+          </div>
+          )}
+
+          {selectedTool === 'images' && (
+          <div
+            ref={imagesPanelRef}
+            style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 16, display: 'grid', gap: 14, minWidth: 0 }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                <strong style={{ fontSize: 14, color: theme.ink }}>Images to PDF</strong>
+                <span style={{ fontSize: 12, color: theme.muted }}>Combine existing image documents into a PDF then download or save</span>
+              </div>
+              <Badge tone="green">Available</Badge>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, alignItems: 'end', minWidth: 0 }}>
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Matter</span>
+                <select
+                  style={styles.input}
+                  value={imagesMatterId}
+                  onChange={event => { setImagesMatterId(event.target.value); setImagesError(null); setImagesSuccess(''); setImagesSaveError(null); setImagesSaveSuccess(''); }}
+                  disabled={mattersLoading || imagesLoading || imagesSaveLoading}
+                >
+                  <option value="">{mattersLoading ? 'Loading matters...' : 'Select a matter'}</option>
+                  {matters.map(m => (
+                    <option key={m.id} value={m.id}>{matterLabel(m)}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Page size</span>
+                <select
+                  style={styles.input}
+                  value={imagesPageSize}
+                  onChange={event => { setImagesPageSize(event.target.value); setImagesError(null); setImagesSuccess(''); setImagesSaveError(null); setImagesSaveSuccess(''); }}
+                  disabled={imagesLoading || imagesSaveLoading}
+                >
+                  <option value="A4">A4</option>
+                  <option value="Letter">Letter</option>
+                </select>
+              </label>
+
+              <label style={{ ...styles.field, minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: theme.muted }}>Output filename</span>
+                <input
+                  style={styles.input}
+                  value={imagesFilename}
+                  onChange={event => setImagesFilename(event.target.value)}
+                  placeholder="images.pdf"
+                  disabled={imagesLoading || imagesSaveLoading}
+                />
+              </label>
+
+              <button
+                type="button"
+                style={{ ...styles.primaryButton, minHeight: 36, opacity: canImages ? 1 : 0.65, cursor: canImages ? 'pointer' : 'not-allowed' }}
+                onClick={runImagesToPdf}
+                disabled={!canImages}
+              >
+                {imagesLoading ? 'Converting...' : 'Apply and Download'}
+              </button>
+
+              {imagesMatterId && (
+                <button
+                  type="button"
+                  style={{ ...styles.ghostButton, minHeight: 36, opacity: canImagesSave ? 1 : 0.65, cursor: canImagesSave ? 'pointer' : 'not-allowed' }}
+                  onClick={runImagesToPdfSave}
+                  disabled={!canImagesSave}
+                >
+                  {imagesSaveLoading ? 'Saving...' : 'Save to matter documents'}
+                </button>
+              )}
+            </div>
+
+            <span style={{ fontSize: 11, color: theme.muted }}>Select existing uploaded PNG/JPEG image documents. WebP is not supported for PDF conversion in this version.</span>
+
+            {imagesMatterId && (
+              <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#FAFAF9', padding: 12, display: 'grid', gap: 10, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                  <strong style={{ fontSize: 13, color: theme.ink }}>Image documents</strong>
+                  <span style={{ fontSize: 12, color: theme.muted }}>{selectedImageDocuments.length}/10 selected</span>
+                </div>
+                {imagesDocsLoading ? (
+                  <span style={{ fontSize: 13, color: theme.muted }}>Loading documents...</span>
+                ) : imagesDocuments.length === 0 ? (
+                  <Empty title="No images found" text="This matter has no existing PNG or JPEG image documents." />
+                ) : (
+                  <div style={{ display: 'grid', gap: 8, maxHeight: 320, overflowY: 'auto', minWidth: 0 }}>
+                    {imagesDocuments.map(doc => {
+                      const selected = selectedImageDocumentIds.includes(doc.id);
+                      const disabled = !selected && selectedImageDocumentIds.length >= 10;
+                      return (
+                        <label key={doc.id} style={{ display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', gap: 10, alignItems: 'start', border: `1px solid ${selected ? theme.blue : theme.line}`, borderRadius: 8, background: selected ? theme.blueBg : '#fff', padding: 10, minWidth: 0 }}>
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            disabled={disabled || imagesLoading || imagesSaveLoading}
+                            onChange={() => toggleImageDocument(doc.id)}
+                            style={{ marginTop: 3 }}
+                          />
+                          <span style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                            <span style={{ fontSize: 13, fontWeight: 600, color: theme.ink, overflowWrap: 'anywhere' }}>{doc.displayName || doc.name || doc.id}</span>
+                            <span style={{ fontSize: 12, color: theme.muted }}>{doc.date || 'No date'} | {doc.size || 'Unknown size'}</span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {imagesDocsError && <Alert tone="danger">{imagesDocsError}</Alert>}
+            {imagesError && <Alert tone="danger">{imagesError}</Alert>}
+            {imagesSuccess && <Alert tone="success">{imagesSuccess}</Alert>}
+            {imagesSaveError && <Alert tone="danger">{imagesSaveError}</Alert>}
+            {imagesSaveSuccess && <Alert tone="success">{imagesSaveSuccess}</Alert>}
           </div>
           )}
 
