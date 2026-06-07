@@ -5430,6 +5430,7 @@ const TIMELINE_TYPE_DISPLAY = {
   deadline: { source: 'Deadline', tone: 'amber' },
   payment: { source: 'Payment', tone: 'green' },
   checklist: { source: 'Checklist', tone: 'blue' },
+  stage_change: { source: 'Stage', tone: 'blue' },
 };
 
 function mapTimelineApiEvent(event) {

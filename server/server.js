@@ -823,6 +823,22 @@ updatedAt TEXT
 )`);
   await run('CREATE INDEX IF NOT EXISTS idx_hr_offboarding_checklist_caseId ON hr_offboarding_checklist_items(offboardingCaseId)');
 
+  // TIMELINE-30D: matter stage history (captures future stage changes; matters.stage stays source of truth)
+  await run(`CREATE TABLE IF NOT EXISTS matter_stage_history (
+id TEXT PRIMARY KEY,
+matterId TEXT NOT NULL,
+oldStage TEXT,
+newStage TEXT NOT NULL,
+changedBy TEXT,
+changedByName TEXT,
+changedAt TEXT NOT NULL,
+source TEXT NOT NULL DEFAULT 'manual',
+note TEXT DEFAULT '',
+createdAt TEXT NOT NULL
+)`);
+  await run('CREATE INDEX IF NOT EXISTS idx_matter_stage_history_matterId ON matter_stage_history(matterId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_matter_stage_history_changedAt ON matter_stage_history(changedAt)');
+
   await ensureClientUserSupport();
   await ensureColumn('matter_checklist_items', 'dueDate', 'TEXT');
   await ensureColumn('matter_checklist_items', 'assignee', 'TEXT');
@@ -4955,7 +4971,28 @@ app.get('/api/matters/:id', async (req, res) => {
 });
 
 // TIMELINE-30B: unified, read-only, staff-only matter timeline aggregated from existing data.
-const MATTER_TIMELINE_TYPES = new Set(['matter_opened', 'note', 'task', 'appearance', 'document', 'time_entry', 'invoice', 'deadline', 'payment', 'checklist']);
+const MATTER_TIMELINE_TYPES = new Set(['matter_opened', 'note', 'task', 'appearance', 'document', 'time_entry', 'invoice', 'deadline', 'payment', 'checklist', 'stage_change']);
+
+// TIMELINE-30D: record a matter stage change (no-op when unchanged). Captures future
+// changes only; matters.stage remains the source of truth. note is never audited.
+async function recordMatterStageChange(req, { matterId, oldStage, newStage, source = 'manual', note = '' }) {
+  const oldVal = oldStage == null ? '' : String(oldStage);
+  const newVal = newStage == null ? '' : String(newStage);
+  if (oldVal === newVal) return;
+  const now = new Date().toISOString();
+  const id = genId('MSH');
+  await run(
+    `INSERT INTO matter_stage_history (id, matterId, oldStage, newStage, changedBy, changedByName, changedAt, source, note, createdAt)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    [id, matterId, oldVal, newVal, req.user?.userId || '', req.user?.fullName || '', now, source, typeof note === 'string' ? note : '', now],
+  );
+  await recordAuditEvent(req, {
+    action: 'matter_stage_changed',
+    entityType: 'matter',
+    entityId: matterId,
+    metadata: { matterId, oldStage: oldVal, newStage: newVal, changedBy: req.user?.userId || '', source },
+  }).catch(() => {});
+}
 const MATTER_TIMELINE_DEFAULT_LIMIT = 200;
 const MATTER_TIMELINE_MAX_LIMIT = 500;
 
@@ -4978,7 +5015,7 @@ async function buildMatterTimeline(matterId, { showMoney }) {
     push(matter.openDate, 'matter_opened', 'Matter opened', timelineSummaryText(matter.reference || matter.title || ''), matter.assignedTo || matter.paralegal || '', matter.id, 'matter', { reference: matter.reference || '' });
   }
 
-  const [notes, tasks, appearances, documents, timeEntries, invoices, deadlines, payments, checklist] = await Promise.all([
+  const [notes, tasks, appearances, documents, timeEntries, invoices, deadlines, payments, checklist, stageHistory] = await Promise.all([
     all('SELECT id, content, author, createdAt FROM case_notes WHERE matterId=?', [matterId]),
     all('SELECT id, title, completed, assignee, dueDate FROM tasks WHERE matterId=?', [matterId]),
     all('SELECT id, title, date, time, type, location, attorney FROM appearances WHERE matterId=?', [matterId]),
@@ -4988,6 +5025,7 @@ async function buildMatterTimeline(matterId, { showMoney }) {
     all('SELECT id, title, type, dueDate, status, owner, createdAt FROM deadlines WHERE matterId=?', [matterId]),
     all('SELECT id, method, reference, date, amount, createdBy, createdAt FROM payments WHERE matterId=?', [matterId]),
     all('SELECT id, title, completed, dueDate, assignee, createdAt, completedAt, completedBy FROM matter_checklist_items WHERE matterId=?', [matterId]),
+    all('SELECT id, oldStage, newStage, changedByName, changedAt, source FROM matter_stage_history WHERE matterId=?', [matterId]),
   ]);
 
   for (const n of notes) {
@@ -5032,6 +5070,9 @@ async function buildMatterTimeline(matterId, { showMoney }) {
   for (const c of checklist) {
     const status = c.completed ? 'completed' : 'open';
     push(c.completedAt || c.createdAt, 'checklist', c.completed ? 'Checklist item completed' : 'Checklist item added', timelineSummaryText(c.title), (c.completed ? c.completedBy : c.assignee) || '', c.id, 'matter_checklist_item', { status });
+  }
+  for (const s of stageHistory) {
+    push(s.changedAt, 'stage_change', 'Stage changed', `${s.oldStage || '—'} → ${s.newStage}`, s.changedByName || '', s.id, 'matter_stage_history', { oldStage: s.oldStage || '', newStage: s.newStage || '', source: s.source || '' });
   }
 
   const parse = (v) => { const t = Date.parse(v); return Number.isNaN(t) ? null : t; };
@@ -5156,6 +5197,8 @@ app.post('/api/matters', requireAdvocateOrAdmin, validate(createMatterValidation
   const matter = await get('SELECT * FROM matters WHERE id=?', [id]);
   await logAudit(req, 'create', 'matter', id, `Created matter ${matter.title} (${matter.reference})`);
   await recordAuditEvent(req, { action: 'matter_created', entityType: 'matter', entityId: id, clientId: matter.clientId || '', metadata: { title: matter.title || '', reference: matter.reference || '', stage: matter.stage || '', practiceArea: matter.practiceArea || '' } }).catch(() => {});
+  // TIMELINE-30D: record the initial stage for newly created matters (prospective only; no backfill).
+  await recordMatterStageChange(req, { matterId: id, oldStage: '', newStage: matter.stage || 'Intake', source: 'create' }).catch(() => {});
   res.json(matter);
 });
 app.patch('/api/matters/:id', requireAdvocateOrAdmin, async (req, res) => {
@@ -5166,11 +5209,20 @@ app.patch('/api/matters/:id', requireAdvocateOrAdmin, async (req, res) => {
   const fields = ['reference','clientId','title','practiceArea','stage','assignedTo','paralegal','openDate','description','court','judge','caseNo','opposingCounsel','priority','billingRate','billingType','fixedFee','retainerBalance','totalBilled','solDate','remindersEnabled','courtRemindersEnabled','invoiceRemindersEnabled'];
   const updates = fields.filter(f => req.body[f] !== undefined);
   if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
+  // TIMELINE-30D: capture the prior stage before the update so a stage change can be recorded.
+  let priorStage = null;
+  if (updates.includes('stage')) {
+    const before = await get('SELECT stage FROM matters WHERE id=?', [req.params.id]);
+    priorStage = before ? before.stage : null;
+  }
   await run(`UPDATE matters SET ${updates.map(f => `${f}=?`).join(',')} WHERE id=?`, [...updates.map(f => ['billingRate','fixedFee','retainerBalance','totalBilled'].includes(f) ? Number(req.body[f] || 0) : req.body[f]), req.params.id]);
   const matter = await get('SELECT * FROM matters WHERE id=?', [req.params.id]);
   if (matter) {
     await logAudit(req, 'update', 'matter', req.params.id, `Updated matter ${matter.title}`);
     await recordAuditEvent(req, { action: 'matter_updated', entityType: 'matter', entityId: req.params.id, clientId: matter.clientId || '', metadata: { title: matter.title || '', updatedFields: updates.join(','), stage: matter.stage || '' } }).catch(() => {});
+    if (updates.includes('stage')) {
+      await recordMatterStageChange(req, { matterId: req.params.id, oldStage: priorStage, newStage: matter.stage || '', source: 'manual' }).catch(() => {});
+    }
   }
   matter ? res.json(matter) : res.status(404).json({ error: 'Matter not found' });
 });
@@ -5179,11 +5231,15 @@ app.patch('/api/matters/:id/status', requireAdvocateOrAdmin, async (req, res) =>
     await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
     return res.status(403).json({ error: 'Matter access denied' });
   }
+  // TIMELINE-30D: capture the prior stage before the status update.
+  const beforeStatus = await get('SELECT stage FROM matters WHERE id=?', [req.params.id]);
+  const priorStatusStage = beforeStatus ? beforeStatus.stage : null;
   await run('UPDATE matters SET stage=? WHERE id=?', [req.body.stage || 'Closed', req.params.id]);
   const matter = await get('SELECT * FROM matters WHERE id=?', [req.params.id]);
   if (matter) {
     await logAudit(req, 'archive', 'matter', req.params.id, `Set matter ${matter.title} stage to ${matter.stage}`);
     await recordAuditEvent(req, { action: 'matter_archived', entityType: 'matter', entityId: req.params.id, clientId: matter.clientId || '', metadata: { title: matter.title || '', stage: matter.stage || '' } }).catch(() => {});
+    await recordMatterStageChange(req, { matterId: req.params.id, oldStage: priorStatusStage, newStage: matter.stage || '', source: 'status' }).catch(() => {});
   }
   matter ? res.json(matter) : res.status(404).json({ error: 'Matter not found' });
 });

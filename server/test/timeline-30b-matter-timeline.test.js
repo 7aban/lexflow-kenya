@@ -218,13 +218,20 @@ describe('TIMELINE-30B unified matter timeline read route', () => {
     expect(after).toEqual(before);
   });
 
-  test('24. No new tables are created', async () => {
+  test('24. The 30B timeline route adds no timeline tables and is read-only', async () => {
+    // TIMELINE-30D intentionally introduced matter_stage_history in a later phase, so it
+    // is no longer asserted absent here. The 30B route must still not create timeline
+    // tables of its own, and merely viewing the timeline must not write stage history.
     const tables = (await new Promise((resolve, reject) => {
       const db = new sqlite3.Database(config.DATABASE_PATH);
       db.all("SELECT name FROM sqlite_master WHERE type='table'", [], (err, rows) => { db.close(); err ? reject(err) : resolve(rows); });
     })).map(t => t.name);
-    expect(tables).not.toContain('matter_stage_history');
     expect(tables).not.toContain('matter_timeline');
     expect(tables).not.toContain('matter_timeline_events');
+
+    const before = (await dbGet('SELECT COUNT(*) c FROM matter_stage_history WHERE matterId=?', [MATTER_ID])).c;
+    await timeline(adminToken);
+    const after = (await dbGet('SELECT COUNT(*) c FROM matter_stage_history WHERE matterId=?', [MATTER_ID])).c;
+    expect(after).toBe(before);
   });
 });
