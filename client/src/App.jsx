@@ -1,5 +1,5 @@
 import { Component, useEffect, useRef, useState } from 'react';
-import { IconLayoutDashboard, IconChartLine, IconUsers, IconUserPlus, IconBriefcase, IconCheckbox, IconCalendarDue, IconFileInvoice, IconMessages, IconUsersGroup, IconSettings, IconListSearch, IconExternalLink, IconChevronDown, IconShield, IconSearch, IconBell, IconRefresh, IconTemplate, IconLink } from '@tabler/icons-react';
+import { IconLayoutDashboard, IconChartLine, IconReportAnalytics, IconUsers, IconUserPlus, IconBriefcase, IconCheckbox, IconCalendarDue, IconFileInvoice, IconMessages, IconUsersGroup, IconSettings, IconListSearch, IconExternalLink, IconChevronDown, IconShield, IconSearch, IconBell, IconRefresh, IconTemplate, IconLink } from '@tabler/icons-react';
 import { api, API_BASE, AUTH_FAILURE_MESSAGE, clearSession, clearAllLexFlowStorage, fetchAvatarObjectUrl, getNotifications, markNotificationsRead, readSession, saveSession } from './lib/apiClient.js';
 import { globalSearch } from './api.js';
 import { defaultFirmSettings, styles, StyleTag, theme, loadAndApplyFirmTheme } from './theme.jsx';
@@ -16,10 +16,12 @@ import DeadlineCenter from './views/DeadlineCenter.jsx';
 import Invitations from './views/Invitations.jsx';
 import { Clients, ConnectedAccounts, Dashboard, FirmSettings, Invoices, Matters, Tasks, Users } from './views/StaffViews.jsx';
 import DocumentStudio from './views/DocumentStudio.jsx';
+import Reports from './views/Reports.jsx';
 
 const navIcons = {
   Dashboard: IconLayoutDashboard,
   Performance: IconChartLine,
+  Reports: IconReportAnalytics,
   Clients: IconUsers,
   Invitations: IconUserPlus,
   Matters: IconBriefcase,
@@ -45,7 +47,7 @@ const navDisplayLabels = {
 
 const initialData = { dashboard: {}, clients: [], matters: [], tasks: [], invoices: [], firmSettings: defaultFirmSettings };
 const navGroups = [
-  { title: 'Overview', items: [['Dashboard', ['admin', 'advocate', 'assistant']], ['Performance', ['admin']]] },
+  { title: 'Overview', items: [['Dashboard', ['admin', 'advocate', 'assistant']], ['Performance', ['admin']], ['Reports', ['admin']]] },
   { title: 'Relationships', items: [['Clients', ['admin', 'advocate', 'assistant']], ['Invitations', ['admin']]] },
   { title: 'Matters', items: [['Matters', ['admin', 'advocate', 'assistant']]] },
   { title: 'Work', items: [['Tasks', ['admin', 'advocate', 'assistant']], ['Deadlines', ['admin', 'advocate', 'assistant']]] },
@@ -673,6 +675,7 @@ export default function App() {
             {(!loading || bootstrapped) && view === 'Communications' && <Communications clients={data.clients} matters={data.matters} focus={communicationFocus} notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Invoices' && <Invoices invoices={data.invoices} isAdmin={isAdmin} canManage={canManage} reload={refresh} notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Performance' && isAdmin && <AdvocatePerformance notify={setToast} />}
+            {(!loading || bootstrapped) && view === 'Reports' && isAdmin && <Reports data={data} notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Firm Settings' && isAdmin && <FirmSettings settings={firm} clients={data.clients} reload={refresh} notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Connected Accounts' && <ConnectedAccounts notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Users' && isAdmin && <Users clients={data.clients} notify={setToast} />}
