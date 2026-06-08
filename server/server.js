@@ -160,6 +160,10 @@ const ALLOWED_KYC_SANCTIONS_STATUSES = new Set(['not_checked', 'clear', 'flagged
 const ALLOWED_AUTHORITY_STATUSES = new Set(['not_required', 'pending', 'confirmed', 'expired', 'rejected']);
 const ALLOWED_AUTHORITY_BASIS = new Set(['director_resolution', 'board_resolution', 'power_of_attorney', 'letter_of_authority', 'mandate', 'other']);
 
+// RET-31I: retainer lifecycle event enums (append-only record; no side-effect mutations).
+const ALLOWED_LIFECYCLE_EVENT_TYPES = new Set(['scope_variation', 'suspension', 'resumption', 'termination', 'closure']);
+const ALLOWED_LIFECYCLE_STATUSES = new Set(['recorded', 'pending', 'approved', 'completed', 'cancelled']);
+
 const {
   defaultReminderSettings,
   defaultReminderTemplates,
@@ -1048,6 +1052,88 @@ function authorityAuditMetadata(rowOrPayload) {
   };
 }
 
+// RET-31I: retainer lifecycle event helpers (append-only record; no side-effect mutations).
+const LIFECYCLE_EVENT_SELECT = `SELECT r.*, c.name clientName
+  FROM retainer_lifecycle_events r LEFT JOIN clients c ON c.id=r.clientId`;
+
+function publicLifecycleEvent(row) {
+  return {
+    id: row.id,
+    clientId: row.clientId,
+    clientName: row.clientName || '',
+    matterId: row.matterId || '',
+    retainerId: row.retainerId || '',
+    eventType: row.eventType || '',
+    status: row.status || 'recorded',
+    effectiveDate: row.effectiveDate || '',
+    noticeDate: row.noticeDate || '',
+    title: row.title || '',
+    summary: row.summary || '',
+    reason: row.reason || '',
+    scopeBeforeSummary: row.scopeBeforeSummary || '',
+    scopeAfterSummary: row.scopeAfterSummary || '',
+    clientObligationsSummary: row.clientObligationsSummary || '',
+    firmObligationsSummary: row.firmObligationsSummary || '',
+    isActive: Number(row.isActive) === 1,
+    createdAt: row.createdAt || '',
+    updatedAt: row.updatedAt || '',
+    deactivatedAt: row.deactivatedAt || '',
+  };
+}
+
+function lifecycleEventAuditMetadata(row) {
+  return {
+    lifecycleEventId: row.id,
+    clientId: row.clientId,
+    matterId: row.matterId || '',
+    retainerId: row.retainerId || '',
+    eventType: row.eventType || '',
+    status: row.status || '',
+    effectiveDate: row.effectiveDate || '',
+    noticeDate: row.noticeDate || '',
+    title: row.title || '',
+    isActive: Number(row.isActive ?? 1),
+  };
+}
+
+async function canAccessLifecycleEvent(req, clientId, matterId) {
+  if (req.user.role === 'admin' || req.user.role === 'assistant') return true;
+  if (req.user.role === 'advocate') {
+    if (!(await canAccessClient(req, clientId))) return false;
+    if (matterId && !(await canAccessMatter(req, matterId))) return false;
+    return true;
+  }
+  return false;
+}
+
+function validateLifecycleEventPayload(payload, { partial = false } = {}) {
+  const p = payload || {};
+  if (!partial) {
+    if (!p.clientId) return 'clientId is required';
+    if (!p.eventType) return 'eventType is required';
+  }
+  if (p.eventType !== undefined && !ALLOWED_LIFECYCLE_EVENT_TYPES.has(p.eventType)) {
+    return `Invalid eventType. Allowed: ${[...ALLOWED_LIFECYCLE_EVENT_TYPES].join(', ')}`;
+  }
+  if (p.status !== undefined && !ALLOWED_LIFECYCLE_STATUSES.has(p.status)) {
+    return `Invalid status. Allowed: ${[...ALLOWED_LIFECYCLE_STATUSES].join(', ')}`;
+  }
+  if (p.effectiveDate !== undefined && p.effectiveDate !== '' && p.effectiveDate !== null && Number.isNaN(new Date(p.effectiveDate).getTime())) {
+    return 'Invalid effectiveDate';
+  }
+  if (p.noticeDate !== undefined && p.noticeDate !== '' && p.noticeDate !== null && Number.isNaN(new Date(p.noticeDate).getTime())) {
+    return 'Invalid noticeDate';
+  }
+  if ((p.title || '').length > 200) return 'title exceeds 200 characters';
+  if ((p.summary || '').length > 5000) return 'summary exceeds 5000 characters';
+  if ((p.reason || '').length > 5000) return 'reason exceeds 5000 characters';
+  if ((p.scopeBeforeSummary || '').length > 5000) return 'scopeBeforeSummary exceeds 5000 characters';
+  if ((p.scopeAfterSummary || '').length > 5000) return 'scopeAfterSummary exceeds 5000 characters';
+  if ((p.clientObligationsSummary || '').length > 5000) return 'clientObligationsSummary exceeds 5000 characters';
+  if ((p.firmObligationsSummary || '').length > 5000) return 'firmObligationsSummary exceeds 5000 characters';
+  return null;
+}
+
 async function getFirmSettings() {
   const settings = await get('SELECT * FROM firm_settings WHERE id=?', ['default']);
   const reminderSettings = await getReminderSettings();
@@ -1111,6 +1197,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS retainer_ledger_entries (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, matterId TEXT, retainerId TEXT, feePlanId TEXT, entryType TEXT NOT NULL, direction TEXT NOT NULL, amount REAL NOT NULL, currency TEXT NOT NULL DEFAULT 'KES', entryDate TEXT NOT NULL, reference TEXT, description TEXT, sourceType TEXT, sourceId TEXT, isVoided INTEGER NOT NULL DEFAULT 0, voidedBy TEXT, voidedAt TEXT, voidReason TEXT, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS client_kyc_records (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'not_started', clientCategory TEXT, riskLevel TEXT, idNumber TEXT, kraPin TEXT, registrationNumber TEXT, verificationDate TEXT, expiryDate TEXT, sourceOfFundsSummary TEXT DEFAULT '', pepStatus TEXT, sanctionsCheckStatus TEXT, verifiedBy TEXT, notes TEXT DEFAULT '', isActive INTEGER NOT NULL DEFAULT 1, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, deactivatedBy TEXT, deactivatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS client_authority_records (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', authorityBasis TEXT, authorisedPersonName TEXT, authorisedPersonRole TEXT, authorisedPersonEmail TEXT, authorisedPersonPhone TEXT, authorityDate TEXT, expiryDate TEXT, notes TEXT DEFAULT '', isActive INTEGER NOT NULL DEFAULT 1, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, deactivatedBy TEXT, deactivatedAt TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS retainer_lifecycle_events (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, matterId TEXT, retainerId TEXT, eventType TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'recorded', effectiveDate TEXT, noticeDate TEXT, title TEXT, summary TEXT DEFAULT '', reason TEXT DEFAULT '', scopeBeforeSummary TEXT DEFAULT '', scopeAfterSummary TEXT DEFAULT '', clientObligationsSummary TEXT DEFAULT '', firmObligationsSummary TEXT DEFAULT '', isActive INTEGER NOT NULL DEFAULT 1, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, deactivatedBy TEXT, deactivatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS signature_assets (id TEXT PRIMARY KEY, ownerType TEXT NOT NULL CHECK(ownerType IN ('user','firm')), ownerId TEXT, assetType TEXT NOT NULL CHECK(assetType IN ('signature','stamp')), label TEXT NOT NULL, mimeType TEXT NOT NULL, content BLOB NOT NULL, size INTEGER, isDefault INTEGER DEFAULT 0, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT, deletedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS hr_staff_profiles (id TEXT PRIMARY KEY, userId TEXT NOT NULL UNIQUE, jobTitle TEXT, department TEXT, practiceTeam TEXT, employmentType TEXT, startDate TEXT, contractEndDate TEXT, supervisorUserId TEXT, workEmail TEXT, workPhone TEXT, emergencyContactName TEXT, emergencyContactPhone TEXT, hrStatus TEXT NOT NULL DEFAULT 'active', adminNotes TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, createdBy TEXT, updatedBy TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS hr_leave_requests (
@@ -1402,6 +1489,12 @@ createdAt TEXT NOT NULL
   await run('CREATE INDEX IF NOT EXISTS idx_client_authority_records_status ON client_authority_records(status)');
   await run('CREATE INDEX IF NOT EXISTS idx_client_authority_records_basis ON client_authority_records(authorityBasis)');
   await run('CREATE INDEX IF NOT EXISTS idx_client_authority_records_active ON client_authority_records(isActive)');
+  await run('CREATE INDEX IF NOT EXISTS idx_lifecycle_events_clientId ON retainer_lifecycle_events(clientId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_lifecycle_events_matterId ON retainer_lifecycle_events(matterId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_lifecycle_events_retainerId ON retainer_lifecycle_events(retainerId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_lifecycle_events_eventType ON retainer_lifecycle_events(eventType)');
+  await run('CREATE INDEX IF NOT EXISTS idx_lifecycle_events_status ON retainer_lifecycle_events(status)');
+  await run('CREATE INDEX IF NOT EXISTS idx_lifecycle_events_clientId_active ON retainer_lifecycle_events(clientId, isActive)');
   await backfillSeededReceiptNumbers();
   await seedReminderTemplates();
 
@@ -5613,6 +5706,33 @@ app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
     };
   }
 
+  // RET-31I: retainer lifecycle event snapshot summary (double module-gated; safe fields only).
+  let lifecycleBlock = { visible: false };
+  if ((await isModuleEnabled('retainerManagement')) && (await isModuleEnabled('scopeVariation'))) {
+    const activeEvents = await all(`SELECT id, eventType, status, effectiveDate, noticeDate, title, matterId
+      FROM retainer_lifecycle_events WHERE clientId=? AND isActive=1 ORDER BY createdAt DESC`, [clientId]);
+    const latestEvent = activeEvents.length ? activeEvents[0] : null;
+    const eventCounts = { scope_variation: 0, suspension: 0, resumption: 0, termination: 0, closure: 0, pending: 0 };
+    for (const e of activeEvents) {
+      if (eventCounts[e.eventType] !== undefined) eventCounts[e.eventType]++;
+      if (e.status === 'pending') eventCounts.pending++;
+    }
+    lifecycleBlock = {
+      visible: true,
+      activeCount: activeEvents.length,
+      latest: latestEvent ? {
+        id: latestEvent.id,
+        eventType: latestEvent.eventType || '',
+        status: latestEvent.status || 'recorded',
+        effectiveDate: latestEvent.effectiveDate || '',
+        noticeDate: latestEvent.noticeDate || '',
+        title: latestEvent.title || '',
+        matterId: latestEvent.matterId || '',
+      } : null,
+      summary: eventCounts,
+    };
+  }
+
   res.json({
     client: {
       id: clientRow.id,
@@ -5635,6 +5755,7 @@ app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
     ledger: ledgerBlock,
     kyc: kycBlock,
     authority: authorityBlock,
+    lifecycle: lifecycleBlock,
   });
 });
 // RET-31D: retainer intake and scope schedule routes (module-gated, staff-only).
@@ -6378,6 +6499,149 @@ app.delete('/api/client-authorities/:id', requireStaff, async (req, res) => {
   }).catch(() => {});
   res.json({ message: 'Authority record deactivated' });
 });
+
+// RET-31I: retainer lifecycle event routes (append-only record; double module-gated; staff-only).
+app.get('/api/retainer-lifecycle-events', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'retainerManagement', 'Retainer Management')) return;
+  if (!await requireEnabledModule(req, res, 'scopeVariation', 'Scope Variation')) return;
+  const { clientId, matterId, retainerId, eventType, includeInactive } = req.query;
+  const conditions = [];
+  const params = [];
+  if (clientId) { conditions.push('r.clientId=?'); params.push(clientId); }
+  if (matterId) { conditions.push('r.matterId=?'); params.push(matterId); }
+  if (retainerId) { conditions.push('r.retainerId=?'); params.push(retainerId); }
+  if (eventType) { conditions.push('r.eventType=?'); params.push(eventType); }
+  if (includeInactive !== 'true') { conditions.push('r.isActive=1'); }
+  const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+  const rows = await all(`${LIFECYCLE_EVENT_SELECT} ${where} ORDER BY r.createdAt DESC`, params);
+  const scoped = [];
+  for (const row of rows) {
+    if (await canAccessLifecycleEvent(req, row.clientId, row.matterId)) {
+      scoped.push(publicLifecycleEvent(row));
+    }
+  }
+  res.json(scoped);
+});
+
+app.get('/api/retainer-lifecycle-events/:id', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'retainerManagement', 'Retainer Management')) return;
+  if (!await requireEnabledModule(req, res, 'scopeVariation', 'Scope Variation')) return;
+  const row = await get(`${LIFECYCLE_EVENT_SELECT} WHERE r.id=?`, [req.params.id]);
+  if (!row) return res.status(404).json({ error: 'Lifecycle event not found' });
+  if (!await canAccessLifecycleEvent(req, row.clientId, row.matterId)) {
+    return res.status(403).json({ error: 'Lifecycle event access denied' });
+  }
+  res.json(publicLifecycleEvent(row));
+});
+
+app.post('/api/retainer-lifecycle-events', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'retainerManagement', 'Retainer Management')) return;
+  if (!await requireEnabledModule(req, res, 'scopeVariation', 'Scope Variation')) return;
+  const validationError = validateLifecycleEventPayload(req.body, { partial: false });
+  if (validationError) return res.status(400).json({ error: validationError });
+  const client = await get('SELECT id FROM clients WHERE id=?', [req.body.clientId]);
+  if (!client) return res.status(400).json({ error: 'Client not found' });
+  if (req.body.matterId) {
+    const matter = await get('SELECT id, clientId FROM matters WHERE id=?', [req.body.matterId]);
+    if (!matter) return res.status(400).json({ error: 'Matter not found' });
+    if (matter.clientId !== req.body.clientId) return res.status(400).json({ error: 'matterId does not belong to clientId' });
+  }
+  if (req.body.retainerId) {
+    const ret = await get('SELECT id, clientId, matterId, isActive FROM retainer_records WHERE id=?', [req.body.retainerId]);
+    if (!ret) return res.status(400).json({ error: 'Retainer not found' });
+    if (Number(ret.isActive) !== 1) return res.status(400).json({ error: 'retainerId is not active' });
+    if (ret.clientId !== req.body.clientId) return res.status(400).json({ error: 'retainerId does not belong to this client' });
+    if (req.body.matterId && (ret.matterId || '') !== req.body.matterId) return res.status(400).json({ error: 'retainerId does not belong to this matter' });
+  }
+  if (!await canAccessLifecycleEvent(req, req.body.clientId, req.body.matterId)) {
+    return res.status(403).json({ error: 'Lifecycle event create denied' });
+  }
+  const id = genId('LCE');
+  const now = new Date().toISOString();
+  await run(`INSERT INTO retainer_lifecycle_events (id,clientId,matterId,retainerId,eventType,status,effectiveDate,noticeDate,title,summary,reason,scopeBeforeSummary,scopeAfterSummary,clientObligationsSummary,firmObligationsSummary,isActive,createdBy,createdAt)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)`,
+    [id, req.body.clientId, req.body.matterId || null, req.body.retainerId || null, req.body.eventType, req.body.status || 'recorded',
+     req.body.effectiveDate || null, req.body.noticeDate || null, req.body.title || null, req.body.summary || '', req.body.reason || '',
+     req.body.scopeBeforeSummary || '', req.body.scopeAfterSummary || '', req.body.clientObligationsSummary || '', req.body.firmObligationsSummary || '',
+     req.user.userId || '', now]);
+  const row = await get(`${LIFECYCLE_EVENT_SELECT} WHERE r.id=?`, [id]);
+  await recordAuditEvent(req, {
+    action: 'retainer_lifecycle_event_created',
+    entityType: 'retainer_lifecycle_event',
+    entityId: id,
+    clientId: req.body.clientId,
+    matterId: req.body.matterId || '',
+    metadata: lifecycleEventAuditMetadata(row),
+  }).catch(() => {});
+  res.status(201).json(publicLifecycleEvent(row));
+});
+
+app.patch('/api/retainer-lifecycle-events/:id', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'retainerManagement', 'Retainer Management')) return;
+  if (!await requireEnabledModule(req, res, 'scopeVariation', 'Scope Variation')) return;
+  const existing = await get(`${LIFECYCLE_EVENT_SELECT} WHERE r.id=?`, [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Lifecycle event not found' });
+  if (!await canAccessLifecycleEvent(req, existing.clientId, existing.matterId)) {
+    return res.status(403).json({ error: 'Lifecycle event update denied' });
+  }
+  if (req.body.clientId !== undefined && req.body.clientId !== existing.clientId) {
+    return res.status(400).json({ error: 'clientId cannot be changed after creation' });
+  }
+  const validationError = validateLifecycleEventPayload(req.body, { partial: true });
+  if (validationError) return res.status(400).json({ error: validationError });
+  const { status, effectiveDate, noticeDate, title, summary, reason, scopeBeforeSummary, scopeAfterSummary, clientObligationsSummary, firmObligationsSummary } = req.body;
+  const fields = [];
+  const vals = [];
+  if (status !== undefined) { fields.push('status=?'); vals.push(status); }
+  if (effectiveDate !== undefined) { fields.push('effectiveDate=?'); vals.push(effectiveDate || null); }
+  if (noticeDate !== undefined) { fields.push('noticeDate=?'); vals.push(noticeDate || null); }
+  if (title !== undefined) { fields.push('title=?'); vals.push(title || null); }
+  if (summary !== undefined) { fields.push('summary=?'); vals.push(summary || ''); }
+  if (reason !== undefined) { fields.push('reason=?'); vals.push(reason || ''); }
+  if (scopeBeforeSummary !== undefined) { fields.push('scopeBeforeSummary=?'); vals.push(scopeBeforeSummary || ''); }
+  if (scopeAfterSummary !== undefined) { fields.push('scopeAfterSummary=?'); vals.push(scopeAfterSummary || ''); }
+  if (clientObligationsSummary !== undefined) { fields.push('clientObligationsSummary=?'); vals.push(clientObligationsSummary || ''); }
+  if (firmObligationsSummary !== undefined) { fields.push('firmObligationsSummary=?'); vals.push(firmObligationsSummary || ''); }
+  if (!fields.length) return res.status(400).json({ error: 'No fields to update' });
+  const now = new Date().toISOString();
+  fields.push('updatedAt=?'); vals.push(now);
+  fields.push('updatedBy=?'); vals.push(req.user.userId || '');
+  vals.push(req.params.id);
+  await run(`UPDATE retainer_lifecycle_events SET ${fields.join(', ')} WHERE id=?`, vals);
+  const updated = await get(`${LIFECYCLE_EVENT_SELECT} WHERE r.id=?`, [req.params.id]);
+  await recordAuditEvent(req, {
+    action: 'retainer_lifecycle_event_updated',
+    entityType: 'retainer_lifecycle_event',
+    entityId: req.params.id,
+    clientId: existing.clientId,
+    matterId: existing.matterId || '',
+    metadata: lifecycleEventAuditMetadata(updated),
+  }).catch(() => {});
+  res.json(publicLifecycleEvent(updated));
+});
+
+app.delete('/api/retainer-lifecycle-events/:id', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'retainerManagement', 'Retainer Management')) return;
+  if (!await requireEnabledModule(req, res, 'scopeVariation', 'Scope Variation')) return;
+  const existing = await get(`${LIFECYCLE_EVENT_SELECT} WHERE r.id=?`, [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Lifecycle event not found' });
+  if (!await canAccessLifecycleEvent(req, existing.clientId, existing.matterId)) {
+    return res.status(403).json({ error: 'Lifecycle event deactivate denied' });
+  }
+  const now = new Date().toISOString();
+  await run('UPDATE retainer_lifecycle_events SET isActive=0, deactivatedBy=?, deactivatedAt=?, updatedAt=? WHERE id=?',
+    [req.user.userId || '', now, now, req.params.id]);
+  await recordAuditEvent(req, {
+    action: 'retainer_lifecycle_event_deactivated',
+    entityType: 'retainer_lifecycle_event',
+    entityId: req.params.id,
+    clientId: existing.clientId,
+    matterId: existing.matterId || '',
+    metadata: lifecycleEventAuditMetadata({ ...existing, isActive: 0 }),
+  }).catch(() => {});
+  res.json({ message: 'Lifecycle event deactivated' });
+});
+
 app.delete('/api/clients/:id', requireAdvocateOrAdmin, async (req, res) => {
   const client = await get('SELECT * FROM clients WHERE id=?', [req.params.id]);
   const matters = await all('SELECT id FROM matters WHERE clientId=?', [req.params.id]);

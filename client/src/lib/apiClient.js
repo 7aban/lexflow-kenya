@@ -558,3 +558,10 @@ export const getClientAuthorityRecord = (id) => api(`/client-authorities/${encod
 export const createClientAuthority = (payload) => api('/client-authorities', { method: 'POST', body: payload });
 export const updateClientAuthority = (id, payload) => api(`/client-authorities/${encodeURIComponent(id)}`, { method: 'PATCH', body: payload });
 export const deleteClientAuthority = (id) => api(`/client-authorities/${encodeURIComponent(id)}`, { method: 'DELETE' });
+
+// RET-31I: retainer lifecycle events (double module-gated: retainerManagement + scopeVariation).
+export const getRetainerLifecycleEvents = (params = {}) => api(queryPath('/retainer-lifecycle-events', params));
+export const getRetainerLifecycleEvent = (id) => api(`/retainer-lifecycle-events/${encodeURIComponent(id)}`);
+export const createRetainerLifecycleEvent = (payload) => api('/retainer-lifecycle-events', { method: 'POST', body: payload });
+export const updateRetainerLifecycleEvent = (id, payload) => api(`/retainer-lifecycle-events/${encodeURIComponent(id)}`, { method: 'PATCH', body: payload });
+export const deleteRetainerLifecycleEvent = (id) => api(`/retainer-lifecycle-events/${encodeURIComponent(id)}`, { method: 'DELETE' });
