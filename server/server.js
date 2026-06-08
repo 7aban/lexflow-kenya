@@ -105,6 +105,18 @@ app.use('/api/login', authLimiter);
 app.use('/api/register', authLimiter);
 app.use('/api/invitations', authLimiter);
 
+const DEFAULT_MODULE_SETTINGS = {
+  retainerManagement: false,
+  kycCdd: false,
+  corporateAuthority: false,
+  retainerLedger: false,
+  scopeVariation: false,
+  clientTasks: false,
+  advancedCompliance: false,
+};
+
+const ALLOWED_MODULE_KEYS = new Set(Object.keys(DEFAULT_MODULE_SETTINGS));
+
 const defaultFirmSettings = {
   id: 'default',
   name: 'LexFlow Kenya',
@@ -120,6 +132,7 @@ const defaultFirmSettings = {
   vatNumber: '',
   invoiceFooterNote: '',
   defaultInvoiceDueDays: 30,
+  moduleSettings: { ...DEFAULT_MODULE_SETTINGS },
 };
 
 const {
@@ -156,6 +169,55 @@ function normalizeBillable(value, fallback = 1) {
   if (value === true || value === 1 || value === '1' || value === 'true') return 1;
   if (value === false || value === 0 || value === '0' || value === 'false') return 0;
   return null;
+}
+
+function parseModuleSettingsJson(value) {
+  if (!value || typeof value !== 'string') return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeModuleSettingsInput(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return { error: 'moduleSettings must be an object' };
+  const unknownKeys = Object.keys(input).filter(key => !ALLOWED_MODULE_KEYS.has(key));
+  if (unknownKeys.length) return { error: `Unknown module setting key: ${unknownKeys[0]}` };
+  const normalized = {};
+  for (const key of ALLOWED_MODULE_KEYS) {
+    if (input[key] === undefined) continue;
+    if (typeof input[key] !== 'boolean') {
+      if (input[key] === 1 || input[key] === 0) {
+        normalized[key] = Boolean(input[key]);
+      } else {
+        return { error: `Module setting "${key}" must be a boolean value` };
+      }
+    } else {
+      normalized[key] = input[key];
+    }
+  }
+  return { value: normalized };
+}
+
+function resolveModuleSettings(stored) {
+  const parsed = parseModuleSettingsJson(stored);
+  if (!parsed) return { ...DEFAULT_MODULE_SETTINGS };
+  const valid = {};
+  for (const key of ALLOWED_MODULE_KEYS) {
+    if (typeof parsed[key] === 'boolean') {
+      valid[key] = parsed[key];
+    }
+  }
+  return { ...DEFAULT_MODULE_SETTINGS, ...valid };
+}
+
+async function isModuleEnabled(moduleKey) {
+  if (!ALLOWED_MODULE_KEYS.has(moduleKey)) return false;
+  const settings = await getFirmSettings();
+  return Boolean(settings.moduleSettings?.[moduleKey]);
 }
 
 const HR_STAFF_ROLES = new Set(['admin', 'advocate', 'assistant']);
@@ -648,9 +710,11 @@ async function getFirmSettings() {
       theme = null;
     }
   }
-  const normalized = { ...defaultFirmSettings, ...(settings || {}) };
+  const moduleSettings = settings ? resolveModuleSettings(settings.moduleSettingsJson) : { ...DEFAULT_MODULE_SETTINGS };
+  const { moduleSettingsJson: _msj, ...safeSettings } = settings || {};
+  const normalized = { ...defaultFirmSettings, ...safeSettings };
   normalized.defaultInvoiceDueDays = normalizeDefaultInvoiceDueDays(normalized.defaultInvoiceDueDays);
-  return { ...normalized, reminderSettings, theme: theme || null };
+  return { ...normalized, reminderSettings, theme: theme || null, moduleSettings };
 }
 
 async function initDb() {
@@ -886,6 +950,7 @@ createdAt TEXT NOT NULL
   await ensureColumn('firm_settings', 'vatNumber', "TEXT DEFAULT ''");
   await ensureColumn('firm_settings', 'invoiceFooterNote', "TEXT DEFAULT ''");
   await ensureColumn('firm_settings', 'defaultInvoiceDueDays', 'INTEGER DEFAULT 30');
+  await ensureColumn('firm_settings', 'moduleSettingsJson', 'TEXT');
   await run('UPDATE firm_settings SET defaultInvoiceDueDays=30 WHERE defaultInvoiceDueDays NOT IN (7,14,30,45) OR defaultInvoiceDueDays IS NULL');
   await ensureColumn('payments', 'proofId', 'TEXT');
   await ensureColumn('payments', 'createdBy', 'TEXT');
@@ -1391,10 +1456,23 @@ app.put('/api/firm-settings', authenticate, requireAdmin, async (req, res) => {
   if (req.body.advocateBillingVisibility !== undefined) {
     await run('UPDATE firm_settings SET advocateBillingVisibility=?', [Number(req.body.advocateBillingVisibility)]);
   }
-  const fieldsUpdated = Object.keys(req.body).filter(k => k !== 'reminderSettings');
+  let moduleValidationResult = null;
+  if (req.body.moduleSettings !== undefined) {
+    const validation = normalizeModuleSettingsInput(req.body.moduleSettings);
+    if (validation.error) return res.status(400).json({ error: validation.error });
+    moduleValidationResult = validation;
+    const currentSettings = await get('SELECT moduleSettingsJson FROM firm_settings WHERE id=?', ['default']);
+    const current = resolveModuleSettings(currentSettings?.moduleSettingsJson);
+    const merged = { ...current, ...validation.value };
+    await run('UPDATE firm_settings SET moduleSettingsJson=? WHERE id=?', [JSON.stringify(merged), 'default']);
+  }
+  const fieldsUpdated = Object.keys(req.body).filter(k => k !== 'reminderSettings' && k !== 'moduleSettings');
   const metadata = { name: settings.name, fieldsUpdated };
   if (req.body.advocateBillingVisibility !== undefined && req.body.advocateBillingVisibility !== oldBillingVisibility) {
     metadata.advocateBillingVisibility = { old: oldBillingVisibility, new: Number(req.body.advocateBillingVisibility) };
+  }
+  if (moduleValidationResult && Object.keys(moduleValidationResult.value).length) {
+    metadata.moduleSettings = { ...moduleValidationResult.value };
   }
   await logAudit(req, 'update', 'firm_settings', 'default', `Updated firm settings for ${settings.name}`);
   await recordAuditEvent(req, { action: 'firm_settings_updated', entityType: 'firm_settings', entityId: 'default', metadata }).catch(() => {});

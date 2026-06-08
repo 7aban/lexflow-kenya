@@ -3059,6 +3059,7 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
     { id: 'billing', label: 'Billing & Payment', hint: 'Invoice defaults, payment guidance, tax identifiers, and billing visibility.' },
     { id: 'branding', label: 'Branding & Theme', hint: 'Saved firm colors plus the live workspace theme preview controls.' },
     { id: 'reminders', label: 'Reminders & Automation', hint: 'Firm-wide reminder channels and provider credentials.' },
+    { id: 'modules', label: 'Practice Modules', hint: 'Enable optional practice modules for this firm.' },
   ];
   const activeSettingsSection = settingsSections.find(section => section.id === settingsSection) || settingsSections[0];
 
@@ -3256,6 +3257,57 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
             </>}
             <div style={styles.formHelper}>When credentials are blank, LexFlow uses console stubs for testing. Real messages send automatically once provider credentials are saved.</div>
             <button style={styles.primaryButton}>Save automation</button>
+          </form>
+        </Card>
+      )}
+
+      {settingsSection === 'modules' && (
+        <Card title="Practice Modules" hint="Enable optional practice modules for this firm.">
+          <form onSubmit={submit} style={styles.formGrid}>
+            <div style={{ display: 'grid', gap: 16 }}>
+              <div>
+                <strong style={{ fontSize: 13, color: theme.ink }}>Retainer &amp; KYC</strong>
+                <div style={{ display: 'grid', gap: 10, marginTop: 8 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input type="checkbox" checked={Boolean(form.moduleSettings?.retainerManagement)} onChange={e => setForm({ ...form, moduleSettings: { ...form.moduleSettings, retainerManagement: e.target.checked } })} />
+                    Retainer Management
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input type="checkbox" checked={Boolean(form.moduleSettings?.kycCdd)} onChange={e => setForm({ ...form, moduleSettings: { ...form.moduleSettings, kycCdd: e.target.checked } })} />
+                    KYC / CDD
+                  </label>
+                </div>
+              </div>
+              <div>
+                <strong style={{ fontSize: 13, color: theme.ink }}>Advanced Workflows</strong>
+                <div style={{ display: 'grid', gap: 10, marginTop: 8 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input type="checkbox" checked={Boolean(form.moduleSettings?.corporateAuthority)} onChange={e => setForm({ ...form, moduleSettings: { ...form.moduleSettings, corporateAuthority: e.target.checked } })} />
+                    Corporate Authority
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input type="checkbox" checked={Boolean(form.moduleSettings?.retainerLedger)} onChange={e => setForm({ ...form, moduleSettings: { ...form.moduleSettings, retainerLedger: e.target.checked } })} />
+                    Retainer Ledger
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input type="checkbox" checked={Boolean(form.moduleSettings?.scopeVariation)} onChange={e => setForm({ ...form, moduleSettings: { ...form.moduleSettings, scopeVariation: e.target.checked } })} />
+                    Scope Variation
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input type="checkbox" checked={Boolean(form.moduleSettings?.clientTasks)} onChange={e => setForm({ ...form, moduleSettings: { ...form.moduleSettings, clientTasks: e.target.checked } })} />
+                    Client Tasks
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input type="checkbox" checked={Boolean(form.moduleSettings?.advancedCompliance)} onChange={e => setForm({ ...form, moduleSettings: { ...form.moduleSettings, advancedCompliance: e.target.checked } })} />
+                    Advanced Compliance
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div style={{ ...styles.alert, padding: 10, borderRadius: 6 }}>
+              Disabled modules are hidden from future workflows. Disabling a module does not delete existing data.
+            </div>
+            <button style={styles.primaryButton}>Save settings</button>
           </form>
         </Card>
       )}
