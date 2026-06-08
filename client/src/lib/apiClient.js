@@ -531,3 +531,10 @@ export const getRetainer = (id) => api(`/retainers/${encodeURIComponent(id)}`);
 export const createRetainer = (payload) => api('/retainers', { method: 'POST', body: payload });
 export const updateRetainer = (id, payload) => api(`/retainers/${encodeURIComponent(id)}`, { method: 'PATCH', body: payload });
 export const deleteRetainer = (id) => api(`/retainers/${encodeURIComponent(id)}`, { method: 'DELETE' });
+
+// RET-31E: matter fee plans (module-gated, staff-only; planning/record only).
+export const getMatterFeePlans = (params = {}) => api(queryPath('/matter-fee-plans', params));
+export const getMatterFeePlan = (id) => api(`/matter-fee-plans/${encodeURIComponent(id)}`);
+export const createMatterFeePlan = (payload) => api('/matter-fee-plans', { method: 'POST', body: payload });
+export const updateMatterFeePlan = (id, payload) => api(`/matter-fee-plans/${encodeURIComponent(id)}`, { method: 'PATCH', body: payload });
+export const deleteMatterFeePlan = (id) => api(`/matter-fee-plans/${encodeURIComponent(id)}`, { method: 'DELETE' });

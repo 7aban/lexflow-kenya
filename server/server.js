@@ -138,6 +138,13 @@ const defaultFirmSettings = {
 const ALLOWED_RETAINER_STATUSES = new Set(['not_started', 'draft', 'sent', 'signed', 'declined', 'terminated']);
 const ALLOWED_RETAINER_ENGAGEMENT_TYPES = new Set(['advisory', 'litigation', 'conveyancing', 'corporate', 'employment', 'family', 'criminal', 'other']);
 
+// RET-31E: matter fee plan enums (planning/record only; no billing computation).
+const ALLOWED_FEE_PLAN_TYPES = new Set(['fixed', 'hourly', 'capped', 'retainer', 'contingency', 'pro_bono', 'mixed', 'other']);
+const ALLOWED_FEE_PLAN_STATUSES = new Set(['draft', 'proposed', 'approved', 'superseded', 'cancelled']);
+const ALLOWED_FEE_PLAN_BILLING_FREQUENCIES = new Set(['upfront', 'monthly', 'milestone', 'on_completion', 'as_incurred', 'other']);
+const ALLOWED_FEE_PLAN_VAT_TREATMENTS = new Set(['exclusive', 'inclusive', 'exempt', 'not_applicable']);
+const ALLOWED_FEE_PLAN_DISBURSEMENTS_TREATMENTS = new Set(['included', 'billed_separately', 'estimated', 'not_applicable', 'other']);
+
 const {
   defaultReminderSettings,
   defaultReminderTemplates,
@@ -735,6 +742,75 @@ function publicRetainerRecord(row) {
   };
 }
 
+// RET-31E: normalize a numeric fee-plan field to a number or null (no computation).
+function feePlanNumOrNull(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const n = Number(value);
+  return Number.isNaN(n) ? null : n;
+}
+
+// RET-31E: validate a numeric field is blank/null or a finite number >= 0.
+function feePlanNumericError(value, label) {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'boolean') return `${label} must be a number`;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return `${label} must be a valid number`;
+  if (n < 0) return `${label} must be greater than or equal to 0`;
+  return null;
+}
+
+// RET-31E: shared payload validation for matter fee plans.
+// partial=true skips the required-field checks (used by PATCH).
+function validateFeePlanPayload(payload, { partial = false } = {}) {
+  const p = payload || {};
+  if (!partial) {
+    if (!p.clientId) return 'clientId is required';
+    if (!p.matterId) return 'matterId is required';
+    if (!p.feeType) return 'feeType is required';
+  }
+  if (p.feeType !== undefined && !ALLOWED_FEE_PLAN_TYPES.has(p.feeType)) return `Invalid feeType. Allowed: ${[...ALLOWED_FEE_PLAN_TYPES].join(', ')}`;
+  if (p.status !== undefined && p.status !== '' && p.status !== null && !ALLOWED_FEE_PLAN_STATUSES.has(p.status)) return `Invalid status. Allowed: ${[...ALLOWED_FEE_PLAN_STATUSES].join(', ')}`;
+  if (p.billingFrequency !== undefined && p.billingFrequency !== '' && p.billingFrequency !== null && !ALLOWED_FEE_PLAN_BILLING_FREQUENCIES.has(p.billingFrequency)) return `Invalid billingFrequency. Allowed: ${[...ALLOWED_FEE_PLAN_BILLING_FREQUENCIES].join(', ')}`;
+  if (p.vatTreatment !== undefined && p.vatTreatment !== '' && p.vatTreatment !== null && !ALLOWED_FEE_PLAN_VAT_TREATMENTS.has(p.vatTreatment)) return `Invalid vatTreatment. Allowed: ${[...ALLOWED_FEE_PLAN_VAT_TREATMENTS].join(', ')}`;
+  if (p.disbursementsTreatment !== undefined && p.disbursementsTreatment !== '' && p.disbursementsTreatment !== null && !ALLOWED_FEE_PLAN_DISBURSEMENTS_TREATMENTS.has(p.disbursementsTreatment)) return `Invalid disbursementsTreatment. Allowed: ${[...ALLOWED_FEE_PLAN_DISBURSEMENTS_TREATMENTS].join(', ')}`;
+  for (const f of ['estimatedAmount', 'hourlyRate', 'capAmount', 'depositRequired']) {
+    const err = feePlanNumericError(p[f], f);
+    if (err) return err;
+  }
+  if (p.currency !== undefined && p.currency !== null && String(p.currency).length > 10) return 'currency exceeds 10 characters';
+  if ((p.paymentTerms || '').length > 5000) return 'paymentTerms exceeds 5000 characters';
+  if ((p.notes || '').length > 10000) return 'notes exceeds 10000 characters';
+  return null;
+}
+
+function publicFeePlan(row) {
+  return {
+    id: row.id,
+    clientId: row.clientId,
+    clientName: row.clientName || '',
+    matterId: row.matterId || '',
+    matterTitle: row.matterTitle || '',
+    matterReference: row.matterReference || '',
+    retainerId: row.retainerId || '',
+    feeType: row.feeType || '',
+    currency: row.currency || 'KES',
+    estimatedAmount: feePlanNumOrNull(row.estimatedAmount),
+    hourlyRate: feePlanNumOrNull(row.hourlyRate),
+    capAmount: feePlanNumOrNull(row.capAmount),
+    depositRequired: feePlanNumOrNull(row.depositRequired),
+    billingFrequency: row.billingFrequency || '',
+    paymentTerms: row.paymentTerms || '',
+    vatTreatment: row.vatTreatment || '',
+    disbursementsTreatment: row.disbursementsTreatment || '',
+    status: row.status || 'draft',
+    notes: row.notes || '',
+    isActive: Number(row.isActive || 1) === 1,
+    createdAt: row.createdAt || '',
+    updatedAt: row.updatedAt || '',
+    deactivatedAt: row.deactivatedAt || '',
+  };
+}
+
 async function getFirmSettings() {
   const settings = await get('SELECT * FROM firm_settings WHERE id=?', ['default']);
   const reminderSettings = await getReminderSettings();
@@ -794,6 +870,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS document_templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, practiceArea TEXT, category TEXT, bodyMarkup TEXT, active INTEGER DEFAULT 1, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS document_requests (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, clientId TEXT NOT NULL, staffUserId TEXT NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', createdAt TEXT NOT NULL, respondedAt TEXT, responseDocumentId TEXT, cancelledAt TEXT, cancelledBy TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS retainer_records (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, matterId TEXT, status TEXT NOT NULL DEFAULT 'not_started', engagementType TEXT, engagementStartDate TEXT, signedDate TEXT, responsibleAdvocate TEXT, scopeSummary TEXT DEFAULT '', exclusionsSummary TEXT DEFAULT '', clientObligationsSummary TEXT DEFAULT '', firmObligationsSummary TEXT DEFAULT '', billingArrangementSummary TEXT DEFAULT '', terminationTermsSummary TEXT DEFAULT '', notes TEXT DEFAULT '', isActive INTEGER NOT NULL DEFAULT 1, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, deactivatedBy TEXT, deactivatedAt TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS matter_fee_plans (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, matterId TEXT NOT NULL, retainerId TEXT, feeType TEXT NOT NULL, currency TEXT NOT NULL DEFAULT 'KES', estimatedAmount REAL, hourlyRate REAL, capAmount REAL, depositRequired REAL, billingFrequency TEXT, paymentTerms TEXT, vatTreatment TEXT, disbursementsTreatment TEXT, status TEXT NOT NULL DEFAULT 'draft', notes TEXT DEFAULT '', isActive INTEGER NOT NULL DEFAULT 1, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, deactivatedBy TEXT, deactivatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS signature_assets (id TEXT PRIMARY KEY, ownerType TEXT NOT NULL CHECK(ownerType IN ('user','firm')), ownerId TEXT, assetType TEXT NOT NULL CHECK(assetType IN ('signature','stamp')), label TEXT NOT NULL, mimeType TEXT NOT NULL, content BLOB NOT NULL, size INTEGER, isDefault INTEGER DEFAULT 0, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT, deletedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS hr_staff_profiles (id TEXT PRIMARY KEY, userId TEXT NOT NULL UNIQUE, jobTitle TEXT, department TEXT, practiceTeam TEXT, employmentType TEXT, startDate TEXT, contractEndDate TEXT, supervisorUserId TEXT, workEmail TEXT, workPhone TEXT, emergencyContactName TEXT, emergencyContactPhone TEXT, hrStatus TEXT NOT NULL DEFAULT 'active', adminNotes TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, createdBy TEXT, updatedBy TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS hr_leave_requests (
@@ -1066,6 +1143,11 @@ createdAt TEXT NOT NULL
   await run('CREATE INDEX IF NOT EXISTS idx_retainer_records_matterId ON retainer_records(matterId)');
   await run('CREATE INDEX IF NOT EXISTS idx_retainer_records_status ON retainer_records(status)');
   await run('CREATE INDEX IF NOT EXISTS idx_retainer_records_active ON retainer_records(isActive)');
+  await run('CREATE INDEX IF NOT EXISTS idx_matter_fee_plans_clientId ON matter_fee_plans(clientId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_matter_fee_plans_matterId ON matter_fee_plans(matterId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_matter_fee_plans_retainerId ON matter_fee_plans(retainerId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_matter_fee_plans_status ON matter_fee_plans(status)');
+  await run('CREATE INDEX IF NOT EXISTS idx_matter_fee_plans_active ON matter_fee_plans(isActive)');
   await backfillSeededReceiptNumbers();
   await seedReminderTemplates();
 
@@ -5204,6 +5286,32 @@ app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
     };
   }
 
+  // RET-31E: matter fee plan snapshot (module-gated, read-only; no billing computation).
+  let feePlanBlock = { visible: false };
+  if (await isModuleEnabled('retainerManagement')) {
+    const activeFeePlans = await all(`SELECT id, matterId, feeType, status, currency, estimatedAmount, hourlyRate, capAmount, depositRequired, billingFrequency, vatTreatment
+      FROM matter_fee_plans WHERE clientId=? AND isActive=1 ORDER BY createdAt DESC`, [clientId]);
+    const latestFeePlan = activeFeePlans.length ? activeFeePlans[0] : null;
+    feePlanBlock = {
+      visible: true,
+      activeCount: activeFeePlans.length,
+      latest: latestFeePlan ? {
+        id: latestFeePlan.id,
+        matterId: latestFeePlan.matterId || '',
+        matterTitle: matterTitleById.get(latestFeePlan.matterId) || '',
+        feeType: latestFeePlan.feeType || '',
+        status: latestFeePlan.status || '',
+        currency: latestFeePlan.currency || 'KES',
+        estimatedAmount: feePlanNumOrNull(latestFeePlan.estimatedAmount),
+        hourlyRate: feePlanNumOrNull(latestFeePlan.hourlyRate),
+        capAmount: feePlanNumOrNull(latestFeePlan.capAmount),
+        depositRequired: feePlanNumOrNull(latestFeePlan.depositRequired),
+        billingFrequency: latestFeePlan.billingFrequency || '',
+        vatTreatment: latestFeePlan.vatTreatment || '',
+      } : null,
+    };
+  }
+
   res.json({
     client: {
       id: clientRow.id,
@@ -5222,6 +5330,7 @@ app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
     recentDocuments,
     attentionFlags,
     retainer: retainerBlock,
+    feePlan: feePlanBlock,
   });
 });
 // RET-31D: retainer intake and scope schedule routes (module-gated, staff-only).
@@ -5420,6 +5529,188 @@ app.delete('/api/retainers/:id', requireStaff, async (req, res) => {
     metadata: { retainerId: req.params.id, clientId: existing.clientId, matterId: existing.matterId || '', status: existing.status, engagementType: existing.engagementType || '', engagementStartDate: existing.engagementStartDate || '', signedDate: existing.signedDate || '', isActive: 0 },
   }).catch(() => {});
   res.json({ message: 'Retainer record deactivated' });
+});
+
+// RET-31E: matter fee plan routes (module-gated, staff-only; planning/record only).
+const FEE_PLAN_SELECT = `SELECT r.*, c.name clientName, m.title matterTitle, m.reference matterReference
+    FROM matter_fee_plans r LEFT JOIN clients c ON c.id=r.clientId LEFT JOIN matters m ON m.id=r.matterId`;
+
+async function canAccessFeePlan(req, clientId, matterId) {
+  if (req.user.role === 'admin' || req.user.role === 'assistant') return true;
+  if (req.user.role === 'advocate') {
+    if (!(await canAccessClient(req, clientId))) return false;
+    if (!(await canAccessMatter(req, matterId))) return false;
+    return true;
+  }
+  return false;
+}
+
+// RET-31E: whitelist audit metadata (excludes notes/paymentTerms/disbursementsTreatment).
+function feePlanAuditMetadata(row, isActiveOverride) {
+  return {
+    feePlanId: row.id,
+    clientId: row.clientId,
+    matterId: row.matterId,
+    retainerId: row.retainerId || '',
+    feeType: row.feeType || '',
+    status: row.status || '',
+    currency: row.currency || '',
+    estimatedAmount: feePlanNumOrNull(row.estimatedAmount),
+    hourlyRate: feePlanNumOrNull(row.hourlyRate),
+    capAmount: feePlanNumOrNull(row.capAmount),
+    depositRequired: feePlanNumOrNull(row.depositRequired),
+    billingFrequency: row.billingFrequency || '',
+    vatTreatment: row.vatTreatment || '',
+    isActive: isActiveOverride !== undefined ? isActiveOverride : Number(row.isActive),
+  };
+}
+
+app.get('/api/matter-fee-plans', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'retainerManagement', 'Retainer Management')) return;
+  const { clientId, matterId, retainerId, status, includeInactive } = req.query;
+  const conditions = [];
+  const params = [];
+  if (clientId) { conditions.push('r.clientId=?'); params.push(clientId); }
+  if (matterId) { conditions.push('r.matterId=?'); params.push(matterId); }
+  if (retainerId) { conditions.push('r.retainerId=?'); params.push(retainerId); }
+  if (status) { conditions.push('r.status=?'); params.push(status); }
+  if (includeInactive !== 'true') { conditions.push('r.isActive=1'); }
+  const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+  const rows = await all(`${FEE_PLAN_SELECT} ${where} ORDER BY r.createdAt DESC`, params);
+  const scoped = [];
+  for (const row of rows) {
+    if (await canAccessFeePlan(req, row.clientId, row.matterId)) {
+      scoped.push(publicFeePlan(row));
+    }
+  }
+  res.json(scoped);
+});
+
+app.get('/api/matter-fee-plans/:id', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'retainerManagement', 'Retainer Management')) return;
+  const row = await get(`${FEE_PLAN_SELECT} WHERE r.id=?`, [req.params.id]);
+  if (!row) return res.status(404).json({ error: 'Fee plan not found' });
+  if (!await canAccessFeePlan(req, row.clientId, row.matterId)) {
+    return res.status(403).json({ error: 'Fee plan access denied' });
+  }
+  res.json(publicFeePlan(row));
+});
+
+app.post('/api/matter-fee-plans', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'retainerManagement', 'Retainer Management')) return;
+  const { clientId, matterId, retainerId, feeType, currency, estimatedAmount, hourlyRate, capAmount, depositRequired,
+    billingFrequency, paymentTerms, vatTreatment, disbursementsTreatment, status, notes } = req.body;
+  const validationError = validateFeePlanPayload(req.body, { partial: false });
+  if (validationError) return res.status(400).json({ error: validationError });
+  const client = await get('SELECT id FROM clients WHERE id=?', [clientId]);
+  if (!client) return res.status(400).json({ error: 'Client not found' });
+  const matter = await get('SELECT id, clientId FROM matters WHERE id=?', [matterId]);
+  if (!matter) return res.status(400).json({ error: 'Matter not found' });
+  if (matter.clientId !== clientId) return res.status(400).json({ error: 'matterId does not belong to clientId' });
+  if (retainerId) {
+    const ret = await get('SELECT id, clientId, matterId, isActive FROM retainer_records WHERE id=?', [retainerId]);
+    if (!ret) return res.status(400).json({ error: 'Retainer not found' });
+    if (Number(ret.isActive) !== 1) return res.status(400).json({ error: 'retainerId is not active' });
+    if (ret.clientId !== clientId) return res.status(400).json({ error: 'retainerId does not belong to this client' });
+    if ((ret.matterId || '') !== matterId) return res.status(400).json({ error: 'retainerId does not belong to this matter' });
+  }
+  if (!await canAccessFeePlan(req, clientId, matterId)) {
+    return res.status(403).json({ error: 'Fee plan create denied' });
+  }
+  const id = genId('FEE');
+  const now = new Date().toISOString();
+  await run(`INSERT INTO matter_fee_plans (id,clientId,matterId,retainerId,feeType,currency,estimatedAmount,hourlyRate,capAmount,depositRequired,billingFrequency,paymentTerms,vatTreatment,disbursementsTreatment,status,notes,isActive,createdBy,createdAt)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)`,
+    [id, clientId, matterId, retainerId || null, feeType, (currency || 'KES'),
+     feePlanNumOrNull(estimatedAmount), feePlanNumOrNull(hourlyRate), feePlanNumOrNull(capAmount), feePlanNumOrNull(depositRequired),
+     billingFrequency || null, paymentTerms || '', vatTreatment || null, disbursementsTreatment || null, status || 'draft', notes || '', req.user.userId || '', now]);
+  const row = await get(`${FEE_PLAN_SELECT} WHERE r.id=?`, [id]);
+  await recordAuditEvent(req, {
+    action: 'matter_fee_plan_created',
+    entityType: 'matter_fee_plan',
+    entityId: id,
+    clientId,
+    matterId,
+    metadata: feePlanAuditMetadata(row, 1),
+  }).catch(() => {});
+  res.status(201).json(publicFeePlan(row));
+});
+
+app.patch('/api/matter-fee-plans/:id', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'retainerManagement', 'Retainer Management')) return;
+  const existing = await get(`${FEE_PLAN_SELECT} WHERE r.id=?`, [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Fee plan not found' });
+  if (!await canAccessFeePlan(req, existing.clientId, existing.matterId)) {
+    return res.status(403).json({ error: 'Fee plan update denied' });
+  }
+  if (req.body.clientId !== undefined && req.body.clientId !== existing.clientId) {
+    return res.status(400).json({ error: 'clientId cannot be changed after creation' });
+  }
+  if (req.body.matterId !== undefined && req.body.matterId !== existing.matterId) {
+    return res.status(400).json({ error: 'matterId cannot be changed after creation' });
+  }
+  const validationError = validateFeePlanPayload(req.body, { partial: true });
+  if (validationError) return res.status(400).json({ error: validationError });
+  const { retainerId, feeType, currency, estimatedAmount, hourlyRate, capAmount, depositRequired,
+    billingFrequency, paymentTerms, vatTreatment, disbursementsTreatment, status, notes } = req.body;
+  if (retainerId !== undefined && retainerId !== null && retainerId !== '') {
+    const ret = await get('SELECT id, clientId, matterId, isActive FROM retainer_records WHERE id=?', [retainerId]);
+    if (!ret) return res.status(400).json({ error: 'Retainer not found' });
+    if (Number(ret.isActive) !== 1) return res.status(400).json({ error: 'retainerId is not active' });
+    if (ret.clientId !== existing.clientId) return res.status(400).json({ error: 'retainerId does not belong to this client' });
+    if ((ret.matterId || '') !== existing.matterId) return res.status(400).json({ error: 'retainerId does not belong to this matter' });
+  }
+  const fields = [];
+  const vals = [];
+  if (retainerId !== undefined) { fields.push('retainerId=?'); vals.push(retainerId || null); }
+  if (feeType !== undefined) { fields.push('feeType=?'); vals.push(feeType); }
+  if (currency !== undefined) { fields.push('currency=?'); vals.push(currency || 'KES'); }
+  if (estimatedAmount !== undefined) { fields.push('estimatedAmount=?'); vals.push(feePlanNumOrNull(estimatedAmount)); }
+  if (hourlyRate !== undefined) { fields.push('hourlyRate=?'); vals.push(feePlanNumOrNull(hourlyRate)); }
+  if (capAmount !== undefined) { fields.push('capAmount=?'); vals.push(feePlanNumOrNull(capAmount)); }
+  if (depositRequired !== undefined) { fields.push('depositRequired=?'); vals.push(feePlanNumOrNull(depositRequired)); }
+  if (billingFrequency !== undefined) { fields.push('billingFrequency=?'); vals.push(billingFrequency || null); }
+  if (paymentTerms !== undefined) { fields.push('paymentTerms=?'); vals.push(paymentTerms || ''); }
+  if (vatTreatment !== undefined) { fields.push('vatTreatment=?'); vals.push(vatTreatment || null); }
+  if (disbursementsTreatment !== undefined) { fields.push('disbursementsTreatment=?'); vals.push(disbursementsTreatment || null); }
+  if (status !== undefined) { fields.push('status=?'); vals.push(status); }
+  if (notes !== undefined) { fields.push('notes=?'); vals.push(notes || ''); }
+  if (!fields.length) return res.status(400).json({ error: 'No fields to update' });
+  const now = new Date().toISOString();
+  fields.push('updatedAt=?'); vals.push(now);
+  fields.push('updatedBy=?'); vals.push(req.user.userId || '');
+  vals.push(req.params.id);
+  await run(`UPDATE matter_fee_plans SET ${fields.join(', ')} WHERE id=?`, vals);
+  const updated = await get(`${FEE_PLAN_SELECT} WHERE r.id=?`, [req.params.id]);
+  await recordAuditEvent(req, {
+    action: 'matter_fee_plan_updated',
+    entityType: 'matter_fee_plan',
+    entityId: req.params.id,
+    clientId: existing.clientId,
+    matterId: existing.matterId,
+    metadata: feePlanAuditMetadata(updated),
+  }).catch(() => {});
+  res.json(publicFeePlan(updated));
+});
+
+app.delete('/api/matter-fee-plans/:id', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'retainerManagement', 'Retainer Management')) return;
+  const existing = await get(`${FEE_PLAN_SELECT} WHERE r.id=?`, [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Fee plan not found' });
+  if (!await canAccessFeePlan(req, existing.clientId, existing.matterId)) {
+    return res.status(403).json({ error: 'Fee plan deactivate denied' });
+  }
+  const now = new Date().toISOString();
+  await run('UPDATE matter_fee_plans SET isActive=0, deactivatedBy=?, deactivatedAt=?, updatedAt=? WHERE id=?', [req.user.userId || '', now, now, req.params.id]);
+  await recordAuditEvent(req, {
+    action: 'matter_fee_plan_deactivated',
+    entityType: 'matter_fee_plan',
+    entityId: req.params.id,
+    clientId: existing.clientId,
+    matterId: existing.matterId,
+    metadata: feePlanAuditMetadata(existing, 0),
+  }).catch(() => {});
+  res.json({ message: 'Fee plan deactivated' });
 });
 app.delete('/api/clients/:id', requireAdvocateOrAdmin, async (req, res) => {
   const client = await get('SELECT * FROM clients WHERE id=?', [req.params.id]);
