@@ -151,6 +151,13 @@ const ALLOWED_LEDGER_DIRECTIONS = new Set(['credit', 'debit']);
 // Fixed direction per entry type ('adjustment' allows either).
 const LEDGER_REQUIRED_DIRECTION = { deposit: 'credit', refund: 'debit', fee_application: 'debit' };
 
+// RET-31G: client KYC/CDD enums (metadata-only; no document upload, no screening).
+const ALLOWED_KYC_STATUSES = new Set(['not_started', 'pending', 'verified', 'expired', 'rejected']);
+const ALLOWED_KYC_CLIENT_CATEGORIES = new Set(['individual', 'company', 'organisation', 'government', 'other']);
+const ALLOWED_KYC_RISK_LEVELS = new Set(['low', 'medium', 'high']);
+const ALLOWED_KYC_PEP_STATUSES = new Set(['unknown', 'not_pep', 'pep']);
+const ALLOWED_KYC_SANCTIONS_STATUSES = new Set(['not_checked', 'clear', 'flagged']);
+
 const {
   defaultReminderSettings,
   defaultReminderTemplates,
@@ -920,6 +927,66 @@ function ledgerAuditMetadata(row, isVoidedOverride) {
   };
 }
 
+// RET-31G: validate a client KYC/CDD payload (metadata only). Returns error string or null.
+function validateKycPayload(payload, { partial = false } = {}) {
+  const p = payload || {};
+  if (!partial) {
+    if (!p.clientId) return 'clientId is required';
+  }
+  if (p.status !== undefined && p.status !== '' && p.status !== null && !ALLOWED_KYC_STATUSES.has(p.status)) return `Invalid status. Allowed: ${[...ALLOWED_KYC_STATUSES].join(', ')}`;
+  if (p.clientCategory !== undefined && p.clientCategory !== '' && p.clientCategory !== null && !ALLOWED_KYC_CLIENT_CATEGORIES.has(p.clientCategory)) return `Invalid clientCategory. Allowed: ${[...ALLOWED_KYC_CLIENT_CATEGORIES].join(', ')}`;
+  if (p.riskLevel !== undefined && p.riskLevel !== '' && p.riskLevel !== null && !ALLOWED_KYC_RISK_LEVELS.has(p.riskLevel)) return `Invalid riskLevel. Allowed: ${[...ALLOWED_KYC_RISK_LEVELS].join(', ')}`;
+  if (p.pepStatus !== undefined && p.pepStatus !== '' && p.pepStatus !== null && !ALLOWED_KYC_PEP_STATUSES.has(p.pepStatus)) return `Invalid pepStatus. Allowed: ${[...ALLOWED_KYC_PEP_STATUSES].join(', ')}`;
+  if (p.sanctionsCheckStatus !== undefined && p.sanctionsCheckStatus !== '' && p.sanctionsCheckStatus !== null && !ALLOWED_KYC_SANCTIONS_STATUSES.has(p.sanctionsCheckStatus)) return `Invalid sanctionsCheckStatus. Allowed: ${[...ALLOWED_KYC_SANCTIONS_STATUSES].join(', ')}`;
+  if (p.verificationDate !== undefined && p.verificationDate !== '' && p.verificationDate !== null && Number.isNaN(new Date(p.verificationDate).getTime())) return 'Invalid verificationDate';
+  if (p.expiryDate !== undefined && p.expiryDate !== '' && p.expiryDate !== null && Number.isNaN(new Date(p.expiryDate).getTime())) return 'Invalid expiryDate';
+  if ((p.idNumber || '').length > 100) return 'idNumber exceeds 100 characters';
+  if ((p.kraPin || '').length > 100) return 'kraPin exceeds 100 characters';
+  if ((p.registrationNumber || '').length > 100) return 'registrationNumber exceeds 100 characters';
+  if ((p.sourceOfFundsSummary || '').length > 5000) return 'sourceOfFundsSummary exceeds 5000 characters';
+  if ((p.notes || '').length > 10000) return 'notes exceeds 10000 characters';
+  if ((p.verifiedBy || '').length > 160) return 'verifiedBy exceeds 160 characters';
+  return null;
+}
+
+function publicKycRecord(row) {
+  return {
+    id: row.id,
+    clientId: row.clientId,
+    clientName: row.clientName || '',
+    status: row.status || 'not_started',
+    clientCategory: row.clientCategory || '',
+    riskLevel: row.riskLevel || '',
+    idNumber: row.idNumber || '',
+    kraPin: row.kraPin || '',
+    registrationNumber: row.registrationNumber || '',
+    verificationDate: row.verificationDate || '',
+    expiryDate: row.expiryDate || '',
+    sourceOfFundsSummary: row.sourceOfFundsSummary || '',
+    pepStatus: row.pepStatus || '',
+    sanctionsCheckStatus: row.sanctionsCheckStatus || '',
+    verifiedBy: row.verifiedBy || '',
+    notes: row.notes || '',
+    isActive: Number(row.isActive || 1) === 1,
+    createdAt: row.createdAt || '',
+    updatedAt: row.updatedAt || '',
+    deactivatedAt: row.deactivatedAt || '',
+  };
+}
+
+// RET-31G: whitelist audit metadata (excludes all sensitive PII / free text).
+function kycAuditMetadata(row, isActiveOverride) {
+  return {
+    kycRecordId: row.id,
+    clientId: row.clientId,
+    status: row.status || '',
+    clientCategory: row.clientCategory || '',
+    riskLevel: row.riskLevel || '',
+    expiryDate: row.expiryDate || '',
+    isActive: isActiveOverride !== undefined ? isActiveOverride : Number(row.isActive || 0),
+  };
+}
+
 async function getFirmSettings() {
   const settings = await get('SELECT * FROM firm_settings WHERE id=?', ['default']);
   const reminderSettings = await getReminderSettings();
@@ -981,6 +1048,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS retainer_records (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, matterId TEXT, status TEXT NOT NULL DEFAULT 'not_started', engagementType TEXT, engagementStartDate TEXT, signedDate TEXT, responsibleAdvocate TEXT, scopeSummary TEXT DEFAULT '', exclusionsSummary TEXT DEFAULT '', clientObligationsSummary TEXT DEFAULT '', firmObligationsSummary TEXT DEFAULT '', billingArrangementSummary TEXT DEFAULT '', terminationTermsSummary TEXT DEFAULT '', notes TEXT DEFAULT '', isActive INTEGER NOT NULL DEFAULT 1, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, deactivatedBy TEXT, deactivatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS matter_fee_plans (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, matterId TEXT NOT NULL, retainerId TEXT, feeType TEXT NOT NULL, currency TEXT NOT NULL DEFAULT 'KES', estimatedAmount REAL, hourlyRate REAL, capAmount REAL, depositRequired REAL, billingFrequency TEXT, paymentTerms TEXT, vatTreatment TEXT, disbursementsTreatment TEXT, status TEXT NOT NULL DEFAULT 'draft', notes TEXT DEFAULT '', isActive INTEGER NOT NULL DEFAULT 1, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, deactivatedBy TEXT, deactivatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS retainer_ledger_entries (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, matterId TEXT, retainerId TEXT, feePlanId TEXT, entryType TEXT NOT NULL, direction TEXT NOT NULL, amount REAL NOT NULL, currency TEXT NOT NULL DEFAULT 'KES', entryDate TEXT NOT NULL, reference TEXT, description TEXT, sourceType TEXT, sourceId TEXT, isVoided INTEGER NOT NULL DEFAULT 0, voidedBy TEXT, voidedAt TEXT, voidReason TEXT, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS client_kyc_records (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'not_started', clientCategory TEXT, riskLevel TEXT, idNumber TEXT, kraPin TEXT, registrationNumber TEXT, verificationDate TEXT, expiryDate TEXT, sourceOfFundsSummary TEXT DEFAULT '', pepStatus TEXT, sanctionsCheckStatus TEXT, verifiedBy TEXT, notes TEXT DEFAULT '', isActive INTEGER NOT NULL DEFAULT 1, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, deactivatedBy TEXT, deactivatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS signature_assets (id TEXT PRIMARY KEY, ownerType TEXT NOT NULL CHECK(ownerType IN ('user','firm')), ownerId TEXT, assetType TEXT NOT NULL CHECK(assetType IN ('signature','stamp')), label TEXT NOT NULL, mimeType TEXT NOT NULL, content BLOB NOT NULL, size INTEGER, isDefault INTEGER DEFAULT 0, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT, deletedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS hr_staff_profiles (id TEXT PRIMARY KEY, userId TEXT NOT NULL UNIQUE, jobTitle TEXT, department TEXT, practiceTeam TEXT, employmentType TEXT, startDate TEXT, contractEndDate TEXT, supervisorUserId TEXT, workEmail TEXT, workPhone TEXT, emergencyContactName TEXT, emergencyContactPhone TEXT, hrStatus TEXT NOT NULL DEFAULT 'active', adminNotes TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, createdBy TEXT, updatedBy TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS hr_leave_requests (
@@ -1264,6 +1332,10 @@ createdAt TEXT NOT NULL
   await run('CREATE INDEX IF NOT EXISTS idx_retainer_ledger_entries_feePlanId ON retainer_ledger_entries(feePlanId)');
   await run('CREATE INDEX IF NOT EXISTS idx_retainer_ledger_entries_entryType ON retainer_ledger_entries(entryType)');
   await run('CREATE INDEX IF NOT EXISTS idx_retainer_ledger_entries_isVoided ON retainer_ledger_entries(isVoided)');
+  await run('CREATE INDEX IF NOT EXISTS idx_client_kyc_records_clientId ON client_kyc_records(clientId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_client_kyc_records_status ON client_kyc_records(status)');
+  await run('CREATE INDEX IF NOT EXISTS idx_client_kyc_records_riskLevel ON client_kyc_records(riskLevel)');
+  await run('CREATE INDEX IF NOT EXISTS idx_client_kyc_records_active ON client_kyc_records(isActive)');
   await backfillSeededReceiptNumbers();
   await seedReminderTemplates();
 
@@ -5436,6 +5508,26 @@ app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
     ledgerBlock = { visible: true, ...computeLedgerSummary(ledgerRows) };
   }
 
+  // RET-31G: client KYC/CDD snapshot summary (module-gated; non-sensitive fields only).
+  let kycBlock = { visible: false };
+  if (await isModuleEnabled('kycCdd')) {
+    const activeKyc = await all(`SELECT id, status, clientCategory, riskLevel, verificationDate, expiryDate
+      FROM client_kyc_records WHERE clientId=? AND isActive=1 ORDER BY createdAt DESC`, [clientId]);
+    const latestKyc = activeKyc.length ? activeKyc[0] : null;
+    kycBlock = {
+      visible: true,
+      activeCount: activeKyc.length,
+      latest: latestKyc ? {
+        id: latestKyc.id,
+        status: latestKyc.status || 'not_started',
+        clientCategory: latestKyc.clientCategory || '',
+        riskLevel: latestKyc.riskLevel || '',
+        verificationDate: latestKyc.verificationDate || '',
+        expiryDate: latestKyc.expiryDate || '',
+      } : null,
+    };
+  }
+
   res.json({
     client: {
       id: clientRow.id,
@@ -5456,6 +5548,7 @@ app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
     retainer: retainerBlock,
     feePlan: feePlanBlock,
     ledger: ledgerBlock,
+    kyc: kycBlock,
   });
 });
 // RET-31D: retainer intake and scope schedule routes (module-gated, staff-only).
@@ -5968,6 +6061,128 @@ app.post('/api/retainer-ledger/:id/void', requireStaff, async (req, res) => {
     metadata: ledgerAuditMetadata(updated, 1),
   }).catch(() => {});
   res.json(publicLedgerEntry(updated));
+});
+
+// RET-31G: client KYC/CDD routes (module-gated, staff-only, metadata only).
+const KYC_SELECT = `SELECT r.*, c.name clientName
+    FROM client_kyc_records r LEFT JOIN clients c ON c.id=r.clientId`;
+
+async function canAccessKyc(req, clientId) {
+  if (req.user.role === 'admin' || req.user.role === 'assistant') return true;
+  if (req.user.role === 'advocate') return canAccessClient(req, clientId);
+  return false;
+}
+
+app.get('/api/client-kyc', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'kycCdd', 'KYC / CDD')) return;
+  const { clientId, status, includeInactive } = req.query;
+  const conditions = [];
+  const params = [];
+  if (clientId) { conditions.push('r.clientId=?'); params.push(clientId); }
+  if (status) { conditions.push('r.status=?'); params.push(status); }
+  if (includeInactive !== 'true') { conditions.push('r.isActive=1'); }
+  const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+  const rows = await all(`${KYC_SELECT} ${where} ORDER BY r.createdAt DESC`, params);
+  const scoped = [];
+  for (const row of rows) {
+    if (await canAccessKyc(req, row.clientId)) scoped.push(publicKycRecord(row));
+  }
+  res.json(scoped);
+});
+
+app.get('/api/client-kyc/:id', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'kycCdd', 'KYC / CDD')) return;
+  const row = await get(`${KYC_SELECT} WHERE r.id=?`, [req.params.id]);
+  if (!row) return res.status(404).json({ error: 'KYC record not found' });
+  if (!await canAccessKyc(req, row.clientId)) return res.status(403).json({ error: 'KYC access denied' });
+  res.json(publicKycRecord(row));
+});
+
+app.post('/api/client-kyc', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'kycCdd', 'KYC / CDD')) return;
+  const { clientId, status, clientCategory, riskLevel, idNumber, kraPin, registrationNumber,
+    verificationDate, expiryDate, sourceOfFundsSummary, pepStatus, sanctionsCheckStatus, verifiedBy, notes } = req.body;
+  const validationError = validateKycPayload(req.body, { partial: false });
+  if (validationError) return res.status(400).json({ error: validationError });
+  const client = await get('SELECT id FROM clients WHERE id=?', [clientId]);
+  if (!client) return res.status(400).json({ error: 'Client not found' });
+  if (!await canAccessKyc(req, clientId)) return res.status(403).json({ error: 'KYC create denied' });
+  const id = genId('KYC');
+  const now = new Date().toISOString();
+  await run(`INSERT INTO client_kyc_records (id,clientId,status,clientCategory,riskLevel,idNumber,kraPin,registrationNumber,verificationDate,expiryDate,sourceOfFundsSummary,pepStatus,sanctionsCheckStatus,verifiedBy,notes,isActive,createdBy,createdAt)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)`,
+    [id, clientId, status || 'not_started', clientCategory || null, riskLevel || null, idNumber || null, kraPin || null, registrationNumber || null,
+     verificationDate || null, expiryDate || null, sourceOfFundsSummary || '', pepStatus || null, sanctionsCheckStatus || null, verifiedBy || null, notes || '', req.user.userId || '', now]);
+  const row = await get(`${KYC_SELECT} WHERE r.id=?`, [id]);
+  await recordAuditEvent(req, {
+    action: 'client_kyc_record_created',
+    entityType: 'client_kyc_record',
+    entityId: id,
+    clientId,
+    metadata: kycAuditMetadata(row, 1),
+  }).catch(() => {});
+  res.status(201).json(publicKycRecord(row));
+});
+
+app.patch('/api/client-kyc/:id', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'kycCdd', 'KYC / CDD')) return;
+  const existing = await get(`${KYC_SELECT} WHERE r.id=?`, [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'KYC record not found' });
+  if (!await canAccessKyc(req, existing.clientId)) return res.status(403).json({ error: 'KYC update denied' });
+  if (req.body.clientId !== undefined && req.body.clientId !== existing.clientId) {
+    return res.status(400).json({ error: 'clientId cannot be changed after creation' });
+  }
+  const validationError = validateKycPayload(req.body, { partial: true });
+  if (validationError) return res.status(400).json({ error: validationError });
+  const { status, clientCategory, riskLevel, idNumber, kraPin, registrationNumber,
+    verificationDate, expiryDate, sourceOfFundsSummary, pepStatus, sanctionsCheckStatus, verifiedBy, notes } = req.body;
+  const fields = [];
+  const vals = [];
+  if (status !== undefined) { fields.push('status=?'); vals.push(status); }
+  if (clientCategory !== undefined) { fields.push('clientCategory=?'); vals.push(clientCategory || null); }
+  if (riskLevel !== undefined) { fields.push('riskLevel=?'); vals.push(riskLevel || null); }
+  if (idNumber !== undefined) { fields.push('idNumber=?'); vals.push(idNumber || null); }
+  if (kraPin !== undefined) { fields.push('kraPin=?'); vals.push(kraPin || null); }
+  if (registrationNumber !== undefined) { fields.push('registrationNumber=?'); vals.push(registrationNumber || null); }
+  if (verificationDate !== undefined) { fields.push('verificationDate=?'); vals.push(verificationDate || null); }
+  if (expiryDate !== undefined) { fields.push('expiryDate=?'); vals.push(expiryDate || null); }
+  if (sourceOfFundsSummary !== undefined) { fields.push('sourceOfFundsSummary=?'); vals.push(sourceOfFundsSummary || ''); }
+  if (pepStatus !== undefined) { fields.push('pepStatus=?'); vals.push(pepStatus || null); }
+  if (sanctionsCheckStatus !== undefined) { fields.push('sanctionsCheckStatus=?'); vals.push(sanctionsCheckStatus || null); }
+  if (verifiedBy !== undefined) { fields.push('verifiedBy=?'); vals.push(verifiedBy || null); }
+  if (notes !== undefined) { fields.push('notes=?'); vals.push(notes || ''); }
+  if (!fields.length) return res.status(400).json({ error: 'No fields to update' });
+  const now = new Date().toISOString();
+  fields.push('updatedAt=?'); vals.push(now);
+  fields.push('updatedBy=?'); vals.push(req.user.userId || '');
+  vals.push(req.params.id);
+  await run(`UPDATE client_kyc_records SET ${fields.join(', ')} WHERE id=?`, vals);
+  const updated = await get(`${KYC_SELECT} WHERE r.id=?`, [req.params.id]);
+  await recordAuditEvent(req, {
+    action: 'client_kyc_record_updated',
+    entityType: 'client_kyc_record',
+    entityId: req.params.id,
+    clientId: existing.clientId,
+    metadata: kycAuditMetadata(updated),
+  }).catch(() => {});
+  res.json(publicKycRecord(updated));
+});
+
+app.delete('/api/client-kyc/:id', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'kycCdd', 'KYC / CDD')) return;
+  const existing = await get(`${KYC_SELECT} WHERE r.id=?`, [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'KYC record not found' });
+  if (!await canAccessKyc(req, existing.clientId)) return res.status(403).json({ error: 'KYC deactivate denied' });
+  const now = new Date().toISOString();
+  await run('UPDATE client_kyc_records SET isActive=0, deactivatedBy=?, deactivatedAt=?, updatedAt=? WHERE id=?', [req.user.userId || '', now, now, req.params.id]);
+  await recordAuditEvent(req, {
+    action: 'client_kyc_record_deactivated',
+    entityType: 'client_kyc_record',
+    entityId: req.params.id,
+    clientId: existing.clientId,
+    metadata: kycAuditMetadata(existing, 0),
+  }).catch(() => {});
+  res.json({ message: 'KYC record deactivated' });
 });
 app.delete('/api/clients/:id', requireAdvocateOrAdmin, async (req, res) => {
   const client = await get('SELECT * FROM clients WHERE id=?', [req.params.id]);

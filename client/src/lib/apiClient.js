@@ -544,3 +544,10 @@ export const getRetainerLedger = (params = {}) => api(queryPath('/retainer-ledge
 export const getRetainerLedgerSummary = (params = {}) => api(queryPath('/retainer-ledger/summary', params));
 export const createRetainerLedgerEntry = (payload) => api('/retainer-ledger', { method: 'POST', body: payload });
 export const voidRetainerLedgerEntry = (id, payload = {}) => api(`/retainer-ledger/${encodeURIComponent(id)}/void`, { method: 'POST', body: payload });
+
+// RET-31G: client KYC/CDD records (module-gated kycCdd, staff-only, metadata only).
+export const getClientKyc = (params = {}) => api(queryPath('/client-kyc', params));
+export const getClientKycRecord = (id) => api(`/client-kyc/${encodeURIComponent(id)}`);
+export const createClientKyc = (payload) => api('/client-kyc', { method: 'POST', body: payload });
+export const updateClientKyc = (id, payload) => api(`/client-kyc/${encodeURIComponent(id)}`, { method: 'PATCH', body: payload });
+export const deleteClientKyc = (id) => api(`/client-kyc/${encodeURIComponent(id)}`, { method: 'DELETE' });
