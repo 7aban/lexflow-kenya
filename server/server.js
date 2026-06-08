@@ -5956,6 +5956,250 @@ app.delete('/api/retainers/:id', requireStaff, async (req, res) => {
   res.json({ message: 'Retainer record deactivated' });
 });
 
+// RET-31J: retainer document generator (module-gated retainerManagement, staff-only).
+// Reuses the existing document template merge + matter-document storage pipeline.
+// No new schema, no PDF/DOCX/signing; output is text/plain saved as a matter document
+// (staff-only by default). Optional KYC/authority/lifecycle merge fields resolve blank
+// when their modules are disabled — generation is never blocked by those optional modules.
+function retainerDocumentText(value) {
+  // Stringify safely; never return null so dotted tokens always resolve (no unresolved spam).
+  if (value === undefined || value === null) return '';
+  return String(value);
+}
+
+async function buildRetainerMergeNamespaces(retainerRow, matterRow) {
+  const clientId = retainerRow.clientId;
+  const matterId = matterRow ? matterRow.id : (retainerRow.matterId || '');
+
+  // retainer namespace — document-body fields only; never `notes`.
+  const retainer = {
+    id: retainerDocumentText(retainerRow.id),
+    status: retainerDocumentText(retainerRow.status),
+    engagementType: retainerDocumentText(retainerRow.engagementType),
+    engagementStartDate: retainerDocumentText(retainerRow.engagementStartDate),
+    signedDate: retainerDocumentText(retainerRow.signedDate),
+    responsibleAdvocate: retainerDocumentText(retainerRow.responsibleAdvocate),
+    scopeSummary: retainerDocumentText(retainerRow.scopeSummary),
+    exclusionsSummary: retainerDocumentText(retainerRow.exclusionsSummary),
+    clientObligationsSummary: retainerDocumentText(retainerRow.clientObligationsSummary),
+    firmObligationsSummary: retainerDocumentText(retainerRow.firmObligationsSummary),
+    billingArrangementSummary: retainerDocumentText(retainerRow.billingArrangementSummary),
+    terminationTermsSummary: retainerDocumentText(retainerRow.terminationTermsSummary),
+  };
+
+  // feePlan namespace — latest active fee plan, preferring the resolved matter, else client.
+  // Record/planning fields only; never compute invoice/payment/VAT values.
+  let feePlanRow = null;
+  if (matterId) {
+    feePlanRow = await get('SELECT * FROM matter_fee_plans WHERE clientId=? AND matterId=? AND isActive=1 ORDER BY createdAt DESC LIMIT 1', [clientId, matterId]);
+  }
+  if (!feePlanRow) {
+    feePlanRow = await get('SELECT * FROM matter_fee_plans WHERE clientId=? AND isActive=1 ORDER BY createdAt DESC LIMIT 1', [clientId]);
+  }
+  const feePlan = {
+    id: retainerDocumentText(feePlanRow?.id),
+    feeType: retainerDocumentText(feePlanRow?.feeType),
+    status: retainerDocumentText(feePlanRow?.status),
+    currency: retainerDocumentText(feePlanRow?.currency),
+    estimatedAmount: feePlanRow && feePlanRow.estimatedAmount !== null && feePlanRow.estimatedAmount !== undefined ? retainerDocumentText(feePlanRow.estimatedAmount) : '',
+    hourlyRate: feePlanRow && feePlanRow.hourlyRate !== null && feePlanRow.hourlyRate !== undefined ? retainerDocumentText(feePlanRow.hourlyRate) : '',
+    capAmount: feePlanRow && feePlanRow.capAmount !== null && feePlanRow.capAmount !== undefined ? retainerDocumentText(feePlanRow.capAmount) : '',
+    depositRequired: feePlanRow && feePlanRow.depositRequired !== null && feePlanRow.depositRequired !== undefined ? retainerDocumentText(feePlanRow.depositRequired) : '',
+    billingFrequency: retainerDocumentText(feePlanRow?.billingFrequency),
+    vatTreatment: retainerDocumentText(feePlanRow?.vatTreatment),
+  };
+
+  // kyc namespace — safe summary ONLY, and ONLY when the kycCdd module is enabled.
+  const kyc = { status: '', clientCategory: '', riskLevel: '', verificationDate: '', expiryDate: '' };
+  if (await isModuleEnabled('kycCdd')) {
+    const kycRow = await get('SELECT status, clientCategory, riskLevel, verificationDate, expiryDate FROM client_kyc_records WHERE clientId=? AND isActive=1 ORDER BY createdAt DESC LIMIT 1', [clientId]);
+    if (kycRow) {
+      kyc.status = retainerDocumentText(kycRow.status);
+      kyc.clientCategory = retainerDocumentText(kycRow.clientCategory);
+      kyc.riskLevel = retainerDocumentText(kycRow.riskLevel);
+      kyc.verificationDate = retainerDocumentText(kycRow.verificationDate);
+      kyc.expiryDate = retainerDocumentText(kycRow.expiryDate);
+    }
+  }
+
+  // authority namespace — safe summary ONLY, and ONLY when corporateAuthority is enabled.
+  const authority = { status: '', authorityBasis: '', authorityDate: '', expiryDate: '', authorisedPersonName: '', authorisedPersonRole: '' };
+  if (await isModuleEnabled('corporateAuthority')) {
+    const authRow = await get('SELECT status, authorityBasis, authorityDate, expiryDate, authorisedPersonName, authorisedPersonRole FROM client_authority_records WHERE clientId=? AND isActive=1 ORDER BY createdAt DESC LIMIT 1', [clientId]);
+    if (authRow) {
+      authority.status = retainerDocumentText(authRow.status);
+      authority.authorityBasis = retainerDocumentText(authRow.authorityBasis);
+      authority.authorityDate = retainerDocumentText(authRow.authorityDate);
+      authority.expiryDate = retainerDocumentText(authRow.expiryDate);
+      authority.authorisedPersonName = retainerDocumentText(authRow.authorisedPersonName);
+      authority.authorisedPersonRole = retainerDocumentText(authRow.authorisedPersonRole);
+    }
+  }
+
+  // lifecycle namespace — safe summary ONLY, and ONLY when retainerManagement + scopeVariation are enabled.
+  const lifecycle = { eventType: '', status: '', effectiveDate: '', noticeDate: '', title: '' };
+  if ((await isModuleEnabled('retainerManagement')) && (await isModuleEnabled('scopeVariation'))) {
+    const lceRow = await get('SELECT eventType, status, effectiveDate, noticeDate, title FROM retainer_lifecycle_events WHERE clientId=? AND isActive=1 ORDER BY createdAt DESC LIMIT 1', [clientId]);
+    if (lceRow) {
+      lifecycle.eventType = retainerDocumentText(lceRow.eventType);
+      lifecycle.status = retainerDocumentText(lceRow.status);
+      lifecycle.effectiveDate = retainerDocumentText(lceRow.effectiveDate);
+      lifecycle.noticeDate = retainerDocumentText(lceRow.noticeDate);
+      lifecycle.title = retainerDocumentText(lceRow.title);
+    }
+  }
+
+  return { retainer, feePlan, kyc, authority, lifecycle };
+}
+
+app.post('/api/retainers/:id/generate-document', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'retainerManagement', 'Retainer Management')) return;
+
+  // 1. Load retainer (404 missing, 400 inactive).
+  const retainer = await get(`SELECT r.*, c.name clientName, m.title matterTitle, m.reference matterReference
+    FROM retainer_records r LEFT JOIN clients c ON c.id=r.clientId LEFT JOIN matters m ON m.id=r.matterId WHERE r.id=?`, [req.params.id]);
+  if (!retainer) return res.status(404).json({ error: 'Retainer record not found' });
+  if (Number(retainer.isActive) !== 1) return res.status(400).json({ error: 'Retainer record is not active' });
+
+  // 2. Access enforcement (admin/assistant all; advocate client+matter; client forbidden).
+  if (!await canAccessRetainer(req, retainer.clientId, retainer.matterId)) {
+    await recordAuditEvent(req, {
+      action: 'forbidden_retainer_document_generation',
+      entityType: 'retainer_record',
+      entityId: req.params.id,
+      clientId: retainer.clientId,
+      matterId: retainer.matterId || '',
+      metadata: { reason: 'insufficient permissions', route: 'retainer_document_generate', retainerId: req.params.id },
+    }).catch(() => {});
+    return res.status(403).json({ error: 'Retainer document generation access denied' });
+  }
+
+  const { templateId, matterId: bodyMatterId, filename, clientVisible } = req.body || {};
+
+  // 3. Resolve matterId (documents.matterId is NOT NULL).
+  const resolvedMatterId = retainer.matterId || (typeof bodyMatterId === 'string' ? bodyMatterId.trim() : '') || '';
+  if (!resolvedMatterId) {
+    return res.status(400).json({ error: 'matterId is required when the retainer has no linked matter' });
+  }
+
+  // 4. Validate matter (exists, belongs to retainer client, advocate can access it).
+  const matter = await get('SELECT * FROM matters WHERE id=?', [resolvedMatterId]);
+  if (!matter) return res.status(400).json({ error: 'Matter not found' });
+  if (matter.clientId !== retainer.clientId) {
+    return res.status(400).json({ error: 'matterId does not belong to the retainer client' });
+  }
+  if (!await canAccessMatter(req, resolvedMatterId)) {
+    await recordAuditEvent(req, {
+      action: 'forbidden_retainer_document_generation',
+      entityType: 'retainer_record',
+      entityId: req.params.id,
+      clientId: retainer.clientId,
+      matterId: resolvedMatterId,
+      metadata: { reason: 'matter access denied', route: 'retainer_document_generate', retainerId: req.params.id },
+    }).catch(() => {});
+    return res.status(403).json({ error: 'Matter access denied' });
+  }
+
+  // 5. Load active document template (templateId required; missing/inactive -> 404).
+  if (!templateId || typeof templateId !== 'string') {
+    return res.status(400).json({ error: 'templateId is required' });
+  }
+  const template = await get('SELECT * FROM document_templates WHERE id=? AND active=1', [templateId]);
+  if (!template) return res.status(404).json({ error: 'Active document template not found' });
+
+  // 6. Compose merge context on top of the existing helper (helper left unmodified).
+  const [client, firm] = await Promise.all([
+    get('SELECT * FROM clients WHERE id=?', [retainer.clientId]),
+    get('SELECT * FROM firm_settings WHERE id=?', ['default']),
+  ]);
+  const baseContext = buildTemplateMergeContext({
+    firm: firm || {},
+    matter,
+    client: client || {},
+    user: req.user || {},
+    today: today(),
+  });
+  const namespaces = await buildRetainerMergeNamespaces(retainer, matter);
+  const context = { ...baseContext, ...namespaces };
+
+  // 7. Merge.
+  const merged = mergeTemplateMarkup(template.bodyMarkup || '', context);
+
+  // 8. Save as a matter document using the existing generated-document pattern.
+  const content = Buffer.from(merged.preview, 'utf8');
+  const documentId = genId('DOC');
+  const generatedAt = new Date().toISOString();
+  const generatedDate = today();
+  const requestedName = typeof filename === 'string' && filename.trim() ? filename.trim() : `${template.name || 'Retainer document'} ${generatedDate}`;
+  let displayName = cleanDocumentName(requestedName);
+  if (!/\.txt$/i.test(displayName)) displayName = cleanDocumentName(`${displayName}.txt`);
+  const name = displayName;
+  const actor = actorLabel(req);
+  const size = `${Math.max(1, Math.round(content.length / 1024))} KB`;
+
+  // clientVisible honored only for share-capable roles (admin/advocate), matching the
+  // existing requireAdvocateOrAdmin document-visibility control; default staff-only (0).
+  const wantsVisible = clientVisible === true || clientVisible === 1 || clientVisible === '1' || clientVisible === 'true';
+  const canShareWithClient = req.user.role === 'admin' || req.user.role === 'advocate';
+  const finalClientVisible = (wantsVisible && canShareWithClient) ? 1 : 0;
+
+  await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy,templateId,templateName,generatedBy,generatedAt,version)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [
+    documentId,
+    resolvedMatterId,
+    name,
+    displayName,
+    'Text',
+    'text/plain',
+    generatedDate,
+    size,
+    content,
+    'generated',
+    null,
+    null,
+    null,
+    finalClientVisible,
+    actor,
+    template.id,
+    template.name || '',
+    actor,
+    generatedAt,
+    1,
+  ]);
+
+  const doc = await get(`SELECT d.id,d.matterId,d.name,d.displayName,d.type,d.mimeType,d.date,d.size,d.source,d.folderId,d.messageId,d.noticeId,d.clientVisible,d.uploadedBy,d.templateId,d.templateName,d.generatedBy,d.generatedAt,d.version,f.name folderName
+    FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=?`, [documentId]);
+
+  // 10. Audit — whitelist metadata only; never content/free text/PII.
+  await logAudit(req, 'generate', 'document', documentId, `Generated retainer document ${doc.displayName || doc.name}`);
+  await recordAuditEvent(req, {
+    action: 'retainer_document_generated',
+    entityType: 'document',
+    entityId: documentId,
+    matterId: resolvedMatterId,
+    clientId: retainer.clientId,
+    metadata: {
+      retainerId: retainer.id,
+      clientId: retainer.clientId,
+      matterId: resolvedMatterId,
+      templateId: template.id,
+      templateName: template.name || '',
+      documentId,
+      filename: cleanDocumentName(doc.displayName || doc.name || documentId),
+      clientVisible: finalClientVisible,
+      unresolvedTokenCount: merged.unresolvedTokens.length,
+      contentLength: content.length,
+      source: 'retainer_document_generator',
+    },
+  }).catch(() => {});
+
+  // 9. Respond with public metadata only (content never returned).
+  res.status(201).json({
+    document: publicDocument(doc),
+    unresolvedTokens: merged.unresolvedTokens,
+  });
+});
+
 // RET-31E: matter fee plan routes (module-gated, staff-only; planning/record only).
 const FEE_PLAN_SELECT = `SELECT r.*, c.name clientName, m.title matterTitle, m.reference matterReference
     FROM matter_fee_plans r LEFT JOIN clients c ON c.id=r.clientId LEFT JOIN matters m ON m.id=r.matterId`;

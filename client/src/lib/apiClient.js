@@ -532,6 +532,10 @@ export const createRetainer = (payload) => api('/retainers', { method: 'POST', b
 export const updateRetainer = (id, payload) => api(`/retainers/${encodeURIComponent(id)}`, { method: 'PATCH', body: payload });
 export const deleteRetainer = (id) => api(`/retainers/${encodeURIComponent(id)}`, { method: 'DELETE' });
 
+// RET-31J: generate a retainer document from an existing template (module-gated retainerManagement, staff-only).
+export const generateRetainerDocument = (retainerId, payload = {}) =>
+  api(`/retainers/${encodeURIComponent(retainerId)}/generate-document`, { method: 'POST', body: payload });
+
 // RET-31E: matter fee plans (module-gated, staff-only; planning/record only).
 export const getMatterFeePlans = (params = {}) => api(queryPath('/matter-fee-plans', params));
 export const getMatterFeePlan = (id) => api(`/matter-fee-plans/${encodeURIComponent(id)}`);
