@@ -551,3 +551,10 @@ export const getClientKycRecord = (id) => api(`/client-kyc/${encodeURIComponent(
 export const createClientKyc = (payload) => api('/client-kyc', { method: 'POST', body: payload });
 export const updateClientKyc = (id, payload) => api(`/client-kyc/${encodeURIComponent(id)}`, { method: 'PATCH', body: payload });
 export const deleteClientKyc = (id) => api(`/client-kyc/${encodeURIComponent(id)}`, { method: 'DELETE' });
+
+// RET-31H: client authority records (module-gated corporateAuthority, staff-only, metadata only).
+export const getClientAuthorities = (params = {}) => api(queryPath('/client-authorities', params));
+export const getClientAuthorityRecord = (id) => api(`/client-authorities/${encodeURIComponent(id)}`);
+export const createClientAuthority = (payload) => api('/client-authorities', { method: 'POST', body: payload });
+export const updateClientAuthority = (id, payload) => api(`/client-authorities/${encodeURIComponent(id)}`, { method: 'PATCH', body: payload });
+export const deleteClientAuthority = (id) => api(`/client-authorities/${encodeURIComponent(id)}`, { method: 'DELETE' });

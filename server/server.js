@@ -157,6 +157,8 @@ const ALLOWED_KYC_CLIENT_CATEGORIES = new Set(['individual', 'company', 'organis
 const ALLOWED_KYC_RISK_LEVELS = new Set(['low', 'medium', 'high']);
 const ALLOWED_KYC_PEP_STATUSES = new Set(['unknown', 'not_pep', 'pep']);
 const ALLOWED_KYC_SANCTIONS_STATUSES = new Set(['not_checked', 'clear', 'flagged']);
+const ALLOWED_AUTHORITY_STATUSES = new Set(['not_required', 'pending', 'confirmed', 'expired', 'rejected']);
+const ALLOWED_AUTHORITY_BASIS = new Set(['director_resolution', 'board_resolution', 'power_of_attorney', 'letter_of_authority', 'mandate', 'other']);
 
 const {
   defaultReminderSettings,
@@ -987,6 +989,65 @@ function kycAuditMetadata(row, isActiveOverride) {
   };
 }
 
+// RET-31H: client authority record helpers (metadata only).
+const AUTHORITY_SELECT = `SELECT r.*, c.name clientName
+  FROM client_authority_records r LEFT JOIN clients c ON c.id=r.clientId`;
+
+function publicAuthorityRecord(row) {
+  return {
+    id: row.id,
+    clientId: row.clientId,
+    clientName: row.clientName || '',
+    status: row.status || 'pending',
+    authorityBasis: row.authorityBasis || '',
+    authorisedPersonName: row.authorisedPersonName || '',
+    authorisedPersonRole: row.authorisedPersonRole || '',
+    authorisedPersonEmail: row.authorisedPersonEmail || '',
+    authorisedPersonPhone: row.authorisedPersonPhone || '',
+    authorityDate: row.authorityDate || '',
+    expiryDate: row.expiryDate || '',
+    notes: row.notes || '',
+    isActive: Number(row.isActive) === 1,
+    createdAt: row.createdAt || '',
+    updatedAt: row.updatedAt || '',
+    deactivatedAt: row.deactivatedAt || '',
+  };
+}
+
+async function canAccessAuthority(req, clientId) {
+  if (req.user.role === 'admin' || req.user.role === 'assistant') return true;
+  if (req.user.role === 'advocate') return canAccessClient(req, clientId);
+  return false;
+}
+
+function validateAuthorityPayload(payload, { partial = false } = {}) {
+  const p = payload || {};
+  if (!partial) {
+    if (!p.clientId) return 'clientId is required';
+  }
+  if (p.status !== undefined && p.status !== '' && p.status !== null && !ALLOWED_AUTHORITY_STATUSES.has(p.status)) return `Invalid status. Allowed: ${[...ALLOWED_AUTHORITY_STATUSES].join(', ')}`;
+  if (p.authorityBasis !== undefined && p.authorityBasis !== '' && p.authorityBasis !== null && !ALLOWED_AUTHORITY_BASIS.has(p.authorityBasis)) return `Invalid authorityBasis. Allowed: ${[...ALLOWED_AUTHORITY_BASIS].join(', ')}`;
+  if (p.authorityDate !== undefined && p.authorityDate !== '' && p.authorityDate !== null && Number.isNaN(new Date(p.authorityDate).getTime())) return 'Invalid authorityDate';
+  if (p.expiryDate !== undefined && p.expiryDate !== '' && p.expiryDate !== null && Number.isNaN(new Date(p.expiryDate).getTime())) return 'Invalid expiryDate';
+  if ((p.authorisedPersonName || '').length > 160) return 'authorisedPersonName exceeds 160 characters';
+  if ((p.authorisedPersonRole || '').length > 120) return 'authorisedPersonRole exceeds 120 characters';
+  if ((p.authorisedPersonEmail || '').length > 160) return 'authorisedPersonEmail exceeds 160 characters';
+  if ((p.authorisedPersonPhone || '').length > 80) return 'authorisedPersonPhone exceeds 80 characters';
+  if ((p.notes || '').length > 10000) return 'notes exceeds 10000 characters';
+  return null;
+}
+
+function authorityAuditMetadata(rowOrPayload) {
+  return {
+    authorityRecordId: rowOrPayload.id,
+    clientId: rowOrPayload.clientId,
+    status: rowOrPayload.status || '',
+    authorityBasis: rowOrPayload.authorityBasis || '',
+    expiryDate: rowOrPayload.expiryDate || '',
+    isActive: Number(rowOrPayload.isActive ?? 1),
+  };
+}
+
 async function getFirmSettings() {
   const settings = await get('SELECT * FROM firm_settings WHERE id=?', ['default']);
   const reminderSettings = await getReminderSettings();
@@ -1049,6 +1110,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS matter_fee_plans (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, matterId TEXT NOT NULL, retainerId TEXT, feeType TEXT NOT NULL, currency TEXT NOT NULL DEFAULT 'KES', estimatedAmount REAL, hourlyRate REAL, capAmount REAL, depositRequired REAL, billingFrequency TEXT, paymentTerms TEXT, vatTreatment TEXT, disbursementsTreatment TEXT, status TEXT NOT NULL DEFAULT 'draft', notes TEXT DEFAULT '', isActive INTEGER NOT NULL DEFAULT 1, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, deactivatedBy TEXT, deactivatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS retainer_ledger_entries (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, matterId TEXT, retainerId TEXT, feePlanId TEXT, entryType TEXT NOT NULL, direction TEXT NOT NULL, amount REAL NOT NULL, currency TEXT NOT NULL DEFAULT 'KES', entryDate TEXT NOT NULL, reference TEXT, description TEXT, sourceType TEXT, sourceId TEXT, isVoided INTEGER NOT NULL DEFAULT 0, voidedBy TEXT, voidedAt TEXT, voidReason TEXT, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS client_kyc_records (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'not_started', clientCategory TEXT, riskLevel TEXT, idNumber TEXT, kraPin TEXT, registrationNumber TEXT, verificationDate TEXT, expiryDate TEXT, sourceOfFundsSummary TEXT DEFAULT '', pepStatus TEXT, sanctionsCheckStatus TEXT, verifiedBy TEXT, notes TEXT DEFAULT '', isActive INTEGER NOT NULL DEFAULT 1, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, deactivatedBy TEXT, deactivatedAt TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS client_authority_records (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', authorityBasis TEXT, authorisedPersonName TEXT, authorisedPersonRole TEXT, authorisedPersonEmail TEXT, authorisedPersonPhone TEXT, authorityDate TEXT, expiryDate TEXT, notes TEXT DEFAULT '', isActive INTEGER NOT NULL DEFAULT 1, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, deactivatedBy TEXT, deactivatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS signature_assets (id TEXT PRIMARY KEY, ownerType TEXT NOT NULL CHECK(ownerType IN ('user','firm')), ownerId TEXT, assetType TEXT NOT NULL CHECK(assetType IN ('signature','stamp')), label TEXT NOT NULL, mimeType TEXT NOT NULL, content BLOB NOT NULL, size INTEGER, isDefault INTEGER DEFAULT 0, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT, deletedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS hr_staff_profiles (id TEXT PRIMARY KEY, userId TEXT NOT NULL UNIQUE, jobTitle TEXT, department TEXT, practiceTeam TEXT, employmentType TEXT, startDate TEXT, contractEndDate TEXT, supervisorUserId TEXT, workEmail TEXT, workPhone TEXT, emergencyContactName TEXT, emergencyContactPhone TEXT, hrStatus TEXT NOT NULL DEFAULT 'active', adminNotes TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, createdBy TEXT, updatedBy TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS hr_leave_requests (
@@ -1336,6 +1398,10 @@ createdAt TEXT NOT NULL
   await run('CREATE INDEX IF NOT EXISTS idx_client_kyc_records_status ON client_kyc_records(status)');
   await run('CREATE INDEX IF NOT EXISTS idx_client_kyc_records_riskLevel ON client_kyc_records(riskLevel)');
   await run('CREATE INDEX IF NOT EXISTS idx_client_kyc_records_active ON client_kyc_records(isActive)');
+  await run('CREATE INDEX IF NOT EXISTS idx_client_authority_records_clientId ON client_authority_records(clientId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_client_authority_records_status ON client_authority_records(status)');
+  await run('CREATE INDEX IF NOT EXISTS idx_client_authority_records_basis ON client_authority_records(authorityBasis)');
+  await run('CREATE INDEX IF NOT EXISTS idx_client_authority_records_active ON client_authority_records(isActive)');
   await backfillSeededReceiptNumbers();
   await seedReminderTemplates();
 
@@ -5528,6 +5594,25 @@ app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
     };
   }
 
+  // RET-31H: client authority snapshot summary (module-gated; safe fields only).
+  let authorityBlock = { visible: false };
+  if (await isModuleEnabled('corporateAuthority')) {
+    const activeAuthority = await all(`SELECT id, status, authorityBasis, authorityDate, expiryDate
+      FROM client_authority_records WHERE clientId=? AND isActive=1 ORDER BY createdAt DESC`, [clientId]);
+    const latestAuthority = activeAuthority.length ? activeAuthority[0] : null;
+    authorityBlock = {
+      visible: true,
+      activeCount: activeAuthority.length,
+      latest: latestAuthority ? {
+        id: latestAuthority.id,
+        status: latestAuthority.status || 'pending',
+        authorityBasis: latestAuthority.authorityBasis || '',
+        authorityDate: latestAuthority.authorityDate || '',
+        expiryDate: latestAuthority.expiryDate || '',
+      } : null,
+    };
+  }
+
   res.json({
     client: {
       id: clientRow.id,
@@ -5549,6 +5634,7 @@ app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
     feePlan: feePlanBlock,
     ledger: ledgerBlock,
     kyc: kycBlock,
+    authority: authorityBlock,
   });
 });
 // RET-31D: retainer intake and scope schedule routes (module-gated, staff-only).
@@ -6183,6 +6269,114 @@ app.delete('/api/client-kyc/:id', requireStaff, async (req, res) => {
     metadata: kycAuditMetadata(existing, 0),
   }).catch(() => {});
   res.json({ message: 'KYC record deactivated' });
+});
+// RET-31H: client authority record routes (module-gated, staff-only, metadata only).
+app.get('/api/client-authorities', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'corporateAuthority', 'Corporate Authority')) return;
+  const { clientId, status, includeInactive } = req.query;
+  const conditions = [];
+  const params = [];
+  if (clientId) { conditions.push('r.clientId=?'); params.push(clientId); }
+  if (status) { conditions.push('r.status=?'); params.push(status); }
+  if (includeInactive !== 'true') { conditions.push('r.isActive=1'); }
+  const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+  const rows = await all(`${AUTHORITY_SELECT} ${where} ORDER BY r.createdAt DESC`, params);
+  const scoped = [];
+  for (const row of rows) {
+    if (await canAccessAuthority(req, row.clientId)) scoped.push(publicAuthorityRecord(row));
+  }
+  res.json(scoped);
+});
+
+app.get('/api/client-authorities/:id', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'corporateAuthority', 'Corporate Authority')) return;
+  const row = await get(`${AUTHORITY_SELECT} WHERE r.id=?`, [req.params.id]);
+  if (!row) return res.status(404).json({ error: 'Authority record not found' });
+  if (!await canAccessAuthority(req, row.clientId)) return res.status(403).json({ error: 'Authority access denied' });
+  res.json(publicAuthorityRecord(row));
+});
+
+app.post('/api/client-authorities', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'corporateAuthority', 'Corporate Authority')) return;
+  const validationError = validateAuthorityPayload(req.body, { partial: false });
+  if (validationError) return res.status(400).json({ error: validationError });
+  const client = await get('SELECT id FROM clients WHERE id=?', [req.body.clientId]);
+  if (!client) return res.status(400).json({ error: 'Client not found' });
+  if (!await canAccessAuthority(req, req.body.clientId)) return res.status(403).json({ error: 'Authority create denied' });
+  const id = genId('AUT');
+  const now = new Date().toISOString();
+  await run(`INSERT INTO client_authority_records (id,clientId,status,authorityBasis,authorisedPersonName,authorisedPersonRole,authorisedPersonEmail,authorisedPersonPhone,authorityDate,expiryDate,notes,isActive,createdBy,createdAt)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,1,?,?)`,
+    [id, req.body.clientId, req.body.status || 'pending', req.body.authorityBasis || null,
+     req.body.authorisedPersonName || null, req.body.authorisedPersonRole || null,
+     req.body.authorisedPersonEmail || null, req.body.authorisedPersonPhone || null,
+     req.body.authorityDate || null, req.body.expiryDate || null, req.body.notes || '',
+     req.user.userId || '', now]);
+  const row = await get(`${AUTHORITY_SELECT} WHERE r.id=?`, [id]);
+  await recordAuditEvent(req, {
+    action: 'client_authority_record_created',
+    entityType: 'client_authority_record',
+    entityId: id,
+    clientId: req.body.clientId,
+    metadata: authorityAuditMetadata(row),
+  }).catch(() => {});
+  res.status(201).json(publicAuthorityRecord(row));
+});
+
+app.patch('/api/client-authorities/:id', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'corporateAuthority', 'Corporate Authority')) return;
+  const existing = await get(`${AUTHORITY_SELECT} WHERE r.id=?`, [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Authority record not found' });
+  if (!await canAccessAuthority(req, existing.clientId)) return res.status(403).json({ error: 'Authority update denied' });
+  if (req.body.clientId !== undefined && req.body.clientId !== existing.clientId) {
+    return res.status(400).json({ error: 'clientId cannot be changed after creation' });
+  }
+  const validationError = validateAuthorityPayload(req.body, { partial: true });
+  if (validationError) return res.status(400).json({ error: validationError });
+  const { status, authorityBasis, authorisedPersonName, authorisedPersonRole, authorisedPersonEmail, authorisedPersonPhone, authorityDate, expiryDate, notes } = req.body;
+  const fields = [];
+  const vals = [];
+  if (status !== undefined) { fields.push('status=?'); vals.push(status); }
+  if (authorityBasis !== undefined) { fields.push('authorityBasis=?'); vals.push(authorityBasis || null); }
+  if (authorisedPersonName !== undefined) { fields.push('authorisedPersonName=?'); vals.push(authorisedPersonName || null); }
+  if (authorisedPersonRole !== undefined) { fields.push('authorisedPersonRole=?'); vals.push(authorisedPersonRole || null); }
+  if (authorisedPersonEmail !== undefined) { fields.push('authorisedPersonEmail=?'); vals.push(authorisedPersonEmail || null); }
+  if (authorisedPersonPhone !== undefined) { fields.push('authorisedPersonPhone=?'); vals.push(authorisedPersonPhone || null); }
+  if (authorityDate !== undefined) { fields.push('authorityDate=?'); vals.push(authorityDate || null); }
+  if (expiryDate !== undefined) { fields.push('expiryDate=?'); vals.push(expiryDate || null); }
+  if (notes !== undefined) { fields.push('notes=?'); vals.push(notes || ''); }
+  if (!fields.length) return res.status(400).json({ error: 'No fields to update' });
+  const now = new Date().toISOString();
+  fields.push('updatedAt=?'); vals.push(now);
+  fields.push('updatedBy=?'); vals.push(req.user.userId || '');
+  vals.push(req.params.id);
+  await run(`UPDATE client_authority_records SET ${fields.join(', ')} WHERE id=?`, vals);
+  const updated = await get(`${AUTHORITY_SELECT} WHERE r.id=?`, [req.params.id]);
+  await recordAuditEvent(req, {
+    action: 'client_authority_record_updated',
+    entityType: 'client_authority_record',
+    entityId: req.params.id,
+    clientId: existing.clientId,
+    metadata: authorityAuditMetadata(updated),
+  }).catch(() => {});
+  res.json(publicAuthorityRecord(updated));
+});
+
+app.delete('/api/client-authorities/:id', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'corporateAuthority', 'Corporate Authority')) return;
+  const existing = await get(`${AUTHORITY_SELECT} WHERE r.id=?`, [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Authority record not found' });
+  if (!await canAccessAuthority(req, existing.clientId)) return res.status(403).json({ error: 'Authority deactivate denied' });
+  const now = new Date().toISOString();
+  await run('UPDATE client_authority_records SET isActive=0, deactivatedBy=?, deactivatedAt=?, updatedAt=? WHERE id=?', [req.user.userId || '', now, now, req.params.id]);
+  await recordAuditEvent(req, {
+    action: 'client_authority_record_deactivated',
+    entityType: 'client_authority_record',
+    entityId: req.params.id,
+    clientId: existing.clientId,
+    metadata: authorityAuditMetadata({ ...existing, isActive: 0 }),
+  }).catch(() => {});
+  res.json({ message: 'Authority record deactivated' });
 });
 app.delete('/api/clients/:id', requireAdvocateOrAdmin, async (req, res) => {
   const client = await get('SELECT * FROM clients WHERE id=?', [req.params.id]);
