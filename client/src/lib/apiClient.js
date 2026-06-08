@@ -524,3 +524,10 @@ export const completeOffboardingCase = (caseId) => api(`/hr/offboarding/${encode
 export const cancelOffboardingCase = (caseId) => api(`/hr/offboarding/${encodeURIComponent(caseId)}/cancel`, { method: 'POST', body: {} });
 // Thin helper for the existing reassign route (route shape unchanged).
 export const reassignMatter = (matterId, assignedTo) => api(`/matters/${encodeURIComponent(matterId)}/reassign`, { method: 'PATCH', body: { assignedTo } });
+
+// RET-31D: retainer intake and scope schedule (module-gated, staff-only).
+export const getRetainers = (params = {}) => api(queryPath('/retainers', params));
+export const getRetainer = (id) => api(`/retainers/${encodeURIComponent(id)}`);
+export const createRetainer = (payload) => api('/retainers', { method: 'POST', body: payload });
+export const updateRetainer = (id, payload) => api(`/retainers/${encodeURIComponent(id)}`, { method: 'PATCH', body: payload });
+export const deleteRetainer = (id) => api(`/retainers/${encodeURIComponent(id)}`, { method: 'DELETE' });

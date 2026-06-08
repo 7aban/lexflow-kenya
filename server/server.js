@@ -135,6 +135,9 @@ const defaultFirmSettings = {
   moduleSettings: { ...DEFAULT_MODULE_SETTINGS },
 };
 
+const ALLOWED_RETAINER_STATUSES = new Set(['not_started', 'draft', 'sent', 'signed', 'declined', 'terminated']);
+const ALLOWED_RETAINER_ENGAGEMENT_TYPES = new Set(['advisory', 'litigation', 'conveyancing', 'corporate', 'employment', 'family', 'criminal', 'other']);
+
 const {
   defaultReminderSettings,
   defaultReminderTemplates,
@@ -218,6 +221,13 @@ async function isModuleEnabled(moduleKey) {
   if (!ALLOWED_MODULE_KEYS.has(moduleKey)) return false;
   const settings = await getFirmSettings();
   return Boolean(settings.moduleSettings?.[moduleKey]);
+}
+
+async function requireEnabledModule(req, res, moduleKey, label) {
+  if (!(await isModuleEnabled(moduleKey))) {
+    return res.status(403).json({ error: 'feature_disabled', message: `${label} is not enabled for this firm.` });
+  }
+  return true;
 }
 
 const HR_STAFF_ROLES = new Set(['admin', 'advocate', 'assistant']);
@@ -699,6 +709,32 @@ async function ensureClientUserSupport() {
   await ensureColumn('users', 'clientId', 'TEXT');
 }
 
+function publicRetainerRecord(row) {
+  return {
+    id: row.id,
+    clientId: row.clientId,
+    clientName: row.clientName || '',
+    matterId: row.matterId || '',
+    matterTitle: row.matterTitle || '',
+    matterReference: row.matterReference || '',
+    status: row.status || 'not_started',
+    engagementType: row.engagementType || '',
+    engagementStartDate: row.engagementStartDate || '',
+    signedDate: row.signedDate || '',
+    responsibleAdvocate: row.responsibleAdvocate || '',
+    scopeSummary: row.scopeSummary || '',
+    exclusionsSummary: row.exclusionsSummary || '',
+    clientObligationsSummary: row.clientObligationsSummary || '',
+    firmObligationsSummary: row.firmObligationsSummary || '',
+    billingArrangementSummary: row.billingArrangementSummary || '',
+    terminationTermsSummary: row.terminationTermsSummary || '',
+    isActive: Number(row.isActive || 1) === 1,
+    createdAt: row.createdAt || '',
+    updatedAt: row.updatedAt || '',
+    deactivatedAt: row.deactivatedAt || '',
+  };
+}
+
 async function getFirmSettings() {
   const settings = await get('SELECT * FROM firm_settings WHERE id=?', ['default']);
   const reminderSettings = await getReminderSettings();
@@ -757,6 +793,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS checklist_template_items (id TEXT PRIMARY KEY, templateId TEXT NOT NULL, title TEXT NOT NULL, notes TEXT, position INTEGER DEFAULT 0, createdAt TEXT NOT NULL)`);
   await run(`CREATE TABLE IF NOT EXISTS document_templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, practiceArea TEXT, category TEXT, bodyMarkup TEXT, active INTEGER DEFAULT 1, createdBy TEXT, createdAt TEXT NOT NULL, updatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS document_requests (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, clientId TEXT NOT NULL, staffUserId TEXT NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', createdAt TEXT NOT NULL, respondedAt TEXT, responseDocumentId TEXT, cancelledAt TEXT, cancelledBy TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS retainer_records (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, matterId TEXT, status TEXT NOT NULL DEFAULT 'not_started', engagementType TEXT, engagementStartDate TEXT, signedDate TEXT, responsibleAdvocate TEXT, scopeSummary TEXT DEFAULT '', exclusionsSummary TEXT DEFAULT '', clientObligationsSummary TEXT DEFAULT '', firmObligationsSummary TEXT DEFAULT '', billingArrangementSummary TEXT DEFAULT '', terminationTermsSummary TEXT DEFAULT '', notes TEXT DEFAULT '', isActive INTEGER NOT NULL DEFAULT 1, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, deactivatedBy TEXT, deactivatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS signature_assets (id TEXT PRIMARY KEY, ownerType TEXT NOT NULL CHECK(ownerType IN ('user','firm')), ownerId TEXT, assetType TEXT NOT NULL CHECK(assetType IN ('signature','stamp')), label TEXT NOT NULL, mimeType TEXT NOT NULL, content BLOB NOT NULL, size INTEGER, isDefault INTEGER DEFAULT 0, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT, deletedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS hr_staff_profiles (id TEXT PRIMARY KEY, userId TEXT NOT NULL UNIQUE, jobTitle TEXT, department TEXT, practiceTeam TEXT, employmentType TEXT, startDate TEXT, contractEndDate TEXT, supervisorUserId TEXT, workEmail TEXT, workPhone TEXT, emergencyContactName TEXT, emergencyContactPhone TEXT, hrStatus TEXT NOT NULL DEFAULT 'active', adminNotes TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, createdBy TEXT, updatedBy TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS hr_leave_requests (
@@ -1025,6 +1062,10 @@ createdAt TEXT NOT NULL
   await run('CREATE INDEX IF NOT EXISTS idx_document_requests_matterId ON document_requests(matterId)');
   await run('CREATE INDEX IF NOT EXISTS idx_document_requests_clientId ON document_requests(clientId)');
   await run('CREATE INDEX IF NOT EXISTS idx_document_requests_status ON document_requests(status)');
+  await run('CREATE INDEX IF NOT EXISTS idx_retainer_records_clientId ON retainer_records(clientId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_retainer_records_matterId ON retainer_records(matterId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_retainer_records_status ON retainer_records(status)');
+  await run('CREATE INDEX IF NOT EXISTS idx_retainer_records_active ON retainer_records(isActive)');
   await backfillSeededReceiptNumbers();
   await seedReminderTemplates();
 
@@ -5134,6 +5175,35 @@ app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
     attentionFlags.push({ key: 'no_active_matter', label: 'No active matter', severity: 'info', detail: 'No active matters for this client' });
   }
 
+  // RET-31D: retainer intake snapshot (module-gated).
+  let retainerBlock = { visible: false };
+  if (await isModuleEnabled('retainerManagement')) {
+    const activeRetainers = await all(`SELECT id, matterId, status, engagementType, engagementStartDate, signedDate
+      FROM retainer_records WHERE clientId=? AND isActive=1 ORDER BY createdAt DESC`, [clientId]);
+    const latest = activeRetainers.length ? activeRetainers[0] : null;
+    const retainerFlags = [];
+    if (latest && latest.status !== 'signed') {
+      retainerFlags.push({ key: 'unsigned_retainer', label: 'Unsigned retainer', severity: 'warning', detail: `Latest retainer (${latest.id.slice(0,8)}…) is ${latest.status}` });
+    }
+    if (activeCount > 0 && !latest) {
+      retainerFlags.push({ key: 'no_retainer', label: 'No retainer', severity: 'info', detail: 'Active matters exist but no active retainer record' });
+    }
+    retainerBlock = {
+      visible: true,
+      activeCount: activeRetainers.length,
+      latest: latest ? {
+        id: latest.id,
+        matterId: latest.matterId || '',
+        matterTitle: matterTitleById.get(latest.matterId) || '',
+        status: latest.status,
+        engagementType: latest.engagementType || '',
+        engagementStartDate: latest.engagementStartDate || '',
+        signedDate: latest.signedDate || '',
+      } : null,
+      flags: retainerFlags,
+    };
+  }
+
   res.json({
     client: {
       id: clientRow.id,
@@ -5151,7 +5221,205 @@ app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
     billing,
     recentDocuments,
     attentionFlags,
+    retainer: retainerBlock,
   });
+});
+// RET-31D: retainer intake and scope schedule routes (module-gated, staff-only).
+async function canAccessRetainer(req, clientId, matterId) {
+  if (req.user.role === 'admin' || req.user.role === 'assistant') return true;
+  if (req.user.role === 'advocate') {
+    if (!(await canAccessClient(req, clientId))) return false;
+    if (matterId && !(await canAccessMatter(req, matterId))) return false;
+    return true;
+  }
+  return false;
+}
+
+app.get('/api/retainers', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'retainerManagement', 'Retainer Management')) return;
+  const { clientId, matterId, status, includeInactive } = req.query;
+  const conditions = [];
+  const params = [];
+  if (clientId) { conditions.push('r.clientId=?'); params.push(clientId); }
+  if (matterId) { conditions.push('r.matterId=?'); params.push(matterId); }
+  if (status) { conditions.push('r.status=?'); params.push(status); }
+  if (includeInactive !== 'true') { conditions.push('r.isActive=1'); }
+  const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+  const rows = await all(`SELECT r.*, c.name clientName, m.title matterTitle, m.reference matterReference
+    FROM retainer_records r LEFT JOIN clients c ON c.id=r.clientId LEFT JOIN matters m ON m.id=r.matterId
+    ${where} ORDER BY r.createdAt DESC`, params);
+  const scoped = [];
+  for (const row of rows) {
+    if (await canAccessRetainer(req, row.clientId, row.matterId)) {
+      scoped.push(publicRetainerRecord(row));
+    }
+  }
+  res.json(scoped);
+});
+
+app.get('/api/retainers/:id', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'retainerManagement', 'Retainer Management')) return;
+  const row = await get(`SELECT r.*, c.name clientName, m.title matterTitle, m.reference matterReference
+    FROM retainer_records r LEFT JOIN clients c ON c.id=r.clientId LEFT JOIN matters m ON m.id=r.matterId
+    WHERE r.id=?`, [req.params.id]);
+  if (!row) return res.status(404).json({ error: 'Retainer record not found' });
+  if (!await canAccessRetainer(req, row.clientId, row.matterId)) {
+    return res.status(403).json({ error: 'Retainer access denied' });
+  }
+  res.json(publicRetainerRecord(row));
+});
+
+app.post('/api/retainers', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'retainerManagement', 'Retainer Management')) return;
+  const { clientId, matterId, status, engagementType, engagementStartDate, signedDate, responsibleAdvocate,
+    scopeSummary, exclusionsSummary, clientObligationsSummary, firmObligationsSummary,
+    billingArrangementSummary, terminationTermsSummary, notes } = req.body;
+  if (!clientId) return res.status(400).json({ error: 'clientId is required' });
+  if (status && !ALLOWED_RETAINER_STATUSES.has(status)) return res.status(400).json({ error: `Invalid status. Allowed: ${[...ALLOWED_RETAINER_STATUSES].join(', ')}` });
+  if (engagementType && !ALLOWED_RETAINER_ENGAGEMENT_TYPES.has(engagementType)) return res.status(400).json({ error: `Invalid engagementType. Allowed: ${[...ALLOWED_RETAINER_ENGAGEMENT_TYPES].join(', ')}` });
+  if (engagementStartDate) {
+    const d = new Date(engagementStartDate);
+    if (isNaN(d.getTime())) return res.status(400).json({ error: 'Invalid engagementStartDate' });
+  }
+  if (signedDate) {
+    const d = new Date(signedDate);
+    if (isNaN(d.getTime())) return res.status(400).json({ error: 'Invalid signedDate' });
+  }
+  const maxLen = 5000;
+  if ((scopeSummary || '').length > maxLen) return res.status(400).json({ error: 'scopeSummary exceeds 5000 characters' });
+  if ((exclusionsSummary || '').length > maxLen) return res.status(400).json({ error: 'exclusionsSummary exceeds 5000 characters' });
+  if ((clientObligationsSummary || '').length > maxLen) return res.status(400).json({ error: 'clientObligationsSummary exceeds 5000 characters' });
+  if ((firmObligationsSummary || '').length > maxLen) return res.status(400).json({ error: 'firmObligationsSummary exceeds 5000 characters' });
+  if ((billingArrangementSummary || '').length > maxLen) return res.status(400).json({ error: 'billingArrangementSummary exceeds 5000 characters' });
+  if ((terminationTermsSummary || '').length > maxLen) return res.status(400).json({ error: 'terminationTermsSummary exceeds 5000 characters' });
+  if ((notes || '').length > 10000) return res.status(400).json({ error: 'notes exceeds 10000 characters' });
+  const client = await get('SELECT id FROM clients WHERE id=?', [clientId]);
+  if (!client) return res.status(400).json({ error: 'Client not found' });
+  if (matterId) {
+    const matter = await get('SELECT id, clientId FROM matters WHERE id=?', [matterId]);
+    if (!matter) return res.status(400).json({ error: 'Matter not found' });
+    if (matter.clientId !== clientId) return res.status(400).json({ error: 'matterId does not belong to clientId' });
+  }
+  if (!await canAccessRetainer(req, clientId, matterId)) {
+    return res.status(403).json({ error: 'Retainer create denied' });
+  }
+  const id = genId('RET');
+  const now = new Date().toISOString();
+  await run(`INSERT INTO retainer_records (id,clientId,matterId,status,engagementType,engagementStartDate,signedDate,responsibleAdvocate,scopeSummary,exclusionsSummary,clientObligationsSummary,firmObligationsSummary,billingArrangementSummary,terminationTermsSummary,notes,isActive,createdBy,createdAt)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)`,
+    [id, clientId, matterId || null, status || 'not_started', engagementType || null, engagementStartDate || null, signedDate || null, responsibleAdvocate || null,
+     scopeSummary || '', exclusionsSummary || '', clientObligationsSummary || '', firmObligationsSummary || '',
+     billingArrangementSummary || '', terminationTermsSummary || '', notes || '', req.user.userId || '', now]);
+  await recordAuditEvent(req, {
+    action: 'retainer_record_created',
+    entityType: 'retainer_record',
+    entityId: id,
+    clientId,
+    matterId: matterId || '',
+    metadata: { retainerId: id, clientId, matterId: matterId || '', status: status || 'not_started', engagementType: engagementType || '', engagementStartDate: engagementStartDate || '', signedDate: signedDate || '', isActive: 1 },
+  }).catch(() => {});
+  const row = await get(`SELECT r.*, c.name clientName, m.title matterTitle, m.reference matterReference
+    FROM retainer_records r LEFT JOIN clients c ON c.id=r.clientId LEFT JOIN matters m ON m.id=r.matterId WHERE r.id=?`, [id]);
+  res.status(201).json(publicRetainerRecord(row));
+});
+
+app.patch('/api/retainers/:id', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'retainerManagement', 'Retainer Management')) return;
+  const existing = await get(`SELECT r.*, c.name clientName, m.title matterTitle, m.reference matterReference
+    FROM retainer_records r LEFT JOIN clients c ON c.id=r.clientId LEFT JOIN matters m ON m.id=r.matterId WHERE r.id=?`, [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Retainer record not found' });
+  if (!await canAccessRetainer(req, existing.clientId, existing.matterId)) {
+    return res.status(403).json({ error: 'Retainer update denied' });
+  }
+  if (req.body.clientId !== undefined && req.body.clientId !== existing.clientId) {
+    return res.status(400).json({ error: 'clientId cannot be changed after creation' });
+  }
+  const { status, engagementType, engagementStartDate, signedDate, responsibleAdvocate, matterId,
+    scopeSummary, exclusionsSummary, clientObligationsSummary, firmObligationsSummary,
+    billingArrangementSummary, terminationTermsSummary, notes } = req.body;
+  if (status !== undefined && !ALLOWED_RETAINER_STATUSES.has(status)) return res.status(400).json({ error: `Invalid status. Allowed: ${[...ALLOWED_RETAINER_STATUSES].join(', ')}` });
+  if (engagementType !== undefined && !ALLOWED_RETAINER_ENGAGEMENT_TYPES.has(engagementType)) return res.status(400).json({ error: `Invalid engagementType. Allowed: ${[...ALLOWED_RETAINER_ENGAGEMENT_TYPES].join(', ')}` });
+  if (engagementStartDate !== undefined) {
+    const d = new Date(engagementStartDate);
+    if (isNaN(d.getTime())) return res.status(400).json({ error: 'Invalid engagementStartDate' });
+  }
+  if (signedDate !== undefined) {
+    const d = new Date(signedDate);
+    if (isNaN(d.getTime())) return res.status(400).json({ error: 'Invalid signedDate' });
+  }
+  const maxLen = 5000;
+  if ((scopeSummary || '').length > maxLen) return res.status(400).json({ error: 'scopeSummary exceeds 5000 characters' });
+  if ((exclusionsSummary || '').length > maxLen) return res.status(400).json({ error: 'exclusionsSummary exceeds 5000 characters' });
+  if ((clientObligationsSummary || '').length > maxLen) return res.status(400).json({ error: 'clientObligationsSummary exceeds 5000 characters' });
+  if ((firmObligationsSummary || '').length > maxLen) return res.status(400).json({ error: 'firmObligationsSummary exceeds 5000 characters' });
+  if ((billingArrangementSummary || '').length > maxLen) return res.status(400).json({ error: 'billingArrangementSummary exceeds 5000 characters' });
+  if ((terminationTermsSummary || '').length > maxLen) return res.status(400).json({ error: 'terminationTermsSummary exceeds 5000 characters' });
+  if ((notes || '').length > 10000) return res.status(400).json({ error: 'notes exceeds 10000 characters' });
+  if (matterId !== undefined) {
+    if (matterId === '' || matterId === null) {
+      return res.status(400).json({ error: 'matterId cannot be cleared in v1' });
+    }
+    const matter = await get('SELECT id, clientId FROM matters WHERE id=?', [matterId]);
+    if (!matter) return res.status(400).json({ error: 'Matter not found' });
+    if (matter.clientId !== existing.clientId) return res.status(400).json({ error: 'matterId does not belong to this client' });
+  }
+  const fields = [];
+  const vals = [];
+  if (status !== undefined) { fields.push('status=?'); vals.push(status); }
+  if (engagementType !== undefined) { fields.push('engagementType=?'); vals.push(engagementType); }
+  if (engagementStartDate !== undefined) { fields.push('engagementStartDate=?'); vals.push(engagementStartDate); }
+  if (signedDate !== undefined) { fields.push('signedDate=?'); vals.push(signedDate); }
+  if (responsibleAdvocate !== undefined) { fields.push('responsibleAdvocate=?'); vals.push(responsibleAdvocate); }
+  if (matterId !== undefined) { fields.push('matterId=?'); vals.push(matterId); }
+  if (scopeSummary !== undefined) { fields.push('scopeSummary=?'); vals.push(scopeSummary); }
+  if (exclusionsSummary !== undefined) { fields.push('exclusionsSummary=?'); vals.push(exclusionsSummary); }
+  if (clientObligationsSummary !== undefined) { fields.push('clientObligationsSummary=?'); vals.push(clientObligationsSummary); }
+  if (firmObligationsSummary !== undefined) { fields.push('firmObligationsSummary=?'); vals.push(firmObligationsSummary); }
+  if (billingArrangementSummary !== undefined) { fields.push('billingArrangementSummary=?'); vals.push(billingArrangementSummary); }
+  if (terminationTermsSummary !== undefined) { fields.push('terminationTermsSummary=?'); vals.push(terminationTermsSummary); }
+  if (notes !== undefined) { fields.push('notes=?'); vals.push(notes); }
+  if (!fields.length) return res.status(400).json({ error: 'No fields to update' });
+  const now = new Date().toISOString();
+  fields.push('updatedAt=?'); vals.push(now);
+  fields.push('updatedBy=?'); vals.push(req.user.userId || '');
+  vals.push(req.params.id);
+  await run(`UPDATE retainer_records SET ${fields.join(', ')} WHERE id=?`, vals);
+  const newStatus = status !== undefined ? status : existing.status;
+  const newEngagementType = engagementType !== undefined ? engagementType : (existing.engagementType || '');
+  const newEngagementStartDate = engagementStartDate !== undefined ? engagementStartDate : (existing.engagementStartDate || '');
+  const newSignedDate = signedDate !== undefined ? signedDate : (existing.signedDate || '');
+  await recordAuditEvent(req, {
+    action: 'retainer_record_updated',
+    entityType: 'retainer_record',
+    entityId: req.params.id,
+    clientId: existing.clientId,
+    matterId: existing.matterId || '',
+    metadata: { retainerId: req.params.id, clientId: existing.clientId, matterId: existing.matterId || '', status: newStatus, engagementType: newEngagementType, engagementStartDate: newEngagementStartDate, signedDate: newSignedDate, isActive: Number(existing.isActive) },
+  }).catch(() => {});
+  const updated = await get(`SELECT r.*, c.name clientName, m.title matterTitle, m.reference matterReference
+    FROM retainer_records r LEFT JOIN clients c ON c.id=r.clientId LEFT JOIN matters m ON m.id=r.matterId WHERE r.id=?`, [req.params.id]);
+  res.json(publicRetainerRecord(updated));
+});
+
+app.delete('/api/retainers/:id', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'retainerManagement', 'Retainer Management')) return;
+  const existing = await get(`SELECT r.*, c.name clientName, m.title matterTitle, m.reference matterReference
+    FROM retainer_records r LEFT JOIN clients c ON c.id=r.clientId LEFT JOIN matters m ON m.id=r.matterId WHERE r.id=?`, [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Retainer record not found' });
+  if (!await canAccessRetainer(req, existing.clientId, existing.matterId)) {
+    return res.status(403).json({ error: 'Retainer deactivate denied' });
+  }
+  const now = new Date().toISOString();
+  await run('UPDATE retainer_records SET isActive=0, deactivatedBy=?, deactivatedAt=?, updatedAt=? WHERE id=?', [req.user.userId || '', now, now, req.params.id]);
+  await recordAuditEvent(req, {
+    action: 'retainer_record_deactivated',
+    entityType: 'retainer_record',
+    entityId: req.params.id,
+    clientId: existing.clientId,
+    matterId: existing.matterId || '',
+    metadata: { retainerId: req.params.id, clientId: existing.clientId, matterId: existing.matterId || '', status: existing.status, engagementType: existing.engagementType || '', engagementStartDate: existing.engagementStartDate || '', signedDate: existing.signedDate || '', isActive: 0 },
+  }).catch(() => {});
+  res.json({ message: 'Retainer record deactivated' });
 });
 app.delete('/api/clients/:id', requireAdvocateOrAdmin, async (req, res) => {
   const client = await get('SELECT * FROM clients WHERE id=?', [req.params.id]);
