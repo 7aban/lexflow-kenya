@@ -145,6 +145,12 @@ const ALLOWED_FEE_PLAN_BILLING_FREQUENCIES = new Set(['upfront', 'monthly', 'mil
 const ALLOWED_FEE_PLAN_VAT_TREATMENTS = new Set(['exclusive', 'inclusive', 'exempt', 'not_applicable']);
 const ALLOWED_FEE_PLAN_DISBURSEMENTS_TREATMENTS = new Set(['included', 'billed_separately', 'estimated', 'not_applicable', 'other']);
 
+// RET-31F: retainer ledger enums (planning/record ledger only; no trust accounting).
+const ALLOWED_LEDGER_ENTRY_TYPES = new Set(['deposit', 'fee_application', 'refund', 'adjustment']);
+const ALLOWED_LEDGER_DIRECTIONS = new Set(['credit', 'debit']);
+// Fixed direction per entry type ('adjustment' allows either).
+const LEDGER_REQUIRED_DIRECTION = { deposit: 'credit', refund: 'debit', fee_application: 'debit' };
+
 const {
   defaultReminderSettings,
   defaultReminderTemplates,
@@ -811,6 +817,109 @@ function publicFeePlan(row) {
   };
 }
 
+// RET-31F: validate a retainer ledger payload (append-only money record).
+// Returns an error string, or null when valid.
+function validateLedgerPayload(payload) {
+  const p = payload || {};
+  if (!p.clientId) return 'clientId is required';
+  if (!p.entryType) return 'entryType is required';
+  if (!p.direction) return 'direction is required';
+  if (!ALLOWED_LEDGER_ENTRY_TYPES.has(p.entryType)) return `Invalid entryType. Allowed: ${[...ALLOWED_LEDGER_ENTRY_TYPES].join(', ')}`;
+  if (!ALLOWED_LEDGER_DIRECTIONS.has(p.direction)) return `Invalid direction. Allowed: ${[...ALLOWED_LEDGER_DIRECTIONS].join(', ')}`;
+  const requiredDirection = LEDGER_REQUIRED_DIRECTION[p.entryType];
+  if (requiredDirection && p.direction !== requiredDirection) return `${p.entryType} must be a ${requiredDirection}`;
+  if (p.amount === undefined || p.amount === null || p.amount === '') return 'amount is required';
+  if (typeof p.amount === 'boolean') return 'amount must be a number';
+  const amt = Number(p.amount);
+  if (!Number.isFinite(amt)) return 'amount must be a valid number';
+  if (amt <= 0) return 'amount must be greater than 0';
+  if (!p.entryDate) return 'entryDate is required';
+  if (Number.isNaN(new Date(p.entryDate).getTime())) return 'Invalid entryDate';
+  if (p.currency !== undefined && p.currency !== null && String(p.currency).length > 10) return 'currency exceeds 10 characters';
+  if ((p.reference || '').length > 200) return 'reference exceeds 200 characters';
+  if ((p.description || '').length > 2000) return 'description exceeds 2000 characters';
+  if ((p.sourceType || '').length > 80) return 'sourceType exceeds 80 characters';
+  if ((p.sourceId || '').length > 120) return 'sourceId exceeds 120 characters';
+  return null;
+}
+
+function publicLedgerEntry(row) {
+  return {
+    id: row.id,
+    clientId: row.clientId,
+    clientName: row.clientName || '',
+    matterId: row.matterId || '',
+    matterTitle: row.matterTitle || '',
+    matterReference: row.matterReference || '',
+    retainerId: row.retainerId || '',
+    feePlanId: row.feePlanId || '',
+    entryType: row.entryType || '',
+    direction: row.direction || '',
+    amount: Number(row.amount || 0),
+    currency: row.currency || 'KES',
+    entryDate: row.entryDate || '',
+    reference: row.reference || '',
+    description: row.description || '',
+    sourceType: row.sourceType || '',
+    sourceId: row.sourceId || '',
+    isVoided: Number(row.isVoided || 0) === 1,
+    voidedBy: row.voidedBy || '',
+    voidedAt: row.voidedAt || '',
+    voidReason: row.voidReason || '',
+    createdAt: row.createdAt || '',
+    updatedAt: row.updatedAt || '',
+  };
+}
+
+// RET-31F: compute a display-only summary from ledger rows. Considers non-voided rows
+// only. Groups by currency so mixed currencies are never summed into one misleading total.
+function computeLedgerSummary(rows) {
+  const active = (rows || []).filter(r => Number(r.isVoided || 0) !== 1);
+  const groups = new Map();
+  for (const r of active) {
+    const cur = r.currency || 'KES';
+    if (!groups.has(cur)) groups.set(cur, { currency: cur, totalCredits: 0, totalDebits: 0, balance: 0, entryCount: 0 });
+    const g = groups.get(cur);
+    const amt = Number(r.amount || 0);
+    if (r.direction === 'credit') g.totalCredits += amt;
+    else if (r.direction === 'debit') g.totalDebits += amt;
+    g.balance = g.totalCredits - g.totalDebits;
+    g.entryCount += 1;
+  }
+  const byCurrency = [...groups.values()];
+  if (byCurrency.length <= 1) {
+    const only = byCurrency[0] || { currency: 'KES', totalCredits: 0, totalDebits: 0, balance: 0, entryCount: 0 };
+    return { currency: only.currency, totalCredits: only.totalCredits, totalDebits: only.totalDebits, balance: only.balance, entryCount: only.entryCount };
+  }
+  // Mixed currencies: do NOT sum across currencies; expose the grouped breakdown.
+  return {
+    currency: 'MIXED',
+    totalCredits: null,
+    totalDebits: null,
+    balance: null,
+    entryCount: active.length,
+    byCurrency,
+  };
+}
+
+// RET-31F: whitelist audit metadata (excludes description/reference/voidReason/source*).
+function ledgerAuditMetadata(row, isVoidedOverride) {
+  return {
+    ledgerEntryId: row.id,
+    clientId: row.clientId,
+    matterId: row.matterId || '',
+    retainerId: row.retainerId || '',
+    feePlanId: row.feePlanId || '',
+    entryType: row.entryType || '',
+    direction: row.direction || '',
+    amount: Number(row.amount || 0),
+    currency: row.currency || '',
+    entryDate: row.entryDate || '',
+    isVoided: isVoidedOverride !== undefined ? isVoidedOverride : Number(row.isVoided || 0),
+    voidedBy: row.voidedBy || '',
+  };
+}
+
 async function getFirmSettings() {
   const settings = await get('SELECT * FROM firm_settings WHERE id=?', ['default']);
   const reminderSettings = await getReminderSettings();
@@ -871,6 +980,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS document_requests (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, clientId TEXT NOT NULL, staffUserId TEXT NOT NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'pending', createdAt TEXT NOT NULL, respondedAt TEXT, responseDocumentId TEXT, cancelledAt TEXT, cancelledBy TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS retainer_records (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, matterId TEXT, status TEXT NOT NULL DEFAULT 'not_started', engagementType TEXT, engagementStartDate TEXT, signedDate TEXT, responsibleAdvocate TEXT, scopeSummary TEXT DEFAULT '', exclusionsSummary TEXT DEFAULT '', clientObligationsSummary TEXT DEFAULT '', firmObligationsSummary TEXT DEFAULT '', billingArrangementSummary TEXT DEFAULT '', terminationTermsSummary TEXT DEFAULT '', notes TEXT DEFAULT '', isActive INTEGER NOT NULL DEFAULT 1, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, deactivatedBy TEXT, deactivatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS matter_fee_plans (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, matterId TEXT NOT NULL, retainerId TEXT, feeType TEXT NOT NULL, currency TEXT NOT NULL DEFAULT 'KES', estimatedAmount REAL, hourlyRate REAL, capAmount REAL, depositRequired REAL, billingFrequency TEXT, paymentTerms TEXT, vatTreatment TEXT, disbursementsTreatment TEXT, status TEXT NOT NULL DEFAULT 'draft', notes TEXT DEFAULT '', isActive INTEGER NOT NULL DEFAULT 1, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, deactivatedBy TEXT, deactivatedAt TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS retainer_ledger_entries (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, matterId TEXT, retainerId TEXT, feePlanId TEXT, entryType TEXT NOT NULL, direction TEXT NOT NULL, amount REAL NOT NULL, currency TEXT NOT NULL DEFAULT 'KES', entryDate TEXT NOT NULL, reference TEXT, description TEXT, sourceType TEXT, sourceId TEXT, isVoided INTEGER NOT NULL DEFAULT 0, voidedBy TEXT, voidedAt TEXT, voidReason TEXT, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS signature_assets (id TEXT PRIMARY KEY, ownerType TEXT NOT NULL CHECK(ownerType IN ('user','firm')), ownerId TEXT, assetType TEXT NOT NULL CHECK(assetType IN ('signature','stamp')), label TEXT NOT NULL, mimeType TEXT NOT NULL, content BLOB NOT NULL, size INTEGER, isDefault INTEGER DEFAULT 0, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT, deletedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS hr_staff_profiles (id TEXT PRIMARY KEY, userId TEXT NOT NULL UNIQUE, jobTitle TEXT, department TEXT, practiceTeam TEXT, employmentType TEXT, startDate TEXT, contractEndDate TEXT, supervisorUserId TEXT, workEmail TEXT, workPhone TEXT, emergencyContactName TEXT, emergencyContactPhone TEXT, hrStatus TEXT NOT NULL DEFAULT 'active', adminNotes TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, createdBy TEXT, updatedBy TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS hr_leave_requests (
@@ -1148,6 +1258,12 @@ createdAt TEXT NOT NULL
   await run('CREATE INDEX IF NOT EXISTS idx_matter_fee_plans_retainerId ON matter_fee_plans(retainerId)');
   await run('CREATE INDEX IF NOT EXISTS idx_matter_fee_plans_status ON matter_fee_plans(status)');
   await run('CREATE INDEX IF NOT EXISTS idx_matter_fee_plans_active ON matter_fee_plans(isActive)');
+  await run('CREATE INDEX IF NOT EXISTS idx_retainer_ledger_entries_clientId ON retainer_ledger_entries(clientId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_retainer_ledger_entries_matterId ON retainer_ledger_entries(matterId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_retainer_ledger_entries_retainerId ON retainer_ledger_entries(retainerId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_retainer_ledger_entries_feePlanId ON retainer_ledger_entries(feePlanId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_retainer_ledger_entries_entryType ON retainer_ledger_entries(entryType)');
+  await run('CREATE INDEX IF NOT EXISTS idx_retainer_ledger_entries_isVoided ON retainer_ledger_entries(isVoided)');
   await backfillSeededReceiptNumbers();
   await seedReminderTemplates();
 
@@ -5312,6 +5428,14 @@ app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
     };
   }
 
+  // RET-31F: retainer ledger snapshot summary (double module-gated; planning ledger only,
+  // computed from entries — never reads/writes matters.retainerBalance).
+  let ledgerBlock = { visible: false };
+  if ((await isModuleEnabled('retainerManagement')) && (await isModuleEnabled('retainerLedger'))) {
+    const ledgerRows = await all('SELECT amount, currency, direction, isVoided FROM retainer_ledger_entries WHERE clientId=?', [clientId]);
+    ledgerBlock = { visible: true, ...computeLedgerSummary(ledgerRows) };
+  }
+
   res.json({
     client: {
       id: clientRow.id,
@@ -5331,6 +5455,7 @@ app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
     attentionFlags,
     retainer: retainerBlock,
     feePlan: feePlanBlock,
+    ledger: ledgerBlock,
   });
 });
 // RET-31D: retainer intake and scope schedule routes (module-gated, staff-only).
@@ -5711,6 +5836,138 @@ app.delete('/api/matter-fee-plans/:id', requireStaff, async (req, res) => {
     metadata: feePlanAuditMetadata(existing, 0),
   }).catch(() => {});
   res.json({ message: 'Fee plan deactivated' });
+});
+
+// RET-31F: retainer ledger routes (double module-gated, staff-only, append-only).
+const LEDGER_SELECT = `SELECT r.*, c.name clientName, m.title matterTitle, m.reference matterReference
+    FROM retainer_ledger_entries r LEFT JOIN clients c ON c.id=r.clientId LEFT JOIN matters m ON m.id=r.matterId`;
+
+async function canAccessLedger(req, clientId, matterId) {
+  if (req.user.role === 'admin' || req.user.role === 'assistant') return true;
+  if (req.user.role === 'advocate') {
+    if (!(await canAccessClient(req, clientId))) return false;
+    if (matterId && !(await canAccessMatter(req, matterId))) return false;
+    return true;
+  }
+  return false;
+}
+
+// Both module gates must pass; returns true only when both are enabled (else 403 already sent).
+async function requireLedgerModules(req, res) {
+  if (!await requireEnabledModule(req, res, 'retainerManagement', 'Retainer Management')) return false;
+  if (!await requireEnabledModule(req, res, 'retainerLedger', 'Retainer Ledger')) return false;
+  return true;
+}
+
+app.get('/api/retainer-ledger', requireStaff, async (req, res) => {
+  if (!await requireLedgerModules(req, res)) return;
+  const { clientId, matterId, retainerId, feePlanId, includeVoided } = req.query;
+  const conditions = [];
+  const params = [];
+  if (clientId) { conditions.push('r.clientId=?'); params.push(clientId); }
+  if (matterId) { conditions.push('r.matterId=?'); params.push(matterId); }
+  if (retainerId) { conditions.push('r.retainerId=?'); params.push(retainerId); }
+  if (feePlanId) { conditions.push('r.feePlanId=?'); params.push(feePlanId); }
+  if (includeVoided !== 'true') { conditions.push('r.isVoided=0'); }
+  const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+  const rows = await all(`${LEDGER_SELECT} ${where} ORDER BY r.entryDate DESC, r.createdAt DESC`, params);
+  const scoped = [];
+  for (const row of rows) {
+    if (await canAccessLedger(req, row.clientId, row.matterId)) {
+      scoped.push(publicLedgerEntry(row));
+    }
+  }
+  res.json(scoped);
+});
+
+app.get('/api/retainer-ledger/summary', requireStaff, async (req, res) => {
+  if (!await requireLedgerModules(req, res)) return;
+  const { clientId, matterId, retainerId, feePlanId } = req.query;
+  const conditions = ['r.isVoided=0'];
+  const params = [];
+  if (clientId) { conditions.push('r.clientId=?'); params.push(clientId); }
+  if (matterId) { conditions.push('r.matterId=?'); params.push(matterId); }
+  if (retainerId) { conditions.push('r.retainerId=?'); params.push(retainerId); }
+  if (feePlanId) { conditions.push('r.feePlanId=?'); params.push(feePlanId); }
+  const where = 'WHERE ' + conditions.join(' AND ');
+  const rows = await all(`${LEDGER_SELECT} ${where}`, params);
+  const accessible = [];
+  for (const row of rows) {
+    if (await canAccessLedger(req, row.clientId, row.matterId)) accessible.push(row);
+  }
+  res.json(computeLedgerSummary(accessible));
+});
+
+app.post('/api/retainer-ledger', requireStaff, async (req, res) => {
+  if (!await requireLedgerModules(req, res)) return;
+  const { clientId, matterId, retainerId, feePlanId, entryType, direction, amount, currency,
+    entryDate, reference, description, sourceType, sourceId } = req.body;
+  const validationError = validateLedgerPayload(req.body);
+  if (validationError) return res.status(400).json({ error: validationError });
+  const client = await get('SELECT id FROM clients WHERE id=?', [clientId]);
+  if (!client) return res.status(400).json({ error: 'Client not found' });
+  if (matterId) {
+    const matter = await get('SELECT id, clientId FROM matters WHERE id=?', [matterId]);
+    if (!matter) return res.status(400).json({ error: 'Matter not found' });
+    if (matter.clientId !== clientId) return res.status(400).json({ error: 'matterId does not belong to clientId' });
+  }
+  if (retainerId) {
+    const ret = await get('SELECT id, clientId, matterId, isActive FROM retainer_records WHERE id=?', [retainerId]);
+    if (!ret) return res.status(400).json({ error: 'Retainer not found' });
+    if (Number(ret.isActive) !== 1) return res.status(400).json({ error: 'retainerId is not active' });
+    if (ret.clientId !== clientId) return res.status(400).json({ error: 'retainerId does not belong to this client' });
+    if (matterId && (ret.matterId || '') !== matterId) return res.status(400).json({ error: 'retainerId does not belong to this matter' });
+  }
+  if (feePlanId) {
+    const fp = await get('SELECT id, clientId, matterId, isActive FROM matter_fee_plans WHERE id=?', [feePlanId]);
+    if (!fp) return res.status(400).json({ error: 'Fee plan not found' });
+    if (Number(fp.isActive) !== 1) return res.status(400).json({ error: 'feePlanId is not active' });
+    if (fp.clientId !== clientId) return res.status(400).json({ error: 'feePlanId does not belong to this client' });
+    if (matterId && (fp.matterId || '') !== matterId) return res.status(400).json({ error: 'feePlanId does not belong to this matter' });
+  }
+  if (!await canAccessLedger(req, clientId, matterId)) {
+    return res.status(403).json({ error: 'Ledger create denied' });
+  }
+  const id = genId('LED');
+  const now = new Date().toISOString();
+  await run(`INSERT INTO retainer_ledger_entries (id,clientId,matterId,retainerId,feePlanId,entryType,direction,amount,currency,entryDate,reference,description,sourceType,sourceId,isVoided,createdBy,createdAt)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?)`,
+    [id, clientId, matterId || null, retainerId || null, feePlanId || null, entryType, direction, Number(amount),
+     (currency || 'KES'), entryDate, reference || null, description || null, sourceType || null, sourceId || null, req.user.userId || '', now]);
+  const row = await get(`${LEDGER_SELECT} WHERE r.id=?`, [id]);
+  await recordAuditEvent(req, {
+    action: 'retainer_ledger_entry_created',
+    entityType: 'retainer_ledger_entry',
+    entityId: id,
+    clientId,
+    matterId: matterId || '',
+    metadata: ledgerAuditMetadata(row, 0),
+  }).catch(() => {});
+  res.status(201).json(publicLedgerEntry(row));
+});
+
+app.post('/api/retainer-ledger/:id/void', requireStaff, async (req, res) => {
+  if (!await requireLedgerModules(req, res)) return;
+  const existing = await get(`${LEDGER_SELECT} WHERE r.id=?`, [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Ledger entry not found' });
+  if (!await canAccessLedger(req, existing.clientId, existing.matterId)) {
+    return res.status(403).json({ error: 'Ledger void denied' });
+  }
+  if (Number(existing.isVoided) === 1) return res.status(409).json({ error: 'Ledger entry already voided' });
+  const voidReason = (req.body && typeof req.body.voidReason === 'string') ? req.body.voidReason.slice(0, 1000) : '';
+  const now = new Date().toISOString();
+  await run('UPDATE retainer_ledger_entries SET isVoided=1, voidedBy=?, voidedAt=?, voidReason=?, updatedBy=?, updatedAt=? WHERE id=?',
+    [req.user.userId || '', now, voidReason, req.user.userId || '', now, req.params.id]);
+  const updated = await get(`${LEDGER_SELECT} WHERE r.id=?`, [req.params.id]);
+  await recordAuditEvent(req, {
+    action: 'retainer_ledger_entry_voided',
+    entityType: 'retainer_ledger_entry',
+    entityId: req.params.id,
+    clientId: existing.clientId,
+    matterId: existing.matterId || '',
+    metadata: ledgerAuditMetadata(updated, 1),
+  }).catch(() => {});
+  res.json(publicLedgerEntry(updated));
 });
 app.delete('/api/clients/:id', requireAdvocateOrAdmin, async (req, res) => {
   const client = await get('SELECT * FROM clients WHERE id=?', [req.params.id]);

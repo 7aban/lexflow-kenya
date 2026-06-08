@@ -538,3 +538,9 @@ export const getMatterFeePlan = (id) => api(`/matter-fee-plans/${encodeURICompon
 export const createMatterFeePlan = (payload) => api('/matter-fee-plans', { method: 'POST', body: payload });
 export const updateMatterFeePlan = (id, payload) => api(`/matter-fee-plans/${encodeURIComponent(id)}`, { method: 'PATCH', body: payload });
 export const deleteMatterFeePlan = (id) => api(`/matter-fee-plans/${encodeURIComponent(id)}`, { method: 'DELETE' });
+
+// RET-31F: retainer ledger (double-gated retainerManagement+retainerLedger, staff-only, append-only).
+export const getRetainerLedger = (params = {}) => api(queryPath('/retainer-ledger', params));
+export const getRetainerLedgerSummary = (params = {}) => api(queryPath('/retainer-ledger/summary', params));
+export const createRetainerLedgerEntry = (payload) => api('/retainer-ledger', { method: 'POST', body: payload });
+export const voidRetainerLedgerEntry = (id, payload = {}) => api(`/retainer-ledger/${encodeURIComponent(id)}/void`, { method: 'POST', body: payload });
