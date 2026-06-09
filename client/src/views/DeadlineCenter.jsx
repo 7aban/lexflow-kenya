@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { confirmLegalDeadlineSuggestion, createDeadline, createLegalDeadlineRule, createLegalDeadlineSuggestion, deleteDeadline, deleteLegalDeadlineRule, getComplianceGuidance, getDeadlines, getLegalDeadlineRules, getLegalDeadlineSuggestions, previewLegalDeadlineRule, updateDeadline, updateLegalDeadlineRule, updateLegalDeadlineSuggestion } from '../lib/apiClient.js';
+import { confirmLegalDeadlineSuggestion, createDeadline, createLegalDeadlineRule, createLegalDeadlineSuggestion, deleteDeadline, deleteLegalDeadlineRule, getComplianceGuidance, getDeadlines, getLegalDeadlineRules, getLegalDeadlineSuggestions, previewLegalDeadlineRule, reviewLegalDeadlineRule, updateDeadline, updateLegalDeadlineRule, updateLegalDeadlineSuggestion } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Badge, Card, ConfirmModal, Empty, Field, MeetingLink, safeHttpUrl, Skeleton, Stat, Table } from '../components/ui.jsx';
 
@@ -8,6 +8,15 @@ const blankForm = { title: '', type: 'statutory', dueDate: '', owner: '', matter
 const blankRuleForm = { ruleType: 'limitation', jurisdiction: 'Kenya', legalArea: '', causeOfAction: '', title: '', triggerEvent: '', periodValue: '', periodUnit: 'years', computationMode: 'calendar', citation: '', notes: '', effectiveFrom: '', effectiveTo: '', version: 1, verifiedBy: '', verifiedAt: '' };
 const RULE_TYPE_OPTIONS = ['limitation', 'statutory_recurring', 'procedural'];
 const PERIOD_UNIT_OPTIONS = ['days', 'months', 'years'];
+// KENYA-32D: rule review status display.
+const REVIEW_STATUS_LABEL = { pending: 'Pending review', reviewed: 'Reviewed', needs_update: 'Needs update' };
+const REVIEW_STATUS_TONE = { pending: 'amber', reviewed: 'green', needs_update: 'red' };
+function ruleNeedsAttention(rule, todayIso) {
+  if (!rule) return false;
+  if (rule.reviewStatus === 'pending' || rule.reviewStatus === 'needs_update') return true;
+  if (rule.nextReviewDate && rule.nextReviewDate < todayIso) return true;
+  return false;
+}
 const typeOptions = ['all', 'Court Date', 'Internal Task', 'SOL / Limitation', 'Invoice Due', 'client', 'internal', 'statutory', 'tax', 'regulatory'];
 
 function dayDiff(date) {
@@ -93,6 +102,10 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [savingSuggestion, setSavingSuggestion] = useState(false);
   const [confirmingId, setConfirmingId] = useState('');
+  // KENYA-32D: per-rule review controls (advocate/admin only).
+  const [reviewingRuleId, setReviewingRuleId] = useState('');
+  const [reviewForm, setReviewForm] = useState({ reviewStatus: 'reviewed', nextReviewDate: '', reviewComment: '' });
+  const [savingReview, setSavingReview] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -286,6 +299,37 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
       await loadRules();
     } catch (err) {
       notify?.({ type: 'danger', message: err.message });
+    }
+  }
+
+  // KENYA-32D: open/close the inline review form for a rule (advocate/admin only).
+  function toggleReview(rule) {
+    if (reviewingRuleId === rule.id) { setReviewingRuleId(''); return; }
+    setReviewingRuleId(rule.id);
+    setReviewForm({
+      reviewStatus: rule.reviewStatus && rule.reviewStatus !== 'pending' ? rule.reviewStatus : 'reviewed',
+      nextReviewDate: rule.nextReviewDate || '',
+      reviewComment: rule.reviewComment || '',
+    });
+  }
+
+  async function submitReview(event, rule) {
+    event.preventDefault();
+    if (!canManage) return notify?.({ type: 'warning', message: 'Only advocates and admins can review legal deadline rules.' });
+    setSavingReview(true);
+    try {
+      await reviewLegalDeadlineRule(rule.id, {
+        reviewStatus: reviewForm.reviewStatus,
+        nextReviewDate: reviewForm.nextReviewDate || undefined,
+        reviewComment: reviewForm.reviewComment || '',
+      });
+      notify?.({ type: 'success', message: 'Review saved.' });
+      setReviewingRuleId('');
+      await loadRules();
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setSavingReview(false);
     }
   }
 
@@ -627,10 +671,38 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
                     </span>
                     <span style={{ fontSize: 12, color: theme.muted }}>Citation: {rule.citation}</span>
                     <span style={{ fontSize: 11, color: theme.muted }}>v{rule.version}{rule.verifiedBy ? ` · verified by ${rule.verifiedBy}` : ' · not verified'}</span>
+                    {/* KENYA-32D: advocate/admin review status. */}
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <Badge tone={REVIEW_STATUS_TONE[rule.reviewStatus] || 'gray'}>{REVIEW_STATUS_LABEL[rule.reviewStatus] || 'Pending review'}</Badge>
+                      {ruleNeedsAttention(rule, todayIso) && <Badge tone="red">Review needed</Badge>}
+                    </div>
+                    <span style={{ fontSize: 11, color: theme.muted }}>
+                      {rule.reviewedAt ? `Last reviewed ${String(rule.reviewedAt).slice(0, 10)}` : 'Not yet reviewed'}
+                      {rule.nextReviewDate ? ` · next review ${rule.nextReviewDate}` : ''}
+                    </span>
                     <div style={styles.actionGroup}>
                       <button type="button" style={styles.tinyButton} onClick={() => editRule(rule)}>Edit</button>
+                      <button type="button" style={styles.tinyButton} onClick={() => toggleReview(rule)}>{reviewingRuleId === rule.id ? 'Close review' : 'Review'}</button>
                       <button type="button" style={styles.dangerTinyButton} onClick={() => setConfirm({ title: 'Deactivate rule?', message: `Deactivate "${rule.title}"? It will be hidden but kept for audit.`, onConfirm: () => deactivateRule(rule) })}>Deactivate</button>
                     </div>
+                    {reviewingRuleId === rule.id && (
+                      <form onSubmit={e => submitReview(e, rule)} style={{ ...styles.formGrid, marginTop: 4, paddingTop: 8, borderTop: `1px solid ${theme.line}` }}>
+                        <Field label="Review status">
+                          <select style={styles.input} value={reviewForm.reviewStatus} onChange={e => setReviewForm({ ...reviewForm, reviewStatus: e.target.value })}>
+                            <option value="pending">Pending review</option>
+                            <option value="reviewed">Reviewed</option>
+                            <option value="needs_update">Needs update</option>
+                          </select>
+                        </Field>
+                        <Field label="Next review date">
+                          <input type="date" style={styles.input} value={reviewForm.nextReviewDate} onChange={e => setReviewForm({ ...reviewForm, nextReviewDate: e.target.value })} />
+                        </Field>
+                        <Field label="Review comment">
+                          <input style={styles.input} value={reviewForm.reviewComment} onChange={e => setReviewForm({ ...reviewForm, reviewComment: e.target.value })} placeholder="Optional internal note" maxLength={500} />
+                        </Field>
+                        <button type="submit" style={styles.primaryButton} disabled={savingReview}>{savingReview ? 'Saving…' : 'Save review'}</button>
+                      </form>
+                    )}
                   </div>
                 )) : <Empty title="No active rules" text="Add a firm-verified limitation or statutory rule to enable date previews." />}
               </div>

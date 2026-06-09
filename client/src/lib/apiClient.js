@@ -296,6 +296,8 @@ export const createLegalDeadlineRule = payload => api('/legal-deadline-rules', {
 export const updateLegalDeadlineRule = (id, payload) => api(`/legal-deadline-rules/${id}`, { method: 'PATCH', body: payload });
 export const deleteLegalDeadlineRule = id => api(`/legal-deadline-rules/${id}`, { method: 'DELETE' });
 export const previewLegalDeadlineRule = (id, payload) => api(`/legal-deadline-rules/${id}/preview`, { method: 'POST', body: payload });
+// KENYA-32D: advocate/admin legal rule review controls.
+export const reviewLegalDeadlineRule = (id, payload) => api(`/legal-deadline-rules/${id}/review`, { method: 'PATCH', body: payload });
 // KENYA-32C: persisted deadline suggestions + explicit confirm-to-deadline (advocate/admin only).
 export const getLegalDeadlineSuggestions = (params = {}) => api(queryPath('/legal-deadline-suggestions', params));
 export const createLegalDeadlineSuggestion = payload => api('/legal-deadline-suggestions', { method: 'POST', body: payload });

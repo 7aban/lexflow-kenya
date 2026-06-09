@@ -172,6 +172,9 @@ const ALLOWED_LEGAL_RULE_COMPUTATION_MODES = new Set(['calendar']);
 // KENYA-32C: persisted deadline suggestion statuses (draft -> confirmed/cancelled, no other transitions).
 const ALLOWED_LEGAL_SUGGESTION_STATUSES = new Set(['draft', 'confirmed', 'cancelled']);
 
+// KENYA-32D: advocate/admin legal rule review statuses (review metadata only; no computation change).
+const ALLOWED_LEGAL_RULE_REVIEW_STATUSES = new Set(['pending', 'reviewed', 'needs_update']);
+
 const {
   defaultReminderSettings,
   defaultReminderTemplates,
@@ -1208,6 +1211,12 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS retainer_lifecycle_events (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, matterId TEXT, retainerId TEXT, eventType TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'recorded', effectiveDate TEXT, noticeDate TEXT, title TEXT, summary TEXT DEFAULT '', reason TEXT DEFAULT '', scopeBeforeSummary TEXT DEFAULT '', scopeAfterSummary TEXT DEFAULT '', clientObligationsSummary TEXT DEFAULT '', firmObligationsSummary TEXT DEFAULT '', isActive INTEGER NOT NULL DEFAULT 1, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, deactivatedBy TEXT, deactivatedAt TEXT)`);
   // KENYA-32B: legal deadline rule library (advocate-verified planning data; no hard-coded periods, no auto deadline creation).
   await run(`CREATE TABLE IF NOT EXISTS legal_deadline_rules (id TEXT PRIMARY KEY, ruleType TEXT NOT NULL, jurisdiction TEXT NOT NULL DEFAULT 'Kenya', legalArea TEXT, causeOfAction TEXT, title TEXT NOT NULL, triggerEvent TEXT NOT NULL, periodValue INTEGER NOT NULL, periodUnit TEXT NOT NULL, computationMode TEXT DEFAULT 'calendar', citation TEXT NOT NULL, notes TEXT DEFAULT '', effectiveFrom TEXT, effectiveTo TEXT, version INTEGER NOT NULL DEFAULT 1, isActive INTEGER NOT NULL DEFAULT 1, verifiedBy TEXT, verifiedAt TEXT, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, deactivatedBy TEXT, deactivatedAt TEXT)`);
+  // KENYA-32D: advocate/admin rule review controls (idempotent — added to the table above).
+  await ensureColumn('legal_deadline_rules', 'reviewStatus', "TEXT NOT NULL DEFAULT 'pending'");
+  await ensureColumn('legal_deadline_rules', 'reviewedBy', 'TEXT');
+  await ensureColumn('legal_deadline_rules', 'reviewedAt', 'TEXT');
+  await ensureColumn('legal_deadline_rules', 'nextReviewDate', 'TEXT');
+  await ensureColumn('legal_deadline_rules', 'reviewComment', "TEXT DEFAULT ''");
   // KENYA-32C: persisted legal deadline suggestions (advocate planning aids; snapshot of a rule + trigger date). Confirmation creates exactly one real deadline; suggestions never auto-create.
   await run(`CREATE TABLE IF NOT EXISTS legal_deadline_suggestions (id TEXT PRIMARY KEY, ruleId TEXT NOT NULL, matterId TEXT, clientId TEXT, triggerDate TEXT NOT NULL, suggestedDueDate TEXT NOT NULL, title TEXT NOT NULL, ruleType TEXT NOT NULL, jurisdiction TEXT NOT NULL, legalArea TEXT, causeOfAction TEXT, triggerEvent TEXT NOT NULL, periodValue INTEGER NOT NULL, periodUnit TEXT NOT NULL, computationMode TEXT NOT NULL DEFAULT 'calendar', citation TEXT NOT NULL, disclaimer TEXT NOT NULL, requiresAdvocateVerification INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'draft', confirmedDeadlineId TEXT, notes TEXT DEFAULT '', createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, confirmedBy TEXT, confirmedAt TEXT, cancelledBy TEXT, cancelledAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS signature_assets (id TEXT PRIMARY KEY, ownerType TEXT NOT NULL CHECK(ownerType IN ('user','firm')), ownerId TEXT, assetType TEXT NOT NULL CHECK(assetType IN ('signature','stamp')), label TEXT NOT NULL, mimeType TEXT NOT NULL, content BLOB NOT NULL, size INTEGER, isDefault INTEGER DEFAULT 0, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT, deletedAt TEXT)`);
@@ -6966,6 +6975,12 @@ function publicLegalDeadlineRule(row) {
     isActive: Number(row.isActive || 0) === 1,
     verifiedBy: row.verifiedBy || '',
     verifiedAt: row.verifiedAt || '',
+    // KENYA-32D: advocate/admin review controls.
+    reviewStatus: row.reviewStatus || 'pending',
+    reviewedBy: row.reviewedBy || '',
+    reviewedAt: row.reviewedAt || '',
+    nextReviewDate: row.nextReviewDate || '',
+    reviewComment: row.reviewComment || '',
     createdAt: row.createdAt || '',
     updatedAt: row.updatedAt || '',
     deactivatedAt: row.deactivatedAt || '',
@@ -7108,6 +7123,49 @@ app.delete('/api/legal-deadline-rules/:id', requireAdmin, async (req, res) => {
     metadata: legalDeadlineRuleAuditMetadata(existing, 0),
   }).catch(() => {});
   res.json({ message: 'Legal deadline rule deactivated' });
+});
+
+// KENYA-32D: advocate/admin review controls. Records review metadata only — does NOT
+// change deadline computation, suggestions, reactivate an inactive rule, or create deadlines.
+app.patch('/api/legal-deadline-rules/:id/review', requireAdvocateOrAdmin, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'advancedCompliance', 'Advanced Compliance')) return;
+  const existing = await get('SELECT * FROM legal_deadline_rules WHERE id=?', [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Legal deadline rule not found' });
+  const { reviewStatus, nextReviewDate, reviewComment } = req.body || {};
+  if (!reviewStatus || !ALLOWED_LEGAL_RULE_REVIEW_STATUSES.has(reviewStatus)) {
+    return res.status(400).json({ error: `Invalid reviewStatus. Allowed: ${[...ALLOWED_LEGAL_RULE_REVIEW_STATUSES].join(', ')}` });
+  }
+  let normalizedNextReview = null;
+  if (nextReviewDate !== undefined && nextReviewDate !== null && nextReviewDate !== '') {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(nextReviewDate)) || Number.isNaN(new Date(`${nextReviewDate}T00:00:00.000Z`).getTime())) {
+      return res.status(400).json({ error: 'nextReviewDate must be a valid YYYY-MM-DD date' });
+    }
+    normalizedNextReview = String(nextReviewDate);
+  }
+  let normalizedComment = '';
+  if (reviewComment !== undefined && reviewComment !== null) {
+    normalizedComment = String(reviewComment).trim();
+    if (normalizedComment.length > 500) return res.status(400).json({ error: 'reviewComment exceeds 500 characters' });
+  }
+  const now = new Date().toISOString();
+  // isActive is intentionally not touched — reviewing an inactive rule does not reactivate it.
+  await run('UPDATE legal_deadline_rules SET reviewStatus=?, reviewedBy=?, reviewedAt=?, nextReviewDate=?, reviewComment=?, updatedBy=?, updatedAt=? WHERE id=?',
+    [reviewStatus, req.user.userId || '', now, normalizedNextReview, normalizedComment, req.user.userId || '', now, req.params.id]);
+  const updated = await get('SELECT * FROM legal_deadline_rules WHERE id=?', [req.params.id]);
+  await recordAuditEvent(req, {
+    action: 'legal_deadline_rule_reviewed',
+    entityType: 'legal_deadline_rule',
+    entityId: req.params.id,
+    metadata: {
+      ruleId: updated.id,
+      reviewStatus: updated.reviewStatus || '',
+      nextReviewDate: updated.nextReviewDate || '',
+      jurisdiction: updated.jurisdiction || '',
+      ruleType: updated.ruleType || '',
+      legalArea: updated.legalArea || '',
+    },
+  }).catch(() => {});
+  res.json(publicLegalDeadlineRule(updated));
 });
 
 app.post('/api/legal-deadline-rules/:id/preview', requireStaff, async (req, res) => {
