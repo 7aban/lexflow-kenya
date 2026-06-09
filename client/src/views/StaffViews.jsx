@@ -2242,6 +2242,7 @@ export function Matters({ data, canManage, reload, notify, focus, onMatterOpened
                         <MatterBillingSnapshot detail={detail} />
                       </div>
                     )}
+                    <HearingBriefCard detail={detail} />
                   </section>
                   <MatterCommandSummary detail={detail} nextActionHints={nextActionHints} />
                   <MatterNextActionHints hints={nextActionHints} />
@@ -5504,7 +5505,7 @@ function AppearanceEditorList({ events, canManage, editingEvent, setEditingEvent
   return (
     <div style={{ ...styles.tableWrap, minWidth: 0, maxWidth: '100%' }} className="lf-appearance-cards">
       <table style={styles.table}>
-        <thead><tr>{['Title', 'Date', 'Time', 'Type', 'Location', 'Virtual Court', 'Actions'].map(h => <th key={h}>{h}</th>)}</tr></thead>
+        <thead><tr>{['Title', 'Date', 'Time', 'Type', 'Location', 'Virtual Court', 'Outcome', 'Actions'].map(h => <th key={h}>{h}</th>)}</tr></thead>
         <tbody>{events.map(event => {
           const editing = editingEvent?.id === event.id;
           return (
@@ -5515,6 +5516,7 @@ function AppearanceEditorList({ events, canManage, editingEvent, setEditingEvent
               <td>{editing ? <input style={styles.input} value={editingEvent.type || ''} onChange={e => setEditingEvent({ ...editingEvent, type: e.target.value })} /> : event.type || '-'}</td>
               <td>{editing ? <input style={styles.input} value={editingEvent.location || ''} onChange={e => setEditingEvent({ ...editingEvent, location: e.target.value })} /> : event.location || '-'}</td>
               <td>{editing ? <input type="url" placeholder="https://..." style={styles.input} value={editingEvent.meetingLink || ''} onChange={e => setEditingEvent({ ...editingEvent, meetingLink: e.target.value })} /> : <MeetingLink event={event} />}</td>
+              <td>{editing ? <input style={styles.input} value={editingEvent.outcome || ''} onChange={e => setEditingEvent({ ...editingEvent, outcome: e.target.value })} /> : event.outcome || '-'}</td>
               <td>{canManage ? editing ? <ActionGroup actions={[['Save', () => saveEvent(event, editingEvent)], ['Cancel', () => setEditingEvent(null)]]} /> : <ActionGroup actions={[['Edit', () => setEditingEvent({ ...event })], ['Delete', () => confirmDelete(event)]]} /> : '-'}</td>
             </tr>
           );
@@ -5709,6 +5711,61 @@ function MatterCourtPrepCard({ detail }) {
       <span style={{ fontSize: 14, color: theme.ink }}>{nextAppearance.title || `${nextAppearance.type || 'Court'} preparation`}</span>
       {safeHttpUrl(nextAppearance.meetingLink) && <a href={safeHttpUrl(nextAppearance.meetingLink)} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: theme.blue, textDecoration: 'underline' }}>Virtual court link</a>}
       {chips.length > 0 && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{chips.map((c, i) => <span key={i} style={chipStyle}>{c.label}</span>)}</div>}
+    </section>
+  );
+}
+
+function HearingBriefCard({ detail }) {
+  const appearances = Array.isArray(detail?.appearances) ? detail.appearances : [];
+  const documents = Array.isArray(detail?.documents) ? detail.documents : [];
+  const notes = Array.isArray(detail?.notes) ? detail.notes : [];
+  const checklistItems = Array.isArray(detail?.checklistItems) ? detail.checklistItems : [];
+  const today = isoDateOnly();
+  const upcoming = appearances.filter(a => a.date && a.date >= today).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const nextAppearance = upcoming[0];
+  const sortedDocs = [...documents].sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 3);
+  const openChecklist = checklistItems.filter(i => !i.completed).slice(0, 3);
+  const recentNotes = [...notes].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))).slice(0, 3);
+  const cardStyle = { border: `1px solid ${theme.line}`, borderLeft: `4px solid ${theme.blue}`, borderRadius: 10, padding: 14, background: '#fff', display: 'grid', gap: 8 };
+  const emptyStyle = { color: theme.muted, fontSize: 12, fontStyle: 'italic' };
+  return (
+    <section aria-label="Hearing brief" style={cardStyle}>
+      <strong style={{ fontSize: 13 }}>Hearing Brief</strong>
+      {nextAppearance ? (
+        <div style={{ display: 'grid', gap: 6 }}>
+          <div style={{ display: 'grid', gap: 2 }}>
+            <span style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: theme.muted }}>Next appearance</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: theme.ink }}>{nextAppearance.title || nextAppearance.type || 'Appearance'}</span>
+            <span style={{ fontSize: 12, color: theme.muted }}>{nextAppearance.date}{nextAppearance.time ? ` at ${nextAppearance.time}` : ''}{nextAppearance.location ? ` — ${nextAppearance.location}` : ''}</span>
+            {safeHttpUrl(nextAppearance.meetingLink) && <a href={safeHttpUrl(nextAppearance.meetingLink)} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: theme.blue, textDecoration: 'underline' }}>Join meeting</a>}
+          </div>
+          {nextAppearance.prepNote && (
+            <div style={{ padding: 8, background: '#F0F4FF', borderRadius: 6, fontSize: 12, color: theme.ink }}>
+              <span style={{ fontWeight: 600 }}>Prep note: </span>{nextAppearance.prepNote}
+            </div>
+          )}
+        </div>
+      ) : (
+        <span style={emptyStyle}>No upcoming court appearance recorded.</span>
+      )}
+      <div style={{ display: 'grid', gap: 4 }}>
+        <span style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: theme.muted }}>Recent documents</span>
+        {sortedDocs.length ? sortedDocs.map((doc, i) => (
+          <span key={doc.id || i} style={{ fontSize: 12, color: theme.ink }}>{doc.displayName || doc.friendlyName || doc.name || 'Document'}</span>
+        )) : <span style={emptyStyle}>No documents recorded.</span>}
+      </div>
+      <div style={{ display: 'grid', gap: 4 }}>
+        <span style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: theme.muted }}>Open action items</span>
+        {openChecklist.length ? openChecklist.map((item, i) => (
+          <span key={item.id || i} style={{ fontSize: 12, color: theme.ink }}>{item.title}</span>
+        )) : <span style={emptyStyle}>No open action items.</span>}
+      </div>
+      <div style={{ display: 'grid', gap: 4 }}>
+        <span style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: theme.muted }}>Recent notes</span>
+        {recentNotes.length ? recentNotes.map((n, i) => (
+          <span key={n.id || i} style={{ fontSize: 12, color: theme.ink }}>{n.content}</span>
+        )) : <span style={emptyStyle}>No notes recorded.</span>}
+      </div>
     </section>
   );
 }
@@ -6402,6 +6459,7 @@ function MatterCourtMode({ detail, nextActionHints }) {
             {nextAppearance.location && <CourtModeField label="Location" value={nextAppearance.location} />}
             {nextAppearance.attorney && <CourtModeField label="Attorney" value={nextAppearance.attorney} />}
             {nextAppearance.prepNote && <CourtModeField label="Prep Note" value={nextAppearance.prepNote} />}
+            {nextAppearance.outcome && <CourtModeField label="Outcome" value={nextAppearance.outcome} />}
             {safeHttpUrl(nextAppearance.meetingLink) && <CourtModeField label="Virtual Court" value={<a href={safeHttpUrl(nextAppearance.meetingLink)} target="_blank" rel="noopener noreferrer" style={styles.link}>{nextAppearance.meetingLink}</a>} />}
           </div>
         </div>
