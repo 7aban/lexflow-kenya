@@ -164,6 +164,11 @@ const ALLOWED_AUTHORITY_BASIS = new Set(['director_resolution', 'board_resolutio
 const ALLOWED_LIFECYCLE_EVENT_TYPES = new Set(['scope_variation', 'suspension', 'resumption', 'termination', 'closure']);
 const ALLOWED_LIFECYCLE_STATUSES = new Set(['recorded', 'pending', 'approved', 'completed', 'cancelled']);
 
+// KENYA-32B: legal deadline rule enums (advocate-verified data; NOT hard-coded legal periods).
+const ALLOWED_LEGAL_RULE_TYPES = new Set(['limitation', 'statutory_recurring', 'procedural']);
+const ALLOWED_LEGAL_RULE_PERIOD_UNITS = new Set(['days', 'months', 'years']);
+const ALLOWED_LEGAL_RULE_COMPUTATION_MODES = new Set(['calendar']);
+
 const {
   defaultReminderSettings,
   defaultReminderTemplates,
@@ -1198,6 +1203,8 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS client_kyc_records (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'not_started', clientCategory TEXT, riskLevel TEXT, idNumber TEXT, kraPin TEXT, registrationNumber TEXT, verificationDate TEXT, expiryDate TEXT, sourceOfFundsSummary TEXT DEFAULT '', pepStatus TEXT, sanctionsCheckStatus TEXT, verifiedBy TEXT, notes TEXT DEFAULT '', isActive INTEGER NOT NULL DEFAULT 1, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, deactivatedBy TEXT, deactivatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS client_authority_records (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', authorityBasis TEXT, authorisedPersonName TEXT, authorisedPersonRole TEXT, authorisedPersonEmail TEXT, authorisedPersonPhone TEXT, authorityDate TEXT, expiryDate TEXT, notes TEXT DEFAULT '', isActive INTEGER NOT NULL DEFAULT 1, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, deactivatedBy TEXT, deactivatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS retainer_lifecycle_events (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, matterId TEXT, retainerId TEXT, eventType TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'recorded', effectiveDate TEXT, noticeDate TEXT, title TEXT, summary TEXT DEFAULT '', reason TEXT DEFAULT '', scopeBeforeSummary TEXT DEFAULT '', scopeAfterSummary TEXT DEFAULT '', clientObligationsSummary TEXT DEFAULT '', firmObligationsSummary TEXT DEFAULT '', isActive INTEGER NOT NULL DEFAULT 1, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, deactivatedBy TEXT, deactivatedAt TEXT)`);
+  // KENYA-32B: legal deadline rule library (advocate-verified planning data; no hard-coded periods, no auto deadline creation).
+  await run(`CREATE TABLE IF NOT EXISTS legal_deadline_rules (id TEXT PRIMARY KEY, ruleType TEXT NOT NULL, jurisdiction TEXT NOT NULL DEFAULT 'Kenya', legalArea TEXT, causeOfAction TEXT, title TEXT NOT NULL, triggerEvent TEXT NOT NULL, periodValue INTEGER NOT NULL, periodUnit TEXT NOT NULL, computationMode TEXT DEFAULT 'calendar', citation TEXT NOT NULL, notes TEXT DEFAULT '', effectiveFrom TEXT, effectiveTo TEXT, version INTEGER NOT NULL DEFAULT 1, isActive INTEGER NOT NULL DEFAULT 1, verifiedBy TEXT, verifiedAt TEXT, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, deactivatedBy TEXT, deactivatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS signature_assets (id TEXT PRIMARY KEY, ownerType TEXT NOT NULL CHECK(ownerType IN ('user','firm')), ownerId TEXT, assetType TEXT NOT NULL CHECK(assetType IN ('signature','stamp')), label TEXT NOT NULL, mimeType TEXT NOT NULL, content BLOB NOT NULL, size INTEGER, isDefault INTEGER DEFAULT 0, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT, deletedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS hr_staff_profiles (id TEXT PRIMARY KEY, userId TEXT NOT NULL UNIQUE, jobTitle TEXT, department TEXT, practiceTeam TEXT, employmentType TEXT, startDate TEXT, contractEndDate TEXT, supervisorUserId TEXT, workEmail TEXT, workPhone TEXT, emergencyContactName TEXT, emergencyContactPhone TEXT, hrStatus TEXT NOT NULL DEFAULT 'active', adminNotes TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, createdBy TEXT, updatedBy TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS hr_leave_requests (
@@ -1440,6 +1447,9 @@ createdAt TEXT NOT NULL
   await run('CREATE INDEX IF NOT EXISTS idx_time_entries_attorney_date ON time_entries(attorney, date)');
   await run('CREATE INDEX IF NOT EXISTS idx_time_entries_billable_billed ON time_entries(billable, billed)');
   await run('CREATE INDEX IF NOT EXISTS idx_deadlines_dueDate_status_type ON deadlines(dueDate, status, type)');
+  await run('CREATE INDEX IF NOT EXISTS idx_legal_deadline_rules_type_active ON legal_deadline_rules(ruleType, isActive)');
+  await run('CREATE INDEX IF NOT EXISTS idx_legal_deadline_rules_jurisdiction_area ON legal_deadline_rules(jurisdiction, legalArea)');
+  await run('CREATE INDEX IF NOT EXISTS idx_legal_deadline_rules_active ON legal_deadline_rules(isActive)');
   await run('CREATE INDEX IF NOT EXISTS idx_documents_matterId_deletedAt_date ON documents(matterId, deletedAt, date)');
   await run('CREATE INDEX IF NOT EXISTS idx_documents_folderId_deletedAt ON documents(folderId, deletedAt)');
   await run('CREATE INDEX IF NOT EXISTS idx_documents_messageId_deletedAt ON documents(messageId, deletedAt)');
@@ -6884,6 +6894,261 @@ app.delete('/api/retainer-lifecycle-events/:id', requireStaff, async (req, res) 
     metadata: lifecycleEventAuditMetadata({ ...existing, isActive: 0 }),
   }).catch(() => {});
   res.json({ message: 'Lifecycle event deactivated' });
+});
+
+// KENYA-32B: Legal Deadline Rule Library + stateless preview.
+// Rules are advocate-verified planning DATA (no hard-coded Kenyan legal periods).
+// Preview computes a suggested date but creates NO deadline/task/appearance/matter row.
+const LEGAL_RULE_DISCLAIMER = 'This is a planning aid only. Confirm the applicable law, trigger date, exclusions, extensions, and court directions before relying on this date.';
+
+function validateLegalDeadlineRulePayload(payload, { partial = false } = {}) {
+  const p = payload || {};
+  const has = k => p[k] !== undefined && p[k] !== null;
+  if (!partial) {
+    if (!p.ruleType) return 'ruleType is required';
+    if (!p.title) return 'title is required';
+    if (!p.triggerEvent) return 'triggerEvent is required';
+    if (p.periodValue === undefined || p.periodValue === null || p.periodValue === '') return 'periodValue is required';
+    if (!p.periodUnit) return 'periodUnit is required';
+    if (!p.citation) return 'citation is required';
+  }
+  if (has('ruleType') && p.ruleType !== '' && !ALLOWED_LEGAL_RULE_TYPES.has(p.ruleType)) return `Invalid ruleType. Allowed: ${[...ALLOWED_LEGAL_RULE_TYPES].join(', ')}`;
+  if (has('periodUnit') && p.periodUnit !== '' && !ALLOWED_LEGAL_RULE_PERIOD_UNITS.has(p.periodUnit)) return `Invalid periodUnit. Allowed: ${[...ALLOWED_LEGAL_RULE_PERIOD_UNITS].join(', ')}`;
+  if (has('computationMode') && p.computationMode !== '' && !ALLOWED_LEGAL_RULE_COMPUTATION_MODES.has(p.computationMode)) return `Invalid computationMode. Allowed: ${[...ALLOWED_LEGAL_RULE_COMPUTATION_MODES].join(', ')}`;
+  if (p.periodValue !== undefined && p.periodValue !== null && p.periodValue !== '') {
+    const pv = Number(p.periodValue);
+    if (!Number.isInteger(pv) || pv <= 0) return 'periodValue must be a positive integer';
+  }
+  if (p.version !== undefined && p.version !== null && p.version !== '') {
+    const v = Number(p.version);
+    if (!Number.isInteger(v) || v <= 0) return 'version must be a positive integer';
+  }
+  if ((p.jurisdiction || '').length > 100) return 'jurisdiction exceeds 100 characters';
+  if ((p.legalArea || '').length > 160) return 'legalArea exceeds 160 characters';
+  if ((p.causeOfAction || '').length > 200) return 'causeOfAction exceeds 200 characters';
+  if ((p.title || '').length > 240) return 'title exceeds 240 characters';
+  if ((p.triggerEvent || '').length > 160) return 'triggerEvent exceeds 160 characters';
+  if ((p.citation || '').length > 1000) return 'citation exceeds 1000 characters';
+  if ((p.notes || '').length > 5000) return 'notes exceeds 5000 characters';
+  if ((p.verifiedBy || '').length > 160) return 'verifiedBy exceeds 160 characters';
+  if (has('effectiveFrom') && p.effectiveFrom !== '' && Number.isNaN(new Date(p.effectiveFrom).getTime())) return 'Invalid effectiveFrom';
+  if (has('effectiveTo') && p.effectiveTo !== '' && Number.isNaN(new Date(p.effectiveTo).getTime())) return 'Invalid effectiveTo';
+  if (has('verifiedAt') && p.verifiedAt !== '' && Number.isNaN(new Date(p.verifiedAt).getTime())) return 'Invalid verifiedAt';
+  return null;
+}
+
+function publicLegalDeadlineRule(row) {
+  return {
+    id: row.id,
+    ruleType: row.ruleType || '',
+    jurisdiction: row.jurisdiction || '',
+    legalArea: row.legalArea || '',
+    causeOfAction: row.causeOfAction || '',
+    title: row.title || '',
+    triggerEvent: row.triggerEvent || '',
+    periodValue: Number(row.periodValue || 0),
+    periodUnit: row.periodUnit || '',
+    computationMode: row.computationMode || 'calendar',
+    citation: row.citation || '',
+    notes: row.notes || '',
+    effectiveFrom: row.effectiveFrom || '',
+    effectiveTo: row.effectiveTo || '',
+    version: Number(row.version || 1),
+    isActive: Number(row.isActive || 0) === 1,
+    verifiedBy: row.verifiedBy || '',
+    verifiedAt: row.verifiedAt || '',
+    createdAt: row.createdAt || '',
+    updatedAt: row.updatedAt || '',
+    deactivatedAt: row.deactivatedAt || '',
+  };
+}
+
+// KENYA-32B: stateless calendar arithmetic. days/months/years only; NO court days,
+// weekends, public holidays, excluded days, or filing-service cascade logic.
+function computePreviewDueDate(triggerDate, periodValue, periodUnit) {
+  const base = new Date(`${String(triggerDate || '').slice(0, 10)}T00:00:00.000Z`);
+  if (Number.isNaN(base.getTime())) return null;
+  const n = Number(periodValue);
+  if (!Number.isInteger(n) || n <= 0) return null;
+  const d = new Date(base.getTime());
+  if (periodUnit === 'days') {
+    d.setUTCDate(d.getUTCDate() + n);
+  } else if (periodUnit === 'months') {
+    const day = d.getUTCDate();
+    const total = d.getUTCMonth() + n;
+    const targetYear = d.getUTCFullYear() + Math.floor(total / 12);
+    const targetMonth = ((total % 12) + 12) % 12;
+    const lastDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
+    d.setUTCFullYear(targetYear, targetMonth, Math.min(day, lastDay));
+  } else if (periodUnit === 'years') {
+    const day = d.getUTCDate();
+    const month = d.getUTCMonth();
+    const targetYear = d.getUTCFullYear() + n;
+    const lastDay = new Date(Date.UTC(targetYear, month + 1, 0)).getUTCDate();
+    d.setUTCFullYear(targetYear, month, Math.min(day, lastDay));
+  } else {
+    return null;
+  }
+  return d.toISOString().slice(0, 10);
+}
+
+// KENYA-32B: whitelist audit metadata (excludes notes / long legal analysis / free text).
+function legalDeadlineRuleAuditMetadata(row, isActiveOverride) {
+  return {
+    ruleId: row.id,
+    ruleType: row.ruleType || '',
+    jurisdiction: row.jurisdiction || '',
+    legalArea: row.legalArea || '',
+    causeOfAction: row.causeOfAction || '',
+    citation: row.citation || '',
+    version: Number(row.version || 1),
+    isActive: isActiveOverride !== undefined ? isActiveOverride : Number(row.isActive || 0),
+  };
+}
+
+app.get('/api/legal-deadline-rules', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'advancedCompliance', 'Advanced Compliance')) return;
+  const { ruleType, jurisdiction, legalArea, includeInactive } = req.query;
+  const conditions = [];
+  const params = [];
+  if (ruleType) { conditions.push('ruleType=?'); params.push(ruleType); }
+  if (jurisdiction) { conditions.push('jurisdiction=?'); params.push(jurisdiction); }
+  if (legalArea) { conditions.push('legalArea=?'); params.push(legalArea); }
+  if (includeInactive !== 'true') { conditions.push('isActive=1'); }
+  const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+  const rows = await all(`SELECT * FROM legal_deadline_rules ${where} ORDER BY createdAt DESC`, params);
+  res.json(rows.map(publicLegalDeadlineRule));
+});
+
+app.post('/api/legal-deadline-rules', requireAdmin, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'advancedCompliance', 'Advanced Compliance')) return;
+  const validationError = validateLegalDeadlineRulePayload(req.body, { partial: false });
+  if (validationError) return res.status(400).json({ error: validationError });
+  const { ruleType, jurisdiction, legalArea, causeOfAction, title, triggerEvent, periodValue, periodUnit,
+    computationMode, citation, notes, effectiveFrom, effectiveTo, version, verifiedBy, verifiedAt } = req.body;
+  const id = genId('LDR');
+  const now = new Date().toISOString();
+  await run(`INSERT INTO legal_deadline_rules (id,ruleType,jurisdiction,legalArea,causeOfAction,title,triggerEvent,periodValue,periodUnit,computationMode,citation,notes,effectiveFrom,effectiveTo,version,isActive,verifiedBy,verifiedAt,createdBy,createdAt)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?)`,
+    [id, ruleType, jurisdiction || 'Kenya', legalArea || null, causeOfAction || null, title, triggerEvent, Number(periodValue), periodUnit,
+     computationMode || 'calendar', citation, notes || '', effectiveFrom || null, effectiveTo || null,
+     version === undefined || version === null || version === '' ? 1 : Number(version), verifiedBy || null, verifiedAt || null, req.user.userId || '', now]);
+  const row = await get('SELECT * FROM legal_deadline_rules WHERE id=?', [id]);
+  await recordAuditEvent(req, {
+    action: 'legal_deadline_rule_created',
+    entityType: 'legal_deadline_rule',
+    entityId: id,
+    metadata: legalDeadlineRuleAuditMetadata(row, 1),
+  }).catch(() => {});
+  res.status(201).json(publicLegalDeadlineRule(row));
+});
+
+app.patch('/api/legal-deadline-rules/:id', requireAdmin, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'advancedCompliance', 'Advanced Compliance')) return;
+  const existing = await get('SELECT * FROM legal_deadline_rules WHERE id=?', [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Legal deadline rule not found' });
+  const validationError = validateLegalDeadlineRulePayload(req.body, { partial: true });
+  if (validationError) return res.status(400).json({ error: validationError });
+  const { ruleType, jurisdiction, legalArea, causeOfAction, title, triggerEvent, periodValue, periodUnit,
+    computationMode, citation, notes, effectiveFrom, effectiveTo, version, verifiedBy, verifiedAt } = req.body;
+  const fields = [];
+  const vals = [];
+  if (ruleType !== undefined) { fields.push('ruleType=?'); vals.push(ruleType); }
+  if (jurisdiction !== undefined) { fields.push('jurisdiction=?'); vals.push(jurisdiction || 'Kenya'); }
+  if (legalArea !== undefined) { fields.push('legalArea=?'); vals.push(legalArea || null); }
+  if (causeOfAction !== undefined) { fields.push('causeOfAction=?'); vals.push(causeOfAction || null); }
+  if (title !== undefined) { fields.push('title=?'); vals.push(title); }
+  if (triggerEvent !== undefined) { fields.push('triggerEvent=?'); vals.push(triggerEvent); }
+  if (periodValue !== undefined) { fields.push('periodValue=?'); vals.push(Number(periodValue)); }
+  if (periodUnit !== undefined) { fields.push('periodUnit=?'); vals.push(periodUnit); }
+  if (computationMode !== undefined) { fields.push('computationMode=?'); vals.push(computationMode || 'calendar'); }
+  if (citation !== undefined) { fields.push('citation=?'); vals.push(citation); }
+  if (notes !== undefined) { fields.push('notes=?'); vals.push(notes || ''); }
+  if (effectiveFrom !== undefined) { fields.push('effectiveFrom=?'); vals.push(effectiveFrom || null); }
+  if (effectiveTo !== undefined) { fields.push('effectiveTo=?'); vals.push(effectiveTo || null); }
+  if (version !== undefined) { fields.push('version=?'); vals.push(version === null || version === '' ? 1 : Number(version)); }
+  if (verifiedBy !== undefined) { fields.push('verifiedBy=?'); vals.push(verifiedBy || null); }
+  if (verifiedAt !== undefined) { fields.push('verifiedAt=?'); vals.push(verifiedAt || null); }
+  if (!fields.length) return res.status(400).json({ error: 'No fields to update' });
+  const now = new Date().toISOString();
+  fields.push('updatedAt=?'); vals.push(now);
+  fields.push('updatedBy=?'); vals.push(req.user.userId || '');
+  vals.push(req.params.id);
+  await run(`UPDATE legal_deadline_rules SET ${fields.join(', ')} WHERE id=?`, vals);
+  const updated = await get('SELECT * FROM legal_deadline_rules WHERE id=?', [req.params.id]);
+  await recordAuditEvent(req, {
+    action: 'legal_deadline_rule_updated',
+    entityType: 'legal_deadline_rule',
+    entityId: req.params.id,
+    metadata: legalDeadlineRuleAuditMetadata(updated),
+  }).catch(() => {});
+  res.json(publicLegalDeadlineRule(updated));
+});
+
+app.delete('/api/legal-deadline-rules/:id', requireAdmin, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'advancedCompliance', 'Advanced Compliance')) return;
+  const existing = await get('SELECT * FROM legal_deadline_rules WHERE id=?', [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Legal deadline rule not found' });
+  const now = new Date().toISOString();
+  await run('UPDATE legal_deadline_rules SET isActive=0, deactivatedBy=?, deactivatedAt=?, updatedBy=?, updatedAt=? WHERE id=?',
+    [req.user.userId || '', now, req.user.userId || '', now, req.params.id]);
+  await recordAuditEvent(req, {
+    action: 'legal_deadline_rule_deactivated',
+    entityType: 'legal_deadline_rule',
+    entityId: req.params.id,
+    metadata: legalDeadlineRuleAuditMetadata(existing, 0),
+  }).catch(() => {});
+  res.json({ message: 'Legal deadline rule deactivated' });
+});
+
+app.post('/api/legal-deadline-rules/:id/preview', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'advancedCompliance', 'Advanced Compliance')) return;
+  const rule = await get('SELECT * FROM legal_deadline_rules WHERE id=?', [req.params.id]);
+  if (!rule || Number(rule.isActive || 0) !== 1) return res.status(404).json({ error: 'Legal deadline rule not found' });
+  const { triggerDate, matterId } = req.body || {};
+  if (!triggerDate || Number.isNaN(new Date(triggerDate).getTime())) return res.status(400).json({ error: 'A valid triggerDate is required' });
+  if (matterId) {
+    const matter = await get('SELECT id FROM matters WHERE id=?', [matterId]);
+    if (!matter) return res.status(404).json({ error: 'Matter not found' });
+    if (!(await canAccessMatter(req, matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: matterId, matterId, metadata: { reason: 'insufficient permissions', route: 'legal_deadline_rule_preview' } }).catch(() => {});
+      return res.status(403).json({ error: 'Matter access denied' });
+    }
+  }
+  const suggestedDueDate = computePreviewDueDate(triggerDate, rule.periodValue, rule.periodUnit);
+  if (!suggestedDueDate) return res.status(400).json({ error: 'Unable to compute a suggested date from this rule and trigger date' });
+  await recordAuditEvent(req, {
+    action: 'deadline_suggestion_previewed',
+    entityType: 'legal_deadline_rule',
+    entityId: rule.id,
+    matterId: matterId || '',
+    metadata: {
+      ruleId: rule.id,
+      matterId: matterId || '',
+      triggerDate: String(triggerDate).slice(0, 10),
+      suggestedDueDate,
+      periodValue: Number(rule.periodValue || 0),
+      periodUnit: rule.periodUnit || '',
+      computationMode: rule.computationMode || 'calendar',
+    },
+  }).catch(() => {});
+  res.json({
+    ruleId: rule.id,
+    title: rule.title || '',
+    ruleType: rule.ruleType || '',
+    jurisdiction: rule.jurisdiction || '',
+    legalArea: rule.legalArea || '',
+    causeOfAction: rule.causeOfAction || '',
+    triggerEvent: rule.triggerEvent || '',
+    triggerDate: String(triggerDate).slice(0, 10),
+    periodValue: Number(rule.periodValue || 0),
+    periodUnit: rule.periodUnit || '',
+    computationMode: rule.computationMode || 'calendar',
+    suggestedDueDate,
+    citation: rule.citation || '',
+    requiresAdvocateVerification: true,
+    disclaimer: LEGAL_RULE_DISCLAIMER,
+  });
 });
 
 app.delete('/api/clients/:id', requireAdvocateOrAdmin, async (req, res) => {

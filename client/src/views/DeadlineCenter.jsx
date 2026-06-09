@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { createDeadline, deleteDeadline, getComplianceGuidance, getDeadlines, updateDeadline } from '../lib/apiClient.js';
+import { createDeadline, createLegalDeadlineRule, deleteDeadline, deleteLegalDeadlineRule, getComplianceGuidance, getDeadlines, getLegalDeadlineRules, previewLegalDeadlineRule, updateDeadline, updateLegalDeadlineRule } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Badge, Card, ConfirmModal, Empty, Field, MeetingLink, safeHttpUrl, Skeleton, Stat, Table } from '../components/ui.jsx';
 
 const blankForm = { title: '', type: 'statutory', dueDate: '', owner: '', matterId: '', clientId: '', notes: '' };
+// KENYA-32B: legal deadline rule library form (advocate-verified planning data).
+const blankRuleForm = { ruleType: 'limitation', jurisdiction: 'Kenya', legalArea: '', causeOfAction: '', title: '', triggerEvent: '', periodValue: '', periodUnit: 'years', computationMode: 'calendar', citation: '', notes: '', effectiveFrom: '', effectiveTo: '', version: 1, verifiedBy: '', verifiedAt: '' };
+const RULE_TYPE_OPTIONS = ['limitation', 'statutory_recurring', 'procedural'];
+const PERIOD_UNIT_OPTIONS = ['days', 'months', 'years'];
 const typeOptions = ['all', 'Court Date', 'Internal Task', 'SOL / Limitation', 'Invoice Due', 'client', 'internal', 'statutory', 'tax', 'regulatory'];
 
 function dayDiff(date) {
@@ -72,6 +76,18 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
   const [confirm, setConfirm] = useState(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  // KENYA-32B: legal deadline rule library + stateless preview state.
+  const [rules, setRules] = useState([]);
+  const [ruleModuleEnabled, setRuleModuleEnabled] = useState(null); // null=unknown, true, false
+  const [rulesLoading, setRulesLoading] = useState(false);
+  const [ruleForm, setRuleForm] = useState(blankRuleForm);
+  const [editingRuleId, setEditingRuleId] = useState(null);
+  const [savingRule, setSavingRule] = useState(false);
+  const [previewRuleId, setPreviewRuleId] = useState('');
+  const [previewTrigger, setPreviewTrigger] = useState('');
+  const [previewMatterId, setPreviewMatterId] = useState('');
+  const [previewResult, setPreviewResult] = useState(null);
+  const [previewing, setPreviewing] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -184,6 +200,102 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
       notify?.({ type: 'success', message: 'Deadline deleted.' });
     } catch (err) {
       notify?.({ type: 'danger', message: err.message });
+    }
+  }
+
+  // KENYA-32B: load active legal deadline rules; gracefully detect the module gate.
+  async function loadRules() {
+    setRulesLoading(true);
+    try {
+      const list = await getLegalDeadlineRules({});
+      setRules(list);
+      setRuleModuleEnabled(true);
+    } catch (err) {
+      if (err.message === 'feature_disabled') {
+        setRuleModuleEnabled(false);
+        setRules([]);
+      } else {
+        notify?.({ type: 'danger', message: err.message });
+      }
+    } finally {
+      setRulesLoading(false);
+    }
+  }
+  useEffect(() => { loadRules(); }, []);
+
+  function editRule(rule) {
+    setEditingRuleId(rule.id);
+    setRuleForm({
+      ruleType: rule.ruleType || 'limitation',
+      jurisdiction: rule.jurisdiction || 'Kenya',
+      legalArea: rule.legalArea || '',
+      causeOfAction: rule.causeOfAction || '',
+      title: rule.title || '',
+      triggerEvent: rule.triggerEvent || '',
+      periodValue: rule.periodValue || '',
+      periodUnit: rule.periodUnit || 'years',
+      computationMode: rule.computationMode || 'calendar',
+      citation: rule.citation || '',
+      notes: rule.notes || '',
+      effectiveFrom: rule.effectiveFrom || '',
+      effectiveTo: rule.effectiveTo || '',
+      version: rule.version || 1,
+      verifiedBy: rule.verifiedBy || '',
+      verifiedAt: rule.verifiedAt || '',
+    });
+  }
+
+  function cancelRuleEdit() {
+    setEditingRuleId(null);
+    setRuleForm(blankRuleForm);
+  }
+
+  async function submitRule(event) {
+    event.preventDefault();
+    if (!canManage) return notify?.({ type: 'warning', message: 'Only admins can manage legal deadline rules.' });
+    setSavingRule(true);
+    try {
+      const payload = { ...ruleForm, periodValue: Number(ruleForm.periodValue), version: Number(ruleForm.version) || 1 };
+      if (editingRuleId) {
+        await updateLegalDeadlineRule(editingRuleId, payload);
+        notify?.({ type: 'success', message: 'Rule updated.' });
+      } else {
+        await createLegalDeadlineRule(payload);
+        notify?.({ type: 'success', message: 'Rule added.' });
+      }
+      cancelRuleEdit();
+      await loadRules();
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setSavingRule(false);
+    }
+  }
+
+  async function deactivateRule(rule) {
+    try {
+      await deleteLegalDeadlineRule(rule.id);
+      notify?.({ type: 'success', message: 'Rule deactivated.' });
+      if (editingRuleId === rule.id) cancelRuleEdit();
+      if (previewRuleId === rule.id) { setPreviewRuleId(''); setPreviewResult(null); }
+      await loadRules();
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    }
+  }
+
+  async function runPreview(event) {
+    event.preventDefault();
+    if (!previewRuleId || !previewTrigger) return notify?.({ type: 'warning', message: 'Choose a rule and a trigger date.' });
+    setPreviewing(true);
+    try {
+      const result = await previewLegalDeadlineRule(previewRuleId, { triggerDate: previewTrigger, matterId: previewMatterId || undefined });
+      setPreviewResult(result);
+    } catch (err) {
+      setPreviewResult(null);
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setPreviewing(false);
     }
   }
 
@@ -365,6 +477,135 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
           <Empty title="No deadlines found" text="Create a custom deadline or add tasks, appearances, invoices and SOL dates to populate this timeline." />
         )}
       </Card>
+      {/* KENYA-32B: Deadline Intelligence (Legal Deadline Rule Library + stateless preview). */}
+      {ruleModuleEnabled === false ? (
+        <Card title="Deadline Intelligence" hint="Limitation & statutory rule planning aids.">
+          <p style={{ margin: 0, color: theme.muted, fontSize: 13 }}>
+            Advanced Compliance is not enabled for this firm. An administrator can enable it in Firm Settings to use the legal deadline rule library and date preview.
+          </p>
+        </Card>
+      ) : ruleModuleEnabled === true ? (
+        <div className="lf-split-grid" style={styles.splitGrid}>
+          {canManage && (
+            <Card title="Legal Deadline Rules" hint="Firm-maintained planning aids. Confirm legal basis before use.">
+              <form onSubmit={submitRule} style={styles.formGrid}>
+                <Field label="Rule type">
+                  <select style={styles.input} value={ruleForm.ruleType} onChange={e => setRuleForm({ ...ruleForm, ruleType: e.target.value })}>
+                    {RULE_TYPE_OPTIONS.map(opt => <option key={opt} value={opt}>{prettyType(opt)}</option>)}
+                  </select>
+                </Field>
+                <Field label="Jurisdiction">
+                  <input style={styles.input} value={ruleForm.jurisdiction} onChange={e => setRuleForm({ ...ruleForm, jurisdiction: e.target.value })} placeholder="Kenya" maxLength={100} />
+                </Field>
+                <Field label="Legal area">
+                  <input style={styles.input} value={ruleForm.legalArea} onChange={e => setRuleForm({ ...ruleForm, legalArea: e.target.value })} placeholder="e.g. Tort / Contract" maxLength={160} />
+                </Field>
+                <Field label="Cause of action">
+                  <input style={styles.input} value={ruleForm.causeOfAction} onChange={e => setRuleForm({ ...ruleForm, causeOfAction: e.target.value })} placeholder="e.g. Negligence" maxLength={200} />
+                </Field>
+                <Field label="Title">
+                  <input required style={styles.input} value={ruleForm.title} onChange={e => setRuleForm({ ...ruleForm, title: e.target.value })} placeholder="e.g. Limitation — tort claim" maxLength={240} />
+                </Field>
+                <Field label="Trigger event">
+                  <input required style={styles.input} value={ruleForm.triggerEvent} onChange={e => setRuleForm({ ...ruleForm, triggerEvent: e.target.value })} placeholder="e.g. cause_of_action_accrual" maxLength={160} />
+                </Field>
+                <Field label="Period value">
+                  <input required type="number" min="1" step="1" style={styles.input} value={ruleForm.periodValue} onChange={e => setRuleForm({ ...ruleForm, periodValue: e.target.value })} placeholder="e.g. 3" />
+                </Field>
+                <Field label="Period unit">
+                  <select style={styles.input} value={ruleForm.periodUnit} onChange={e => setRuleForm({ ...ruleForm, periodUnit: e.target.value })}>
+                    {PERIOD_UNIT_OPTIONS.map(opt => <option key={opt} value={opt}>{prettyType(opt)}</option>)}
+                  </select>
+                </Field>
+                <Field label="Computation mode">
+                  <select style={styles.input} value={ruleForm.computationMode} onChange={e => setRuleForm({ ...ruleForm, computationMode: e.target.value })}>
+                    <option value="calendar">Calendar</option>
+                  </select>
+                </Field>
+                <Field label="Citation">
+                  <input required style={styles.input} value={ruleForm.citation} onChange={e => setRuleForm({ ...ruleForm, citation: e.target.value })} placeholder="e.g. Limitation of Actions Act (Cap 22) s.4(2)" maxLength={1000} />
+                </Field>
+                <Field label="Notes">
+                  <input style={styles.input} value={ruleForm.notes} onChange={e => setRuleForm({ ...ruleForm, notes: e.target.value })} placeholder="Internal planning notes" maxLength={5000} />
+                </Field>
+                <Field label="Effective from">
+                  <input type="date" style={styles.input} value={ruleForm.effectiveFrom} onChange={e => setRuleForm({ ...ruleForm, effectiveFrom: e.target.value })} />
+                </Field>
+                <Field label="Effective to">
+                  <input type="date" style={styles.input} value={ruleForm.effectiveTo} onChange={e => setRuleForm({ ...ruleForm, effectiveTo: e.target.value })} />
+                </Field>
+                <Field label="Version">
+                  <input type="number" min="1" step="1" style={styles.input} value={ruleForm.version} onChange={e => setRuleForm({ ...ruleForm, version: e.target.value })} />
+                </Field>
+                <Field label="Verified by">
+                  <input style={styles.input} value={ruleForm.verifiedBy} onChange={e => setRuleForm({ ...ruleForm, verifiedBy: e.target.value })} placeholder="Advocate name" maxLength={160} />
+                </Field>
+                <Field label="Verified at">
+                  <input type="date" style={styles.input} value={ruleForm.verifiedAt} onChange={e => setRuleForm({ ...ruleForm, verifiedAt: e.target.value })} />
+                </Field>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button type="submit" style={styles.primaryButton} disabled={savingRule}>{savingRule ? 'Saving...' : editingRuleId ? 'Update rule' : 'Add rule'}</button>
+                  {editingRuleId && <button type="button" style={styles.ghostButton} onClick={cancelRuleEdit}>Cancel edit</button>}
+                </div>
+              </form>
+              <p style={{ marginTop: 12, color: theme.muted, fontSize: 12 }}>Rules are firm-maintained planning aids. Confirm legal basis before use.</p>
+              <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
+                {rulesLoading ? <Skeleton rows={2} /> : rules.length ? rules.map(rule => (
+                  <div key={rule.id} style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: 12, display: 'grid', gap: 6 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <strong style={{ fontSize: 14 }}>{rule.title}</strong>
+                      <Badge tone="blue">{prettyType(rule.ruleType)}</Badge>
+                    </div>
+                    <span style={{ fontSize: 12, color: theme.muted }}>
+                      {rule.periodValue} {rule.periodUnit} from {rule.triggerEvent} · {rule.jurisdiction}{rule.legalArea ? ` · ${rule.legalArea}` : ''}
+                    </span>
+                    <span style={{ fontSize: 12, color: theme.muted }}>Citation: {rule.citation}</span>
+                    <span style={{ fontSize: 11, color: theme.muted }}>v{rule.version}{rule.verifiedBy ? ` · verified by ${rule.verifiedBy}` : ' · not verified'}</span>
+                    <div style={styles.actionGroup}>
+                      <button type="button" style={styles.tinyButton} onClick={() => editRule(rule)}>Edit</button>
+                      <button type="button" style={styles.dangerTinyButton} onClick={() => setConfirm({ title: 'Deactivate rule?', message: `Deactivate "${rule.title}"? It will be hidden but kept for audit.`, onConfirm: () => deactivateRule(rule) })}>Deactivate</button>
+                    </div>
+                  </div>
+                )) : <Empty title="No active rules" text="Add a firm-verified limitation or statutory rule to enable date previews." />}
+              </div>
+            </Card>
+          )}
+
+          <Card title="Deadline Intelligence" hint="Suggest a date from a rule and trigger date. Creates no deadline.">
+            <form onSubmit={runPreview} style={styles.formGrid}>
+              <Field label="Rule">
+                <select style={styles.input} value={previewRuleId} onChange={e => { setPreviewRuleId(e.target.value); setPreviewResult(null); }}>
+                  <option value="">Choose a rule</option>
+                  {rules.map(rule => <option key={rule.id} value={rule.id}>{rule.title} ({rule.periodValue} {rule.periodUnit})</option>)}
+                </select>
+              </Field>
+              <Field label="Trigger date">
+                <input type="date" style={styles.input} value={previewTrigger} onChange={e => { setPreviewTrigger(e.target.value); setPreviewResult(null); }} />
+              </Field>
+              <Field label="Matter (optional)">
+                <select style={styles.input} value={previewMatterId} onChange={e => setPreviewMatterId(e.target.value)}>
+                  <option value="">No matter</option>
+                  {matterOptions.map(matter => <option key={matter.id} value={matter.id}>{matter.reference || matter.id} - {matter.title}</option>)}
+                </select>
+              </Field>
+              <button type="submit" style={styles.primaryButton} disabled={previewing || !previewRuleId || !previewTrigger}>{previewing ? 'Computing...' : 'Preview suggested date'}</button>
+            </form>
+            {previewResult && (
+              <div style={{ marginTop: 12, border: `1px solid ${theme.line}`, borderRadius: 8, padding: 14, display: 'grid', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <strong style={{ fontSize: 14 }}>Suggested date</strong>
+                  <Badge tone="gold">{previewResult.suggestedDueDate}</Badge>
+                </div>
+                <span style={{ fontSize: 12, color: theme.muted }}>{previewResult.title} — {previewResult.periodValue} {previewResult.periodUnit} from {previewResult.triggerDate}</span>
+                <span style={{ fontSize: 12, color: theme.muted }}>Citation: {previewResult.citation}</span>
+                {previewResult.requiresAdvocateVerification && <Badge tone="amber">Advocate verification required</Badge>}
+                <p style={{ margin: 0, fontSize: 12, color: theme.muted, fontStyle: 'italic' }}>{previewResult.disclaimer}</p>
+              </div>
+            )}
+          </Card>
+        </div>
+      ) : null}
+
       <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
     </div>
   );

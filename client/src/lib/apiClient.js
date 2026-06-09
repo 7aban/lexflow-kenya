@@ -290,6 +290,12 @@ export const createDeadline = data => api('/deadlines', { method: 'POST', body: 
 export const updateDeadline = (id, data) => api(`/deadlines/${id}`, { method: 'PATCH', body: data });
 export const deleteDeadline = id => api(`/deadlines/${id}`, { method: 'DELETE' });
 export const getComplianceGuidance = () => api('/compliance-guidance');
+// KENYA-32B: legal deadline rule library + stateless preview (no deadline creation).
+export const getLegalDeadlineRules = (params = {}) => api(queryPath('/legal-deadline-rules', params));
+export const createLegalDeadlineRule = payload => api('/legal-deadline-rules', { method: 'POST', body: payload });
+export const updateLegalDeadlineRule = (id, payload) => api(`/legal-deadline-rules/${id}`, { method: 'PATCH', body: payload });
+export const deleteLegalDeadlineRule = id => api(`/legal-deadline-rules/${id}`, { method: 'DELETE' });
+export const previewLegalDeadlineRule = (id, payload) => api(`/legal-deadline-rules/${id}/preview`, { method: 'POST', body: payload });
 export const getNotifications = () => api('/notifications');
 export const markNotificationsRead = data => api('/notifications/read', { method: 'POST', body: data });
 export const getHrStaff = () => api('/hr/staff');
