@@ -1171,6 +1171,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS time_entries (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, attorney TEXT, date TEXT, hours REAL DEFAULT 0, activity TEXT, description TEXT, rate REAL DEFAULT 0, billed INTEGER DEFAULT 0, billable INTEGER DEFAULT 1)`);
   await run(`CREATE TABLE IF NOT EXISTS appearances (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT, date TEXT, time TEXT, type TEXT, location TEXT, meetingLink TEXT, attorney TEXT, prepNote TEXT, outcome TEXT DEFAULT '', attendanceStatus TEXT DEFAULT 'scheduled', appearedBy TEXT DEFAULT '', clientAttended INTEGER NOT NULL DEFAULT 0, attendanceNote TEXT DEFAULT '', attendanceUpdatedBy TEXT, attendanceUpdatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS appearance_prep_items (id TEXT PRIMARY KEY, appearanceId TEXT NOT NULL, matterId TEXT NOT NULL, title TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'general', status TEXT NOT NULL DEFAULT 'open', notes TEXT DEFAULT '', createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, completedBy TEXT, completedAt TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS appearance_documents (id TEXT PRIMARY KEY, appearanceId TEXT NOT NULL, documentId TEXT NOT NULL, matterId TEXT NOT NULL, label TEXT DEFAULT '', notes TEXT DEFAULT '', createdBy TEXT NOT NULL, createdAt TEXT NOT NULL)`);
   await run(`CREATE TABLE IF NOT EXISTS folders (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT NOT NULL, createdBy TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT, displayName TEXT, type TEXT, mimeType TEXT, date TEXT, size TEXT, content BLOB, source TEXT DEFAULT 'firm', folderId TEXT, messageId TEXT, noticeId TEXT, clientVisible INTEGER DEFAULT 0, uploadedBy TEXT, templateId TEXT, templateName TEXT, generatedBy TEXT, generatedAt TEXT, version INTEGER DEFAULT 1)`);
   await run(`CREATE TABLE IF NOT EXISTS case_notes (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, content TEXT NOT NULL, author TEXT, createdAt TEXT)`);
@@ -1459,6 +1460,10 @@ createdAt TEXT NOT NULL
   await run('CREATE INDEX IF NOT EXISTS idx_appearances_matterId ON appearances(matterId)');
   await run('CREATE INDEX IF NOT EXISTS idx_appearance_prep_items_appearanceId ON appearance_prep_items(appearanceId)');
   await run('CREATE INDEX IF NOT EXISTS idx_appearance_prep_items_matterId ON appearance_prep_items(matterId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_appearance_documents_appearanceId ON appearance_documents(appearanceId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_appearance_documents_documentId ON appearance_documents(documentId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_appearance_documents_matterId ON appearance_documents(matterId)');
+  await run('CREATE UNIQUE INDEX IF NOT EXISTS idx_appearance_documents_unique ON appearance_documents(appearanceId, documentId)');
   await run('CREATE INDEX IF NOT EXISTS idx_matters_clientId ON matters(clientId)');
   await run('CREATE INDEX IF NOT EXISTS idx_matters_assignedTo ON matters(assignedTo)');
   await run('CREATE INDEX IF NOT EXISTS idx_matters_solDate ON matters(solDate)');
@@ -7837,6 +7842,7 @@ async function deleteMatterCascade(matterId) {
   await run('DELETE FROM invoices WHERE matterId=?', [matterId]);
   await run('DELETE FROM tasks WHERE matterId=?', [matterId]);
   await run('DELETE FROM time_entries WHERE matterId=?', [matterId]);
+  await run('DELETE FROM appearance_documents WHERE matterId=?', [matterId]);
   await run('DELETE FROM appearance_prep_items WHERE matterId=?', [matterId]);
   await run('DELETE FROM appearances WHERE matterId=?', [matterId]);
   await run('DELETE FROM documents WHERE matterId=?', [matterId]);
@@ -8606,6 +8612,84 @@ app.delete('/api/appearance-prep-items/:id', requireAdvocateOrAdmin, async (req,
   res.json({ id: req.params.id, deleted: false, status: 'done' });
 });
 
+// KENYA-34B: staff-only links between matter documents and specific appearances.
+// The join NEVER changes document visibility, the client portal, or the download path.
+function publicAppearanceDocumentLink(row = {}) {
+  return {
+    id: row.id,
+    appearanceId: row.appearanceId,
+    documentId: row.documentId,
+    matterId: row.matterId,
+    label: row.label || '',
+    createdBy: row.createdBy || '',
+    createdAt: row.createdAt || '',
+    document: {
+      id: row.documentId,
+      displayName: row.displayName || row.docName || 'Document',
+      name: row.docName || '',
+      type: row.docType || '',
+      date: row.docDate || '',
+    },
+  };
+}
+app.get('/api/appearances/:id/documents', requireStaff, async (req, res) => {
+  const appearance = await accessibleAppearanceForPrep(req, req.params.id);
+  if (!appearance) {
+    await recordAuditEvent(req, { action: 'forbidden_appearance_document_access', entityType: 'appearance', entityId: req.params.id, metadata: { reason: 'insufficient permissions', route: 'appearance_document_list' } }).catch(() => {});
+    return res.status(403).json({ error: 'Appearance access denied' });
+  }
+  const rows = await all(`SELECT ad.id, ad.appearanceId, ad.documentId, ad.matterId, ad.label, ad.createdBy, ad.createdAt,
+      d.displayName, d.name docName, d.type docType, d.date docDate
+    FROM appearance_documents ad JOIN documents d ON d.id=ad.documentId
+    WHERE ad.appearanceId=? AND d.deletedAt IS NULL ORDER BY ad.createdAt ASC`, [req.params.id]);
+  res.json(rows.map(publicAppearanceDocumentLink));
+});
+app.post('/api/appearances/:id/documents', requireAdvocateOrAdmin, async (req, res) => {
+  const appearance = await accessibleAppearanceForPrep(req, req.params.id);
+  if (!appearance) {
+    await recordAuditEvent(req, { action: 'forbidden_appearance_document_access', entityType: 'appearance', entityId: req.params.id, metadata: { reason: 'insufficient permissions', route: 'appearance_document_link' } }).catch(() => {});
+    return res.status(403).json({ error: 'Appearance access denied' });
+  }
+  const documentId = typeof req.body?.documentId === 'string' ? req.body.documentId.trim() : '';
+  if (!documentId) return res.status(400).json({ error: 'documentId is required' });
+  const label = typeof req.body?.label === 'string' ? req.body.label.trim().slice(0, 240) : '';
+  const notes = typeof req.body?.notes === 'string' ? req.body.notes.slice(0, 2000) : '';
+  const doc = await get('SELECT * FROM documents WHERE id=? AND deletedAt IS NULL', [documentId]);
+  if (!doc) return res.status(404).json({ error: 'Document not found' });
+  if (doc.matterId !== appearance.matterId) return res.status(400).json({ error: 'Document belongs to a different matter' });
+  if (!(await canAccessMatter(req, appearance.matterId)) || !(await canAccessDocument(req, doc))) {
+    await recordAuditEvent(req, { action: 'forbidden_appearance_document_access', entityType: 'document', entityId: documentId, matterId: appearance.matterId, metadata: { reason: 'insufficient permissions', route: 'appearance_document_link' } }).catch(() => {});
+    return res.status(403).json({ error: 'Document access denied' });
+  }
+  const existing = await get('SELECT * FROM appearance_documents WHERE appearanceId=? AND documentId=?', [req.params.id, documentId]);
+  if (existing) {
+    const row = await get(`SELECT ad.id, ad.appearanceId, ad.documentId, ad.matterId, ad.label, ad.createdBy, ad.createdAt,
+        d.displayName, d.name docName, d.type docType, d.date docDate
+      FROM appearance_documents ad JOIN documents d ON d.id=ad.documentId WHERE ad.id=?`, [existing.id]);
+    return res.json(publicAppearanceDocumentLink(row));
+  }
+  const id = genId('ADL');
+  const now = new Date().toISOString();
+  const actor = req.user.fullName || req.user.email || req.user.userId || '';
+  await run('INSERT INTO appearance_documents (id,appearanceId,documentId,matterId,label,notes,createdBy,createdAt) VALUES (?,?,?,?,?,?,?,?)', [id, req.params.id, documentId, appearance.matterId, label, notes, actor, now]);
+  await recordAuditEvent(req, { action: 'appearance_document_linked', entityType: 'appearance_document', entityId: id, matterId: appearance.matterId, metadata: { appearanceId: req.params.id, documentId, matterId: appearance.matterId, label } }).catch(() => {});
+  const row = await get(`SELECT ad.id, ad.appearanceId, ad.documentId, ad.matterId, ad.label, ad.createdBy, ad.createdAt,
+      d.displayName, d.name docName, d.type docType, d.date docDate
+    FROM appearance_documents ad JOIN documents d ON d.id=ad.documentId WHERE ad.id=?`, [id]);
+  res.json(publicAppearanceDocumentLink(row));
+});
+app.delete('/api/appearance-documents/:id', requireAdvocateOrAdmin, async (req, res) => {
+  const link = await get('SELECT * FROM appearance_documents WHERE id=?', [req.params.id]);
+  if (!link) return res.status(404).json({ error: 'Link not found' });
+  if (!(await canAccessAppearance(req, link.appearanceId))) {
+    await recordAuditEvent(req, { action: 'forbidden_appearance_document_access', entityType: 'appearance_document', entityId: req.params.id, matterId: link.matterId || '', metadata: { reason: 'insufficient permissions', route: 'appearance_document_unlink' } }).catch(() => {});
+    return res.status(403).json({ error: 'Appearance access denied' });
+  }
+  await run('DELETE FROM appearance_documents WHERE id=?', [req.params.id]);
+  await recordAuditEvent(req, { action: 'appearance_document_unlinked', entityType: 'appearance_document', entityId: req.params.id, matterId: link.matterId || '', metadata: { appearanceId: link.appearanceId, documentId: link.documentId, matterId: link.matterId || '', label: link.label || '' } }).catch(() => {});
+  res.json({ id: req.params.id, unlinked: true });
+});
+
 const APPEARANCE_ATTENDANCE_STATUSES = new Set(['scheduled', 'attended', 'adjourned', 'stood_over', 'heard', 'not_attended', 'cancelled']);
 function normalizeAppearanceAttendanceStatus(value) {
   const status = typeof value === 'string' && value.trim() ? value.trim().toLowerCase() : 'scheduled';
@@ -8644,6 +8728,7 @@ app.delete('/api/appearances/:id', requireAdvocateOrAdmin, async (req, res) => {
     return res.status(403).json({ error: 'Appearance access denied' });
   }
   const event = await get('SELECT * FROM appearances WHERE id=?', [req.params.id]);
+  await run('DELETE FROM appearance_documents WHERE appearanceId=?', [req.params.id]);
   await run('DELETE FROM appearance_prep_items WHERE appearanceId=?', [req.params.id]);
   await run('DELETE FROM appearances WHERE id=?', [req.params.id]);
   await logAudit(req, 'delete', 'appearance', req.params.id, `Deleted appearance ${event?.title || event?.type || req.params.id}`);

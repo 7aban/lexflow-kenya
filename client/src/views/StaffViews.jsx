@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote, IconMail, IconPaperclip, IconExternalLink } from '@tabler/icons-react';
-import { api, applyChecklistTemplate, approveHrLeaveRequest, cancelHrLeaveRequestAdmin, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, cancelOffboardingCase, completeOffboardingCase, createHrContract, createHrLeaveBalanceAdjustment, createHrStaffProfile, createMatterChecklistItem, createOffboardingCase, deleteChecklistTemplate, deleteClientAvatar, deleteHrDocument, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadHrDocumentContent, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getHrContracts, getHrDashboard, getHrDocuments, getHrLeaveBalances, getHrLeaveRequests, getHrStaff, getHrStaffProfile, getOffboardingAssignedMatters, getOffboardingCase, getOffboardingCases, getClientSnapshot, getInvoiceDetails, getMatterTimeline, getMatterWorkMetadataLinks, getRetainers, getRetainer, createRetainer, updateRetainer, deleteRetainer, generateRetainerDocument, listDocumentTemplates, getMatterFeePlans, getMatterFeePlan, createMatterFeePlan, updateMatterFeePlan, deleteMatterFeePlan, getRetainerLedger, getRetainerLedgerSummary, createRetainerLedgerEntry, voidRetainerLedgerEntry, getClientKyc, getClientKycRecord, createClientKyc, updateClientKyc, deleteClientKyc, getClientAuthorities, getClientAuthorityRecord, createClientAuthority, updateClientAuthority, deleteClientAuthority, getRetainerLifecycleEvents, getRetainerLifecycleEvent, createRetainerLifecycleEvent, updateRetainerLifecycleEvent, deleteRetainerLifecycleEvent, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, rejectHrLeaveRequest, setHrLeaveEntitlement, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrContract, updateHrDocument, updateHrStaffProfile, updateMatterChecklistItem, updateOffboardingCase, updateOffboardingChecklistItem, uploadClientAvatar, uploadHrDocument, uploadUserAvatar } from '../lib/apiClient.js';
+import { api, applyChecklistTemplate, approveHrLeaveRequest, cancelHrLeaveRequestAdmin, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, cancelOffboardingCase, completeOffboardingCase, createHrContract, createHrLeaveBalanceAdjustment, createHrStaffProfile, createMatterChecklistItem, createOffboardingCase, deleteChecklistTemplate, deleteClientAvatar, deleteHrDocument, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadHrDocumentContent, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getHrContracts, getHrDashboard, getHrDocuments, getHrLeaveBalances, getHrLeaveRequests, getHrStaff, getHrStaffProfile, getOffboardingAssignedMatters, getOffboardingCase, getOffboardingCases, getClientSnapshot, getInvoiceDetails, getMatterTimeline, getAppearanceDocuments, linkAppearanceDocument, unlinkAppearanceDocument, getMatterWorkMetadataLinks, getRetainers, getRetainer, createRetainer, updateRetainer, deleteRetainer, generateRetainerDocument, listDocumentTemplates, getMatterFeePlans, getMatterFeePlan, createMatterFeePlan, updateMatterFeePlan, deleteMatterFeePlan, getRetainerLedger, getRetainerLedgerSummary, createRetainerLedgerEntry, voidRetainerLedgerEntry, getClientKyc, getClientKycRecord, createClientKyc, updateClientKyc, deleteClientKyc, getClientAuthorities, getClientAuthorityRecord, createClientAuthority, updateClientAuthority, deleteClientAuthority, getRetainerLifecycleEvents, getRetainerLifecycleEvent, createRetainerLifecycleEvent, updateRetainerLifecycleEvent, deleteRetainerLifecycleEvent, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, rejectHrLeaveRequest, setHrLeaveEntitlement, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrContract, updateHrDocument, updateHrStaffProfile, updateMatterChecklistItem, updateOffboardingCase, updateOffboardingChecklistItem, uploadClientAvatar, uploadHrDocument, uploadUserAvatar } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, safeHttpUrl, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText, invoiceDueDistanceDays } from '../components/ui.jsx';
@@ -5728,6 +5728,8 @@ const hearingPrepLabels = { general: 'General', document: 'Documents', witness: 
 function HearingBriefCard({ detail, canManage = false, notify, onChanged }) {
   const [prepForm, setPrepForm] = useState({ title: '', category: 'general', notes: '' });
   const [editingPrepItem, setEditingPrepItem] = useState(null);
+  const [linkedDocs, setLinkedDocs] = useState([]);
+  const [linkSelection, setLinkSelection] = useState('');
   const appearances = Array.isArray(detail?.appearances) ? detail.appearances : [];
   const documents = Array.isArray(detail?.documents) ? detail.documents : [];
   const notes = Array.isArray(detail?.notes) ? detail.notes : [];
@@ -5737,6 +5739,40 @@ function HearingBriefCard({ detail, canManage = false, notify, onChanged }) {
   const nextAppearance = upcoming[0];
   const prepItems = Array.isArray(nextAppearance?.prepItems) ? nextAppearance.prepItems : [];
   const openPrepItems = prepItems.filter(item => item.status !== 'done');
+  // KENYA-34B: load the documents staff have linked to this hearing (staff-only join).
+  useEffect(() => {
+    let active = true;
+    setLinkSelection('');
+    if (!nextAppearance?.id) { setLinkedDocs([]); return undefined; }
+    getAppearanceDocuments(nextAppearance.id)
+      .then(rows => { if (active) setLinkedDocs(Array.isArray(rows) ? rows : []); })
+      .catch(() => { if (active) setLinkedDocs([]); });
+    return () => { active = false; };
+  }, [nextAppearance?.id]);
+  const linkedDocumentIds = new Set(linkedDocs.map(link => link.documentId));
+  const linkableDocuments = documents.filter(doc => !linkedDocumentIds.has(doc.id));
+  async function addLinkedDocument(event) {
+    event.preventDefault();
+    if (!nextAppearance?.id || !linkSelection) return;
+    try {
+      await linkAppearanceDocument(nextAppearance.id, { documentId: linkSelection });
+      setLinkSelection('');
+      const rows = await getAppearanceDocuments(nextAppearance.id);
+      setLinkedDocs(Array.isArray(rows) ? rows : []);
+      notify?.({ type: 'success', message: 'Document linked to hearing.' });
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    }
+  }
+  async function removeLinkedDocument(link) {
+    try {
+      await unlinkAppearanceDocument(link.id);
+      setLinkedDocs(prev => prev.filter(l => l.id !== link.id));
+      notify?.({ type: 'success', message: 'Document unlinked from hearing.' });
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    }
+  }
   async function addPrepItem(event) {
     event.preventDefault();
     if (!nextAppearance || !prepForm.title.trim()) return;
@@ -5826,6 +5862,31 @@ function HearingBriefCard({ detail, canManage = false, notify, onChanged }) {
             )}
           </div>
         ) : <span style={emptyStyle}>No appearance selected for prep.</span>}
+      </div>
+      <div style={{ display: 'grid', gap: 4 }}>
+        <span style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: theme.muted }}>Documents for this hearing</span>
+        {nextAppearance ? (
+          <div style={{ display: 'grid', gap: 6 }}>
+            {linkedDocs.length ? linkedDocs.map(link => (
+              <div key={link.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, border: `1px solid ${theme.line}`, borderRadius: 6, padding: 8, background: '#F9FAFB' }}>
+                <div style={{ display: 'grid', gap: 2, minWidth: 0 }}>
+                  <span style={{ fontSize: 12, color: theme.ink, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{link.document?.displayName || link.document?.name || 'Document'}</span>
+                  <span style={{ fontSize: 11, color: theme.muted }}>{[link.document?.type, link.document?.date, link.label].filter(Boolean).join(' · ') || '—'}</span>
+                </div>
+                {canManage && <button type="button" onClick={() => removeLinkedDocument(link)} style={{ ...styles.ghostButton, fontSize: 11, padding: '4px 10px', whiteSpace: 'nowrap' }}>Unlink</button>}
+              </div>
+            )) : <span style={emptyStyle}>No documents linked to this hearing.</span>}
+            {canManage && (
+              <form onSubmit={addLinkedDocument} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 6 }}>
+                <select style={styles.input} value={linkSelection} onChange={e => setLinkSelection(e.target.value)}>
+                  <option value="">Link a matter document…</option>
+                  {linkableDocuments.map(doc => <option key={doc.id} value={doc.id}>{doc.displayName || doc.friendlyName || doc.name || 'Document'}</option>)}
+                </select>
+                <button style={{ ...styles.ghostButton, whiteSpace: 'nowrap' }} disabled={!linkSelection}>Link</button>
+              </form>
+            )}
+          </div>
+        ) : <span style={emptyStyle}>No appearance selected for documents.</span>}
       </div>
       <div style={{ display: 'grid', gap: 4 }}>
         <span style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: theme.muted }}>Recent documents</span>

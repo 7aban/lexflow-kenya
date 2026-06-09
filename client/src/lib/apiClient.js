@@ -361,6 +361,10 @@ export const deleteFolder = folderId => api(`/folders/${folderId}`, { method: 'D
 export const getMatterDocuments = (matterId, folderId = 'all') => api(`/matters/${matterId}/documents${folderId && folderId !== 'all' ? `?folderId=${encodeURIComponent(folderId)}` : ''}`);
 // TIMELINE-30B: read-only unified matter timeline (staff-only on the backend).
 export const getMatterTimeline = (matterId, params = {}) => api(queryPath(`/matters/${encodeURIComponent(matterId)}/timeline`, params));
+// KENYA-34B: staff-only links between matter documents and a specific appearance.
+export const getAppearanceDocuments = (appearanceId) => api(`/appearances/${encodeURIComponent(appearanceId)}/documents`);
+export const linkAppearanceDocument = (appearanceId, payload) => api(`/appearances/${encodeURIComponent(appearanceId)}/documents`, { method: 'POST', body: payload });
+export const unlinkAppearanceDocument = (linkId) => api(`/appearance-documents/${encodeURIComponent(linkId)}`, { method: 'DELETE' });
 export const listDocumentTemplates = () => api('/document-templates');
 export const generateDocumentFromTemplate = (matterId, templateId) =>
   api(`/matters/${matterId}/document-templates/${templateId}/generate`, {
