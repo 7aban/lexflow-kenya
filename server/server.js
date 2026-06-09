@@ -1170,6 +1170,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT NOT NULL, completed INTEGER DEFAULT 0, assignee TEXT, dueDate TEXT, auto_generated INTEGER DEFAULT 0)`);
   await run(`CREATE TABLE IF NOT EXISTS time_entries (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, attorney TEXT, date TEXT, hours REAL DEFAULT 0, activity TEXT, description TEXT, rate REAL DEFAULT 0, billed INTEGER DEFAULT 0, billable INTEGER DEFAULT 1)`);
   await run(`CREATE TABLE IF NOT EXISTS appearances (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT, date TEXT, time TEXT, type TEXT, location TEXT, meetingLink TEXT, attorney TEXT, prepNote TEXT, outcome TEXT DEFAULT '')`);
+  await run(`CREATE TABLE IF NOT EXISTS appearance_prep_items (id TEXT PRIMARY KEY, appearanceId TEXT NOT NULL, matterId TEXT NOT NULL, title TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'general', status TEXT NOT NULL DEFAULT 'open', notes TEXT DEFAULT '', createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, completedBy TEXT, completedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS folders (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT NOT NULL, createdBy TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT, displayName TEXT, type TEXT, mimeType TEXT, date TEXT, size TEXT, content BLOB, source TEXT DEFAULT 'firm', folderId TEXT, messageId TEXT, noticeId TEXT, clientVisible INTEGER DEFAULT 0, uploadedBy TEXT, templateId TEXT, templateName TEXT, generatedBy TEXT, generatedAt TEXT, version INTEGER DEFAULT 1)`);
   await run(`CREATE TABLE IF NOT EXISTS case_notes (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, content TEXT NOT NULL, author TEXT, createdAt TEXT)`);
@@ -1450,6 +1451,8 @@ createdAt TEXT NOT NULL
   await run('CREATE INDEX IF NOT EXISTS idx_appearances_date ON appearances(date)');
   await run('CREATE INDEX IF NOT EXISTS idx_appearances_attorney_date ON appearances(attorney, date)');
   await run('CREATE INDEX IF NOT EXISTS idx_appearances_matterId ON appearances(matterId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_appearance_prep_items_appearanceId ON appearance_prep_items(appearanceId)');
+  await run('CREATE INDEX IF NOT EXISTS idx_appearance_prep_items_matterId ON appearance_prep_items(matterId)');
   await run('CREATE INDEX IF NOT EXISTS idx_matters_clientId ON matters(clientId)');
   await run('CREATE INDEX IF NOT EXISTS idx_matters_assignedTo ON matters(assignedTo)');
   await run('CREATE INDEX IF NOT EXISTS idx_matters_solDate ON matters(solDate)');
@@ -7513,14 +7516,15 @@ app.get('/api/matters/:id', async (req, res) => {
     documentWhere += ` AND ${clientDocumentVisibilitySql('d')}`;
     documentParams.push(req.user.clientId || '');
   }
-  const [tasks, timeEntries, documents, notes, invoices, appearances, checklistItems] = await Promise.all([
+  const [tasks, timeEntries, documents, notes, invoices, appearances, checklistItems, appearancePrepItems] = await Promise.all([
     req.user.role === 'client' ? Promise.resolve([]) : all('SELECT * FROM tasks WHERE matterId=? ORDER BY dueDate', [req.params.id]),
     req.user.role === 'client' ? Promise.resolve([]) : all('SELECT * FROM time_entries WHERE matterId=? ORDER BY date DESC', [req.params.id]),
     all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE ${documentWhere} ORDER BY d.date DESC`, documentParams),
     req.user.role === 'client' ? Promise.resolve([]) : all('SELECT * FROM case_notes WHERE matterId=? ORDER BY createdAt DESC', [req.params.id]),
     all('SELECT * FROM invoices WHERE matterId=? ORDER BY date DESC', [req.params.id]),
     all('SELECT * FROM appearances WHERE matterId=? ORDER BY date', [req.params.id]),
-    req.user.role === 'client' ? Promise.resolve([]) : all('SELECT * FROM matter_checklist_items WHERE matterId=? ORDER BY position ASC, createdAt ASC', [req.params.id])
+    req.user.role === 'client' ? Promise.resolve([]) : all('SELECT * FROM matter_checklist_items WHERE matterId=? ORDER BY position ASC, createdAt ASC', [req.params.id]),
+    req.user.role === 'client' ? Promise.resolve([]) : all('SELECT * FROM appearance_prep_items WHERE matterId=? ORDER BY createdAt ASC', [req.params.id])
   ]);
   await attachInvoiceSummaries(invoices);
   if (req.user.role === 'advocate' && !(await isBillingVisibleFor(req))) {
@@ -7531,6 +7535,14 @@ app.get('/api/matters/:id', async (req, res) => {
   }
   if (req.user.role === 'client') {
     appearances.forEach(a => delete a.outcome);
+  }
+  if (req.user.role !== 'client' && appearancePrepItems.length) {
+    const prepByAppearance = new Map();
+    for (const item of appearancePrepItems) {
+      if (!prepByAppearance.has(item.appearanceId)) prepByAppearance.set(item.appearanceId, []);
+      prepByAppearance.get(item.appearanceId).push(item);
+    }
+    appearances.forEach(a => { a.prepItems = prepByAppearance.get(a.id) || []; });
   }
   const payload = { ...matter, tasks, timeEntries, documents: documents.map(publicDocument), notes, invoices, appearances };
   if (req.user.role !== 'client') payload.checklistItems = checklistItems;
@@ -7819,6 +7831,7 @@ async function deleteMatterCascade(matterId) {
   await run('DELETE FROM invoices WHERE matterId=?', [matterId]);
   await run('DELETE FROM tasks WHERE matterId=?', [matterId]);
   await run('DELETE FROM time_entries WHERE matterId=?', [matterId]);
+  await run('DELETE FROM appearance_prep_items WHERE matterId=?', [matterId]);
   await run('DELETE FROM appearances WHERE matterId=?', [matterId]);
   await run('DELETE FROM documents WHERE matterId=?', [matterId]);
   await run('DELETE FROM folders WHERE matterId=?', [matterId]);
@@ -8478,6 +8491,103 @@ app.get('/api/appearances/:id', requireStaff, async (req, res) => {
   appearance ? res.json(appearance) : res.status(404).json({ error: 'Appearance not found' });
 });
 
+const APPEARANCE_PREP_CATEGORIES = new Set(['general', 'document', 'witness', 'authority', 'submission', 'client', 'filing']);
+const APPEARANCE_PREP_STATUSES = new Set(['open', 'done']);
+function normalizeAppearancePrepCategory(value) {
+  const category = typeof value === 'string' && value.trim() ? value.trim().toLowerCase() : 'general';
+  return APPEARANCE_PREP_CATEGORIES.has(category) ? category : null;
+}
+function normalizeAppearancePrepStatus(value) {
+  const status = typeof value === 'string' && value.trim() ? value.trim().toLowerCase() : 'open';
+  return APPEARANCE_PREP_STATUSES.has(status) ? status : null;
+}
+async function accessibleAppearanceForPrep(req, appearanceId) {
+  if (!(await canAccessAppearance(req, appearanceId))) return null;
+  return get('SELECT id, matterId FROM appearances WHERE id=?', [appearanceId]);
+}
+app.get('/api/appearances/:id/prep-items', requireStaff, async (req, res) => {
+  const appearance = await accessibleAppearanceForPrep(req, req.params.id);
+  if (!appearance) {
+    await recordAuditEvent(req, { action: 'forbidden_appearance_prep_item_access', entityType: 'appearance', entityId: req.params.id, metadata: { reason: 'insufficient permissions', route: 'appearance_prep_list' } }).catch(() => {});
+    return res.status(403).json({ error: 'Appearance access denied' });
+  }
+  res.json(await all('SELECT * FROM appearance_prep_items WHERE appearanceId=? ORDER BY createdAt ASC', [req.params.id]));
+});
+app.post('/api/appearances/:id/prep-items', requireAdvocateOrAdmin, async (req, res) => {
+  const appearance = await accessibleAppearanceForPrep(req, req.params.id);
+  if (!appearance) {
+    await recordAuditEvent(req, { action: 'forbidden_appearance_prep_item_access', entityType: 'appearance', entityId: req.params.id, metadata: { reason: 'insufficient permissions', route: 'appearance_prep_create' } }).catch(() => {});
+    return res.status(403).json({ error: 'Appearance access denied' });
+  }
+  const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+  if (!title) return res.status(400).json({ error: 'Title is required' });
+  if (title.length > 240) return res.status(400).json({ error: 'Title must not exceed 240 characters' });
+  const category = normalizeAppearancePrepCategory(req.body?.category);
+  if (!category) return res.status(400).json({ error: 'Invalid category' });
+  const status = normalizeAppearancePrepStatus(req.body?.status);
+  if (!status) return res.status(400).json({ error: 'Invalid status' });
+  const id = genId('API');
+  const now = new Date().toISOString();
+  const actor = req.user.fullName || req.user.email || req.user.userId || '';
+  await run('INSERT INTO appearance_prep_items (id,appearanceId,matterId,title,category,status,notes,createdBy,createdAt,updatedBy,updatedAt,completedBy,completedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', [
+    id, appearance.id, appearance.matterId, title, category, status, typeof req.body?.notes === 'string' ? req.body.notes : '', actor, now, '', '', status === 'done' ? actor : '', status === 'done' ? now : ''
+  ]);
+  res.json(await get('SELECT * FROM appearance_prep_items WHERE id=?', [id]));
+});
+app.patch('/api/appearance-prep-items/:id', requireAdvocateOrAdmin, async (req, res) => {
+  const existing = await get('SELECT * FROM appearance_prep_items WHERE id=?', [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Prep item not found' });
+  if (!(await canAccessAppearance(req, existing.appearanceId))) {
+    await recordAuditEvent(req, { action: 'forbidden_appearance_prep_item_access', entityType: 'appearance_prep_item', entityId: req.params.id, matterId: existing.matterId || '', metadata: { reason: 'insufficient permissions', route: 'appearance_prep_update' } }).catch(() => {});
+    return res.status(403).json({ error: 'Appearance access denied' });
+  }
+  const updates = [];
+  const params = [];
+  if (req.body?.title !== undefined) {
+    const title = typeof req.body.title === 'string' ? req.body.title.trim() : '';
+    if (!title) return res.status(400).json({ error: 'Title must not be empty' });
+    if (title.length > 240) return res.status(400).json({ error: 'Title must not exceed 240 characters' });
+    updates.push('title=?'); params.push(title);
+  }
+  if (req.body?.category !== undefined) {
+    const category = normalizeAppearancePrepCategory(req.body.category);
+    if (!category) return res.status(400).json({ error: 'Invalid category' });
+    updates.push('category=?'); params.push(category);
+  }
+  if (req.body?.notes !== undefined) {
+    updates.push('notes=?'); params.push(typeof req.body.notes === 'string' ? req.body.notes : '');
+  }
+  if (req.body?.status !== undefined) {
+    const status = normalizeAppearancePrepStatus(req.body.status);
+    if (!status) return res.status(400).json({ error: 'Invalid status' });
+    updates.push('status=?'); params.push(status);
+    if (status === 'done' && existing.status !== 'done') {
+      updates.push('completedBy=?', 'completedAt=?');
+      params.push(req.user.fullName || req.user.email || req.user.userId || '', new Date().toISOString());
+    } else if (status === 'open') {
+      updates.push('completedBy=?', 'completedAt=?');
+      params.push('', '');
+    }
+  }
+  if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
+  updates.push('updatedBy=?', 'updatedAt=?');
+  params.push(req.user.fullName || req.user.email || req.user.userId || '', new Date().toISOString(), req.params.id);
+  await run(`UPDATE appearance_prep_items SET ${updates.join(',')} WHERE id=?`, params);
+  res.json(await get('SELECT * FROM appearance_prep_items WHERE id=?', [req.params.id]));
+});
+app.delete('/api/appearance-prep-items/:id', requireAdvocateOrAdmin, async (req, res) => {
+  const existing = await get('SELECT * FROM appearance_prep_items WHERE id=?', [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Prep item not found' });
+  if (!(await canAccessAppearance(req, existing.appearanceId))) {
+    await recordAuditEvent(req, { action: 'forbidden_appearance_prep_item_access', entityType: 'appearance_prep_item', entityId: req.params.id, matterId: existing.matterId || '', metadata: { reason: 'insufficient permissions', route: 'appearance_prep_delete' } }).catch(() => {});
+    return res.status(403).json({ error: 'Appearance access denied' });
+  }
+  const now = new Date().toISOString();
+  const actor = req.user.fullName || req.user.email || req.user.userId || '';
+  await run('UPDATE appearance_prep_items SET status=?, completedBy=?, completedAt=?, updatedBy=?, updatedAt=? WHERE id=?', ['done', actor, now, actor, now, req.params.id]);
+  res.json({ id: req.params.id, deleted: false, status: 'done' });
+});
+
 app.post('/api/appearances', requireAdvocateOrAdmin, async (req, res) => { const id = genId('EV'); await run('INSERT INTO appearances (id,matterId,title,date,time,type,location,meetingLink,attorney,prepNote,outcome) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [id, req.body.matterId, req.body.title, req.body.date, req.body.time || '9:00 AM', req.body.type || 'Hearing', req.body.location || '', req.body.meetingLink || '', req.body.attorney || '', req.body.prepNote || '', req.body.outcome || '']); const event = await get('SELECT * FROM appearances WHERE id=?', [id]); await logAudit(req, 'create', 'appearance', id, `Scheduled ${event.type || 'appearance'} ${event.title || ''} on ${event.date}`); res.json(event); });
 app.patch('/api/appearances/:id', requireAdvocateOrAdmin, async (req, res) => {
   if (!(await canAccessAppearance(req, req.params.id))) {
@@ -8498,6 +8608,7 @@ app.delete('/api/appearances/:id', requireAdvocateOrAdmin, async (req, res) => {
     return res.status(403).json({ error: 'Appearance access denied' });
   }
   const event = await get('SELECT * FROM appearances WHERE id=?', [req.params.id]);
+  await run('DELETE FROM appearance_prep_items WHERE appearanceId=?', [req.params.id]);
   await run('DELETE FROM appearances WHERE id=?', [req.params.id]);
   await logAudit(req, 'delete', 'appearance', req.params.id, `Deleted appearance ${event?.title || event?.type || req.params.id}`);
   await recordAuditEvent(req, { action: 'appearance_deleted', entityType: 'appearance', entityId: req.params.id, metadata: { title: event?.title || '', type: event?.type || '' } }).catch(() => {});

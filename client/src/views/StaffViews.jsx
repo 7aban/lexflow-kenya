@@ -2242,7 +2242,7 @@ export function Matters({ data, canManage, reload, notify, focus, onMatterOpened
                         <MatterBillingSnapshot detail={detail} />
                       </div>
                     )}
-                    <HearingBriefCard detail={detail} />
+                    <HearingBriefCard detail={detail} canManage={canManage} notify={notify} onChanged={() => loadDetail(detail.id)} />
                   </section>
                   <MatterCommandSummary detail={detail} nextActionHints={nextActionHints} />
                   <MatterNextActionHints hints={nextActionHints} />
@@ -5715,7 +5715,12 @@ function MatterCourtPrepCard({ detail }) {
   );
 }
 
-function HearingBriefCard({ detail }) {
+const hearingPrepCategories = ['general', 'document', 'witness', 'authority', 'submission', 'client', 'filing'];
+const hearingPrepLabels = { general: 'General', document: 'Documents', witness: 'Witnesses', authority: 'Authorities', submission: 'Submissions', client: 'Client', filing: 'Filing' };
+
+function HearingBriefCard({ detail, canManage = false, notify, onChanged }) {
+  const [prepForm, setPrepForm] = useState({ title: '', category: 'general', notes: '' });
+  const [editingPrepItem, setEditingPrepItem] = useState(null);
   const appearances = Array.isArray(detail?.appearances) ? detail.appearances : [];
   const documents = Array.isArray(detail?.documents) ? detail.documents : [];
   const notes = Array.isArray(detail?.notes) ? detail.notes : [];
@@ -5723,6 +5728,30 @@ function HearingBriefCard({ detail }) {
   const today = isoDateOnly();
   const upcoming = appearances.filter(a => a.date && a.date >= today).sort((a, b) => String(a.date).localeCompare(String(b.date)));
   const nextAppearance = upcoming[0];
+  const prepItems = Array.isArray(nextAppearance?.prepItems) ? nextAppearance.prepItems : [];
+  const openPrepItems = prepItems.filter(item => item.status !== 'done');
+  async function addPrepItem(event) {
+    event.preventDefault();
+    if (!nextAppearance || !prepForm.title.trim()) return;
+    try {
+      await api(`/appearances/${nextAppearance.id}/prep-items`, { method: 'POST', body: prepForm });
+      setPrepForm({ title: '', category: 'general', notes: '' });
+      notify?.({ type: 'success', message: 'Hearing prep item added.' });
+      await onChanged?.();
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    }
+  }
+  async function savePrepItem(item, values) {
+    try {
+      await api(`/appearance-prep-items/${item.id}`, { method: 'PATCH', body: values });
+      setEditingPrepItem(null);
+      notify?.({ type: 'success', message: 'Hearing prep item updated.' });
+      await onChanged?.();
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    }
+  }
   const sortedDocs = [...documents].sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 3);
   const openChecklist = checklistItems.filter(i => !i.completed).slice(0, 3);
   const recentNotes = [...notes].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))).slice(0, 3);
@@ -5748,6 +5777,48 @@ function HearingBriefCard({ detail }) {
       ) : (
         <span style={emptyStyle}>No upcoming court appearance recorded.</span>
       )}
+      <div style={{ display: 'grid', gap: 4 }}>
+        <span style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: theme.muted }}>Hearing prep checklist</span>
+        {nextAppearance ? (
+          <div style={{ display: 'grid', gap: 6 }}>
+            {openPrepItems.length ? openPrepItems.map(item => {
+              const editing = editingPrepItem?.id === item.id;
+              return (
+                <div key={item.id} style={{ display: 'grid', gap: 4, border: `1px solid ${theme.line}`, borderRadius: 6, padding: 8, background: '#F9FAFB' }}>
+                  {editing ? (
+                    <>
+                      <input style={styles.input} value={editingPrepItem.title || ''} onChange={e => setEditingPrepItem({ ...editingPrepItem, title: e.target.value })} />
+                      <select style={styles.input} value={editingPrepItem.category || 'general'} onChange={e => setEditingPrepItem({ ...editingPrepItem, category: e.target.value })}>
+                        {hearingPrepCategories.map(category => <option key={category} value={category}>{hearingPrepLabels[category]}</option>)}
+                      </select>
+                      <input style={styles.input} value={editingPrepItem.notes || ''} onChange={e => setEditingPrepItem({ ...editingPrepItem, notes: e.target.value })} placeholder="Notes" />
+                      <ActionGroup actions={[['Save', () => savePrepItem(item, editingPrepItem)], ['Cancel', () => setEditingPrepItem(null)]]} />
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ fontSize: 12, color: theme.ink, fontWeight: 600 }}>{item.title}</span>
+                      <span style={{ fontSize: 11, color: theme.muted }}>{hearingPrepLabels[item.category] || item.category || 'General'}{item.notes ? ` / ${item.notes}` : ''}</span>
+                      {canManage && <ActionGroup actions={[['Done', () => savePrepItem(item, { status: 'done' })], ['Edit', () => setEditingPrepItem({ ...item })]]} />}
+                    </>
+                  )}
+                </div>
+              );
+            }) : <span style={emptyStyle}>No open hearing prep items.</span>}
+            {canManage && (
+              <form onSubmit={addPrepItem} style={{ display: 'grid', gap: 6 }}>
+                <input required style={styles.input} value={prepForm.title} onChange={e => setPrepForm({ ...prepForm, title: e.target.value })} placeholder="Add prep item" />
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 0.5fr) 1fr auto', gap: 6 }}>
+                  <select style={styles.input} value={prepForm.category} onChange={e => setPrepForm({ ...prepForm, category: e.target.value })}>
+                    {hearingPrepCategories.map(category => <option key={category} value={category}>{hearingPrepLabels[category]}</option>)}
+                  </select>
+                  <input style={styles.input} value={prepForm.notes} onChange={e => setPrepForm({ ...prepForm, notes: e.target.value })} placeholder="Notes" />
+                  <button style={{ ...styles.ghostButton, whiteSpace: 'nowrap' }}>Add</button>
+                </div>
+              </form>
+            )}
+          </div>
+        ) : <span style={emptyStyle}>No appearance selected for prep.</span>}
+      </div>
       <div style={{ display: 'grid', gap: 4 }}>
         <span style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: theme.muted }}>Recent documents</span>
         {sortedDocs.length ? sortedDocs.map((doc, i) => (
