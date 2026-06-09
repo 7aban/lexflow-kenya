@@ -1169,7 +1169,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS matters (id TEXT PRIMARY KEY, reference TEXT UNIQUE, clientId TEXT NOT NULL, title TEXT NOT NULL, practiceArea TEXT, stage TEXT DEFAULT 'Intake', assignedTo TEXT, paralegal TEXT, openDate TEXT, description TEXT, court TEXT, judge TEXT, caseNo TEXT, opposingCounsel TEXT, billingRate REAL DEFAULT 0, retainerBalance REAL DEFAULT 0, totalBilled REAL DEFAULT 0, priority TEXT DEFAULT 'Medium', solDate TEXT, billingType TEXT DEFAULT 'hourly', fixedFee REAL DEFAULT 0)`);
   await run(`CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT NOT NULL, completed INTEGER DEFAULT 0, assignee TEXT, dueDate TEXT, auto_generated INTEGER DEFAULT 0)`);
   await run(`CREATE TABLE IF NOT EXISTS time_entries (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, attorney TEXT, date TEXT, hours REAL DEFAULT 0, activity TEXT, description TEXT, rate REAL DEFAULT 0, billed INTEGER DEFAULT 0, billable INTEGER DEFAULT 1)`);
-  await run(`CREATE TABLE IF NOT EXISTS appearances (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT, date TEXT, time TEXT, type TEXT, location TEXT, meetingLink TEXT, attorney TEXT, prepNote TEXT, outcome TEXT DEFAULT '')`);
+  await run(`CREATE TABLE IF NOT EXISTS appearances (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT, date TEXT, time TEXT, type TEXT, location TEXT, meetingLink TEXT, attorney TEXT, prepNote TEXT, outcome TEXT DEFAULT '', attendanceStatus TEXT DEFAULT 'scheduled', appearedBy TEXT DEFAULT '', clientAttended INTEGER NOT NULL DEFAULT 0, attendanceNote TEXT DEFAULT '', attendanceUpdatedBy TEXT, attendanceUpdatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS appearance_prep_items (id TEXT PRIMARY KEY, appearanceId TEXT NOT NULL, matterId TEXT NOT NULL, title TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'general', status TEXT NOT NULL DEFAULT 'open', notes TEXT DEFAULT '', createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, completedBy TEXT, completedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS folders (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT NOT NULL, createdBy TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT, displayName TEXT, type TEXT, mimeType TEXT, date TEXT, size TEXT, content BLOB, source TEXT DEFAULT 'firm', folderId TEXT, messageId TEXT, noticeId TEXT, clientVisible INTEGER DEFAULT 0, uploadedBy TEXT, templateId TEXT, templateName TEXT, generatedBy TEXT, generatedAt TEXT, version INTEGER DEFAULT 1)`);
@@ -1373,6 +1373,12 @@ createdAt TEXT NOT NULL
   await ensureColumn('users', 'tokenVersion', 'INTEGER DEFAULT 1');
   await ensureColumn('appearances', 'meetingLink', 'TEXT');
   await ensureColumn('appearances', 'outcome', "TEXT DEFAULT ''");
+  await ensureColumn('appearances', 'attendanceStatus', "TEXT DEFAULT 'scheduled'");
+  await ensureColumn('appearances', 'appearedBy', "TEXT DEFAULT ''");
+  await ensureColumn('appearances', 'clientAttended', 'INTEGER NOT NULL DEFAULT 0');
+  await ensureColumn('appearances', 'attendanceNote', "TEXT DEFAULT ''");
+  await ensureColumn('appearances', 'attendanceUpdatedBy', 'TEXT');
+  await ensureColumn('appearances', 'attendanceUpdatedAt', 'TEXT');
   await ensureColumn('documents', 'source', "TEXT DEFAULT 'firm'");
   await ensureColumn('documents', 'folderId', 'TEXT');
   await ensureColumn('documents', 'messageId', 'TEXT');
@@ -7534,7 +7540,7 @@ app.get('/api/matters/:id', async (req, res) => {
     for (const inv of invoices) maskInvoiceBilling(inv);
   }
   if (req.user.role === 'client') {
-    appearances.forEach(a => delete a.outcome);
+    appearances.forEach(stripStaffAppearanceFields);
   }
   if (req.user.role !== 'client' && appearancePrepItems.length) {
     const prepByAppearance = new Map();
@@ -8501,6 +8507,18 @@ function normalizeAppearancePrepStatus(value) {
   const status = typeof value === 'string' && value.trim() ? value.trim().toLowerCase() : 'open';
   return APPEARANCE_PREP_STATUSES.has(status) ? status : null;
 }
+function stripStaffAppearanceFields(appearance) {
+  if (!appearance || typeof appearance !== 'object') return appearance;
+  delete appearance.outcome;
+  delete appearance.attendanceStatus;
+  delete appearance.appearedBy;
+  delete appearance.clientAttended;
+  delete appearance.attendanceNote;
+  delete appearance.attendanceUpdatedBy;
+  delete appearance.attendanceUpdatedAt;
+  delete appearance.prepItems;
+  return appearance;
+}
 async function accessibleAppearanceForPrep(req, appearanceId) {
   if (!(await canAccessAppearance(req, appearanceId))) return null;
   return get('SELECT id, matterId FROM appearances WHERE id=?', [appearanceId]);
@@ -8588,16 +8606,34 @@ app.delete('/api/appearance-prep-items/:id', requireAdvocateOrAdmin, async (req,
   res.json({ id: req.params.id, deleted: false, status: 'done' });
 });
 
+const APPEARANCE_ATTENDANCE_STATUSES = new Set(['scheduled', 'attended', 'adjourned', 'stood_over', 'heard', 'not_attended', 'cancelled']);
+function normalizeAppearanceAttendanceStatus(value) {
+  const status = typeof value === 'string' && value.trim() ? value.trim().toLowerCase() : 'scheduled';
+  return APPEARANCE_ATTENDANCE_STATUSES.has(status) ? status : null;
+}
 app.post('/api/appearances', requireAdvocateOrAdmin, async (req, res) => { const id = genId('EV'); await run('INSERT INTO appearances (id,matterId,title,date,time,type,location,meetingLink,attorney,prepNote,outcome) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [id, req.body.matterId, req.body.title, req.body.date, req.body.time || '9:00 AM', req.body.type || 'Hearing', req.body.location || '', req.body.meetingLink || '', req.body.attorney || '', req.body.prepNote || '', req.body.outcome || '']); const event = await get('SELECT * FROM appearances WHERE id=?', [id]); await logAudit(req, 'create', 'appearance', id, `Scheduled ${event.type || 'appearance'} ${event.title || ''} on ${event.date}`); res.json(event); });
 app.patch('/api/appearances/:id', requireAdvocateOrAdmin, async (req, res) => {
   if (!(await canAccessAppearance(req, req.params.id))) {
     await recordAuditEvent(req, { action: 'forbidden_appearance_access', entityType: 'appearance', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
     return res.status(403).json({ error: 'Appearance access denied' });
   }
-  const fields = ['matterId','title','date','time','type','location','meetingLink','attorney','prepNote','outcome'];
+  const fields = ['matterId','title','date','time','type','location','meetingLink','attorney','prepNote','outcome','attendanceStatus','appearedBy','clientAttended','attendanceNote'];
   const updates = fields.filter(f => req.body[f] !== undefined);
   if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
-  await run(`UPDATE appearances SET ${updates.map(f => `${f}=?`).join(',')} WHERE id=?`, [...updates.map(f => req.body[f]), req.params.id]);
+  if (req.body.attendanceStatus !== undefined && !normalizeAppearanceAttendanceStatus(req.body.attendanceStatus)) return res.status(400).json({ error: 'Invalid attendanceStatus' });
+  const attendanceFields = ['attendanceStatus', 'appearedBy', 'clientAttended', 'attendanceNote'];
+  const attendanceUpdated = attendanceFields.some(f => req.body[f] !== undefined);
+  const setFields = [...updates];
+  const params = updates.map(f => {
+    if (f === 'attendanceStatus') return normalizeAppearanceAttendanceStatus(req.body[f]);
+    if (f === 'clientAttended') return req.body[f] ? 1 : 0;
+    return req.body[f];
+  });
+  if (attendanceUpdated) {
+    setFields.push('attendanceUpdatedBy', 'attendanceUpdatedAt');
+    params.push(req.user.fullName || req.user.email || req.user.userId || '', new Date().toISOString());
+  }
+  await run(`UPDATE appearances SET ${setFields.map(f => `${f}=?`).join(',')} WHERE id=?`, [...params, req.params.id]);
   const event = await get('SELECT * FROM appearances WHERE id=?', [req.params.id]);
   if (event) await logAudit(req, 'update', 'appearance', req.params.id, `Updated appearance ${event.title || event.type || req.params.id}`);
   event ? res.json(event) : res.status(404).json({ error: 'Appearance not found' });
@@ -12163,7 +12199,7 @@ app.get('/api/client/dashboard', async (req, res) => {
   await attachInvoiceSummaries(data.invoices || []);
   data.invoicePayments = (await all(`SELECT ${PAYMENT_PUBLIC_COLUMNS} FROM payments WHERE clientId=? ORDER BY date DESC, createdAt DESC`, [req.user.clientId || ''])).map(row => publicPayment(row, { client: true }));
   if (data.appearances) {
-    data.appearances.forEach(a => delete a.outcome);
+    data.appearances.forEach(stripStaffAppearanceFields);
   }
   res.json(data);
 });

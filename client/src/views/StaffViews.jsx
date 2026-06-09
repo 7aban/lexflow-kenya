@@ -5500,12 +5500,15 @@ function TaskEditorList({ tasks, entries = [], matter, canManage, canViewBilling
   );
 }
 
+const attendanceStatuses = ['scheduled', 'attended', 'adjourned', 'stood_over', 'heard', 'not_attended', 'cancelled'];
+const attendanceLabels = { scheduled: 'Scheduled', attended: 'Attended', adjourned: 'Adjourned', stood_over: 'Stood over', heard: 'Heard', not_attended: 'Not attended', cancelled: 'Cancelled' };
+
 function AppearanceEditorList({ events, canManage, editingEvent, setEditingEvent, saveEvent, confirmDelete }) {
   if (!events.length) return <Empty title="No court appearances." text="Scheduled appearances will appear here." />;
   return (
     <div style={{ ...styles.tableWrap, minWidth: 0, maxWidth: '100%' }} className="lf-appearance-cards">
       <table style={styles.table}>
-        <thead><tr>{['Title', 'Date', 'Time', 'Type', 'Location', 'Virtual Court', 'Outcome', 'Actions'].map(h => <th key={h}>{h}</th>)}</tr></thead>
+        <thead><tr>{['Title', 'Date', 'Time', 'Type', 'Location', 'Virtual Court', 'Attendance', 'Appeared By', 'Client', 'Attendance Note', 'Outcome', 'Actions'].map(h => <th key={h}>{h}</th>)}</tr></thead>
         <tbody>{events.map(event => {
           const editing = editingEvent?.id === event.id;
           return (
@@ -5516,6 +5519,10 @@ function AppearanceEditorList({ events, canManage, editingEvent, setEditingEvent
               <td>{editing ? <input style={styles.input} value={editingEvent.type || ''} onChange={e => setEditingEvent({ ...editingEvent, type: e.target.value })} /> : event.type || '-'}</td>
               <td>{editing ? <input style={styles.input} value={editingEvent.location || ''} onChange={e => setEditingEvent({ ...editingEvent, location: e.target.value })} /> : event.location || '-'}</td>
               <td>{editing ? <input type="url" placeholder="https://..." style={styles.input} value={editingEvent.meetingLink || ''} onChange={e => setEditingEvent({ ...editingEvent, meetingLink: e.target.value })} /> : <MeetingLink event={event} />}</td>
+              <td>{editing ? <select style={styles.input} value={editingEvent.attendanceStatus || 'scheduled'} onChange={e => setEditingEvent({ ...editingEvent, attendanceStatus: e.target.value })}>{attendanceStatuses.map(status => <option key={status} value={status}>{attendanceLabels[status]}</option>)}</select> : attendanceLabels[event.attendanceStatus || 'scheduled'] || '-'}</td>
+              <td>{editing ? <input style={styles.input} value={editingEvent.appearedBy || ''} onChange={e => setEditingEvent({ ...editingEvent, appearedBy: e.target.value })} /> : event.appearedBy || '-'}</td>
+              <td>{editing ? <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}><input type="checkbox" checked={Boolean(editingEvent.clientAttended)} onChange={e => setEditingEvent({ ...editingEvent, clientAttended: e.target.checked })} />Attended</label> : event.clientAttended ? 'Yes' : 'No'}</td>
+              <td>{editing ? <input style={styles.input} value={editingEvent.attendanceNote || ''} onChange={e => setEditingEvent({ ...editingEvent, attendanceNote: e.target.value })} /> : event.attendanceNote || '-'}</td>
               <td>{editing ? <input style={styles.input} value={editingEvent.outcome || ''} onChange={e => setEditingEvent({ ...editingEvent, outcome: e.target.value })} /> : event.outcome || '-'}</td>
               <td>{canManage ? editing ? <ActionGroup actions={[['Save', () => saveEvent(event, editingEvent)], ['Cancel', () => setEditingEvent(null)]]} /> : <ActionGroup actions={[['Edit', () => setEditingEvent({ ...event })], ['Delete', () => confirmDelete(event)]]} /> : '-'}</td>
             </tr>
@@ -5766,6 +5773,7 @@ function HearingBriefCard({ detail, canManage = false, notify, onChanged }) {
             <span style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: theme.muted }}>Next appearance</span>
             <span style={{ fontSize: 13, fontWeight: 600, color: theme.ink }}>{nextAppearance.title || nextAppearance.type || 'Appearance'}</span>
             <span style={{ fontSize: 12, color: theme.muted }}>{nextAppearance.date}{nextAppearance.time ? ` at ${nextAppearance.time}` : ''}{nextAppearance.location ? ` — ${nextAppearance.location}` : ''}</span>
+            <span style={{ fontSize: 12, color: theme.muted }}>Attendance: {attendanceLabels[nextAppearance.attendanceStatus || 'scheduled'] || 'Scheduled'}{nextAppearance.appearedBy ? ` / ${nextAppearance.appearedBy}` : ''}</span>
             {safeHttpUrl(nextAppearance.meetingLink) && <a href={safeHttpUrl(nextAppearance.meetingLink)} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: theme.blue, textDecoration: 'underline' }}>Join meeting</a>}
           </div>
           {nextAppearance.prepNote && (
@@ -6529,6 +6537,10 @@ function MatterCourtMode({ detail, nextActionHints }) {
             {nextAppearance.type && <CourtModeField label="Type" value={nextAppearance.type} />}
             {nextAppearance.location && <CourtModeField label="Location" value={nextAppearance.location} />}
             {nextAppearance.attorney && <CourtModeField label="Attorney" value={nextAppearance.attorney} />}
+            <CourtModeField label="Attendance" value={attendanceLabels[nextAppearance.attendanceStatus || 'scheduled'] || 'Scheduled'} />
+            {nextAppearance.appearedBy && <CourtModeField label="Appeared By" value={nextAppearance.appearedBy} />}
+            <CourtModeField label="Client Attended" value={nextAppearance.clientAttended ? 'Yes' : 'No'} />
+            {nextAppearance.attendanceNote && <CourtModeField label="Attendance Note" value={nextAppearance.attendanceNote} />}
             {nextAppearance.prepNote && <CourtModeField label="Prep Note" value={nextAppearance.prepNote} />}
             {nextAppearance.outcome && <CourtModeField label="Outcome" value={nextAppearance.outcome} />}
             {safeHttpUrl(nextAppearance.meetingLink) && <CourtModeField label="Virtual Court" value={<a href={safeHttpUrl(nextAppearance.meetingLink)} target="_blank" rel="noopener noreferrer" style={styles.link}>{nextAppearance.meetingLink}</a>} />}
