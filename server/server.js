@@ -169,6 +169,9 @@ const ALLOWED_LEGAL_RULE_TYPES = new Set(['limitation', 'statutory_recurring', '
 const ALLOWED_LEGAL_RULE_PERIOD_UNITS = new Set(['days', 'months', 'years']);
 const ALLOWED_LEGAL_RULE_COMPUTATION_MODES = new Set(['calendar']);
 
+// KENYA-32C: persisted deadline suggestion statuses (draft -> confirmed/cancelled, no other transitions).
+const ALLOWED_LEGAL_SUGGESTION_STATUSES = new Set(['draft', 'confirmed', 'cancelled']);
+
 const {
   defaultReminderSettings,
   defaultReminderTemplates,
@@ -1205,6 +1208,8 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS retainer_lifecycle_events (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, matterId TEXT, retainerId TEXT, eventType TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'recorded', effectiveDate TEXT, noticeDate TEXT, title TEXT, summary TEXT DEFAULT '', reason TEXT DEFAULT '', scopeBeforeSummary TEXT DEFAULT '', scopeAfterSummary TEXT DEFAULT '', clientObligationsSummary TEXT DEFAULT '', firmObligationsSummary TEXT DEFAULT '', isActive INTEGER NOT NULL DEFAULT 1, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, deactivatedBy TEXT, deactivatedAt TEXT)`);
   // KENYA-32B: legal deadline rule library (advocate-verified planning data; no hard-coded periods, no auto deadline creation).
   await run(`CREATE TABLE IF NOT EXISTS legal_deadline_rules (id TEXT PRIMARY KEY, ruleType TEXT NOT NULL, jurisdiction TEXT NOT NULL DEFAULT 'Kenya', legalArea TEXT, causeOfAction TEXT, title TEXT NOT NULL, triggerEvent TEXT NOT NULL, periodValue INTEGER NOT NULL, periodUnit TEXT NOT NULL, computationMode TEXT DEFAULT 'calendar', citation TEXT NOT NULL, notes TEXT DEFAULT '', effectiveFrom TEXT, effectiveTo TEXT, version INTEGER NOT NULL DEFAULT 1, isActive INTEGER NOT NULL DEFAULT 1, verifiedBy TEXT, verifiedAt TEXT, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, deactivatedBy TEXT, deactivatedAt TEXT)`);
+  // KENYA-32C: persisted legal deadline suggestions (advocate planning aids; snapshot of a rule + trigger date). Confirmation creates exactly one real deadline; suggestions never auto-create.
+  await run(`CREATE TABLE IF NOT EXISTS legal_deadline_suggestions (id TEXT PRIMARY KEY, ruleId TEXT NOT NULL, matterId TEXT, clientId TEXT, triggerDate TEXT NOT NULL, suggestedDueDate TEXT NOT NULL, title TEXT NOT NULL, ruleType TEXT NOT NULL, jurisdiction TEXT NOT NULL, legalArea TEXT, causeOfAction TEXT, triggerEvent TEXT NOT NULL, periodValue INTEGER NOT NULL, periodUnit TEXT NOT NULL, computationMode TEXT NOT NULL DEFAULT 'calendar', citation TEXT NOT NULL, disclaimer TEXT NOT NULL, requiresAdvocateVerification INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'draft', confirmedDeadlineId TEXT, notes TEXT DEFAULT '', createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, confirmedBy TEXT, confirmedAt TEXT, cancelledBy TEXT, cancelledAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS signature_assets (id TEXT PRIMARY KEY, ownerType TEXT NOT NULL CHECK(ownerType IN ('user','firm')), ownerId TEXT, assetType TEXT NOT NULL CHECK(assetType IN ('signature','stamp')), label TEXT NOT NULL, mimeType TEXT NOT NULL, content BLOB NOT NULL, size INTEGER, isDefault INTEGER DEFAULT 0, createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT, deletedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS hr_staff_profiles (id TEXT PRIMARY KEY, userId TEXT NOT NULL UNIQUE, jobTitle TEXT, department TEXT, practiceTeam TEXT, employmentType TEXT, startDate TEXT, contractEndDate TEXT, supervisorUserId TEXT, workEmail TEXT, workPhone TEXT, emergencyContactName TEXT, emergencyContactPhone TEXT, hrStatus TEXT NOT NULL DEFAULT 'active', adminNotes TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, createdBy TEXT, updatedBy TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS hr_leave_requests (
@@ -1450,6 +1455,10 @@ createdAt TEXT NOT NULL
   await run('CREATE INDEX IF NOT EXISTS idx_legal_deadline_rules_type_active ON legal_deadline_rules(ruleType, isActive)');
   await run('CREATE INDEX IF NOT EXISTS idx_legal_deadline_rules_jurisdiction_area ON legal_deadline_rules(jurisdiction, legalArea)');
   await run('CREATE INDEX IF NOT EXISTS idx_legal_deadline_rules_active ON legal_deadline_rules(isActive)');
+  await run('CREATE INDEX IF NOT EXISTS idx_legal_deadline_suggestions_status ON legal_deadline_suggestions(status)');
+  await run('CREATE INDEX IF NOT EXISTS idx_legal_deadline_suggestions_matter_status ON legal_deadline_suggestions(matterId, status)');
+  await run('CREATE INDEX IF NOT EXISTS idx_legal_deadline_suggestions_rule_status ON legal_deadline_suggestions(ruleId, status)');
+  await run('CREATE INDEX IF NOT EXISTS idx_legal_deadline_suggestions_due_date ON legal_deadline_suggestions(suggestedDueDate)');
   await run('CREATE INDEX IF NOT EXISTS idx_documents_matterId_deletedAt_date ON documents(matterId, deletedAt, date)');
   await run('CREATE INDEX IF NOT EXISTS idx_documents_folderId_deletedAt ON documents(folderId, deletedAt)');
   await run('CREATE INDEX IF NOT EXISTS idx_documents_messageId_deletedAt ON documents(messageId, deletedAt)');
@@ -7149,6 +7158,258 @@ app.post('/api/legal-deadline-rules/:id/preview', requireStaff, async (req, res)
     requiresAdvocateVerification: true,
     disclaimer: LEGAL_RULE_DISCLAIMER,
   });
+});
+
+// ---------------------------------------------------------------------------
+// KENYA-32C: persisted legal deadline suggestions + explicit confirm-to-deadline.
+// Suggestions snapshot a KENYA-32B rule + trigger date and remain internal planning
+// aids. Confirmation (advocate/admin only) creates EXACTLY ONE row in `deadlines`.
+// No recurring/cascade automation, no hard-coded periods, no client-portal exposure.
+// ---------------------------------------------------------------------------
+function publicLegalDeadlineSuggestion(row) {
+  return {
+    id: row.id,
+    ruleId: row.ruleId,
+    matterId: row.matterId || '',
+    clientId: row.clientId || '',
+    triggerDate: row.triggerDate || '',
+    suggestedDueDate: row.suggestedDueDate || '',
+    title: row.title || '',
+    ruleType: row.ruleType || '',
+    jurisdiction: row.jurisdiction || '',
+    legalArea: row.legalArea || '',
+    causeOfAction: row.causeOfAction || '',
+    triggerEvent: row.triggerEvent || '',
+    periodValue: Number(row.periodValue || 0),
+    periodUnit: row.periodUnit || '',
+    computationMode: row.computationMode || 'calendar',
+    citation: row.citation || '',
+    disclaimer: row.disclaimer || '',
+    requiresAdvocateVerification: Number(row.requiresAdvocateVerification || 0) === 1,
+    status: row.status || 'draft',
+    confirmedDeadlineId: row.confirmedDeadlineId || '',
+    notes: row.notes || '',
+    createdBy: row.createdBy || '',
+    createdAt: row.createdAt || '',
+    updatedAt: row.updatedAt || '',
+    confirmedAt: row.confirmedAt || '',
+    cancelledAt: row.cancelledAt || '',
+  };
+}
+
+// Whitelisted audit metadata: NO notes / legal analysis / private free text.
+function legalDeadlineSuggestionAuditMetadata(row) {
+  return {
+    suggestionId: row.id,
+    ruleId: row.ruleId || '',
+    matterId: row.matterId || '',
+    clientId: row.clientId || '',
+    status: row.status || '',
+    suggestedDueDate: row.suggestedDueDate || '',
+    confirmedDeadlineId: row.confirmedDeadlineId || '',
+    citation: row.citation || '',
+    ruleType: row.ruleType || '',
+    jurisdiction: row.jurisdiction || '',
+  };
+}
+
+function validateLegalDeadlineSuggestionPayload(payload, { partial = false } = {}) {
+  const p = payload || {};
+  if (!partial) {
+    if (!p.ruleId) return 'ruleId is required';
+    if (!p.triggerDate || Number.isNaN(new Date(p.triggerDate).getTime())) return 'A valid triggerDate is required';
+  }
+  if (p.title !== undefined && p.title !== null && String(p.title).length > 240) return 'title exceeds 240 characters';
+  if (p.notes !== undefined && p.notes !== null && String(p.notes).length > 5000) return 'notes exceeds 5000 characters';
+  return null;
+}
+
+app.get('/api/legal-deadline-suggestions', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'advancedCompliance', 'Advanced Compliance')) return;
+  const { matterId, clientId, status, ruleId } = req.query;
+  // Enforce access on supplied scope filters (advocate scoping).
+  if (matterId) {
+    const matter = await get('SELECT id FROM matters WHERE id=?', [matterId]);
+    if (!matter) return res.status(404).json({ error: 'Matter not found' });
+    if (!(await canAccessMatter(req, matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: matterId, matterId, metadata: { reason: 'insufficient permissions', route: 'legal_deadline_suggestions_list' } }).catch(() => {});
+      return res.status(403).json({ error: 'Matter access denied' });
+    }
+  } else if (clientId) {
+    const client = await get('SELECT id FROM clients WHERE id=?', [clientId]);
+    if (!client) return res.status(404).json({ error: 'Client not found' });
+    if (!(await canAccessClient(req, clientId))) {
+      await recordAuditEvent(req, { action: 'forbidden_client_access', entityType: 'client', entityId: clientId, clientId, metadata: { reason: 'insufficient permissions', route: 'legal_deadline_suggestions_list' } }).catch(() => {});
+      return res.status(403).json({ error: 'Client access denied' });
+    }
+  }
+  const conditions = [];
+  const params = [];
+  if (matterId) { conditions.push('matterId=?'); params.push(matterId); }
+  if (clientId) { conditions.push('clientId=?'); params.push(clientId); }
+  if (status) { conditions.push('status=?'); params.push(status); }
+  if (ruleId) { conditions.push('ruleId=?'); params.push(ruleId); }
+  const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+  const rows = await all(`SELECT * FROM legal_deadline_suggestions ${where} ORDER BY suggestedDueDate ASC, createdAt DESC`, params);
+  // Advocates only see suggestions they can reach when no accessible filter was applied.
+  let visible = rows;
+  if (req.user.role === 'advocate' && !matterId && !clientId) {
+    const filtered = [];
+    for (const row of rows) {
+      if (row.matterId) { if (await canAccessMatter(req, row.matterId)) filtered.push(row); }
+      else if (row.clientId) { if (await canAccessClient(req, row.clientId)) filtered.push(row); }
+      else if (row.createdBy === req.user.userId) filtered.push(row);
+    }
+    visible = filtered;
+  }
+  res.json(visible.map(publicLegalDeadlineSuggestion));
+});
+
+app.post('/api/legal-deadline-suggestions', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'advancedCompliance', 'Advanced Compliance')) return;
+  const validationError = validateLegalDeadlineSuggestionPayload(req.body, { partial: false });
+  if (validationError) return res.status(400).json({ error: validationError });
+  const { ruleId, matterId, clientId, triggerDate, title, notes } = req.body || {};
+  const rule = await get('SELECT * FROM legal_deadline_rules WHERE id=?', [ruleId]);
+  if (!rule || Number(rule.isActive || 0) !== 1) return res.status(404).json({ error: 'Legal deadline rule not found' });
+  let resolvedClientId = clientId || null;
+  if (matterId) {
+    const matter = await get('SELECT id, clientId FROM matters WHERE id=?', [matterId]);
+    if (!matter) return res.status(404).json({ error: 'Matter not found' });
+    if (!(await canAccessMatter(req, matterId))) {
+      await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: matterId, matterId, metadata: { reason: 'insufficient permissions', route: 'legal_deadline_suggestion_create' } }).catch(() => {});
+      return res.status(403).json({ error: 'Matter access denied' });
+    }
+    resolvedClientId = matter.clientId || clientId || null;
+  } else if (clientId) {
+    const client = await get('SELECT id FROM clients WHERE id=?', [clientId]);
+    if (!client) return res.status(404).json({ error: 'Client not found' });
+    if (!(await canAccessClient(req, clientId))) {
+      await recordAuditEvent(req, { action: 'forbidden_client_access', entityType: 'client', entityId: clientId, clientId, metadata: { reason: 'insufficient permissions', route: 'legal_deadline_suggestion_create' } }).catch(() => {});
+      return res.status(403).json({ error: 'Client access denied' });
+    }
+  }
+  const suggestedDueDate = computePreviewDueDate(triggerDate, rule.periodValue, rule.periodUnit);
+  if (!suggestedDueDate) return res.status(400).json({ error: 'Unable to compute a suggested date from this rule and trigger date' });
+  const id = genId('LDS');
+  const now = new Date().toISOString();
+  const resolvedTitle = (title && String(title).trim()) ? String(title).trim() : (rule.title || '');
+  await run(`INSERT INTO legal_deadline_suggestions (id,ruleId,matterId,clientId,triggerDate,suggestedDueDate,title,ruleType,jurisdiction,legalArea,causeOfAction,triggerEvent,periodValue,periodUnit,computationMode,citation,disclaimer,requiresAdvocateVerification,status,notes,createdBy,createdAt)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [id, rule.id, matterId || null, resolvedClientId, String(triggerDate).slice(0, 10), suggestedDueDate,
+     resolvedTitle, rule.ruleType || '', rule.jurisdiction || '', rule.legalArea || null, rule.causeOfAction || null,
+     rule.triggerEvent || '', Number(rule.periodValue || 0), rule.periodUnit || '', rule.computationMode || 'calendar',
+     rule.citation || '', LEGAL_RULE_DISCLAIMER, 1, 'draft', notes || '', req.user.userId || '', now]);
+  const row = await get('SELECT * FROM legal_deadline_suggestions WHERE id=?', [id]);
+  await recordAuditEvent(req, {
+    action: 'legal_deadline_suggestion_created',
+    entityType: 'legal_deadline_suggestion',
+    entityId: id,
+    matterId: matterId || '',
+    clientId: resolvedClientId || '',
+    metadata: legalDeadlineSuggestionAuditMetadata(row),
+  }).catch(() => {});
+  res.status(201).json(publicLegalDeadlineSuggestion(row));
+});
+
+app.patch('/api/legal-deadline-suggestions/:id', requireStaff, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'advancedCompliance', 'Advanced Compliance')) return;
+  const existing = await get('SELECT * FROM legal_deadline_suggestions WHERE id=?', [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Suggestion not found' });
+  if (existing.status !== 'draft') return res.status(409).json({ error: `Suggestion is ${existing.status} and can no longer be edited` });
+  if (req.user.role === 'advocate') {
+    if (existing.matterId) { if (!(await canAccessMatter(req, existing.matterId))) return res.status(403).json({ error: 'Matter access denied' }); }
+    else if (existing.clientId) { if (!(await canAccessClient(req, existing.clientId))) return res.status(403).json({ error: 'Client access denied' }); }
+    else if (existing.createdBy !== req.user.userId) return res.status(403).json({ error: 'Suggestion access denied' });
+  }
+  const { title, notes, status } = req.body || {};
+  if (status !== undefined && status !== 'cancelled') return res.status(400).json({ error: 'Only cancellation is permitted via status; use the confirm route to confirm' });
+  const lengthError = validateLegalDeadlineSuggestionPayload(req.body, { partial: true });
+  if (lengthError) return res.status(400).json({ error: lengthError });
+  const now = new Date().toISOString();
+  if (status === 'cancelled') {
+    await run('UPDATE legal_deadline_suggestions SET status=?, cancelledBy=?, cancelledAt=?, updatedBy=?, updatedAt=? WHERE id=? AND status=?',
+      ['cancelled', req.user.userId || '', now, req.user.userId || '', now, req.params.id, 'draft']);
+    const updated = await get('SELECT * FROM legal_deadline_suggestions WHERE id=?', [req.params.id]);
+    await recordAuditEvent(req, {
+      action: 'legal_deadline_suggestion_cancelled',
+      entityType: 'legal_deadline_suggestion',
+      entityId: req.params.id,
+      matterId: updated.matterId || '',
+      clientId: updated.clientId || '',
+      metadata: legalDeadlineSuggestionAuditMetadata(updated),
+    }).catch(() => {});
+    return res.json(publicLegalDeadlineSuggestion(updated));
+  }
+  const fields = [];
+  const vals = [];
+  if (title !== undefined) { fields.push('title=?'); vals.push((title && String(title).trim()) ? String(title).trim() : existing.title); }
+  if (notes !== undefined) { fields.push('notes=?'); vals.push(notes || ''); }
+  if (!fields.length) return res.status(400).json({ error: 'No fields to update' });
+  fields.push('updatedBy=?'); vals.push(req.user.userId || '');
+  fields.push('updatedAt=?'); vals.push(now);
+  vals.push(req.params.id);
+  await run(`UPDATE legal_deadline_suggestions SET ${fields.join(', ')} WHERE id=?`, vals);
+  const updated = await get('SELECT * FROM legal_deadline_suggestions WHERE id=?', [req.params.id]);
+  await recordAuditEvent(req, {
+    action: 'legal_deadline_suggestion_updated',
+    entityType: 'legal_deadline_suggestion',
+    entityId: req.params.id,
+    matterId: updated.matterId || '',
+    clientId: updated.clientId || '',
+    metadata: legalDeadlineSuggestionAuditMetadata(updated),
+  }).catch(() => {});
+  res.json(publicLegalDeadlineSuggestion(updated));
+});
+
+app.post('/api/legal-deadline-suggestions/:id/confirm', requireAdvocateOrAdmin, async (req, res) => {
+  if (!await requireEnabledModule(req, res, 'advancedCompliance', 'Advanced Compliance')) return;
+  const existing = await get('SELECT * FROM legal_deadline_suggestions WHERE id=?', [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Suggestion not found' });
+  if (existing.status !== 'draft') return res.status(409).json({ error: `Suggestion is already ${existing.status}` });
+  if (!existing.matterId) return res.status(400).json({ error: 'A matterId is required before confirming a suggestion' });
+  const matter = await get('SELECT id, clientId FROM matters WHERE id=?', [existing.matterId]);
+  if (!matter) return res.status(404).json({ error: 'Matter not found' });
+  if (!(await canAccessMatter(req, existing.matterId))) {
+    await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: existing.matterId, matterId: existing.matterId, metadata: { reason: 'insufficient permissions', route: 'legal_deadline_suggestion_confirm' } }).catch(() => {});
+    return res.status(403).json({ error: 'Matter access denied' });
+  }
+  const deadlineId = genId('DL');
+  const now = new Date().toISOString();
+  const clientId = existing.clientId || matter.clientId || '';
+  const deadlineNotes = `Created from legal deadline suggestion. Citation: ${existing.citation || ''}. Confirm applicable law before reliance.`;
+  await run('BEGIN TRANSACTION');
+  try {
+    const fresh = await get('SELECT status FROM legal_deadline_suggestions WHERE id=?', [req.params.id]);
+    if (!fresh || fresh.status !== 'draft') {
+      await run('ROLLBACK').catch(() => {});
+      return res.status(409).json({ error: 'Suggestion is no longer in draft status' });
+    }
+    await run('INSERT INTO deadlines (id,matterId,clientId,title,type,dueDate,owner,status,notes,createdBy,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+      [deadlineId, existing.matterId, clientId, existing.title, 'Legal Deadline', existing.suggestedDueDate, req.user.fullName || req.user.email || '', 'Open', deadlineNotes, req.user.userId || '', now]);
+    const upd = await run('UPDATE legal_deadline_suggestions SET status=?, confirmedDeadlineId=?, confirmedBy=?, confirmedAt=?, updatedBy=?, updatedAt=? WHERE id=? AND status=?',
+      ['confirmed', deadlineId, req.user.userId || '', now, req.user.userId || '', now, req.params.id, 'draft']);
+    if (!upd || upd.changes !== 1) {
+      await run('ROLLBACK').catch(() => {});
+      return res.status(409).json({ error: 'Suggestion could not be confirmed (already processed)' });
+    }
+    await run('COMMIT');
+  } catch (err) {
+    await run('ROLLBACK').catch(() => {});
+    return res.status(500).json({ error: err.message });
+  }
+  const updatedSuggestion = await get('SELECT * FROM legal_deadline_suggestions WHERE id=?', [req.params.id]);
+  const deadline = await get('SELECT * FROM deadlines WHERE id=?', [deadlineId]);
+  await recordAuditEvent(req, {
+    action: 'legal_deadline_suggestion_confirmed',
+    entityType: 'legal_deadline_suggestion',
+    entityId: req.params.id,
+    matterId: existing.matterId || '',
+    clientId: clientId || '',
+    metadata: legalDeadlineSuggestionAuditMetadata(updatedSuggestion),
+  }).catch(() => {});
+  await logAudit(req, 'create', 'deadline', deadlineId, `Created Legal Deadline ${existing.title} from suggestion`).catch(() => {});
+  res.json({ suggestion: publicLegalDeadlineSuggestion(updatedSuggestion), deadline });
 });
 
 app.delete('/api/clients/:id', requireAdvocateOrAdmin, async (req, res) => {

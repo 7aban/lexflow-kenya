@@ -296,6 +296,11 @@ export const createLegalDeadlineRule = payload => api('/legal-deadline-rules', {
 export const updateLegalDeadlineRule = (id, payload) => api(`/legal-deadline-rules/${id}`, { method: 'PATCH', body: payload });
 export const deleteLegalDeadlineRule = id => api(`/legal-deadline-rules/${id}`, { method: 'DELETE' });
 export const previewLegalDeadlineRule = (id, payload) => api(`/legal-deadline-rules/${id}/preview`, { method: 'POST', body: payload });
+// KENYA-32C: persisted deadline suggestions + explicit confirm-to-deadline (advocate/admin only).
+export const getLegalDeadlineSuggestions = (params = {}) => api(queryPath('/legal-deadline-suggestions', params));
+export const createLegalDeadlineSuggestion = payload => api('/legal-deadline-suggestions', { method: 'POST', body: payload });
+export const updateLegalDeadlineSuggestion = (id, payload) => api(`/legal-deadline-suggestions/${id}`, { method: 'PATCH', body: payload });
+export const confirmLegalDeadlineSuggestion = id => api(`/legal-deadline-suggestions/${id}/confirm`, { method: 'POST', body: {} });
 export const getNotifications = () => api('/notifications');
 export const markNotificationsRead = data => api('/notifications/read', { method: 'POST', body: data });
 export const getHrStaff = () => api('/hr/staff');

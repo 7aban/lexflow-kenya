@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { createDeadline, createLegalDeadlineRule, deleteDeadline, deleteLegalDeadlineRule, getComplianceGuidance, getDeadlines, getLegalDeadlineRules, previewLegalDeadlineRule, updateDeadline, updateLegalDeadlineRule } from '../lib/apiClient.js';
+import { confirmLegalDeadlineSuggestion, createDeadline, createLegalDeadlineRule, createLegalDeadlineSuggestion, deleteDeadline, deleteLegalDeadlineRule, getComplianceGuidance, getDeadlines, getLegalDeadlineRules, getLegalDeadlineSuggestions, previewLegalDeadlineRule, updateDeadline, updateLegalDeadlineRule, updateLegalDeadlineSuggestion } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Badge, Card, ConfirmModal, Empty, Field, MeetingLink, safeHttpUrl, Skeleton, Stat, Table } from '../components/ui.jsx';
 
@@ -88,6 +88,11 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
   const [previewMatterId, setPreviewMatterId] = useState('');
   const [previewResult, setPreviewResult] = useState(null);
   const [previewing, setPreviewing] = useState(false);
+  // KENYA-32C: persisted suggestions + confirm-to-deadline.
+  const [suggestions, setSuggestions] = useState([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [savingSuggestion, setSavingSuggestion] = useState(false);
+  const [confirmingId, setConfirmingId] = useState('');
 
   async function load() {
     setLoading(true);
@@ -296,6 +301,67 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
       notify?.({ type: 'danger', message: err.message });
     } finally {
       setPreviewing(false);
+    }
+  }
+
+  // KENYA-32C: persisted suggestions list (planning aids; never auto-create deadlines).
+  async function loadSuggestions() {
+    setSuggestionsLoading(true);
+    try {
+      const list = await getLegalDeadlineSuggestions({});
+      setSuggestions(list);
+    } catch (err) {
+      if (err.message !== 'feature_disabled') notify?.({ type: 'danger', message: err.message });
+      setSuggestions([]);
+    } finally {
+      setSuggestionsLoading(false);
+    }
+  }
+  useEffect(() => { if (ruleModuleEnabled === true) loadSuggestions(); }, [ruleModuleEnabled]);
+
+  // Persist the current preview as a draft suggestion. Creates NO deadline.
+  async function saveAsSuggestion() {
+    if (!previewResult || !previewRuleId || !previewTrigger) return;
+    setSavingSuggestion(true);
+    try {
+      await createLegalDeadlineSuggestion({ ruleId: previewRuleId, triggerDate: previewTrigger, matterId: previewMatterId || undefined });
+      notify?.({ type: 'success', message: 'Suggestion saved. It creates no deadline until confirmed.' });
+      await loadSuggestions();
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setSavingSuggestion(false);
+    }
+  }
+
+  async function cancelSuggestion(suggestion) {
+    try {
+      await updateLegalDeadlineSuggestion(suggestion.id, { status: 'cancelled' });
+      notify?.({ type: 'success', message: 'Suggestion cancelled.' });
+      await loadSuggestions();
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    }
+  }
+
+  function promptConfirmSuggestion(suggestion) {
+    setConfirm({
+      title: 'Confirm legal deadline?',
+      message: 'This will create an actual LexFlow deadline. Confirm the law and trigger date before proceeding.',
+      onConfirm: () => doConfirmSuggestion(suggestion),
+    });
+  }
+
+  async function doConfirmSuggestion(suggestion) {
+    setConfirmingId(suggestion.id);
+    try {
+      await confirmLegalDeadlineSuggestion(suggestion.id);
+      notify?.({ type: 'success', message: 'Deadline created from suggestion.' });
+      await Promise.all([loadSuggestions(), load()]);
+    } catch (err) {
+      notify?.({ type: 'danger', message: err.message });
+    } finally {
+      setConfirmingId('');
     }
   }
 
@@ -600,8 +666,60 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
                 <span style={{ fontSize: 12, color: theme.muted }}>Citation: {previewResult.citation}</span>
                 {previewResult.requiresAdvocateVerification && <Badge tone="amber">Advocate verification required</Badge>}
                 <p style={{ margin: 0, fontSize: 12, color: theme.muted, fontStyle: 'italic' }}>{previewResult.disclaimer}</p>
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button type="button" style={styles.ghostButton} disabled={savingSuggestion} onClick={saveAsSuggestion}>
+                    {savingSuggestion ? 'Saving…' : 'Save as suggestion'}
+                  </button>
+                </div>
               </div>
             )}
+          </Card>
+
+          <Card title="Saved Suggestions" hint="Internal planning aids. Confirming a draft creates one actual deadline.">
+            {suggestionsLoading ? (
+              <Skeleton rows={2} />
+            ) : suggestions.length === 0 ? (
+              <Empty title="No saved suggestions" text="Save a previewed date above to keep it for advocate review." />
+            ) : (
+              <div style={{ display: 'grid', gap: 10 }}>
+                {suggestions.map(suggestion => {
+                  const isDraft = suggestion.status === 'draft';
+                  const tone = suggestion.status === 'confirmed' ? 'green' : suggestion.status === 'cancelled' ? 'red' : 'gold';
+                  const matter = matterOptions.find(m => m.id === suggestion.matterId);
+                  const client = clientOptions.find(c => c.id === suggestion.clientId);
+                  return (
+                    <div key={suggestion.id} style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: 14, display: 'grid', gap: 6 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <strong style={{ fontSize: 14 }}>{suggestion.title}</strong>
+                        <Badge tone={tone}>{suggestion.status}</Badge>
+                      </div>
+                      <span style={{ fontSize: 12, color: theme.muted }}>{prettyType(suggestion.ruleType)} · due {suggestion.suggestedDueDate}</span>
+                      {(matter || client) && (
+                        <span style={{ fontSize: 12, color: theme.muted }}>
+                          {matter ? `Matter: ${matter.reference || matter.title}` : `Client: ${client?.name}`}
+                        </span>
+                      )}
+                      <span style={{ fontSize: 12, color: theme.muted }}>Citation: {suggestion.citation}</span>
+                      {suggestion.requiresAdvocateVerification && isDraft && <Badge tone="amber">Advocate verification required</Badge>}
+                      {suggestion.status === 'confirmed' && suggestion.confirmedDeadlineId && (
+                        <span style={{ fontSize: 12, color: theme.muted }}>Deadline: {suggestion.confirmedDeadlineId}</span>
+                      )}
+                      {isDraft && (
+                        <div style={{ ...styles.actionGroup, marginTop: 4 }}>
+                          {canManage && (
+                            <button type="button" style={styles.tinyButton} disabled={confirmingId === suggestion.id} onClick={() => promptConfirmSuggestion(suggestion)}>
+                              {confirmingId === suggestion.id ? 'Confirming…' : 'Confirm'}
+                            </button>
+                          )}
+                          <button type="button" style={styles.dangerTinyButton} onClick={() => cancelSuggestion(suggestion)}>Cancel</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {!canManage && <p style={{ margin: '8px 0 0', fontSize: 12, color: theme.muted }}>Assistants can save and cancel draft suggestions; only advocates and admins can confirm a deadline.</p>}
           </Card>
         </div>
       ) : null}
