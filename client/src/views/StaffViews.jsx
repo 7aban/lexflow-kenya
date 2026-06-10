@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote, IconMail, IconPaperclip, IconExternalLink } from '@tabler/icons-react';
+import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote, IconMail, IconPaperclip, IconExternalLink, IconLayoutDashboard, IconUsers } from '@tabler/icons-react';
 import { api, applyChecklistTemplate, approveHrLeaveRequest, cancelHrLeaveRequestAdmin, changePassword, clearSession, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, cancelOffboardingCase, completeOffboardingCase, createHrContract, createHrLeaveBalanceAdjustment, createHrStaffProfile, createMatterChecklistItem, createOffboardingCase, deleteChecklistTemplate, deleteClientAvatar, deleteHrDocument, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadHrDocumentContent, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getConnectedAccountAvailability, getHrContracts, getHrDashboard, getHrDocuments, getHrLeaveBalances, getHrLeaveRequests, getHrStaff, getHrStaffProfile, getOffboardingAssignedMatters, getOffboardingCase, getOffboardingCases, getClientSnapshot, getInvoiceDetails, getMatterTimeline, getAppearanceDocuments, linkAppearanceDocument, unlinkAppearanceDocument, getMatterWorkMetadataLinks, getRetainers, getRetainer, createRetainer, updateRetainer, deleteRetainer, generateRetainerDocument, listDocumentTemplates, getMatterFeePlans, getMatterFeePlan, createMatterFeePlan, updateMatterFeePlan, deleteMatterFeePlan, getRetainerLedger, getRetainerLedgerSummary, createRetainerLedgerEntry, voidRetainerLedgerEntry, getClientKyc, getClientKycRecord, createClientKyc, updateClientKyc, deleteClientKyc, getClientAuthorities, getClientAuthorityRecord, createClientAuthority, updateClientAuthority, deleteClientAuthority, getRetainerLifecycleEvents, getRetainerLifecycleEvent, createRetainerLifecycleEvent, updateRetainerLifecycleEvent, deleteRetainerLifecycleEvent, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, rejectHrLeaveRequest, setHrLeaveEntitlement, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrContract, updateHrDocument, updateHrStaffProfile, updateMatterChecklistItem, updateOffboardingCase, updateOffboardingChecklistItem, uploadClientAvatar, uploadHrDocument, uploadUserAvatar } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
@@ -1949,7 +1949,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
   const [selectedId, setSelectedId] = useState('');
   const [detail, setDetail] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
-  const [detailTab, setDetailTab] = useState('Workspace');
+  const [cockpitSection, setCockpitSection] = useState('overview');
   const [editingMatter, setEditingMatter] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [editingEvent, setEditingEvent] = useState(null);
@@ -1957,7 +1957,6 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
   const [confirm, setConfirm] = useState(null);
   const [tooltip, setTooltip] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [cockpitOpen, setCockpitOpen] = useState(false);
   const [workMetadataLinks, setWorkMetadataLinks] = useState([]);
   // PRODUCT-16M: client-side Matter list filters (UI convenience only; no fetch/API/selection/semantics change).
   const [matterSearch, setMatterSearch] = useState('');
@@ -1994,6 +1993,17 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
   const defaultInvoiceDueDate = addDaysIso(defaultInvoiceDueDays);
   const selected = data.matters.find(m => m.id === selectedId) || data.matters[0];
   const nextActionHints = useMemo(() => buildMatterNextActionHints(detail), [detail]);
+  const cockpitSections = useMemo(() => [
+    { id: 'overview', label: 'Overview', icon: IconLayoutDashboard, hint: 'Key details, next actions, and quick links across the matter.', badge: '' },
+    { id: 'tasks', label: 'Tasks', icon: IconListCheck, hint: 'Time entries, checklist, open tasks, and billable tracking.', badge: detail ? `${(detail.tasks || []).filter(t => !t.completed).length} open` : '' },
+    { id: 'court-diary', label: 'Court Diary', icon: IconCalendarEvent, hint: 'Appearances, prep notes, attendance, and hearing materials.', badge: detail ? `${(detail.appearances || []).length} dates` : '' },
+    { id: 'documents', label: 'Documents', icon: IconUpload, hint: 'Upload, folders, document requests, and PDF tools.', badge: detail ? `${(detail.documents || []).length} files` : '' },
+    { id: 'billing', label: 'Billing', icon: IconCash, hint: 'Invoices and billing status.', badge: detail ? `${(detail.invoices || []).length} invoices` : '' },
+    { id: 'timeline', label: 'Timeline', icon: IconClockHour4, hint: 'Chronological matter activity and event history.', badge: '' },
+    { id: 'client-portal', label: 'Client / Portal', icon: IconUsers, hint: 'Client visibility, shared documents, and portal overview.', badge: '' },
+    { id: 'notes', label: 'Notes / Preparation', icon: IconNote, hint: 'Case notes, hearing briefs, and preparation materials.', badge: detail ? `${(detail.notes || []).length} notes` : '' },
+  ], [detail]);
+  const activeCockpitSection = cockpitSections.find(s => s.id === cockpitSection) || cockpitSections[0];
 
   useEffect(() => { if (selected?.id) { setSelectedId(selected.id); loadDetail(selected.id); } else { setDetail(null); setSuggestions([]); } }, [selected?.id]);
   useEffect(() => { if (detail && isAdmin) getUsers(true).then(users => { setAdvocates((users || []).filter(u => u.role === 'advocate' && u.isActive)); setReassignTo(detail.assignedTo || ''); }).catch(() => {}); }, [detail?.id]);
@@ -2001,7 +2011,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
   useEffect(() => {
     if (!focus?.matterId) return;
     setSelectedId(focus.matterId);
-    setDetailTab('Workspace');
+    setCockpitSection('overview');
   }, [focus?.matterId, focus?.ts]);
 
   async function loadDetail(id) {
@@ -2264,39 +2274,78 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
                   </span>
                 )}
               </div>
-              <div style={styles.tabList}>
-                {['Workspace', 'Assistant', 'Court'].map(tab => (
-                  <button key={tab} type="button" onClick={() => setDetailTab(tab)} style={{ ...styles.tabButton, ...(detailTab === tab ? styles.tabActive : {}) }}>{tab}</button>
-                ))}
+              <div className="lf-matter-cockpit-nav" style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 10 }}>
+                {cockpitSections.map(s => {
+                  const active = cockpitSection === s.id;
+                  return (
+                    <button key={s.id} type="button" aria-pressed={active} onClick={() => setCockpitSection(s.id)} style={{ ...(active ? styles.primaryButton : styles.ghostButton), fontSize: 12, padding: '5px 10px', display: 'inline-flex', alignItems: 'center', gap: 4, margin: 0 }}>
+                      <s.icon size={14} stroke={1.75} />
+                      <span>{s.label}</span>
+                      {s.badge ? <span style={{ fontSize: 11, opacity: 0.75, marginLeft: 1 }}>({s.badge})</span> : null}
+                    </button>
+                  );
+                })}
               </div>
-              {detailTab === 'Assistant' ? (
-                <AssistantSuggestions suggestions={suggestions} hints={nextActionHints} />
-              ) : detailTab === 'Court' ? (
-                <MatterCourtMode detail={detail} nextActionHints={nextActionHints} />
-              ) : (
+              <div style={{ marginBottom: 12 }}>
+                <strong style={{ fontSize: 13, color: theme.ink }}>{activeCockpitSection.label}</strong>
+                <span style={{ color: theme.muted, fontSize: 12, marginLeft: 8 }}>{activeCockpitSection.hint}</span>
+              </div>
+
+              {cockpitSection === 'overview' && (
                 <>
-                  <div className="lf-matter-quick-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 4 }}>
-                    <button type="button" onClick={() => scrollToSection('matter-section-time')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="Log time for this matter">
+                  <div className="lf-matter-quick-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                    <button type="button" onClick={() => setCockpitSection('tasks')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="Log time for this matter">
                       <IconClock size={14} stroke={1.75} /> Log time
                     </button>
-                    <button type="button" onClick={() => scrollToSection('matter-section-tasks')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="View and add matter tasks">
+                    <button type="button" onClick={() => setCockpitSection('tasks')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="View and add matter tasks">
                       <IconListCheck size={14} stroke={1.75} /> Task
                     </button>
-                    <button type="button" onClick={() => scrollToSection('matter-section-court')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="Add court appearance or date">
+                    <button type="button" onClick={() => setCockpitSection('court-diary')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="Add court appearance or date">
                       <IconCalendarEvent size={14} stroke={1.75} /> Court / Diary
                     </button>
                     <button type="button" onClick={() => onNavigate?.('Deadlines')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="View full Court Diary in Deadlines view">
                       <IconCalendarEvent size={14} stroke={1.75} /> Court Diary
                     </button>
-                    <button type="button" onClick={() => scrollToSection('matter-section-documents')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="Upload or view documents">
+                    <button type="button" onClick={() => setCockpitSection('documents')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="Upload or view documents">
                       <IconUpload size={14} stroke={1.75} /> Document
                     </button>
-                    <button type="button" onClick={() => scrollToSection('matter-section-notes')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="Add case note">
+                    <button type="button" onClick={() => setCockpitSection('notes')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="Add case note">
                       <IconNote size={14} stroke={1.75} /> Note
                     </button>
                   </div>
+                  <div className="lf-matter-cockpit-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12, marginBottom: 12 }}>
+                    <MatterNextStepPanel detail={detail} onSectionNav={setCockpitSection} />
+                    <MatterCourtPrepCard detail={detail} onSectionNav={setCockpitSection} />
+                    <MatterKeyDocumentsPanel detail={detail} onSectionNav={setCockpitSection} />
+                    <MatterBillingSnapshot detail={detail} onSectionNav={setCockpitSection} />
+                  </div>
+                  <HearingBriefCard detail={detail} canManage={canManage} notify={notify} onChanged={() => loadDetail(detail.id)} onSectionNav={setCockpitSection} />
+                  <MatterCommandSummary detail={detail} nextActionHints={nextActionHints} />
+                  <MatterNextActionHints hints={nextActionHints} />
+                  <AssistantSuggestions suggestions={suggestions} hints={nextActionHints} />
+                </>
+              )}
+
+              {cockpitSection === 'tasks' && (
+                <>
+                  <form id="matter-section-time" onSubmit={logTime} style={styles.formGrid}>
+                    <Field label="Hours"><input type="number" min="0" step="0.1" style={styles.input} value={time.hours} onChange={e => setTime({ ...time, hours: Number(e.target.value) })} /></Field>
+                    <Field label="Description"><input style={styles.input} value={time.description} onChange={e => setTime({ ...time, description: e.target.value })} /></Field>
+                    {canViewBilling && <Field label="Rate"><input type="number" style={styles.input} value={time.rate} onChange={e => setTime({ ...time, rate: Number(e.target.value) })} /></Field>}
+                    <Field label="Billing class"><select style={styles.input} value={time.billable ? 'billable' : 'non_billable'} onChange={e => setTime({ ...time, billable: e.target.value === 'billable' })}><option value="billable">Billable</option><option value="non_billable">Non-billable</option></select></Field>
+                    <div style={{ ...styles.formHelper, gridColumn: '1 / -1' }}>{BILLABLE_TIME_GUIDANCE}</div>
+                    <button style={styles.primaryButton}>Log time</button>
+                  </form>
+                  <div style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Time entries"><TimeEntryEditorList entries={detail.timeEntries || []} canManage={canManage} canViewBilling={canViewBilling} editingTime={editingTime} setEditingTime={setEditingTime} saveTimeEntry={saveTimeEntry} confirmDelete={entry => setConfirm({ title: 'Delete time entry?', message: 'Delete this time entry?', onConfirm: () => deleteTimeEntryRecord(entry) })} /></Sub></div>
+                  <Sub title="Checklist"><MatterChecklistPanel items={detail.checklistItems || []} templates={activeChecklistTemplates} canManage={canManageChecklist} canToggle={canToggleChecklist} canApplyTemplate={canApplyChecklistTemplate} selectedTemplateId={selectedTemplateId} setSelectedTemplateId={setSelectedTemplateId} onApplyTemplate={applySelectedChecklistTemplate} applyingTemplate={applyingTemplate} form={checklistForm} setForm={setChecklistForm} onAdd={addChecklistItem} editingItem={editingChecklistItem} setEditingItem={setEditingChecklistItem} onToggle={toggleChecklistItem} onSave={saveChecklistItem} confirmDelete={item => setConfirm({ title: 'Delete checklist item?', message: 'Delete this checklist item?', onConfirm: () => deleteChecklistItemRecord(item) })} /></Sub>
+                  <div id="matter-section-tasks" style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Tasks"><TaskEditorList tasks={detail.tasks || []} entries={detail.timeEntries || []} matter={detail} canManage={canManage} canViewBilling={canViewBilling} editingTask={editingTask} setEditingTask={setEditingTask} saveTask={saveTask} taskTimer={taskTimer} setTaskTimer={setTaskTimer} notify={notify} onTimerSaved={async () => { await loadDetail(detail.id); await reload(); }} confirmDelete={task => setConfirm({ title: 'Delete task?', message: 'Delete this task?', onConfirm: () => deleteTaskRecord(task) })} /></Sub></div>
+                </>
+              )}
+
+              {cockpitSection === 'court-diary' && (
+                <>
                   {workMetadataLinks.length > 0 && (
-                    <section aria-label="Linked metadata" style={{ border: `1px solid ${theme.line}`, background: '#fff', borderRadius: 10, padding: 14, display: 'grid', gap: 10 }}>
+                    <section aria-label="Linked metadata" style={{ border: `1px solid ${theme.line}`, background: '#fff', borderRadius: 10, padding: 14, display: 'grid', gap: 10, marginBottom: 12 }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
                         <div style={{ display: 'grid', gap: 2 }}>
                           <strong style={{ fontSize: 13 }}>Linked metadata <span style={{ color: theme.muted, fontSize: 12, fontWeight: 400 }}>({workMetadataLinks.length})</span></strong>
@@ -2328,42 +2377,20 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
                       </div>
                     </section>
                   )}
-                  <section aria-label="Matter cockpit" style={{ border: `1px solid ${theme.line}`, background: '#fff', borderRadius: 10, padding: 14, display: 'grid', gap: 10 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-                      <div style={{ display: 'grid', gap: 2 }}>
-                        <strong style={{ fontSize: 13 }}>Matter cockpit</strong>
-                        <span style={{ color: theme.muted, fontSize: 12 }}>Next step, court prep, key documents, and billing snapshot.</span>
-                      </div>
-                      <button type="button" aria-expanded={cockpitOpen} onClick={() => setCockpitOpen(open => !open)} style={{ ...styles.ghostButton, fontSize: 12, padding: '4px 10px' }}>{cockpitOpen ? 'Hide cockpit' : 'Show cockpit'}</button>
-                    </div>
-                    {cockpitOpen && (
-                      <div className="lf-matter-cockpit" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
-                        <MatterNextStepPanel detail={detail} />
-                        <MatterCourtPrepCard detail={detail} />
-                        <MatterKeyDocumentsPanel detail={detail} />
-                        <MatterBillingSnapshot detail={detail} />
-                      </div>
-                    )}
-                    <HearingBriefCard detail={detail} canManage={canManage} notify={notify} onChanged={() => loadDetail(detail.id)} />
-                  </section>
-                  <MatterCommandSummary detail={detail} nextActionHints={nextActionHints} />
-                  <MatterNextActionHints hints={nextActionHints} />
-                  <MatterActivityTimeline detail={detail} />
-                  <form id="matter-section-time" onSubmit={logTime} style={styles.formGrid}>
-                    <Field label="Hours"><input type="number" min="0" step="0.1" style={styles.input} value={time.hours} onChange={e => setTime({ ...time, hours: Number(e.target.value) })} /></Field>
-                    <Field label="Description"><input style={styles.input} value={time.description} onChange={e => setTime({ ...time, description: e.target.value })} /></Field>
-                    {canViewBilling && <Field label="Rate"><input type="number" style={styles.input} value={time.rate} onChange={e => setTime({ ...time, rate: Number(e.target.value) })} /></Field>}
-                    <Field label="Billing class"><select style={styles.input} value={time.billable ? 'billable' : 'non_billable'} onChange={e => setTime({ ...time, billable: e.target.value === 'billable' })}><option value="billable">Billable</option><option value="non_billable">Non-billable</option></select></Field>
-                    <div style={{ ...styles.formHelper, gridColumn: '1 / -1' }}>{BILLABLE_TIME_GUIDANCE}</div>
-                    <button style={styles.primaryButton}>Log time</button>
-                  </form>
-                  <div style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Time entries"><TimeEntryEditorList entries={detail.timeEntries || []} canManage={canManage} canViewBilling={canViewBilling} editingTime={editingTime} setEditingTime={setEditingTime} saveTimeEntry={saveTimeEntry} confirmDelete={entry => setConfirm({ title: 'Delete time entry?', message: 'Delete this time entry?', onConfirm: () => deleteTimeEntryRecord(entry) })} /></Sub></div>
-                  <Sub title="Checklist"><MatterChecklistPanel items={detail.checklistItems || []} templates={activeChecklistTemplates} canManage={canManageChecklist} canToggle={canToggleChecklist} canApplyTemplate={canApplyChecklistTemplate} selectedTemplateId={selectedTemplateId} setSelectedTemplateId={setSelectedTemplateId} onApplyTemplate={applySelectedChecklistTemplate} applyingTemplate={applyingTemplate} form={checklistForm} setForm={setChecklistForm} onAdd={addChecklistItem} editingItem={editingChecklistItem} setEditingItem={setEditingChecklistItem} onToggle={toggleChecklistItem} onSave={saveChecklistItem} confirmDelete={item => setConfirm({ title: 'Delete checklist item?', message: 'Delete this checklist item?', onConfirm: () => deleteChecklistItemRecord(item) })} /></Sub>
-                  <div id="matter-section-tasks" style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Tasks"><TaskEditorList tasks={detail.tasks || []} entries={detail.timeEntries || []} matter={detail} canManage={canManage} canViewBilling={canViewBilling} editingTask={editingTask} setEditingTask={setEditingTask} saveTask={saveTask} taskTimer={taskTimer} setTaskTimer={setTaskTimer} notify={notify} onTimerSaved={async () => { await loadDetail(detail.id); await reload(); }} confirmDelete={task => setConfirm({ title: 'Delete task?', message: 'Delete this task?', onConfirm: () => deleteTaskRecord(task) })} /></Sub></div>
                   <div id="matter-section-court" style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Court Diary / Appearances" hint="View and manage court appearances. All appearances also appear in the Court Diary under Deadlines.">{canManage && <form onSubmit={createEvent} style={{ ...styles.formGrid, marginBottom: 12 }}><Field label="Title"><input required style={styles.input} value={eventForm.title} onChange={e => setEventForm({ ...eventForm, title: e.target.value })} /></Field><Field label="Date"><input required type="date" style={styles.input} value={eventForm.date} onChange={e => setEventForm({ ...eventForm, date: e.target.value })} /></Field><Field label="Time"><input style={styles.input} value={eventForm.time} onChange={e => setEventForm({ ...eventForm, time: e.target.value })} /></Field><Field label="Type"><input style={styles.input} value={eventForm.type} onChange={e => setEventForm({ ...eventForm, type: e.target.value })} /></Field><Field label="Location"><input style={styles.input} value={eventForm.location} onChange={e => setEventForm({ ...eventForm, location: e.target.value })} /></Field><Field label="Meeting Link"><input type="url" placeholder="https://..." style={styles.input} value={eventForm.meetingLink} onChange={e => setEventForm({ ...eventForm, meetingLink: e.target.value })} /></Field><button style={styles.ghostButton}>Schedule event</button></form>}<AppearanceEditorList events={detail.appearances || []} canManage={canManage} editingEvent={editingEvent} setEditingEvent={setEditingEvent} saveEvent={saveEvent} confirmDelete={event => setConfirm({ title: 'Delete appearance?', message: 'Delete this court appearance?', onConfirm: () => deleteEventRecord(event) })} /></Sub></div>
+                  <MatterCourtMode detail={detail} nextActionHints={nextActionHints} />
+                </>
+              )}
+
+              {cockpitSection === 'documents' && (
+                <>
                   <div id="matter-section-documents" style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Documents"><MatterDocuments matterId={detail.id} canManage={canManage} notify={notify} /></Sub></div>
                   <div id="matter-section-document-requests" style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Document requests"><DocumentRequestsPanel matterId={detail.id} canManage={canManage} notify={notify} downloadWithAuth={downloadWithAuth} /></Sub></div>
-                  <div id="matter-section-notes" style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Case notes"><form onSubmit={addNote} style={styles.noteForm}><input style={styles.input} value={note} onChange={e => setNote(e.target.value)} placeholder="Add a note" /><button style={styles.ghostButton}>Save note</button></form><div className="lf-matter-notes-cards"><Table columns={['Note', 'Author', 'Created']} rows={(detail.notes || []).map(n => [n.content, n.author || '-', n.createdAt ? new Date(n.createdAt).toLocaleString() : '-'])} empty="No notes yet." /></div></Sub></div>
+                </>
+              )}
+
+              {cockpitSection === 'billing' && (
+                <>
                   <div id="matter-section-invoices" style={{ minWidth: 0, maxWidth: '100%' }}>
                     <Sub title="Invoices">
                       {canManage && (
@@ -2381,6 +2408,49 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
                       <div className="lf-invoice-cards"><Table columns={['Invoice', 'Amount', 'Paid', 'Balance', 'Status', 'PDF', 'Actions']} rows={(detail.invoices || []).map(i => [i.number || i.id, kes(i.amount), kes(i.amountPaid), kes(i.balance), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <DownloadButton key={`${i.id}-pdf`} label="PDF" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />, canManage && i.status !== 'Paid' ? <ActionGroup key={`${i.id}-actions`} actions={[['Delete', () => setConfirm({ title: 'Delete invoice?', message: 'Delete this invoice?', onConfirm: () => deleteInvoiceRecord(i) })]]} /> : '-'])} empty="No invoices yet." /></div>
                     </Sub>
                   </div>
+                </>
+              )}
+
+              {cockpitSection === 'timeline' && (
+                <MatterActivityTimeline detail={detail} />
+              )}
+
+              {cockpitSection === 'client-portal' && (
+                <div style={{ padding: '12px 0' }}>
+                  <Sub title="Client / Portal">
+                    <div style={{ display: 'grid', gap: 12 }}>
+                      <div style={{ fontSize: 13, color: theme.ink }}>
+                        <strong>Client:</strong> {detail.clientName || 'No client'}
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                        {detail.documents && detail.documents.filter(d => d.clientVisible).length > 0 ? (
+                          <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: '10px 12px', background: '#F9FAFB', flex: '1 1 200px' }}>
+                            <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, color: theme.muted, marginBottom: 4 }}>Shared Documents</div>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>{detail.documents.filter(d => d.clientVisible).length} shared</div>
+                            <div style={{ fontSize: 12, color: theme.muted }}>{detail.documents.length} total documents</div>
+                          </div>
+                        ) : (
+                          <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: '10px 12px', background: '#F9FAFB', flex: '1 1 200px' }}>
+                            <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, color: theme.muted, marginBottom: 4 }}>Shared Documents</div>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>None shared</div>
+                            <div style={{ fontSize: 12, color: theme.muted }}>Documents are staff-only until marked client-visible</div>
+                          </div>
+                        )}
+                        <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: '10px 12px', background: '#F9FAFB', flex: '1 1 200px' }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, color: theme.muted, marginBottom: 4 }}>Portal Access</div>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>{detail.portalAccess ? (detail.portalAccess === 'active' ? 'Active' : 'Available') : 'Not configured'}</div>
+                          <div style={{ fontSize: 12, color: theme.muted }}>Client portal access status</div>
+                        </div>
+                      </div>
+                    </div>
+                  </Sub>
+                </div>
+              )}
+
+              {cockpitSection === 'notes' && (
+                <>
+                  <div id="matter-section-notes" style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Case notes"><form onSubmit={addNote} style={styles.noteForm}><input style={styles.input} value={note} onChange={e => setNote(e.target.value)} placeholder="Add a note" /><button style={styles.ghostButton}>Save note</button></form><div className="lf-matter-notes-cards"><Table columns={['Note', 'Author', 'Created']} rows={(detail.notes || []).map(n => [n.content, n.author || '-', n.createdAt ? new Date(n.createdAt).toLocaleString() : '-'])} empty="No notes yet." /></div></Sub></div>
+                  <HearingBriefCard detail={detail} canManage={canManage} notify={notify} onChanged={() => loadDetail(detail.id)} onSectionNav={setCockpitSection} />
                 </>
               )}
             </div>
@@ -5880,8 +5950,9 @@ function hintLabel(value) {
   return String(value || '').replace(/-/g, ' ');
 }
 
-function MatterNextStepPanel({ detail }) {
+function MatterNextStepPanel({ detail, onSectionNav }) {
   const step = useMemo(() => computeNextStep(detail), [detail]);
+  const sectionMap = { 'matter-section-tasks': 'tasks', 'matter-section-court': 'court-diary', 'matter-section-documents': 'documents', 'matter-section-time': 'billing' };
   if (!step) return null;
   return (
     <section aria-label="Next step" style={{ border: `1px solid ${theme.line}`, borderLeft: `4px solid ${theme.gold || '#D4A34A'}`, borderRadius: 10, padding: 14, background: '#fff', display: 'grid', gap: 8 }}>
@@ -5890,7 +5961,7 @@ function MatterNextStepPanel({ detail }) {
           <strong style={{ fontSize: 13 }}>Next step</strong>
           <span style={{ color: theme.muted, fontSize: 12 }}>{step.reason}</span>
         </div>
-        <button type="button" onClick={() => scrollToSection(step.sectionId)} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }} aria-label={step.title}>
+        <button type="button" onClick={() => onSectionNav?.(sectionMap[step.sectionId] || 'tasks')} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }} aria-label={step.title}>
           {step.actionLabel}
         </button>
       </div>
@@ -5899,7 +5970,7 @@ function MatterNextStepPanel({ detail }) {
   );
 }
 
-function MatterCourtPrepCard({ detail }) {
+function MatterCourtPrepCard({ detail, onSectionNav }) {
   const appearances = Array.isArray(detail?.appearances) ? detail.appearances : [];
   const tasks = Array.isArray(detail?.tasks) ? detail.tasks : [];
   const documents = Array.isArray(detail?.documents) ? detail.documents : [];
@@ -5922,7 +5993,7 @@ function MatterCourtPrepCard({ detail }) {
             <strong style={{ fontSize: 13 }}>Court prep</strong>
             <span style={{ color: theme.muted, fontSize: 12 }}>No upcoming court date recorded for this matter.</span>
           </div>
-          <button type="button" onClick={() => scrollToSection('matter-section-court')} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }} aria-label="Add or check court dates">Add/check court dates</button>
+          <button type="button" onClick={() => onSectionNav?.('court-diary')} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }} aria-label="Add or check court dates">Add/check court dates</button>
         </div>
         {chips.length > 0 && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{chips.map((c, i) => <span key={i} style={chipStyle}>{c.label}</span>)}</div>}
       </section>
@@ -5935,7 +6006,7 @@ function MatterCourtPrepCard({ detail }) {
           <strong style={{ fontSize: 13 }}>Next court prep</strong>
           <span style={{ color: theme.muted, fontSize: 12 }}>{nextAppearance.type || 'Appearance'} on {nextAppearance.date}{nextAppearance.time ? ` at ${nextAppearance.time}` : ''}{nextAppearance.location ? ` — ${nextAppearance.location}` : ''}</span>
         </div>
-        <button type="button" onClick={() => scrollToSection('matter-section-court')} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }} aria-label="Go to court section">Go to court section</button>
+        <button type="button" onClick={() => onSectionNav?.('court-diary')} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }} aria-label="Go to court section">Go to court section</button>
       </div>
       <span style={{ fontSize: 14, color: theme.ink }}>{nextAppearance.title || `${nextAppearance.type || 'Court'} preparation`}</span>
       {safeHttpUrl(nextAppearance.meetingLink) && <a href={safeHttpUrl(nextAppearance.meetingLink)} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: theme.blue, textDecoration: 'underline' }}>Virtual court link</a>}
@@ -5947,7 +6018,7 @@ function MatterCourtPrepCard({ detail }) {
 const hearingPrepCategories = ['general', 'document', 'witness', 'authority', 'submission', 'client', 'filing'];
 const hearingPrepLabels = { general: 'General', document: 'Documents', witness: 'Witnesses', authority: 'Authorities', submission: 'Submissions', client: 'Client', filing: 'Filing' };
 
-function HearingBriefCard({ detail, canManage = false, notify, onChanged }) {
+function HearingBriefCard({ detail, canManage = false, notify, onChanged, onSectionNav }) {
   const [prepForm, setPrepForm] = useState({ title: '', category: 'general', notes: '' });
   const [editingPrepItem, setEditingPrepItem] = useState(null);
   const [linkedDocs, setLinkedDocs] = useState([]);
@@ -6132,7 +6203,7 @@ function HearingBriefCard({ detail, canManage = false, notify, onChanged }) {
   );
 }
 
-function MatterKeyDocumentsPanel({ detail }) {
+function MatterKeyDocumentsPanel({ detail, onSectionNav }) {
   const documents = Array.isArray(detail?.documents) ? detail.documents : [];
   const sorted = [...documents].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
   const shown = sorted.slice(0, 5);
@@ -6145,7 +6216,7 @@ function MatterKeyDocumentsPanel({ detail }) {
             <strong style={{ fontSize: 13 }}>Key documents</strong>
             <span style={{ color: theme.muted, fontSize: 12 }}>No documents recorded for this matter yet.</span>
           </div>
-          <button type="button" onClick={() => scrollToSection('matter-section-documents')} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }} aria-label="Go to documents section">Go to documents</button>
+          <button type="button" onClick={() => onSectionNav?.('documents')} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }} aria-label="Go to documents section">Go to documents</button>
         </div>
       </section>
     );
@@ -6154,7 +6225,7 @@ function MatterKeyDocumentsPanel({ detail }) {
     <section aria-label="Key documents" style={cardStyle}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <strong style={{ fontSize: 13 }}>Key documents</strong>
-        <button type="button" onClick={() => scrollToSection('matter-section-documents')} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }} aria-label="Go to documents section">Go to documents</button>
+        <button type="button" onClick={() => onSectionNav?.('documents')} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }} aria-label="Go to documents section">Go to documents</button>
       </div>
       <div style={{ display: 'grid', gap: 6 }}>
         {shown.map(doc => (
@@ -6171,7 +6242,7 @@ function MatterKeyDocumentsPanel({ detail }) {
   );
 }
 
-function MatterBillingSnapshot({ detail }) {
+function MatterBillingSnapshot({ detail, onSectionNav }) {
   const timeEntries = Array.isArray(detail?.timeEntries) ? detail.timeEntries : [];
   const invoices = Array.isArray(detail?.invoices) ? detail.invoices : [];
   const totalHours = timeEntries.reduce((s, e) => s + Number(e.hours || 0), 0);
@@ -6189,7 +6260,7 @@ function MatterBillingSnapshot({ detail }) {
             <strong style={{ fontSize: 13 }}>Billing snapshot</strong>
             <span style={{ color: theme.muted, fontSize: 12 }}>No billing activity recorded for this matter yet.</span>
           </div>
-          <button type="button" onClick={() => scrollToSection(invoiceCount ? 'matter-section-invoices' : 'matter-section-time')} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }} aria-label={invoiceCount ? 'Go to invoices' : 'Go to time entries'}>{invoiceCount ? 'Go to invoices' : 'Go to time entries'}</button>
+          <button type="button" onClick={() => onSectionNav?.('billing')} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }} aria-label="Go to billing">Go to billing</button>
         </div>
       </section>
     );
@@ -6198,7 +6269,7 @@ function MatterBillingSnapshot({ detail }) {
     <section aria-label="Billing snapshot" style={cardStyle}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <strong style={{ fontSize: 13 }}>Billing snapshot</strong>
-        <button type="button" onClick={() => scrollToSection(invoiceCount ? 'matter-section-invoices' : 'matter-section-time')} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }} aria-label={invoiceCount ? 'Go to invoices' : 'Go to time entries'}>{invoiceCount ? 'Go to invoices' : 'Go to time entries'}</button>
+        <button type="button" onClick={() => onSectionNav?.('billing')} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 14px', whiteSpace: 'nowrap' }} aria-label="Go to billing">Go to billing</button>
       </div>
       <div style={{ display: 'grid', gap: 6 }}>
         {totalHours > 0 && (
