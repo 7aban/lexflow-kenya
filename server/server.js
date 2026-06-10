@@ -2110,6 +2110,15 @@ function pruneExpiredCodes() {
 }
 
 // --- Staff OAuth routes (no authentication required) ---
+// Public OAuth availability endpoint — returns only safe booleans, no secrets.
+app.get('/api/auth/oauth/availability', async (_req, res) => {
+  const stateReady = Boolean(config.OAUTH_STATE_SECRET);
+  res.json({
+    google: stateReady && config.OAUTH_STAFF_ENABLED && Boolean(config.GOOGLE_CLIENT_ID && config.GOOGLE_CLIENT_SECRET),
+    microsoft: stateReady && config.OAUTH_STAFF_ENABLED && Boolean(config.MICROSOFT_CLIENT_ID && config.MICROSOFT_CLIENT_SECRET),
+  });
+});
+
 app.get('/api/auth/oauth/google/start', async (req, res) => {
   if (!config.OAUTH_STAFF_ENABLED) return res.status(503).json({ error: 'Staff OAuth is not enabled.' });
   try {
@@ -2117,7 +2126,7 @@ app.get('/api/auth/oauth/google/start', async (req, res) => {
     const url = googleOAuth.buildAuthorizationUrl(state);
     await recordAuditEvent(req, { action: 'oauth_login_started', entityType: 'oauth', metadata: { provider: 'google' } }).catch(() => {});
     res.json({ authorizationUrl: url });
-  } catch (err) { res.status(500).json({ error: 'OAuth is not configured.' }); }
+  } catch (err) { res.status(503).json({ error: 'OAuth is not configured.' }); }
 });
 
 app.get('/api/auth/oauth/google/callback', async (req, res) => {
@@ -2155,7 +2164,7 @@ app.get('/api/auth/oauth/microsoft/start', async (req, res) => {
     const url = microsoftOAuth.buildAuthorizationUrl(state);
     await recordAuditEvent(req, { action: 'oauth_login_started', entityType: 'oauth', metadata: { provider: 'microsoft' } }).catch(() => {});
     res.json({ authorizationUrl: url });
-  } catch (err) { res.status(500).json({ error: 'OAuth is not configured.' }); }
+  } catch (err) { res.status(503).json({ error: 'OAuth is not configured.' }); }
 });
 
 app.get('/api/auth/oauth/microsoft/callback', async (req, res) => {

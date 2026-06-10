@@ -36,9 +36,9 @@ function OAuthDivider() {
   );
 }
 
-function OAuthButton({ provider, onClick }) {
+function OAuthButton({ provider, onClick, disabled }) {
   return (
-    <button type="button" onClick={onClick} className="lf-login-oauth" style={styles.loginOauthButton}>
+    <button type="button" onClick={onClick} className="lf-login-oauth" style={{ ...styles.loginOauthButton, opacity: disabled ? 0.45 : 1, cursor: disabled ? 'not-allowed' : 'pointer' }} disabled={disabled}>
       {provider === 'google' ? <GoogleLogo /> : <MicrosoftLogo />}
       <span>{provider === 'google' ? 'Continue with Google' : 'Continue with Microsoft'}</span>
     </button>
@@ -69,9 +69,12 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
   useEffect(() => {
     async function checkOAuth() {
       try {
-        const res = await fetch(`${API_BASE}/auth/oauth/google/start`);
-        if (res.ok || res.status === 503) {
-          setOauthEnabled(res.status !== 503);
+        const res = await fetch(`${API_BASE}/auth/oauth/availability`);
+        if (res.ok) {
+          const data = await res.json();
+          setOauthEnabled(data.google || data.microsoft);
+        } else {
+          setOauthEnabled(false);
         }
       } catch {
         setOauthEnabled(false);
@@ -209,17 +212,15 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
                 userSelect: staffAuxHidden ? 'none' : 'auto',
               }}
             >
+              <OAuthDivider />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <OAuthButton provider="google" onClick={() => oauthEnabled && handleOAuth('google')} disabled={!oauthEnabled || oauthBusy} />
+                <OAuthButton provider="microsoft" onClick={() => oauthEnabled && handleOAuth('microsoft')} disabled={!oauthEnabled || oauthBusy} />
+              </div>
               {oauthEnabled ? (
-                <>
-                  <OAuthDivider />
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <OAuthButton provider="google" onClick={() => handleOAuth('google')} />
-                    <OAuthButton provider="microsoft" onClick={() => handleOAuth('microsoft')} />
-                  </div>
-                  <div style={{ fontSize: 11, color: theme.muted, textAlign: 'center', marginTop: 8 }}>For authorised firm users only.</div>
-                </>
+                <div style={{ fontSize: 11, color: theme.muted, textAlign: 'center', marginTop: 8 }}>For authorised firm users only.</div>
               ) : (
-                <div style={{ height: 1 }} />
+                <div style={{ fontSize: 11, color: theme.muted, textAlign: 'center', marginTop: 8, lineHeight: 1.5 }}>OAuth is not configured for this local pilot. Use email and password.</div>
               )}
               {isDev && <div style={styles.loginDemoHint}>Use the seeded demo credentials from the project README / seed output.</div>}
             </div>
