@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { API_BASE, api, fileToDataUrl, fetchDocumentArrayBuffer, getMatterDocuments, listDocumentTemplates, mergePdfDocuments, readSession, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf, splitPdfPages, saveSplitPdf, imagesToPdf, saveImagesToPdf, deletePdfPages, saveDeletedPdf, numberPdfPages, saveNumberedPdf, createCourtBundle, saveCourtBundle, stampPdf, saveStampedPdf, tenthLinePdf, saveTenthLinedPdf } from '../lib/apiClient.js';
+import { API_BASE, api, fileToDataUrl, fetchDocumentArrayBuffer, getMatterDocuments, listChecklistTemplates, listDocumentTemplates, mergePdfDocuments, readSession, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf, splitPdfPages, saveSplitPdf, imagesToPdf, saveImagesToPdf, deletePdfPages, saveDeletedPdf, numberPdfPages, saveNumberedPdf, createCourtBundle, saveCourtBundle, stampPdf, saveStampedPdf, tenthLinePdf, saveTenthLinedPdf } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Skeleton } from '../components/ui.jsx';
 import DocumentToolCards from './document-studio/DocumentToolCards.jsx';
@@ -53,10 +53,14 @@ function SignatureAssetPreview({ asset }) {
   );
 }
 
-export default function DocumentStudio({ notify }) {
+export default function DocumentStudio({ notify, onNavigate }) {
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  const [checklistTemplates, setChecklistTemplates] = useState([]);
+  const [checklistTemplatesLoading, setChecklistTemplatesLoading] = useState(true);
+  const [checklistTemplatesError, setChecklistTemplatesError] = useState(null);
 
   const [previewTemplate, setPreviewTemplate] = useState(null);
   const [matters, setMatters] = useState([]);
@@ -250,6 +254,7 @@ export default function DocumentStudio({ notify }) {
 
   useEffect(() => {
     load();
+    loadChecklistTemplates();
     loadMatters();
     loadSignatureAssets();
     // Best-effort firm name for prefilling the optional cover "prepared by" field.
@@ -425,6 +430,19 @@ export default function DocumentStudio({ notify }) {
       notify?.({ type: 'danger', message: err.message || 'Could not load document templates.' });
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadChecklistTemplates() {
+    setChecklistTemplatesLoading(true);
+    setChecklistTemplatesError(null);
+    try {
+      const data = await listChecklistTemplates();
+      setChecklistTemplates(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setChecklistTemplatesError(err.message || 'Could not load checklist templates.');
+    } finally {
+      setChecklistTemplatesLoading(false);
     }
   }
 
@@ -1597,6 +1615,45 @@ export default function DocumentStudio({ notify }) {
           onClose={closePreview}
           panelRef={panelRef}
         />
+      </Card>
+
+      <Card title="Checklist Templates" hint="Operational workflow templates — not pleadings or generated documents">
+        <div style={{ display: 'grid', gap: 10, minWidth: 0 }}>
+          <span style={{ fontSize: 13, color: theme.ink }}>Create reusable task/checklist templates for common legal workflows, then apply them to matters.</span>
+          <span style={{ fontSize: 12, color: theme.muted }}>These are step-by-step working checklists (e.g. Civil suit filing, Appeal preparation, Conveyancing completion, Client onboarding / KYC, Hearing preparation) — they do not generate documents.</span>
+          <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#F9FAFB', padding: '10px 12px', display: 'grid', gap: 4 }}>
+            <strong style={{ fontSize: 12, color: theme.ink }}>How this works</strong>
+            <span style={{ fontSize: 12, color: theme.muted }}>Step 1: Create a reusable template (Matters page, Checklist Templates card — administrators).</span>
+            <span style={{ fontSize: 12, color: theme.muted }}>Step 2: Add checklist items — one clear action per item.</span>
+            <span style={{ fontSize: 12, color: theme.muted }}>Step 3: Apply it to a matter from the matter's Tasks section.</span>
+            <span style={{ fontSize: 12, color: theme.muted }}>Step 4: Track completion in the matter workspace.</span>
+          </div>
+          {checklistTemplatesLoading ? <Skeleton /> : checklistTemplatesError ? (
+            <Alert tone="danger">{checklistTemplatesError}</Alert>
+          ) : checklistTemplates.length ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(280px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
+              {checklistTemplates.map(template => (
+                <div key={template.id} style={{ border: `1px solid ${theme.line}`, borderRadius: 10, padding: '14px 16px', background: '#fff', display: 'grid', gap: 6, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: theme.ink, wordBreak: 'break-word' }}>{template.name}</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <Badge tone="blue">{template.practiceArea || 'General'}</Badge>
+                    <Badge tone="green">{(template.items || []).length} step{(template.items || []).length === 1 ? '' : 's'}</Badge>
+                  </div>
+                  {template.description ? <div style={{ fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>{template.description}</div> : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <Empty title="No checklist templates yet" text="Create your first reusable checklist from the Matters page — for example a Civil suit filing checklist." />
+          )}
+          {onNavigate && (
+            <div>
+              <button type="button" style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 12px' }} onClick={() => onNavigate('Matters')}>
+                {isAdmin ? 'Manage checklist templates in Matters' : 'Open Matters to apply a template'}
+              </button>
+            </div>
+          )}
+        </div>
       </Card>
 
       <Card title="Document Tools" hint="Prepare, combine, paginate, and format court-ready documents">

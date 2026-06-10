@@ -2292,6 +2292,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
             onUpdateItem={updateTemplateFormItem}
             onRemoveItem={removeTemplateFormItem}
             confirmDelete={template => setConfirm({ title: 'Deactivate checklist template?', message: 'Deactivate this template? Already-applied matter checklist items will remain unchanged.', onConfirm: () => deactivateChecklistTemplate(template) })}
+            onUse={canApplyChecklistTemplate ? template => { setSelectedTemplateId(template.id); notify({ type: 'success', message: `"${template.name}" selected. Open a matter, go to its Tasks section, then press "Apply to matter" under Checklist.` }); } : null}
           />
         )}
         <Card title={detail?.title || 'Matter detail'} hint={detail?.reference || 'Select a file'} action={detail && canManage ? <ActionGroup actions={[['Edit', startMatterEdit], ['Archive', () => setConfirm({ title: 'Archive matter?', message: 'Archive this matter by setting the stage to Closed?', onConfirm: archiveMatter })], ['Delete', () => setConfirm({ title: 'Delete matter?', message: 'Delete this matter and all associated data?', onConfirm: deleteMatterRecord })]]} /> : null}>
@@ -5607,47 +5608,88 @@ export function Users({ clients = [], notify }) {
   </div>;
 }
 
-function ChecklistTemplateLibrary({ templates = [], form, setForm, editingTemplateId, saving, onSubmit, onEdit, onCancel, onAddItem, onUpdateItem, onRemoveItem, confirmDelete }) {
+const CHECKLIST_TEMPLATE_EXAMPLES = ['Civil suit filing checklist', 'Appeal preparation checklist', 'Conveyancing completion checklist', 'Client onboarding / KYC checklist', 'Hearing preparation checklist'];
+
+function ChecklistTemplateHowItWorks() {
   return (
-    <Card title="Checklist Template Library" hint="Reusable matter workflow presets">
+    <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#F9FAFB', padding: '10px 12px', display: 'grid', gap: 4 }}>
+      <strong style={{ fontSize: 12, color: theme.ink }}>How this works</strong>
+      <span style={{ fontSize: 12, color: theme.muted }}>Step 1: Create a reusable template.</span>
+      <span style={{ fontSize: 12, color: theme.muted }}>Step 2: Add checklist items.</span>
+      <span style={{ fontSize: 12, color: theme.muted }}>Step 3: Apply it to a matter.</span>
+      <span style={{ fontSize: 12, color: theme.muted }}>Step 4: Track completion in the matter workspace.</span>
+    </div>
+  );
+}
+
+function ChecklistTemplateLibrary({ templates = [], form, setForm, editingTemplateId, saving, onSubmit, onEdit, onCancel, onAddItem, onUpdateItem, onRemoveItem, confirmDelete, onUse }) {
+  const [practiceFilter, setPracticeFilter] = useState('all');
+  const practiceAreas = [...new Set(templates.map(t => (t.practiceArea || '').trim()).filter(Boolean))].sort();
+  const filteredTemplates = practiceFilter === 'all' ? templates : templates.filter(t => (t.practiceArea || '').trim() === practiceFilter);
+  const hasAnyItemTitle = form.items.some(item => (item.title || '').trim());
+  return (
+    <Card title="Checklist Templates" hint="Reusable task checklists for common legal workflows">
+      <div style={{ display: 'grid', gap: 10, marginBottom: 14 }}>
+        <span style={{ fontSize: 13, color: theme.ink }}>Create reusable task/checklist templates for common legal workflows, then apply them to matters.</span>
+        <span style={{ fontSize: 12, color: theme.muted }}>Examples: {CHECKLIST_TEMPLATE_EXAMPLES.join('; ')}.</span>
+        <ChecklistTemplateHowItWorks />
+      </div>
       <form onSubmit={onSubmit} style={{ ...styles.formGrid, alignItems: 'end', marginBottom: 14 }}>
-        <Field label="Template Name"><input required style={styles.input} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
-        <Field label="Practice"><input style={styles.input} value={form.practiceArea} onChange={e => setForm({ ...form, practiceArea: e.target.value })} placeholder="e.g. Civil Litigation" list="practice-list" /></Field>
-        <Field label="Description"><input style={styles.input} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Purpose of this template" /></Field>
+        <Field label="Template name"><input required style={styles.input} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Civil suit filing checklist" /></Field>
+        <Field label="Practice area"><input style={styles.input} value={form.practiceArea} onChange={e => setForm({ ...form, practiceArea: e.target.value })} placeholder="e.g. Civil Litigation" list="practice-list" /></Field>
+        <Field label="Description"><input style={styles.input} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="What this checklist is for and when to use it." /></Field>
         <div style={{ gridColumn: '1 / -1', display: 'grid', gap: 8 }}>
+          <div style={{ display: 'grid', gap: 2 }}>
+            <strong style={{ fontSize: 12, color: theme.ink }}>Checklist items</strong>
+            <span style={{ fontSize: 12, color: theme.muted }}>Add each step the team must complete. Use one clear action per item, e.g. Draft Plaint, File pleadings, Serve summons.</span>
+          </div>
+          {!hasAnyItemTitle && <span style={{ fontSize: 12, color: theme.muted, border: `1px dashed ${theme.line}`, borderRadius: 8, padding: '8px 10px' }}>No items yet — type the first step below, then use "Add checklist item" for the next one.</span>}
           {form.items.map((item, index) => (
             <div key={index} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, alignItems: 'end' }}>
-              <Field label={`Item ${index + 1}`}><input required style={styles.input} value={item.title} onChange={e => onUpdateItem(index, 'title', e.target.value)} /></Field>
-              <Field label="Notes"><input style={styles.input} value={item.notes} onChange={e => onUpdateItem(index, 'notes', e.target.value)} /></Field>
-              <Field label="Position"><input type="number" min="0" style={styles.input} value={item.position} onChange={e => onUpdateItem(index, 'position', e.target.value)} /></Field>
+              <Field label={`Item ${index + 1}`}><input required style={styles.input} value={item.title} onChange={e => onUpdateItem(index, 'title', e.target.value)} placeholder="e.g. Draft Plaint" /></Field>
+              <Field label="Notes (optional)"><input style={styles.input} value={item.notes} onChange={e => onUpdateItem(index, 'notes', e.target.value)} placeholder="Extra guidance for this step" /></Field>
+              <Field label="Order"><input type="number" min="0" style={styles.input} value={item.position} onChange={e => onUpdateItem(index, 'position', e.target.value)} title="Lower numbers appear first" /></Field>
               <button type="button" style={styles.dangerTinyButton} onClick={() => onRemoveItem(index)}>Remove</button>
             </div>
           ))}
-          <button type="button" style={styles.ghostButton} onClick={onAddItem}>Add template item</button>
+          <button type="button" style={styles.ghostButton} onClick={onAddItem}>Add checklist item</button>
         </div>
         <button style={styles.primaryButton} disabled={saving || !form.name.trim()}>{saving ? 'Saving...' : editingTemplateId ? 'Save template' : 'Create template'}</button>
         {editingTemplateId && <button type="button" style={styles.ghostButton} onClick={onCancel}>Cancel</button>}
       </form>
-      {templates.length ? (
-        <div style={{ display: 'grid', gap: 8 }}>
-          {templates.map(template => (
-            <div key={template.id} style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 10, display: 'grid', gap: 8 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
-                  <strong>{template.name}</strong>
-                  <span style={{ color: theme.muted, fontSize: 12 }}>{template.practiceArea || 'General'} / {(template.items || []).length} item(s)</span>
-                  {template.description ? <span style={{ color: theme.muted, fontSize: 12 }}>{template.description}</span> : null}
-                </div>
-                <ActionGroup actions={[['Edit', () => onEdit(template)], ['Deactivate', () => confirmDelete(template)]]} />
-              </div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {(template.items || []).map(item => <span key={item.id} style={{ border: `1px solid ${theme.line}`, borderRadius: 999, padding: '3px 8px', fontSize: 11 }}>{item.position ?? 0}. {item.title}</span>)}
-              </div>
-            </div>
-          ))}
+      {templates.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+          <span style={{ fontSize: 12, color: theme.muted, fontWeight: 700 }}>Saved templates</span>
+          <select aria-label="Filter templates by practice area" style={{ ...styles.input, width: 'auto', minWidth: 150 }} value={practiceFilter} onChange={e => setPracticeFilter(e.target.value)}>
+            <option value="all">All practice areas</option>
+            {practiceAreas.map(area => <option key={area} value={area}>{area}</option>)}
+          </select>
         </div>
+      )}
+      {templates.length ? (
+        filteredTemplates.length ? (
+          <div style={{ display: 'grid', gap: 8 }}>
+            {filteredTemplates.map(template => (
+              <div key={template.id} style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 10, display: 'grid', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
+                    <strong>{template.name}</strong>
+                    <span style={{ color: theme.muted, fontSize: 12 }}>{template.practiceArea || 'General'} / {(template.items || []).length} item(s)</span>
+                    {template.description ? <span style={{ color: theme.muted, fontSize: 12 }}>{template.description}</span> : null}
+                  </div>
+                  <ActionGroup actions={[...(onUse ? [['Use this template', () => onUse(template)]] : []), ['Edit', () => onEdit(template)], ['Deactivate', () => confirmDelete(template)]]} />
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {(template.items || []).map(item => <span key={item.id} style={{ border: `1px solid ${theme.line}`, borderRadius: 999, padding: '3px 8px', fontSize: 11 }}>{item.position ?? 0}. {item.title}</span>)}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <Empty title="No matching templates" text={`No templates are tagged with "${practiceFilter}". Choose "All practice areas" or create one for this practice.`} />
+        )
       ) : (
-        <Empty title="No checklist templates." text="Create a reusable template before applying one to a matter." />
+        <Empty title="No templates yet" text="Create your first reusable checklist above — for example a Civil suit filing checklist — then apply it to any matter." />
       )}
     </Card>
   );
@@ -5771,13 +5813,14 @@ function MatterChecklistPanel({ items = [], templates = [], canManage, canToggle
       )}
       {canApplyTemplate && (
         <form onSubmit={onApplyTemplate} style={{ ...styles.formGrid, alignItems: 'end' }}>
-          <Field label="Apply Template">
+          <Field label="Apply a checklist template">
             <select style={styles.input} value={selectedTemplateId} onChange={e => setSelectedTemplateId(e.target.value)}>
-              <option value="">Select active template</option>
-              {templates.map(template => <option key={template.id} value={template.id}>{template.name}</option>)}
+              <option value="">{templates.length ? 'Select a template' : 'No templates yet — create one in Checklist Templates'}</option>
+              {templates.map(template => <option key={template.id} value={template.id}>{template.name}{template.practiceArea ? ` (${template.practiceArea})` : ''}</option>)}
             </select>
           </Field>
-          <button type="submit" style={styles.ghostButton} disabled={!selectedTemplateId || applyingTemplate}>{applyingTemplate ? 'Applying...' : 'Apply template'}</button>
+          <button type="submit" style={styles.ghostButton} disabled={!selectedTemplateId || applyingTemplate}>{applyingTemplate ? 'Applying...' : 'Apply to matter'}</button>
+          <div style={{ gridColumn: '1 / -1', fontSize: 12, color: theme.muted }}>Copies every step from the chosen template into this matter's checklist. Manage templates in the Checklist Templates card on the Matters page.</div>
         </form>
       )}
       {canManage && (
