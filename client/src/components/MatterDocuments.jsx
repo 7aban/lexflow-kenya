@@ -316,6 +316,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
                   <input style={styles.input} list="folder-suggestions" value={uploadFolderInput} onChange={e => setUploadFolderInput(e.target.value)} placeholder="e.g. Pleadings, Correspondence, Evidence, Authorities, Invoices, Court Orders..." />
                   <datalist id="folder-suggestions">
                     {realFolders.map(folder => <option key={folder.id} value={folder.name} />)}
+                    <option value="Pleadings" /><option value="Correspondence" /><option value="Evidence" /><option value="Authorities" /><option value="Invoices" /><option value="Court Orders" /><option value="Drafts" /><option value="Research" /><option value="Financial" /><option value="Discovery" /><option value="Witness Statements" /><option value="Expert Reports" /><option value="Submissions" /><option value="Judgments" /><option value="Client Uploads" />
                   </datalist>
                 </Field>
               )}
