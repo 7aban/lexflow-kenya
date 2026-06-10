@@ -37,9 +37,13 @@ const faqItems = [
   ['Where do I download documents?', 'Use the Documents page for all shared files, or open a specific matter and use its document browser.'],
 ];
 
-export default function ClientChatWidget({ firm, matters = [], selectedMatterId = '', user, notify }) {
-  const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState('FAQ');
+export default function ClientChatWidget({ firm, matters = [], selectedMatterId = '', user, notify, open: openProp, onClose }) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isOpen = openProp !== undefined ? openProp : internalOpen;
+  function toggleOpen(v) {
+    if (openProp === undefined) setInternalOpen(v);
+    if (!v) onClose?.();
+  }
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState(faqItems[0][0]);
   const [matterId, setMatterId] = useState(selectedMatterId || matters[0]?.id || '');
@@ -59,8 +63,8 @@ export default function ClientChatWidget({ firm, matters = [], selectedMatterId 
   useEffect(() => { loadConversations(); }, []);
 
   useEffect(() => {
-    if (open && tab === 'Message Firm') loadConversations();
-  }, [open, tab]);
+    if (isOpen && tab === 'Message Firm') loadConversations();
+  }, [isOpen, tab]);
 
   useEffect(() => {
     if (!matterId || !conversations.length) {
@@ -159,37 +163,42 @@ export default function ClientChatWidget({ firm, matters = [], selectedMatterId 
       <button
         type="button"
         aria-label="Open help and chat"
-        onClick={() => setOpen(true)}
+        onClick={() => toggleOpen(true)}
         style={{
           position: 'fixed',
           right: 22,
           bottom: 22,
           zIndex: 2500,
-          width: 54,
           height: 54,
           borderRadius: 999,
           border: 0,
           background: firm?.accentColor || theme.gold,
           color: '#fff',
-          fontSize: 22,
+          fontSize: 14,
+          fontWeight: 700,
           boxShadow: theme.shadowLift,
           cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '0 20px 0 18px',
         }}
       >
-        💬
-        {unread > 0 && <span style={{ position: 'absolute', top: -3, right: -3, minWidth: 18, height: 18, borderRadius: 999, display: 'grid', placeItems: 'center', background: theme.green, color: '#fff', fontSize: 10, fontWeight: 900, border: '2px solid #fff' }}>{unread}</span>}
+        <span style={{ fontSize: 20, lineHeight: 1 }}>💬</span>
+        <span>Chat</span>
+        {unread > 0 && <span style={{ minWidth: 20, height: 20, borderRadius: 999, display: 'grid', placeItems: 'center', background: theme.green, color: '#fff', fontSize: 10, fontWeight: 900, border: '2px solid #fff', lineHeight: 1 }}>{unread}</span>}
       </button>
       <div
-        aria-hidden={!open}
+        aria-hidden={!isOpen}
         style={{
           position: 'fixed',
           inset: 0,
-          zIndex: open ? 2600 : -1,
-          pointerEvents: open ? 'auto' : 'none',
-          background: open ? 'rgba(15,27,51,.18)' : 'rgba(15,27,51,0)',
+          zIndex: isOpen ? 2600 : -1,
+          pointerEvents: isOpen ? 'auto' : 'none',
+          background: isOpen ? 'rgba(15,27,51,.18)' : 'rgba(15,27,51,0)',
           transition: 'background .18s ease',
         }}
-        onClick={() => setOpen(false)}
+        onClick={() => toggleOpen(false)}
       />
       <aside
         role="dialog"
@@ -206,7 +215,7 @@ export default function ClientChatWidget({ firm, matters = [], selectedMatterId 
           background: '#fff',
           borderLeft: `1px solid ${theme.line}`,
           boxShadow: theme.shadowLift,
-          transform: open ? 'translateX(0)' : 'translateX(105%)',
+          transform: isOpen ? 'translateX(0)' : 'translateX(105%)',
           transition: 'transform .22s ease',
           display: 'grid',
           gridTemplateRows: 'auto auto 1fr',
@@ -217,7 +226,7 @@ export default function ClientChatWidget({ firm, matters = [], selectedMatterId 
             <div style={styles.eyebrow}>{firm?.name || 'LexFlow Kenya'}</div>
             <h2 style={{ margin: '2px 0 0', fontSize: 18 }}>Help & Chat</h2>
           </div>
-          <button type="button" aria-label="Close help and chat" onClick={() => setOpen(false)} style={styles.toastClose}>x</button>
+          <button type="button" aria-label="Close help and chat" onClick={() => toggleOpen(false)} style={styles.toastClose}>x</button>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, padding: 12, borderBottom: `1px solid ${theme.line}` }}>
           {['FAQ', 'Message Firm'].map(item => (
@@ -256,11 +265,15 @@ export default function ClientChatWidget({ firm, matters = [], selectedMatterId 
                   <Badge tone="blue">Secure</Badge>
                 </div>
               </div>
-              <Field label="Matter">
+              {matters.length === 0 ? (
+                <div style={{ padding: 10, background: theme.wash, borderRadius: 8, fontSize: 13, color: '#6B7280', lineHeight: 1.5 }}>
+                  No matters available yet. Once the firm adds you to a matter, you can send messages from here.
+                </div>
+              ) : <Field label="Matter">
                 <select style={styles.input} value={matterId || selectedMatterId || matters[0]?.id || ''} onChange={event => setMatterId(event.target.value)}>
                   {matters.map(matter => <option key={matter.id} value={matter.id}>{matter.title}</option>)}
                 </select>
-              </Field>
+              </Field>}
               <div style={{ border: `1px solid ${theme.line}`, borderRadius: 10, padding: 10, background: '#F8FAFC', display: 'grid', gap: 8, maxHeight: 230, overflowY: 'auto' }}>
                 {loadingThread ? <span style={styles.mutedText}>Loading conversation...</span> : messages.length ? messages.map(item => (
                   <div key={item.id} style={{ display: 'grid', justifyItems: item.senderRole === 'client' ? 'end' : 'start' }}>
@@ -288,7 +301,7 @@ export default function ClientChatWidget({ firm, matters = [], selectedMatterId 
               <Field label="Attachment">
                 <input type="file" style={styles.input} onChange={event => setAttachment(event.target.files?.[0] || null)} />
               </Field>
-              <button type="submit" disabled={sending || !matters.length} style={styles.primaryButton}>{sending ? 'Sending...' : 'Send message'}</button>
+              <button type="submit" disabled={sending || !matters.length} style={styles.primaryButton}>{sending ? 'Sending...' : !matters.length ? 'No matters to message about' : 'Send message'}</button>
               <p>Messages are saved in a secure conversation thread and notify the legal team.</p>
             </form>
           )}

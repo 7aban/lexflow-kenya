@@ -151,6 +151,7 @@ const clientInvoiceMobilePolishCss = `
       font-size: 13px;
       background: #F9FAFB;
     }
+    .lf-dashboard-grid { grid-template-columns: 1fr; }
   }
 `;
 
@@ -175,6 +176,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
   const [payment, setPayment] = useState({ invoiceId: '', method: 'M-PESA', reference: '', amount: '', note: '', file: null });
   const [loading, setLoading] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [selfHasAvatar, setSelfHasAvatar] = useState(Boolean(user?.hasAvatar));
   const [myAvatarUrl, setMyAvatarUrl] = useState(null);
   const [avatarVersion, setAvatarVersion] = useState(0);
@@ -394,6 +396,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
             submitPayment={submitPayment}
             notify={notify}
             onNavigate={switchView}
+            onOpenChat={() => setChatOpen(true)}
           />
         )}
         {!loading && view === 'Notices' && <Notices notices={dashboard.notices} matters={dashboard.matters} notify={notify} />}
@@ -402,7 +405,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
         {!loading && view === 'Account' && <Account user={user} client={dashboard.client} firm={firm} matters={dashboard.matters} avatarUrl={myAvatarUrl} hasAvatar={selfHasAvatar} onAvatarUpload={handleAvatarUpload} onAvatarRemove={handleAvatarRemove} onNavigate={switchView} logout={logout} notify={notify} />}
         {!loading && view === 'Court Dates' && <CourtDates appearances={dashboard.appearances} matters={dashboard.matters} />}
       </main>
-      <ClientChatWidget firm={firm} matters={dashboard.matters} selectedMatterId={selected?.id || ''} user={user} notify={notify} />
+      <ClientChatWidget firm={firm} matters={dashboard.matters} selectedMatterId={selected?.id || ''} user={user} notify={notify} open={chatOpen} onClose={() => setChatOpen(false)} />
       <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   );
@@ -441,7 +444,7 @@ function ClientDashboard({ data, stats, user, avatarUrl, selectMatter, onNavigat
             </div>
           </>
         ) : (
-          <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>Your matter updates will appear here when available.</p>
+          <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>No matters assigned yet. Once the firm adds you to a matter, its status, documents, invoices and court dates will appear here.</p>
         )}
       </section>
       <NextActions data={data} selectMatter={selectMatter} onNavigate={onNavigate} />
@@ -513,7 +516,7 @@ function ClientDashboard({ data, stats, user, avatarUrl, selectMatter, onNavigat
           <div className="lf-client-matters-cards"><Table columns={['Matter', 'Stage', 'Next Court', 'Action']} rows={data.matters.map(m => {
             const next = nextEventFor(m, data.appearances);
             return [m.title, <Badge key={m.id} tone="blue">{m.stage || 'Intake'}</Badge>, next?.date || '-', <button key={`${m.id}-view`} type="button" style={styles.tinyButton} onClick={() => selectMatter(m.id)}>View</button>];
-          })} empty="No matters have been shared yet." /></div>
+          })            } empty="No matters assigned yet. When the firm adds you to a matter, it will appear here with its documents, invoices and court dates." /></div>
         </Card>
         <Card title="Notices" hint="Latest firm updates">
           {data.notices.slice(0, 3).length ? data.notices.slice(0, 3).map(notice => <NoticeItem key={notice.id} notice={notice} />) : <Empty title="No notices" text="Firm notices will appear here." />}
@@ -577,7 +580,7 @@ function NextActions({ data, selectMatter, onNavigate }) {
     <section style={{ background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 14 }}>
       <h3 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>What needs your attention</h3>
       {items.length === 0 ? (
-        <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>You're up to date. We'll show important actions here when something needs your attention.</p>
+        <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>You are up to date. Invoices needing payment, upcoming court dates and new firm updates will appear here.</p>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {items.map(item => (
@@ -712,7 +715,7 @@ function ActivityTimeline({ data, onNavigate }) {
   );
 }
 
-function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, events, notices, proofs, invoicePayments, uploadDoc, uploading, payment, setPayment, submitPayment, notify, onNavigate }) {
+function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, events, notices, proofs, invoicePayments, uploadDoc, uploading, payment, setPayment, submitPayment, notify, onNavigate, onOpenChat }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [sortOrder, setSortOrder] = useState('newest');
@@ -805,6 +808,7 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
         <Card title={selected.title} hint={selected.reference || 'Matter overview'}>
           <div style={styles.clientStatusGrid}><Badge tone="blue">{selected.stage || 'Intake'}</Badge><span>{selected.practiceArea || 'General'}</span><span>{selected.assignedTo || 'Firm team'}</span></div>
           <p style={styles.clientDescription}>{selected.description || 'No public description has been added yet.'}</p>
+          <button type="button" onClick={onOpenChat} style={{ ...styles.tinyButton, marginTop: 8 }}>Send a message about this matter</button>
         </Card>
         <MatterSnapshot selected={selected} events={events} docs={docs} invoices={invoices} notices={notices} />
         <Card title="Court appearances" hint="Virtual court links appear on hearing days">
@@ -1175,7 +1179,7 @@ function Documents({ documents, matters, notify }) {
   }, [documents, matters, search, matterFilter, sortOrder]);
 
   const hasFilter = search.trim() || matterFilter;
-  const emptyText = documents.length === 0 ? 'No documents shared yet.' : 'No shared documents match your search.';
+  const emptyText = documents.length === 0 ? 'No documents shared yet across your matters.' : 'No shared documents match your search.';
 
   return (
     <>
@@ -1338,7 +1342,7 @@ function Account({ user, client, firm, matters, avatarUrl, hasAvatar, onAvatarUp
             <button type="button" onClick={() => onNavigate('My Matters')} style={{ ...styles.tinyButton, alignSelf: 'flex-start' }}>View all matters</button>
           </div>
         ) : (
-          <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>Your matters will appear here when shared by the firm.</p>
+          <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>No matters shared yet. When the firm adds you to a matter, it will appear here.</p>
         )}
       </Card>
       <Card title="Firm contact" hint={firm?.name || 'LexFlow Kenya'}>

@@ -61,6 +61,8 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+
+  useEffect(() => { setPassword(''); }, []);
   const [oauthBusy, setOauthBusy] = useState(false);
   const [oauthEnabled, setOauthEnabled] = useState(false);
   const firmName = firm?.name || 'LexFlow Kenya';

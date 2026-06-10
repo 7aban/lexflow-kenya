@@ -187,7 +187,7 @@ function PasswordInput({ value, onChange, autoComplete, required = false }) {
 // hosted in the Account area (Connected Accounts view). A successful change
 // bumps the server-side tokenVersion, so the current session is signed out
 // and the user logs back in with the new password.
-function ChangePasswordCard({ notify }) {
+function ChangePasswordCard({ notify, onPasswordChanged }) {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -203,7 +203,7 @@ function ChangePasswordCard({ notify }) {
       await changePassword(currentPassword, newPassword);
       setDone(true);
       notify({ type: 'success', message: 'Password changed. Please sign in again with your new password.' });
-      setTimeout(() => { clearSession(); window.location.reload(); }, 2500);
+      setTimeout(() => { clearSession(); onPasswordChanged?.(); }, 2500);
     } catch (err) {
       notify({ type: 'danger', message: err.message });
       setBusy(false);
@@ -235,7 +235,7 @@ function ChangePasswordCard({ notify }) {
   );
 }
 
-export function ConnectedAccounts({ notify }) {
+export function ConnectedAccounts({ notify, onPasswordChanged }) {
   const [accounts, setAccounts] = useState([]);
   const [messages, setMessages] = useState([]);
   const [calendarEvents, setCalendarEvents] = useState([]);
@@ -506,7 +506,7 @@ export function ConnectedAccounts({ notify }) {
 
   return (
     <div style={styles.pageStack}>
-      <ChangePasswordCard notify={notify} />
+      <ChangePasswordCard notify={notify} onPasswordChanged={onPasswordChanged} />
       <Card title="Connected Accounts" hint="Authorize external provider access for future integrations">
         <div style={{ display: 'grid', gap: 12 }}>
           <div style={{ ...styles.alert, padding: 10, borderRadius: 6 }}>

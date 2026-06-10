@@ -681,7 +681,7 @@ export default function App() {
             {(!loading || bootstrapped) && view === 'Performance' && isAdmin && <AdvocatePerformance notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Reports' && isAdmin && <Reports data={data} notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Firm Settings' && isAdmin && <FirmSettings settings={firm} clients={data.clients} reload={refresh} notify={setToast} />}
-            {(!loading || bootstrapped) && view === 'Connected Accounts' && <ConnectedAccounts notify={setToast} />}
+            {(!loading || bootstrapped) && view === 'Connected Accounts' && <ConnectedAccounts notify={setToast} onPasswordChanged={logout} />}
             {(!loading || bootstrapped) && view === 'Users' && isAdmin && <Users clients={data.clients} notify={setToast} />}
             {(!loading || bootstrapped) && view === 'My Leave' && <MyLeave notify={setToast} />}
             {(!loading || bootstrapped) && view === 'HR' && isAdmin && <HR notify={setToast} />}
