@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { IconLayoutDashboard, IconBriefcase, IconBell, IconFile, IconInvoice, IconUserCircle, IconCalendarEvent } from '@tabler/icons-react';
-import { api, deleteMyAvatar, downloadWithAuth, fileToDataUrl, getMyAvatar, uploadMyAvatar } from '../lib/apiClient.js';
+import { IconLayoutDashboard, IconBriefcase, IconBell, IconFile, IconInvoice, IconUserCircle, IconCalendarEvent, IconEye, IconEyeOff } from '@tabler/icons-react';
+import { api, changePassword, deleteMyAvatar, downloadWithAuth, fileToDataUrl, getMyAvatar, uploadMyAvatar } from '../lib/apiClient.js';
 import { styles, StyleTag, theme, loadAndApplyFirmTheme } from '../theme.jsx';
-import { Badge, Card, Empty, Field, kes, Logo, MeetingLink, safeHttpUrl, Skeleton, statusTone, Table, Toast, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText } from '../components/ui.jsx';
+import { Alert, Badge, Card, Empty, Field, kes, Logo, MeetingLink, safeHttpUrl, Skeleton, statusTone, Table, Toast, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText } from '../components/ui.jsx';
 import ClientChatWidget from '../components/ClientChatWidget.jsx';
 import MatterDocuments from '../components/MatterDocuments.jsx';
 
@@ -399,7 +399,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
         {!loading && view === 'Notices' && <Notices notices={dashboard.notices} matters={dashboard.matters} notify={notify} />}
         {!loading && view === 'Documents' && <Documents documents={dashboard.documents} matters={dashboard.matters} notify={notify} />}
         {!loading && view === 'Invoices' && <BillingInvoices data={dashboard} matters={dashboard.matters} firm={firm} notify={notify} selectMatter={id => { setSelectedId(id); setView('My Matters'); }} onNavigate={switchView} />}
-        {!loading && view === 'Account' && <Account user={user} client={dashboard.client} firm={firm} matters={dashboard.matters} avatarUrl={myAvatarUrl} hasAvatar={selfHasAvatar} onAvatarUpload={handleAvatarUpload} onAvatarRemove={handleAvatarRemove} onNavigate={switchView} />}
+        {!loading && view === 'Account' && <Account user={user} client={dashboard.client} firm={firm} matters={dashboard.matters} avatarUrl={myAvatarUrl} hasAvatar={selfHasAvatar} onAvatarUpload={handleAvatarUpload} onAvatarRemove={handleAvatarRemove} onNavigate={switchView} logout={logout} notify={notify} />}
         {!loading && view === 'Court Dates' && <CourtDates appearances={dashboard.appearances} matters={dashboard.matters} />}
       </main>
       <ClientChatWidget firm={firm} matters={dashboard.matters} selectedMatterId={selected?.id || ''} user={user} notify={notify} />
@@ -1247,9 +1247,52 @@ function DownloadButton({ label, path, filename, notify, ariaLabel }) {
   );
 }
 
-function Account({ user, client, firm, matters, avatarUrl, hasAvatar, onAvatarUpload, onAvatarRemove, onNavigate }) {
+function PasswordField({ label, value, onChange, placeholder, showPassword, onToggleShow, autoComplete }) {
+  return (
+    <div style={{ marginBottom: 6 }}>
+      <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 3 }}>{label}</label>
+      <div style={{ position: 'relative' }}>
+        <input value={value} onChange={onChange} type={showPassword ? 'text' : 'password'} placeholder={placeholder} autoComplete={autoComplete} minLength={8} style={{ ...styles.input, paddingRight: 40, boxSizing: 'border-box' }} />
+        <button type="button" tabIndex={-1} aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={onToggleShow} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', border: 0, background: 'none', cursor: 'pointer', padding: 4, color: '#6B7280', display: 'flex', alignItems: 'center' }}>
+          {showPassword ? <IconEyeOff size={18} /> : <IconEye size={18} />}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Account({ user, client, firm, matters, avatarUrl, hasAvatar, onAvatarUpload, onAvatarRemove, onNavigate, logout, notify }) {
   const activeMatters = matters ? matters.filter(m => !['Closed', 'Archived'].includes(m.stage)) : [];
   const linkedMatters = matters ? matters.slice(0, 3) : [];
+  const [pwForm, setPwForm] = useState({ current: '', newPw: '', confirm: '' });
+  const [pwBusy, setPwBusy] = useState(false);
+  const [pwError, setPwError] = useState('');
+  const [pwSuccess, setPwSuccess] = useState('');
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  async function handleChangePassword(event) {
+    event.preventDefault();
+    setPwError('');
+    setPwSuccess('');
+    if (!pwForm.current.trim()) { setPwError('Current password is required.'); return; }
+    if (pwForm.newPw.length < 8) { setPwError('New password must be at least 8 characters.'); return; }
+    if (pwForm.newPw !== pwForm.confirm) { setPwError('New passwords do not match.'); return; }
+    setPwBusy(true);
+    try {
+      await changePassword(pwForm.current, pwForm.newPw);
+      setPwSuccess('Password changed successfully. Signing out...');
+      setPwForm({ current: '', newPw: '', confirm: '' });
+      notify?.({ type: 'success', message: 'Password changed. Please log in again with your new password.' });
+      setTimeout(() => logout?.(), 1500);
+    } catch (err) {
+      setPwError(err.message || 'Failed to change password.');
+    } finally {
+      setPwBusy(false);
+    }
+  }
+
   return (
     <div style={styles.pageStack}>
       <Card title="Account details" hint="Your portal identity">
@@ -1268,6 +1311,16 @@ function Account({ user, client, firm, matters, avatarUrl, hasAvatar, onAvatarUp
           <Row label="Email" value={user?.email} />
           <Row label="Phone" value={client?.phone} />
         </div>
+      </Card>
+      <Card title="Change Password" hint="Update your portal login password">
+        <form onSubmit={handleChangePassword} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {pwError && <Alert tone="danger">{pwError}</Alert>}
+          {pwSuccess && <Alert tone="success">{pwSuccess}</Alert>}
+          <PasswordField label="Current password" value={pwForm.current} onChange={e => setPwForm({ ...pwForm, current: e.target.value })} placeholder="Enter current password" showPassword={showCurrent} onToggleShow={() => setShowCurrent(s => !s)} autoComplete="current-password" />
+          <PasswordField label="New password" value={pwForm.newPw} onChange={e => setPwForm({ ...pwForm, newPw: e.target.value })} placeholder="At least 8 characters" showPassword={showNew} onToggleShow={() => setShowNew(s => !s)} autoComplete="new-password" />
+          <PasswordField label="Confirm new password" value={pwForm.confirm} onChange={e => setPwForm({ ...pwForm, confirm: e.target.value })} placeholder="Re-enter new password" showPassword={showConfirm} onToggleShow={() => setShowConfirm(s => !s)} autoComplete="new-password" />
+          <button disabled={pwBusy} style={{ ...styles.primaryButton, alignSelf: 'flex-start', marginTop: 8 }}>{pwBusy ? 'Changing...' : 'Change password'}</button>
+        </form>
       </Card>
       <Card title="Linked matters" hint={`${matters ? matters.length : 0} file(s)`}>
         {activeMatters.length > 0 ? (

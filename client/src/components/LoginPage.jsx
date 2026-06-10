@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { IconScale, IconLock, IconShieldCheck, IconServer } from '@tabler/icons-react';
+import { IconScale, IconLock, IconShieldCheck, IconServer, IconEye, IconEyeOff } from '@tabler/icons-react';
 import { API_BASE } from '../lib/apiClient.js';
 import { styles, StyleTag, theme } from '../theme.jsx';
 import { Alert } from './ui.jsx';
@@ -60,6 +60,7 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [oauthBusy, setOauthBusy] = useState(false);
   const [oauthEnabled, setOauthEnabled] = useState(false);
   const firmName = firm?.name || 'LexFlow Kenya';
@@ -191,7 +192,12 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
                 <input className="lf-login-input" style={styles.loginInput} value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" placeholder={modeCopy.placeholder} />
               </LoginField>
               <LoginField label="Password">
-                <input className="lf-login-input" style={styles.loginInput} type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" placeholder={mode === 'client' ? 'Portal password' : 'Workspace password'} />
+                <div style={{ position: 'relative' }}>
+                  <input className="lf-login-input" style={{ ...styles.loginInput, paddingRight: 40 }} type={showPassword ? 'text' : 'password'} value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" placeholder={mode === 'client' ? 'Portal password' : 'Workspace password'} />
+                  <button type="button" tabIndex={-1} aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword(s => !s)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', border: 0, background: 'none', cursor: 'pointer', padding: 4, color: '#6B7280', display: 'flex', alignItems: 'center' }}>
+                    {showPassword ? <IconEyeOff size={18} /> : <IconEye size={18} />}
+                  </button>
+                </div>
               </LoginField>
             </div>
             <button disabled={busy} className="lf-login-submit" style={{ ...styles.loginPrimaryButton, width: '100%', marginTop: 18 }}>{busy ? 'Signing in...' : modeCopy.button}</button>
