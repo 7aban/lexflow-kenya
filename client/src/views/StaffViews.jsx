@@ -5502,7 +5502,7 @@ export function Users({ clients = [], notify }) {
       <Field label="Email"><input required style={styles.input} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field>
       <Field label="Password"><input required type="password" style={styles.input} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} /></Field>
       <Field label="Role"><select style={styles.input} value={form.role} onChange={e => setForm({ ...form, role: e.target.value, clientId: e.target.value === 'client' ? form.clientId : '' })}><option value="assistant">Assistant</option><option value="advocate">Advocate</option><option value="admin">Admin</option><option value="client">Client</option></select></Field>
-      {form.role === 'client' && <><Field label="Linked Client"><select required style={styles.input} value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })}><option value="">Select client</option>{clientOptions.map(c => <option key={c.id}>{c.name}</option>)}</select></Field><div style={styles.formHelper}>Client users can view only the linked client's matters, documents, invoices, and messages. Share credentials manually after creating the account.</div></>}
+      {form.role === 'client' && <><Field label="Linked Client"><select required style={styles.input} value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })}><option value="">Select client</option>{clientOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field><div style={styles.formHelper}>Client users can view only the linked client's matters, documents, invoices, and messages. Share credentials manually after creating the account.</div></>}
       <button style={styles.primaryButton}>Create user</button>
     </form></Card>
     <Card title="Team" hint={`${visibleUsers.length} users`}>
@@ -5559,7 +5559,7 @@ export function Users({ clients = [], notify }) {
             <option value="admin">Admin</option>
           </select>,
           <Badge key={`status-${u.id}`} tone={u.isActive ? 'green' : 'red'}>{u.isActive ? 'Active' : 'Inactive'}</Badge>,
-          u.clientId ? clientOptions.find(c => c.id === u.clientId)?.name || u.clientId : '-',
+          u.clientId ? (clientOptions.find(c => c.id === u.clientId)?.name || <Badge key={`client-${u.id}`} tone="red">Not linked to a client record</Badge>) : '-',
           <div key={`actions-${u.id}`} style={{ display: 'flex', gap: 6 }}>
             <button style={styles.tinyButton} onClick={() => toggleActive(u.id, !u.isActive, u.fullName)}>{u.isActive ? 'Deactivate' : 'Activate'}</button>
           </div>,

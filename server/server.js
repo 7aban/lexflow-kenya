@@ -772,6 +772,18 @@ async function ensureClientUserSupport() {
   await ensureColumn('users', 'clientId', 'TEXT');
 }
 
+// LOCAL-PILOT-FIX-9: heal client portal users created while the staff "Linked
+// Client" dropdown submitted the client NAME instead of the client id. Only
+// rewrites client-role users whose clientId matches no client record but does
+// exactly match one client's name; unknown or ambiguous values are left alone.
+async function repairClientUserLinks() {
+  await run(`UPDATE users SET clientId=(SELECT id FROM clients WHERE name=users.clientId)
+    WHERE role='client'
+      AND clientId IS NOT NULL AND clientId<>''
+      AND NOT EXISTS (SELECT 1 FROM clients WHERE id=users.clientId)
+      AND (SELECT COUNT(*) FROM clients WHERE name=users.clientId)=1`);
+}
+
 function publicRetainerRecord(row) {
   return {
     id: row.id,
@@ -1394,6 +1406,7 @@ createdAt TEXT NOT NULL
   await run('CREATE INDEX IF NOT EXISTS idx_matter_stage_history_changedAt ON matter_stage_history(changedAt)');
 
   await ensureClientUserSupport();
+  await repairClientUserLinks();
   await ensureColumn('matter_checklist_items', 'dueDate', 'TEXT');
   await ensureColumn('matter_checklist_items', 'assignee', 'TEXT');
   await ensureColumn('matter_checklist_items', 'updatedAt', 'TEXT');
@@ -4586,6 +4599,10 @@ app.post('/api/auth/register', requireAdmin, validate(registerValidation), async
     if (!passwordPolicy.ok) return res.status(400).json({ error: 'Password is required' });
     if (!['advocate', 'assistant', 'admin', 'client'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
     if (role === 'client' && !clientId) return res.status(400).json({ error: 'Client users must be linked to a client record' });
+    if (role === 'client') {
+      const linkedClient = await get('SELECT id FROM clients WHERE id=?', [clientId]);
+      if (!linkedClient) return res.status(400).json({ error: 'Linked client not found' });
+    }
     const id = genId('U');
     const createdAt = new Date().toISOString();
     await run('INSERT INTO users (id,email,password,fullName,role,clientId,createdAt) VALUES (?,?,?,?,?,?,?)', [id, email, await hashPassword(password), fullName, role, role === 'client' ? clientId : '', createdAt]);
@@ -12581,7 +12598,7 @@ const dbReady = initDb().catch(err => {
   if (require.main === module) process.exit(1);
 });
 
-module.exports = { app, config, dbReady };
+module.exports = { app, config, dbReady, repairClientUserLinks };
 
 if (require.main === module) {
   dbReady.then(() => {
