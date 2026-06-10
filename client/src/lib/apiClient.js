@@ -336,6 +336,9 @@ export const getHrStaffProfile = userId => api(`/hr/staff/${encodeURIComponent(u
 export const createHrStaffProfile = (userId, payload) => api(`/hr/staff/${encodeURIComponent(userId)}/profile`, { method: 'POST', body: payload });
 export const updateHrStaffProfile = (userId, payload) => api(`/hr/staff/${encodeURIComponent(userId)}/profile`, { method: 'PATCH', body: payload });
 export const listConnectedAccounts = () => api('/connected-accounts');
+// LOCAL-PILOT-FIX-2: booleans describing whether provider OAuth is configured,
+// so the UI can hide Connect buttons instead of failing after the click.
+export const getConnectedAccountAvailability = () => api('/connected-accounts/availability');
 export const startConnectedAccountOAuth = provider => api(`/connected-accounts/${encodeURIComponent(provider)}/start`, { method: 'POST', body: {} });
 export const disconnectConnectedAccount = id => api(`/connected-accounts/${encodeURIComponent(id)}/disconnect`, { method: 'POST', body: {} });
 export const syncConnectedAccountEmailMetadata = id => api(`/connected-accounts/${encodeURIComponent(id)}/sync-email-metadata`, { method: 'POST', body: {} });

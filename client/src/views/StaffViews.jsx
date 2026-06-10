@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote, IconMail, IconPaperclip, IconExternalLink } from '@tabler/icons-react';
-import { api, applyChecklistTemplate, approveHrLeaveRequest, cancelHrLeaveRequestAdmin, changePassword, clearSession, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, cancelOffboardingCase, completeOffboardingCase, createHrContract, createHrLeaveBalanceAdjustment, createHrStaffProfile, createMatterChecklistItem, createOffboardingCase, deleteChecklistTemplate, deleteClientAvatar, deleteHrDocument, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadHrDocumentContent, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getHrContracts, getHrDashboard, getHrDocuments, getHrLeaveBalances, getHrLeaveRequests, getHrStaff, getHrStaffProfile, getOffboardingAssignedMatters, getOffboardingCase, getOffboardingCases, getClientSnapshot, getInvoiceDetails, getMatterTimeline, getAppearanceDocuments, linkAppearanceDocument, unlinkAppearanceDocument, getMatterWorkMetadataLinks, getRetainers, getRetainer, createRetainer, updateRetainer, deleteRetainer, generateRetainerDocument, listDocumentTemplates, getMatterFeePlans, getMatterFeePlan, createMatterFeePlan, updateMatterFeePlan, deleteMatterFeePlan, getRetainerLedger, getRetainerLedgerSummary, createRetainerLedgerEntry, voidRetainerLedgerEntry, getClientKyc, getClientKycRecord, createClientKyc, updateClientKyc, deleteClientKyc, getClientAuthorities, getClientAuthorityRecord, createClientAuthority, updateClientAuthority, deleteClientAuthority, getRetainerLifecycleEvents, getRetainerLifecycleEvent, createRetainerLifecycleEvent, updateRetainerLifecycleEvent, deleteRetainerLifecycleEvent, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, rejectHrLeaveRequest, setHrLeaveEntitlement, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrContract, updateHrDocument, updateHrStaffProfile, updateMatterChecklistItem, updateOffboardingCase, updateOffboardingChecklistItem, uploadClientAvatar, uploadHrDocument, uploadUserAvatar } from '../lib/apiClient.js';
+import { api, applyChecklistTemplate, approveHrLeaveRequest, cancelHrLeaveRequestAdmin, changePassword, clearSession, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, cancelOffboardingCase, completeOffboardingCase, createHrContract, createHrLeaveBalanceAdjustment, createHrStaffProfile, createMatterChecklistItem, createOffboardingCase, deleteChecklistTemplate, deleteClientAvatar, deleteHrDocument, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadHrDocumentContent, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getConnectedAccountAvailability, getHrContracts, getHrDashboard, getHrDocuments, getHrLeaveBalances, getHrLeaveRequests, getHrStaff, getHrStaffProfile, getOffboardingAssignedMatters, getOffboardingCase, getOffboardingCases, getClientSnapshot, getInvoiceDetails, getMatterTimeline, getAppearanceDocuments, linkAppearanceDocument, unlinkAppearanceDocument, getMatterWorkMetadataLinks, getRetainers, getRetainer, createRetainer, updateRetainer, deleteRetainer, generateRetainerDocument, listDocumentTemplates, getMatterFeePlans, getMatterFeePlan, createMatterFeePlan, updateMatterFeePlan, deleteMatterFeePlan, getRetainerLedger, getRetainerLedgerSummary, createRetainerLedgerEntry, voidRetainerLedgerEntry, getClientKyc, getClientKycRecord, createClientKyc, updateClientKyc, deleteClientKyc, getClientAuthorities, getClientAuthorityRecord, createClientAuthority, updateClientAuthority, deleteClientAuthority, getRetainerLifecycleEvents, getRetainerLifecycleEvent, createRetainerLifecycleEvent, updateRetainerLifecycleEvent, deleteRetainerLifecycleEvent, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, rejectHrLeaveRequest, setHrLeaveEntitlement, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrContract, updateHrDocument, updateHrStaffProfile, updateMatterChecklistItem, updateOffboardingCase, updateOffboardingChecklistItem, uploadClientAvatar, uploadHrDocument, uploadUserAvatar } from '../lib/apiClient.js';
 import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, safeHttpUrl, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText, invoiceDueDistanceDays } from '../components/ui.jsx';
@@ -157,6 +157,32 @@ function connectedAccountDateTime(value) {
   return parsed ? parsed.toLocaleString() : '-';
 }
 
+// LOCAL-PILOT-FIX-2: password input with a show/hide toggle. Controlled value
+// only; never stores or logs the password anywhere else.
+function PasswordInput({ value, onChange, autoComplete, required = false }) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+      <input
+        type={visible ? 'text' : 'password'}
+        autoComplete={autoComplete}
+        value={value}
+        onChange={onChange}
+        style={{ ...styles.input, width: '100%', paddingRight: 64 }}
+        required={required}
+      />
+      <button
+        type="button"
+        aria-label={visible ? 'Hide password' : 'Show password'}
+        onClick={() => setVisible(v => !v)}
+        style={{ position: 'absolute', right: 6, border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 12, color: theme.muted, padding: '4px 6px' }}
+      >
+        {visible ? 'Hide' : 'Show'}
+      </button>
+    </div>
+  );
+}
+
 // LOCAL-PILOT-FIX-1: self-service password change for the signed-in user,
 // hosted in the Account area (Connected Accounts view). A successful change
 // bumps the server-side tokenVersion, so the current session is signed out
@@ -191,15 +217,15 @@ function ChangePasswordCard({ notify }) {
         : (
           <form onSubmit={submit} style={{ display: 'grid', gap: 10, maxWidth: 420 }}>
             <Field label="Current password">
-              <input type="password" autoComplete="current-password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} style={styles.input} required />
+              <PasswordInput autoComplete="current-password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} required />
             </Field>
             <Field label="New password">
-              <input type="password" autoComplete="new-password" value={newPassword} onChange={e => setNewPassword(e.target.value)} style={styles.input} required />
+              <PasswordInput autoComplete="new-password" value={newPassword} onChange={e => setNewPassword(e.target.value)} required />
             </Field>
             <Field label="Confirm new password">
-              <input type="password" autoComplete="new-password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} style={styles.input} required />
+              <PasswordInput autoComplete="new-password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required />
             </Field>
-            <small style={styles.mutedText}>At least 12 characters, including an uppercase letter, a lowercase letter, a number, and a symbol.</small>
+            <small style={styles.mutedText}>At least 8 characters, including an uppercase letter, a lowercase letter, a number, and a symbol.</small>
             <div>
               <button type="submit" style={styles.primaryButton} disabled={busy}>{busy ? 'Changing password...' : 'Change password'}</button>
             </div>
@@ -222,6 +248,9 @@ export function ConnectedAccounts({ notify }) {
   const [syncingId, setSyncingId] = useState('');
   const [calendarSyncingId, setCalendarSyncingId] = useState('');
   const [metadataBusyId, setMetadataBusyId] = useState('');
+  // LOCAL-PILOT-FIX-2: null = unknown (keep prior behaviour); otherwise booleans
+  // per provider so unconfigured Connect buttons are hidden with a clear note.
+  const [oauthAvailability, setOauthAvailability] = useState(null);
 
   async function load() {
     setLoading(true);
@@ -243,7 +272,10 @@ export function ConnectedAccounts({ notify }) {
     }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    getConnectedAccountAvailability().then(setOauthAvailability).catch(() => {});
+  }, []);
 
   async function connect(provider) {
     setBusyProvider(provider);
@@ -486,14 +518,24 @@ export function ConnectedAccounts({ notify }) {
           <div style={{ ...styles.alert, padding: 10, borderRadius: 6 }}>
             Confirming a match links metadata to a matter. It does not import email bodies, attachments, or create calendar/court events.
           </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button type="button" style={styles.primaryButton} onClick={() => connect('google')} disabled={Boolean(busyProvider)}>
-              {busyProvider === 'google' ? 'Opening Google...' : 'Connect Google'}
-            </button>
-            <button type="button" style={styles.ghostButton} onClick={() => connect('microsoft')} disabled={Boolean(busyProvider)}>
-              {busyProvider === 'microsoft' ? 'Opening Microsoft...' : 'Connect Microsoft'}
-            </button>
-          </div>
+          {oauthAvailability && !oauthAvailability.google && !oauthAvailability.microsoft ? (
+            <div style={{ ...styles.alert, padding: 10, borderRadius: 6 }}>
+              OAuth is not configured for this local pilot. Use your email and password to sign in — connected accounts are optional and can be set up later.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {(!oauthAvailability || oauthAvailability.google) && (
+                <button type="button" style={styles.primaryButton} onClick={() => connect('google')} disabled={Boolean(busyProvider)}>
+                  {busyProvider === 'google' ? 'Opening Google...' : 'Connect Google'}
+                </button>
+              )}
+              {(!oauthAvailability || oauthAvailability.microsoft) && (
+                <button type="button" style={styles.ghostButton} onClick={() => connect('microsoft')} disabled={Boolean(busyProvider)}>
+                  {busyProvider === 'microsoft' ? 'Opening Microsoft...' : 'Connect Microsoft'}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </Card>
       <Card title="Authorized Providers" hint={`${accounts.length} connected account${accounts.length === 1 ? '' : 's'}`}>
@@ -520,6 +562,10 @@ export function ConnectedAccounts({ notify }) {
     </div>
   );
 }
+
+// LOCAL-PILOT-FIX-2: exact backend message (asserted by server tests, so it is
+// stable) mapped to actionable guidance wherever invoice generation is offered.
+const NO_BILLABLE_MESSAGE = 'No billable amount found for this matter';
 
 function isBillableValue(value) {
   if (value === undefined || value === null) return true;
@@ -2055,7 +2101,7 @@ export function Matters({ data, canManage, reload, notify, focus, onMatterOpened
   async function addNote(event) { event.preventDefault(); if (!detail || !note.trim()) return; try { await api(`/matters/${detail.id}/notes`, { method: 'POST', body: { content: note } }); setNote(''); notify({ type: 'success', message: 'Case note saved.' }); await loadDetail(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function createEvent(event) { event.preventDefault(); if (!detail) return; try { await api('/appearances', { method: 'POST', body: { ...eventForm, matterId: detail.id } }); setEventForm(emptyEventForm); notify({ type: 'success', message: 'Court appearance scheduled.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function uploadDoc(event) { const file = event.target.files?.[0]; if (!file || !detail) return; try { await api(`/matters/${detail.id}/documents`, { method: 'POST', body: { name: file.name, mimeType: file.type || 'application/octet-stream', data: await fileToDataUrl(file) } }); notify({ type: 'success', message: 'Document uploaded.' }); event.target.value = ''; await loadDetail(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
-  async function generateInvoice() { if (!detail) return; try { const body = { matterId: detail.id }; if (invoiceDueDateOverride) body.dueDate = invoiceDueDateOverride; await api('/invoices/generate', { method: 'POST', body }); setInvoiceDueDateOverride(''); notify({ type: 'success', message: 'Invoice generated.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
+  async function generateInvoice() { if (!detail) return; try { const body = { matterId: detail.id }; if (invoiceDueDateOverride) body.dueDate = invoiceDueDateOverride; await api('/invoices/generate', { method: 'POST', body }); setInvoiceDueDateOverride(''); notify({ type: 'success', message: 'Invoice generated.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message === NO_BILLABLE_MESSAGE ? 'This matter has no unbilled billable time and no fixed fee. Log billable time first, or create a manual invoice from the Invoices page.' : err.message }); } }
   function startMatterEdit() { if (!detail) return; setEditingMatter(true); setForm({ ...emptyMatterForm, ...detail }); }
   async function archiveMatter() { if (!detail) return; try { await api(`/matters/${detail.id}/status`, { method: 'PATCH', body: { stage: 'Closed' } }); notify({ type: 'success', message: 'Matter archived.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteMatterRecord() { if (!detail) return; try { const id = detail.id; await api(`/matters/${id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Matter deleted.' }); setDetail(null); setSelectedId(''); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
@@ -2408,6 +2454,13 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
   // of the proof-queue's own filter. Loaded once from the SAME existing /payment-proofs route
   // (status=All) — no new route, no API/backend/schema change; the route never returns BLOB content.
   const [collectionsProofs, setCollectionsProofs] = useState([]);
+  // LOCAL-PILOT-FIX-2: invoice creation directly on the billing page plus an
+  // always-visible unbilled/receivables line. Matters and time entries are
+  // loaded read-only from existing routes; figures are display-only.
+  const [matters, setMatters] = useState([]);
+  const [timeEntries, setTimeEntries] = useState([]);
+  const [createForm, setCreateForm] = useState({ matterId: '', manual: false, amount: '', description: '', dueDate: '' });
+  const [creating, setCreating] = useState(false);
   // PRODUCT-16G: collapse the high-level billing overview by default so the invoice
   // register is the primary work surface sooner. Display-only; no billing logic change.
   const [billingOverviewOpen, setBillingOverviewOpen] = useState(false);
@@ -2476,6 +2529,61 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
       .catch(() => {});
     return () => { active = false; };
   }, []);
+  // LOCAL-PILOT-FIX-2: load matters (for the create-invoice picker) and time
+  // entries (for the unbilled figure) once; both are non-fatal if unavailable.
+  useEffect(() => {
+    let active = true;
+    api('/matters').then(rows => { if (active) setMatters(Array.isArray(rows) ? rows : []); }).catch(() => {});
+    api('/time-entries').then(rows => { if (active) setTimeEntries(Array.isArray(rows) ? rows : []); }).catch(() => {});
+    return () => { active = false; };
+  }, []);
+  const unbilledSummary = useMemo(() => {
+    const rows = timeEntries.filter(e => !e.billed && isBillableValue(e.billable));
+    const hours = rows.reduce((sum, e) => sum + Number(e.hours || 0), 0);
+    const amount = rows.reduce((sum, e) => sum + Number(e.hours || 0) * Number(e.rate || 0), 0);
+    return { count: rows.length, hours, amount };
+  }, [timeEntries]);
+  const receivableTotals = useMemo(() => {
+    const outstanding = invoices.filter(i => i.status !== 'Paid').reduce((sum, i) => sum + Number((i.balance ?? i.amount) || 0), 0);
+    const paid = invoices.reduce((sum, i) => sum + Number(i.amountPaid || 0), 0);
+    return { outstanding, paid };
+  }, [invoices]);
+  const selectedMatterBilling = useMemo(() => {
+    if (!createForm.matterId) return null;
+    const rows = timeEntries.filter(e => e.matterId === createForm.matterId && !e.billed && isBillableValue(e.billable));
+    const amount = rows.reduce((sum, e) => sum + Number(e.hours || 0) * Number(e.rate || 0), 0);
+    const matter = matters.find(m => m.id === createForm.matterId);
+    return { count: rows.length, amount, isFixed: matter?.billingType === 'fixed', fixedFee: Number(matter?.fixedFee || 0) };
+  }, [createForm.matterId, timeEntries, matters]);
+  async function createInvoice(event) {
+    event.preventDefault();
+    if (!createForm.matterId) return notify({ type: 'warning', message: 'Select a matter for the invoice.' });
+    if (createForm.manual && !(Number(createForm.amount) > 0)) return notify({ type: 'warning', message: 'Enter a manual amount greater than zero.' });
+    setCreating(true);
+    try {
+      const body = { matterId: createForm.matterId };
+      if (createForm.dueDate) body.dueDate = createForm.dueDate;
+      if (createForm.manual) {
+        body.manual = true;
+        body.amount = Number(createForm.amount);
+        if (createForm.description) body.description = createForm.description;
+      }
+      const invoice = await api('/invoices/generate', { method: 'POST', body });
+      notify({ type: 'success', message: `Invoice ${invoice.number || invoice.id} created for ${kes(invoice.amount)}.` });
+      setCreateForm({ matterId: '', manual: false, amount: '', description: '', dueDate: '' });
+      api('/time-entries').then(rows => setTimeEntries(Array.isArray(rows) ? rows : [])).catch(() => {});
+      await reload();
+    } catch (err) {
+      notify({
+        type: 'danger',
+        message: err.message === NO_BILLABLE_MESSAGE
+          ? 'This matter has no unbilled billable time and no fixed fee. Log billable time first, or tick "Enter amount manually" to create a manual invoice.'
+          : err.message,
+      });
+    } finally {
+      setCreating(false);
+    }
+  }
   // PRODUCT-15K: counts use DERIVED overdue (stored 'Overdue' OR isInvoiceOverdue) so the summary
   // matches the register and Command Summary after PRODUCT-15F. Unpaid is counted directly as
   // non-Paid to avoid double counting; outstanding = unpaid minus overdue. Stored status untouched.
@@ -2886,6 +2994,62 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
   }
   return <>
     <style>{billingMobilePolishCss}</style>
+    {canManage && (
+      <section aria-label="Create invoice" style={{ marginBottom: 16, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <IconCash size={16} stroke={1.75} style={{ color: '#697386' }} />
+          <span style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>Create invoice</span>
+        </div>
+        <p style={{ fontSize: 12, color: '#697386', margin: '6px 0 0' }}>
+          Pick a matter to invoice its unbilled time or fixed fee, or enter an amount manually.
+        </p>
+        <form onSubmit={createInvoice} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 10 }}>
+          <div style={{ flex: '2 1 220px', minWidth: 0 }}>
+            <Field label="Matter">
+              <select style={styles.input} value={createForm.matterId} onChange={e => setCreateForm(f => ({ ...f, matterId: e.target.value }))}>
+                <option value="">Select a matter...</option>
+                {matters.map(m => (
+                  <option key={m.id} value={m.id}>{`${m.reference || m.id} - ${m.title || 'Untitled matter'}${m.clientName ? ` (${m.clientName})` : ''}`}</option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          <div style={{ flex: '1 1 130px' }}>
+            <Field label="Due date (optional)">
+              <input type="date" style={styles.input} value={createForm.dueDate} onChange={e => setCreateForm(f => ({ ...f, dueDate: e.target.value }))} />
+            </Field>
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#111827', paddingBottom: 8 }}>
+            <input type="checkbox" checked={createForm.manual} onChange={e => setCreateForm(f => ({ ...f, manual: e.target.checked }))} />
+            Enter amount manually
+          </label>
+          {createForm.manual && (
+            <div style={{ flex: '1 1 120px' }}>
+              <Field label="Amount (KES)">
+                <input type="number" min="0.01" step="0.01" style={styles.input} value={createForm.amount} onChange={e => setCreateForm(f => ({ ...f, amount: e.target.value }))} />
+              </Field>
+            </div>
+          )}
+          {createForm.manual && (
+            <div style={{ flex: '2 1 180px' }}>
+              <Field label="Description (optional)">
+                <input style={styles.input} value={createForm.description} onChange={e => setCreateForm(f => ({ ...f, description: e.target.value }))} placeholder="Legal services" />
+              </Field>
+            </div>
+          )}
+          <button type="submit" style={styles.primaryButton} disabled={creating}>{creating ? 'Creating...' : 'Create invoice'}</button>
+        </form>
+        {selectedMatterBilling && !createForm.manual && (
+          <p style={{ fontSize: 12, color: '#697386', margin: '8px 0 0' }}>
+            {selectedMatterBilling.isFixed
+              ? `Fixed-fee matter - this will invoice ${kes(selectedMatterBilling.fixedFee)}.`
+              : selectedMatterBilling.count > 0
+                ? `${selectedMatterBilling.count} unbilled time entr${selectedMatterBilling.count === 1 ? 'y' : 'ies'} (about ${kes(selectedMatterBilling.amount)}) will be invoiced.`
+                : 'This matter has no unbilled billable time. Log time first, or tick "Enter amount manually".'}
+          </p>
+        )}
+      </section>
+    )}
     <section aria-label="Billing overview" style={{ marginBottom: 16, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -2894,7 +3058,9 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
         </div>
         <button type="button" aria-expanded={billingOverviewOpen} onClick={() => setBillingOverviewOpen(open => !open)} style={{ ...styles.ghostButton, fontSize: 12, padding: '4px 10px' }}>{billingOverviewOpen ? 'Hide' : 'Show'}</button>
       </div>
-      <p style={{ fontSize: 12, color: '#697386', margin: '6px 0 0' }}>Summary, unpaid follow-up and quick billing totals.</p>
+      <p style={{ fontSize: 12, color: '#697386', margin: '6px 0 0' }}>
+        {`Unbilled time ${kes(unbilledSummary.amount)} (${unbilledSummary.count} entr${unbilledSummary.count === 1 ? 'y' : 'ies'}, not yet invoiced) | Outstanding ${kes(receivableTotals.outstanding)} | Collected ${kes(receivableTotals.paid)}`}
+      </p>
       {billingOverviewOpen && (<>
     <div style={{ marginBottom: 16, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

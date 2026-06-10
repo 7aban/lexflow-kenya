@@ -142,6 +142,16 @@ const SEED_ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || 'admin@lexflow.co.ke';
 const SEED_ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || (isTest ? 'test-password' : (isProduction ? '' : 'password123'));
 const SEED_ADMIN_NAME = process.env.SEED_ADMIN_NAME || 'Admin';
 
+// LOCAL-PILOT-FIX-2: pilot-friendly password minimum length. The shared policy
+// (lib/passwordPolicy.js) defaults to 12; routes pass this value instead.
+// Complexity rules (upper/lower/digit/symbol, common-password list) unchanged.
+const PASSWORD_MIN_LENGTH = (() => {
+  const value = parseInt(process.env.LEXFLOW_PASSWORD_MIN_LENGTH || '8', 10);
+  if (isNaN(value) || value < 6) return 8;
+  if (value > 128) return 128;
+  return value;
+})();
+
 // Rate limiting configuration
 const RATE_LIMIT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || (isTest ? '0' : '900000'), 10); // 15 min default
 const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || (isTest ? '999999' : '100'), 10); // 100 requests per window
@@ -240,6 +250,7 @@ module.exports = {
   SEED_ADMIN_EMAIL,
   SEED_ADMIN_PASSWORD,
   SEED_ADMIN_NAME,
+  PASSWORD_MIN_LENGTH,
   RATE_LIMIT_WINDOW_MS,
   RATE_LIMIT_MAX,
   AUTH_RATE_LIMIT_WINDOW_MS,

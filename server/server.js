@@ -1894,7 +1894,7 @@ app.post('/api/invitations/:token/accept', async (req, res) => {
   }
   const { password, fullName } = req.body;
   if (!password) return res.status(400).json({ error: 'Password is required' });
-  const passwordPolicy = validatePasswordPolicy(password);
+  const passwordPolicy = validatePasswordPolicy(password, { minLength: config.PASSWORD_MIN_LENGTH });
   if (!passwordPolicy.ok) return res.status(400).json({ error: 'Password does not meet security requirements', details: passwordPolicy.errors });
   const existing = await get('SELECT id FROM users WHERE lower(email)=lower(?)', [invitation.email]);
   if (existing) return res.status(400).json({ error: 'A user with this email already exists' });
@@ -2959,6 +2959,17 @@ async function unlinkWorkMetadataMatter(req, { sourceType, sourceId, connectedAc
 app.get('/api/connected-accounts', authenticate, requireStaff, async (req, res) => {
   const accounts = await oauth.getConnectedAccounts(req.user.userId);
   res.json(accounts);
+});
+
+// LOCAL-PILOT-FIX-2: lets the UI hide Connect buttons and show a clear local-pilot
+// note instead of a confusing "OAuth is not configured" error after the click.
+// Booleans only — never exposes secrets or their values.
+app.get('/api/connected-accounts/availability', authenticate, requireStaff, async (_req, res) => {
+  const stateReady = Boolean(config.OAUTH_STATE_SECRET);
+  res.json({
+    google: stateReady && Boolean(config.GOOGLE_CLIENT_ID && config.GOOGLE_CLIENT_SECRET),
+    microsoft: stateReady && Boolean(config.MICROSOFT_CLIENT_ID && config.MICROSOFT_CLIENT_SECRET),
+  });
 });
 
 app.post('/api/connected-accounts/:provider/start', authenticate, requireStaff, async (req, res) => {
@@ -4542,7 +4553,7 @@ app.post('/api/auth/change-password', async (req, res) => {
     if (!user) return res.status(401).json({ error: 'User not found' });
     if (!(await verifyPassword(currentPassword, user.password))) return res.status(401).json({ error: 'Current password is incorrect' });
     if (await verifyPassword(newPassword, user.password)) return res.status(400).json({ error: 'New password must be different from current password' });
-    const passwordPolicy = validatePasswordPolicy(newPassword);
+    const passwordPolicy = validatePasswordPolicy(newPassword, { minLength: config.PASSWORD_MIN_LENGTH });
     if (!passwordPolicy.ok) return res.status(400).json({ error: 'Password does not meet security requirements', details: passwordPolicy.errors });
     const hashedPassword = await hashPassword(newPassword);
     await run('UPDATE users SET password=?, tokenVersion = COALESCE(tokenVersion, 1) + 1 WHERE id=?', [hashedPassword, req.user.userId]);
@@ -4562,7 +4573,7 @@ app.post('/api/auth/register', requireAdmin, validate(registerValidation), async
   try {
     const { email, password, fullName, role = 'assistant', clientId = '' } = req.body;
     if (!email || !password || !fullName) return res.status(400).json({ error: 'email, password and fullName are required' });
-    const passwordPolicy = validatePasswordPolicy(password);
+    const passwordPolicy = validatePasswordPolicy(password, { minLength: config.PASSWORD_MIN_LENGTH });
     if (!passwordPolicy.ok) return res.status(400).json({ error: 'Password does not meet security requirements', details: passwordPolicy.errors });
     if (!['advocate', 'assistant', 'admin', 'client'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
     if (role === 'client' && !clientId) return res.status(400).json({ error: 'Client users must be linked to a client record' });
@@ -11969,7 +11980,18 @@ app.post('/api/invoices/generate', requireAdvocateOrAdmin, validate(generateInvo
     let amount = 0;
     let source = 'hourly';
     let items = [];
-    if (matter.billingType === 'fixed') {
+    // LOCAL-PILOT-FIX-2: optional manual invoice — a stated amount for matters
+    // without unbilled time or a fixed fee. Same access and billing-visibility
+    // checks and the same response shape as generated invoices; time entries
+    // are never touched by this branch.
+    if (req.body.manual === true) {
+      const manualAmount = Number(req.body.amount);
+      if (!Number.isFinite(manualAmount) || manualAmount <= 0) return res.status(400).json({ error: 'amount must be a positive number for a manual invoice' });
+      if (manualAmount > 1000000000) return res.status(400).json({ error: 'amount is too large' });
+      amount = Math.round(manualAmount * 100) / 100;
+      source = 'manual';
+      items = [{ description: String(req.body.description || 'Legal services').slice(0, 500), hours: 0, rate: 0, amount }];
+    } else if (matter.billingType === 'fixed') {
       amount = Number(matter.fixedFee || 0);
       source = 'fixed';
       items = [{ description: 'Legal Services (Fixed Fee)', hours: 0, rate: 0, amount }];
@@ -11979,7 +12001,7 @@ app.post('/api/invoices/generate', requireAdvocateOrAdmin, validate(generateInvo
       amount = items.reduce((sum, item) => sum + item.amount, 0);
     }
     if (amount <= 0) return res.status(400).json({ error: 'No billable amount found for this matter' });
-    await run('INSERT INTO invoices (id,matterId,clientId,number,date,amount,status,dueDate,description,source) VALUES (?,?,?,?,?,?,?,?,?,?)', [id, matter.id, matter.clientId, number, date, amount, 'Outstanding', dueDate, source === 'fixed' ? 'Fixed fee invoice' : 'Unbilled time invoice', source]);
+    await run('INSERT INTO invoices (id,matterId,clientId,number,date,amount,status,dueDate,description,source) VALUES (?,?,?,?,?,?,?,?,?,?)', [id, matter.id, matter.clientId, number, date, amount, 'Outstanding', dueDate, source === 'fixed' ? 'Fixed fee invoice' : source === 'manual' ? 'Manual invoice' : 'Unbilled time invoice', source]);
     for (const item of items) await run('INSERT INTO invoice_items (id,invoiceId,timeEntryId,date,description,hours,rate,amount) VALUES (?,?,?,?,?,?,?,?)', [genId('ITEM'), id, item.timeEntryId || '', item.date || date, item.description, item.hours, item.rate, item.amount]);
     if (source === 'hourly' && items.length) await run(`UPDATE time_entries SET billed=1 WHERE id IN (${items.map(() => '?').join(',')})`, items.map(i => i.timeEntryId));
     await run('UPDATE matters SET totalBilled=COALESCE(totalBilled,0)+? WHERE id=?', [amount, matter.id]);
