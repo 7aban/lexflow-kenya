@@ -73,7 +73,7 @@ export default function AcceptInvitation({ firm, onAccepted }) {
               <input required style={styles.input} value={form.fullName} onChange={e => setForm({ ...form, fullName: e.target.value })} placeholder="Your full name" />
             </Field>
             <Field label="Password">
-              <input required minLength={8} type="password" style={styles.input} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="At least 8 characters" />
+              <input required type="password" style={styles.input} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="Enter a password you will remember" />
             </Field>
             <button disabled={busy} style={{ ...styles.primaryButton, width: '100%', marginTop: 16 }}>{busy ? 'Activating...' : 'Set password and enter portal'}</button>
           </>

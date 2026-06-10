@@ -80,14 +80,12 @@ describe('P0-1 Password policy minimum 8', () => {
     fix2Token = loginRes.body.token;
   });
 
-  test('password under 8 characters is rejected with the length error', async () => {
+  test('password under 8 characters is now accepted under simplified policy', async () => {
     const res = await request(app)
       .post('/api/auth/register')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ email: 'too-short@test.lexflow.co.ke', password: PASSWORD_7, fullName: 'Too Short', role: 'assistant' });
-    expect(res.statusCode).toBe(400);
-    expect(res.body.error).toBe('Password does not meet security requirements');
-    expect(res.body.details.join(' ')).toContain('at least 8 characters');
+      .send({ email: 'short-accepted@test.lexflow.co.ke', password: PASSWORD_7, fullName: 'Short Accepted', role: 'assistant' });
+    expect(res.statusCode).toBe(200);
   });
 
   test('change-password accepts an 8-character new password', async () => {
@@ -113,7 +111,7 @@ describe('P0-1 Password policy minimum 8', () => {
     expect(res.body.token).toBeDefined();
   });
 
-  test('change-password still rejects an under-8 new password', async () => {
+  test('under-8 password is now accepted on change-password under simplified policy', async () => {
     const loginRes = await request(app)
       .post('/api/auth/login')
       .send({ email: TEST_EMAIL, password: PASSWORD_8_NEXT });
@@ -121,8 +119,7 @@ describe('P0-1 Password policy minimum 8', () => {
       .post('/api/auth/change-password')
       .set('Authorization', `Bearer ${loginRes.body.token}`)
       .send({ currentPassword: PASSWORD_8_NEXT, newPassword: PASSWORD_7 });
-    expect(res.statusCode).toBe(400);
-    expect(res.body.error).toBe('Password does not meet security requirements');
+    expect(res.statusCode).toBe(200);
   });
 });
 

@@ -225,7 +225,7 @@ function ChangePasswordCard({ notify }) {
             <Field label="Confirm new password">
               <PasswordInput autoComplete="new-password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required />
             </Field>
-            <small style={styles.mutedText}>At least 8 characters, including an uppercase letter, a lowercase letter, a number, and a symbol.</small>
+            <small style={styles.mutedText}>Enter a password you will remember.</small>
             <div>
               <button type="submit" style={styles.primaryButton} disabled={busy}>{busy ? 'Changing password...' : 'Change password'}</button>
             </div>

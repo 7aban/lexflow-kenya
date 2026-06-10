@@ -1252,7 +1252,7 @@ function PasswordField({ label, value, onChange, placeholder, showPassword, onTo
     <div style={{ marginBottom: 6 }}>
       <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 3 }}>{label}</label>
       <div style={{ position: 'relative' }}>
-        <input value={value} onChange={onChange} type={showPassword ? 'text' : 'password'} placeholder={placeholder} autoComplete={autoComplete} minLength={8} style={{ ...styles.input, paddingRight: 40, boxSizing: 'border-box' }} />
+        <input value={value} onChange={onChange} type={showPassword ? 'text' : 'password'} placeholder={placeholder} autoComplete={autoComplete} style={{ ...styles.input, paddingRight: 40, boxSizing: 'border-box' }} />
         <button type="button" tabIndex={-1} aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={onToggleShow} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', border: 0, background: 'none', cursor: 'pointer', padding: 4, color: '#6B7280', display: 'flex', alignItems: 'center' }}>
           {showPassword ? <IconEyeOff size={18} /> : <IconEye size={18} />}
         </button>
@@ -1277,7 +1277,7 @@ function Account({ user, client, firm, matters, avatarUrl, hasAvatar, onAvatarUp
     setPwError('');
     setPwSuccess('');
     if (!pwForm.current.trim()) { setPwError('Current password is required.'); return; }
-    if (pwForm.newPw.length < 8) { setPwError('New password must be at least 8 characters.'); return; }
+    if (!pwForm.newPw.trim()) { setPwError('New password is required.'); return; }
     if (pwForm.newPw !== pwForm.confirm) { setPwError('New passwords do not match.'); return; }
     setPwBusy(true);
     try {
@@ -1317,7 +1317,7 @@ function Account({ user, client, firm, matters, avatarUrl, hasAvatar, onAvatarUp
           {pwError && <Alert tone="danger">{pwError}</Alert>}
           {pwSuccess && <Alert tone="success">{pwSuccess}</Alert>}
           <PasswordField label="Current password" value={pwForm.current} onChange={e => setPwForm({ ...pwForm, current: e.target.value })} placeholder="Enter current password" showPassword={showCurrent} onToggleShow={() => setShowCurrent(s => !s)} autoComplete="current-password" />
-          <PasswordField label="New password" value={pwForm.newPw} onChange={e => setPwForm({ ...pwForm, newPw: e.target.value })} placeholder="At least 8 characters" showPassword={showNew} onToggleShow={() => setShowNew(s => !s)} autoComplete="new-password" />
+          <PasswordField label="New password" value={pwForm.newPw} onChange={e => setPwForm({ ...pwForm, newPw: e.target.value })} placeholder="Enter a password you will remember" showPassword={showNew} onToggleShow={() => setShowNew(s => !s)} autoComplete="new-password" />
           <PasswordField label="Confirm new password" value={pwForm.confirm} onChange={e => setPwForm({ ...pwForm, confirm: e.target.value })} placeholder="Re-enter new password" showPassword={showConfirm} onToggleShow={() => setShowConfirm(s => !s)} autoComplete="new-password" />
           <button disabled={pwBusy} style={{ ...styles.primaryButton, alignSelf: 'flex-start', marginTop: 8 }}>{pwBusy ? 'Changing...' : 'Change password'}</button>
         </form>

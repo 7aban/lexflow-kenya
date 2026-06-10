@@ -1894,8 +1894,8 @@ app.post('/api/invitations/:token/accept', async (req, res) => {
   }
   const { password, fullName } = req.body;
   if (!password) return res.status(400).json({ error: 'Password is required' });
-  const passwordPolicy = validatePasswordPolicy(password, { minLength: config.PASSWORD_MIN_LENGTH });
-  if (!passwordPolicy.ok) return res.status(400).json({ error: 'Password does not meet security requirements', details: passwordPolicy.errors });
+  const passwordPolicy = validatePasswordPolicy(password);
+  if (!passwordPolicy.ok) return res.status(400).json({ error: 'Password is required' });
   const existing = await get('SELECT id FROM users WHERE lower(email)=lower(?)', [invitation.email]);
   if (existing) return res.status(400).json({ error: 'A user with this email already exists' });
   const id = genId('U');
@@ -4553,8 +4553,8 @@ app.post('/api/auth/change-password', async (req, res) => {
     if (!user) return res.status(401).json({ error: 'User not found' });
     if (!(await verifyPassword(currentPassword, user.password))) return res.status(401).json({ error: 'Current password is incorrect' });
     if (await verifyPassword(newPassword, user.password)) return res.status(400).json({ error: 'New password must be different from current password' });
-    const passwordPolicy = validatePasswordPolicy(newPassword, { minLength: config.PASSWORD_MIN_LENGTH });
-    if (!passwordPolicy.ok) return res.status(400).json({ error: 'Password does not meet security requirements', details: passwordPolicy.errors });
+    const passwordPolicy = validatePasswordPolicy(newPassword);
+    if (!passwordPolicy.ok) return res.status(400).json({ error: 'Password is required' });
     const hashedPassword = await hashPassword(newPassword);
     await run('UPDATE users SET password=?, tokenVersion = COALESCE(tokenVersion, 1) + 1 WHERE id=?', [hashedPassword, req.user.userId]);
     await recordAuditEvent(req, { action: 'password_changed', entityType: 'user', entityId: req.user.userId, metadata: { role: req.user.role } }).catch(() => {});
@@ -4573,8 +4573,8 @@ app.post('/api/auth/register', requireAdmin, validate(registerValidation), async
   try {
     const { email, password, fullName, role = 'assistant', clientId = '' } = req.body;
     if (!email || !password || !fullName) return res.status(400).json({ error: 'email, password and fullName are required' });
-    const passwordPolicy = validatePasswordPolicy(password, { minLength: config.PASSWORD_MIN_LENGTH });
-    if (!passwordPolicy.ok) return res.status(400).json({ error: 'Password does not meet security requirements', details: passwordPolicy.errors });
+    const passwordPolicy = validatePasswordPolicy(password);
+    if (!passwordPolicy.ok) return res.status(400).json({ error: 'Password is required' });
     if (!['advocate', 'assistant', 'admin', 'client'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
     if (role === 'client' && !clientId) return res.status(400).json({ error: 'Client users must be linked to a client record' });
     const id = genId('U');

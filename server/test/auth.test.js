@@ -11,6 +11,7 @@ let clientToken;
 let adminUserId;
 
 beforeAll(async () => {
+  dbCleanup();
   const adminRes = await request(app)
     .post('/api/auth/login')
     .send({ email: 'admin@lexflow.co.ke', password: 'password123' });
@@ -28,18 +29,37 @@ beforeAll(async () => {
   clientToken = clientRes.body.token;
 });
 
-afterAll(async () => {
+function dbCleanup() {
   const db = new sqlite3.Database(config.DATABASE_PATH);
   const run = (sql, params = []) => new Promise((resolve, reject) => {
     db.run(sql, params, (err) => err ? reject(err) : resolve());
   });
+  const testEmails = [
+    'emptyinvite-pol@test.com', 'spaceinvite-pol@test.com', 'simpleinvite-pol@test.com', 'stronginvite@test.com',
+    'weakinvite@test.com', 'shortinvite@test.com', 'tokenversion-invite@test.com',
+    'common@test.com', 'simplepolicy@test.com', 'emptypass@test.com', 'spacepass@test.com',
+    'weakpass@test.com', 'short@test.com', 'strongpolicy@test.com',
+  ];
+  for (const email of testEmails) {
+    run('DELETE FROM users WHERE email=?', [email]);
+    run('DELETE FROM invitations WHERE email=?', [email]);
+  }
+  db.close();
+}
+
+afterAll(async () => {
   const { hashPassword } = require('../lib/passwords');
+  const db = new sqlite3.Database(config.DATABASE_PATH);
+  const run = (sql, params = []) => new Promise((resolve, reject) => {
+    db.run(sql, params, (err) => err ? reject(err) : resolve());
+  });
   try {
     const defaultHash = await hashPassword('password123');
     await run("UPDATE users SET password=?, tokenVersion=1 WHERE email IN (?,?)", [defaultHash, 'admin@lexflow.co.ke', 'sarah.mwangi@achokilaw.co.ke']);
   } finally {
     db.close();
   }
+  dbCleanup();
 });
 
 describe('Auth API', () => {
@@ -322,89 +342,87 @@ describe('JWT Hardening', () => {
 });
 
 describe('Registration password policy enforcement', () => {
-  test('rejects weak password with 400', async () => {
+  test('rejects empty password with 400', async () => {
     const res = await request(app)
       .post('/api/auth/register')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ email: 'weakpass@test.com', password: 'weak', fullName: 'Weak User', role: 'assistant' });
+      .send({ email: 'emptypass@test.com', password: '', fullName: 'Empty User', role: 'assistant' });
     expect(res.statusCode).toBe(400);
-    expect(res.body.error).toBe('Password does not meet security requirements');
-    expect(Array.isArray(res.body.details)).toBe(true);
+    expect(res.body.error).toBe('email, password and fullName are required');
   });
 
-  test('rejects short password with 400', async () => {
+  test('rejects whitespace-only password with 400', async () => {
     const res = await request(app)
       .post('/api/auth/register')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ email: 'short@test.com', password: 'Ab1!', fullName: 'Short User', role: 'assistant' });
+      .send({ email: 'spacepass@test.com', password: '   ', fullName: 'Space User', role: 'assistant' });
     expect(res.statusCode).toBe(400);
-    expect(res.body.error).toBe('Password does not meet security requirements');
+    expect(res.body.error).toBe('Password is required');
   });
 
-  test('rejects common password password123 with 400', async () => {
+  test('accepts previously-common password password123', async () => {
     const res = await request(app)
       .post('/api/auth/register')
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ email: 'common@test.com', password: 'password123', fullName: 'Common User', role: 'assistant' });
-    expect(res.statusCode).toBe(400);
-    expect(res.body.error).toBe('Password does not meet security requirements');
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toHaveProperty('id');
+    expect(res.body.email).toBe('common@test.com');
   });
 
-  test('accepts strong password and creates user', async () => {
+  test('accepts simple password and creates user', async () => {
     const res = await request(app)
       .post('/api/auth/register')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ email: 'strongpolicy@test.com', password: 'Str0ng!Passw0rd2026', fullName: 'Strong User', role: 'assistant' });
+      .send({ email: 'simplepolicy@test.com', password: 'laban', fullName: 'Simple User', role: 'assistant' });
     expect(res.statusCode).toBe(200);
     expect(res.body).toHaveProperty('id');
-    expect(res.body.email).toBe('strongpolicy@test.com');
+    expect(res.body.email).toBe('simplepolicy@test.com');
   });
 });
 
 describe('Invitation acceptance password policy enforcement', () => {
-  test('rejects weak password with 400', async () => {
-    // Create an invitation first
+  test('rejects empty password with 400', async () => {
     const inviteRes = await request(app)
       .post('/api/invitations')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ email: 'weakinvite@test.com' });
+      .send({ email: 'emptyinvite-pol@test.com' });
     expect(inviteRes.statusCode).toBe(200);
     const token = inviteRes.body.token;
 
     const res = await request(app)
       .post(`/api/invitations/${token}/accept`)
-      .send({ password: 'weak', fullName: 'Weak Client' });
+      .send({ password: '', fullName: 'Empty Client' });
     expect(res.statusCode).toBe(400);
-    expect(res.body.error).toBe('Password does not meet security requirements');
-    expect(Array.isArray(res.body.details)).toBe(true);
+    expect(res.body.error).toBe('Password is required');
   });
 
-  test('rejects old 6-character password that previously passed', async () => {
+  test('rejects whitespace-only password with 400', async () => {
     const inviteRes = await request(app)
       .post('/api/invitations')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ email: 'shortinvite@test.com' });
+      .send({ email: 'spaceinvite-pol@test.com' });
     expect(inviteRes.statusCode).toBe(200);
     const token = inviteRes.body.token;
 
     const res = await request(app)
       .post(`/api/invitations/${token}/accept`)
-      .send({ password: 'Ab1!xy', fullName: 'Short Client' });
+      .send({ password: '   ', fullName: 'Space Client' });
     expect(res.statusCode).toBe(400);
-    expect(res.body.error).toBe('Password does not meet security requirements');
+    expect(res.body.error).toBe('Password is required');
   });
 
-  test('accepts strong password', async () => {
+  test('accepts simple password', async () => {
     const inviteRes = await request(app)
       .post('/api/invitations')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ email: 'stronginvite@test.com' });
+      .send({ email: 'simpleinvite-pol@test.com' });
     expect(inviteRes.statusCode).toBe(200);
     const token = inviteRes.body.token;
 
     const res = await request(app)
       .post(`/api/invitations/${token}/accept`)
-      .send({ password: 'Str0ng!Passw0rd2026', fullName: 'Strong Client' });
+      .send({ password: 'laban', fullName: 'Simple Client' });
     expect(res.statusCode).toBe(200);
     expect(res.body).toHaveProperty('message');
     expect(res.body).toHaveProperty('token');
@@ -519,14 +537,13 @@ describe('Change password', () => {
     expect(res.body.error).toBe('Current password is incorrect');
   });
 
-  test('weak newPassword returns 400 with policy error', async () => {
+  test('empty newPassword returns 400', async () => {
     const res = await request(app)
       .post('/api/auth/change-password')
       .set('Authorization', `Bearer ${advocateToken}`)
-      .send({ currentPassword: 'password123', newPassword: 'weak' });
+      .send({ currentPassword: 'password123', newPassword: '' });
     expect(res.statusCode).toBe(400);
-    expect(res.body.error).toBe('Password does not meet security requirements');
-    expect(Array.isArray(res.body.details)).toBe(true);
+    expect(res.body.error).toBe('currentPassword and newPassword are required');
   });
 
   test('same password rejected with 400', async () => {
@@ -548,12 +565,12 @@ describe('Change password', () => {
     expect(after.tokenVersion).toBe(before.tokenVersion);
   });
 
-  test('weak newPassword does NOT increment tokenVersion', async () => {
+  test('whitespace-only newPassword does NOT increment tokenVersion', async () => {
     const before = await dbGet('SELECT tokenVersion FROM users WHERE email=?', ['sarah.mwangi@achokilaw.co.ke']);
     await request(app)
       .post('/api/auth/change-password')
       .set('Authorization', `Bearer ${advocateToken}`)
-      .send({ currentPassword: 'password123', newPassword: 'weak' });
+      .send({ currentPassword: 'password123', newPassword: '   ' });
     const after = await dbGet('SELECT tokenVersion FROM users WHERE email=?', ['sarah.mwangi@achokilaw.co.ke']);
     expect(after.tokenVersion).toBe(before.tokenVersion);
   });
