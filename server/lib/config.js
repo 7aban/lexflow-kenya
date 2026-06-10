@@ -148,9 +148,13 @@ const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || (isTest ? '999999'
 const AUTH_RATE_LIMIT_WINDOW_MS = parseInt(process.env.AUTH_RATE_LIMIT_WINDOW_MS || (isTest ? '0' : '900000'), 10); // 15 min
 const AUTH_RATE_LIMIT_MAX = parseInt(process.env.AUTH_RATE_LIMIT_MAX || (isTest ? '999999' : '5'), 10); // 5 attempts per 15 min
 
-// Disable rate limiting in test mode
+// LOCAL-PILOT-FIX-1: allow disabling rate limiting entirely for local pilot
+// runs via LEXFLOW_DISABLE_RATE_LIMIT=true. Never honoured in production.
+const DISABLE_RATE_LIMIT = process.env.LEXFLOW_DISABLE_RATE_LIMIT === 'true' && !isProduction;
+
+// Disable rate limiting in test mode or when explicitly disabled for local pilot
 function rateLimitConfig(windowMs, max) {
-  if (isTest) {
+  if (isTest || DISABLE_RATE_LIMIT) {
     return {
       windowMs: 1000, // 1 second (minimum valid value)
       max: 999999, // effectively unlimited
@@ -170,7 +174,15 @@ function rateLimitConfig(windowMs, max) {
 
 // JSON body limit
 const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || '1mb';
-const UPLOAD_BODY_LIMIT = process.env.UPLOAD_BODY_LIMIT || '10mb';
+// LOCAL-PILOT-FIX-1: uploads are base64 JSON, which inflates files by ~4/3.
+// A 34mb body limit accepts files up to UPLOAD_MAX_FILE_MB (25 MB) once the
+// base64 inflation and JSON envelope are accounted for. Keep both in sync if
+// either is overridden via environment.
+const UPLOAD_BODY_LIMIT = process.env.UPLOAD_BODY_LIMIT || '34mb';
+const UPLOAD_MAX_FILE_MB = (() => {
+  const value = parseInt(process.env.UPLOAD_MAX_FILE_MB || '25', 10);
+  return isNaN(value) || value < 1 ? 25 : value;
+})();
 
 // Helmet CSP configuration
 const CSP_REPORT_ONLY = process.env.CSP_REPORT_ONLY === 'true';
@@ -232,8 +244,10 @@ module.exports = {
   RATE_LIMIT_MAX,
   AUTH_RATE_LIMIT_WINDOW_MS,
   AUTH_RATE_LIMIT_MAX,
+  DISABLE_RATE_LIMIT,
   JSON_BODY_LIMIT,
   UPLOAD_BODY_LIMIT,
+  UPLOAD_MAX_FILE_MB,
   CSP_REPORT_ONLY,
   CSP_DIRECTIVES,
   rateLimitConfig,

@@ -81,9 +81,35 @@ app.use(cors(corsOptions));
 app.use(helmet({
   contentSecurityPolicy: config.CSP_REPORT_ONLY ? { reportOnly: true, directives: config.CSP_DIRECTIVES } : config.isProduction ? { directives: config.CSP_DIRECTIVES } : false,
 }));
-app.use(express.json({ limit: config.JSON_BODY_LIMIT }));
-// Separate upload limit for document routes
-app.use('/api/documents', express.json({ limit: config.UPLOAD_BODY_LIMIT }));
+// LOCAL-PILOT-FIX-1: pick the JSON body limit per path BEFORE parsing. The
+// previous global 1mb parser ran first on every request, so the larger limit
+// mounted at /api/documents never took effect — and the actual upload routes
+// (/api/matters/:id/documents, /api/document-requests/:id/respond,
+// /api/hr/documents) are not under /api/documents anyway, capping uploads at
+// ~750 KB after base64 inflation and returning Express's HTML 413 page.
+const UPLOAD_BODY_PATHS = [
+  /^\/api\/documents(\/|$)/,
+  /^\/api\/matters\/[^/]+\/documents(\/|$)/,
+  /^\/api\/document-requests\/[^/]+\/respond$/,
+  /^\/api\/hr\/documents(\/|$)/,
+];
+const isUploadBodyPath = requestPath => UPLOAD_BODY_PATHS.some(pattern => pattern.test(requestPath));
+const standardJsonParser = express.json({ limit: config.JSON_BODY_LIMIT });
+const uploadJsonParser = express.json({ limit: config.UPLOAD_BODY_LIMIT });
+app.use((req, res, next) => (isUploadBodyPath(req.path) ? uploadJsonParser : standardJsonParser)(req, res, next));
+// Clear JSON 413 instead of Express's default HTML error page. File-type and
+// visibility policy are still enforced by the individual routes.
+app.use((err, req, res, next) => {
+  if (err && err.type === 'entity.too.large') {
+    return res.status(413).json({
+      error: isUploadBodyPath(req.path)
+        ? `File is too large. The maximum upload size is ${config.UPLOAD_MAX_FILE_MB} MB.`
+        : 'Request body is too large.',
+      code: 'payload_too_large',
+    });
+  }
+  return next(err);
+});
 
 app.use('/api', (_req, res, next) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate');

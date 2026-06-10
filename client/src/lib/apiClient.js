@@ -139,6 +139,32 @@ export async function api(path, options = {}) {
   return body;
 }
 
+// LOCAL-PILOT-FIX-1: dedicated helper because /auth/change-password answers
+// 401 for a mistyped current password; the shared api() treats every 401 as
+// an expired session and would force-log the user out over a typo.
+export async function changePassword(currentPassword, newPassword) {
+  const session = readSession();
+  const headers = { 'Content-Type': 'application/json' };
+  if (session?.token) headers.Authorization = `Bearer ${session.token}`;
+  const response = await fetch(`${API_BASE}/auth/change-password`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+  const type = response.headers.get('content-type') || '';
+  const body = type.includes('application/json') ? await response.json().catch(() => ({})) : {};
+  if (response.status === 401 && body?.error !== 'Current password is incorrect') {
+    clearSession();
+    emitAuthFailure();
+    throw new AuthExpiredError();
+  }
+  if (!response.ok) {
+    const details = Array.isArray(body?.details) && body.details.length ? ` ${body.details.join(' ')}` : '';
+    throw new Error(`${body?.error || `Request failed (${response.status})`}${details}`);
+  }
+  return body;
+}
+
 function filenameFromDisposition(disposition, fallbackFilename) {
   const match =
     disposition.match(/filename\*=UTF-8''([^;]+)/i) ||
