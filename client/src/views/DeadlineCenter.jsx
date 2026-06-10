@@ -445,7 +445,10 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
 
       <div style={{ border: `1px solid ${theme.line}`, borderRadius: 10, padding: 16, background: '#fff', boxShadow: theme.shadow, display: 'grid', gap: 12 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-          <strong style={{ fontSize: 15 }}>Court diary</strong>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <strong style={{ fontSize: 17 }}>Court Diary</strong>
+            {courtItems.length > 0 && <Badge tone="red">{courtItems.length} upcoming</Badge>}
+          </div>
           {courtItems.length > 0 && <button type="button" onClick={scrollToTimeline} style={styles.ghostButton}>View in timeline</button>}
         </div>
         {upcomingCourtItems.length ? (

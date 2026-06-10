@@ -62,7 +62,7 @@ beforeAll(async () => {
   await run('INSERT INTO payment_proofs (id,invoiceId,matterId,clientId,method,reference,amount,note,status,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?)',
     [`${PREFIX}PP1`, `${PREFIX}INV1`, margaretMatterId, margaretId, 'mpesa', 'REF1', 5000, 'fixture', 'Pending', new Date().toISOString()]);
   await run('INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,content,source,clientVisible) VALUES (?,?,?,?,?,?,?,?,?,?)',
-    [`${PREFIX}DOC1`, margaretMatterId, 'snap-secret.pdf', 'Snapshot Secret', 'pdf', 'application/pdf', '2026-06-08', Buffer.from(SECRET_DOC), 'firm', 0]);
+    [`${PREFIX}DOC1`, margaretMatterId, 'snap-secret.pdf', 'Snapshot Secret', 'pdf', 'application/pdf', isoDaysFromNow(1), Buffer.from(SECRET_DOC), 'firm', 0]);
   await run('INSERT INTO conversations (id,matterId,clientId,subject,createdAt) VALUES (?,?,?,?,?)',
     [`${PREFIX}CONV1`, margaretMatterId, margaretId, 'Snapshot thread', new Date().toISOString()]);
   await run('INSERT INTO messages (id,conversationId,senderId,senderRole,body,createdAt) VALUES (?,?,?,?,?,?)',

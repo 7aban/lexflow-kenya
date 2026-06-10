@@ -46,7 +46,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const [documents, setDocuments] = useState([]);
   const [selectedFolder, setSelectedFolder] = useState('all');
   const [newFolderName, setNewFolderName] = useState('');
-  const [uploadFolderId, setUploadFolderId] = useState('uncategorised');
+  const [uploadFolderInput, setUploadFolderInput] = useState('');
   const [confirm, setConfirm] = useState(null);
   const [loading, setLoading] = useState(false);
   const [templates, setTemplates] = useState([]);
@@ -79,8 +79,13 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   }, [showGenerateControls]);
 
   useEffect(() => {
-    if (!clientMode && selectedFolder && selectedFolder !== 'all') setUploadFolderId(selectedFolder);
-  }, [clientMode, selectedFolder]);
+    if (!clientMode && selectedFolder && selectedFolder !== 'all') {
+      const folder = folders.find(f => f.id === selectedFolder);
+      if (folder) setUploadFolderInput(folder.name);
+    } else if (!clientMode && selectedFolder === 'all') {
+      setUploadFolderInput('');
+    }
+  }, [clientMode, selectedFolder, folders]);
 
   async function load() {
     setLoading(true);
@@ -169,16 +174,27 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     const file = event.target.files?.[0];
     if (!file) return;
     try {
+      let targetFolderId = 'uncategorised';
+      if (uploadFolderInput.trim()) {
+        const existing = realFolders.find(f => f.name.toLowerCase() === uploadFolderInput.trim().toLowerCase());
+        if (existing) {
+          targetFolderId = existing.id;
+        } else {
+          const newFolder = await createFolder(matterId, { name: uploadFolderInput.trim() });
+          targetFolderId = newFolder.id;
+        }
+      }
       await api(`/matters/${matterId}/documents`, {
         method: 'POST',
         body: {
           name: file.name,
           mimeType: file.type || 'application/octet-stream',
           data: await fileToDataUrl(file),
-          folderId: clientMode ? undefined : uploadFolderId,
+          folderId: clientMode ? undefined : targetFolderId,
         },
       });
       event.target.value = '';
+      setUploadFolderInput('');
       notify?.({ type: 'success', message: clientMode ? 'Document shared with the firm.' : 'Document uploaded.' });
       await load();
     } catch (err) { notify?.({ type: 'danger', message: err.message }); }
@@ -296,10 +312,11 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
           <div className="lf-doc-upload-area">
             <div style={{ ...styles.formGrid }}>
               {!clientMode && (
-                <Field label="Upload Folder">
-                  <select style={styles.input} value={uploadFolderId} onChange={e => setUploadFolderId(e.target.value)}>
-                    {folderOptions.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
-                  </select>
+                <Field label="Folder">
+                  <input style={styles.input} list="folder-suggestions" value={uploadFolderInput} onChange={e => setUploadFolderInput(e.target.value)} placeholder="e.g. Pleadings, Correspondence, Evidence, Authorities, Invoices, Court Orders..." />
+                  <datalist id="folder-suggestions">
+                    {realFolders.map(folder => <option key={folder.id} value={folder.name} />)}
+                  </datalist>
                 </Field>
               )}
               <Field label={clientMode ? 'Upload to Client Uploads' : 'Upload Document'}>

@@ -43,6 +43,7 @@ const navIcons = {
 };
 
 const navDisplayLabels = {
+  'Deadlines': 'Court Diary & Deadlines',
   'Audit Log': 'Audit Log (Legacy)',
   'Structured Audit': 'Audit Events',
 };
@@ -672,7 +673,7 @@ export default function App() {
             {loading && !bootstrapped && <Skeleton />}
             {(!loading || bootstrapped) && view === 'Dashboard' && <Dashboard data={data} user={user} onNavigate={setView} />}
             {(!loading || bootstrapped) && view === 'Clients' && <Clients clients={data.clients} matters={data.matters} canManage={canManage} isAdmin={isAdmin} reload={refresh} notify={setToast} focus={clientFocus} />}
-            {(!loading || bootstrapped) && view === 'Matters' && <Matters data={data} canManage={canManage} reload={refresh} notify={setToast} focus={matterFocus} onMatterOpened={async matterId => { setNotifications(current => current.filter(item => item.matterId !== matterId)); try { await markNotificationsRead({ matterId }); } catch {} }} />}
+            {(!loading || bootstrapped) && view === 'Matters' && <Matters data={data} canManage={canManage} reload={refresh} notify={setToast} focus={matterFocus} onNavigate={setView} onMatterOpened={async matterId => { setNotifications(current => current.filter(item => item.matterId !== matterId)); try { await markNotificationsRead({ matterId }); } catch {} }} />}
             {(!loading || bootstrapped) && view === 'Tasks' && <Tasks data={data} canManage={canManage} reload={refresh} notify={setToast} focus={taskFocus} />}
             {(!loading || bootstrapped) && view === 'Deadlines' && <DeadlineCenter data={data} canManage={canManage} notify={setToast} focus={appearanceFocus} />}
             {(!loading || bootstrapped) && view === 'Communications' && <Communications clients={data.clients} matters={data.matters} focus={communicationFocus} notify={setToast} />}

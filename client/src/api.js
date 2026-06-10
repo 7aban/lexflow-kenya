@@ -138,10 +138,11 @@ export const downloadInvoicePdf = async (id, filename = 'invoice.pdf') => {
   return blob;
 };
 
-export const uploadMatterDocument = async (matterId, file) => req('POST', `/api/matters/${matterId}/documents`, {
+export const uploadMatterDocument = async (matterId, file, folderId) => req('POST', `/api/matters/${matterId}/documents`, {
   name: file.name,
   mimeType: file.type || 'application/octet-stream',
   data: await fileToDataUrl(file),
+  ...(folderId ? { folderId } : {}),
 });
 export const deleteDocument = id => req('DELETE', `/api/documents/${id}`);
 
