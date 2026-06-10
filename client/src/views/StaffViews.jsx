@@ -1955,6 +1955,41 @@ function ClientSnapshotCard({ clientId, onClose }) {
     </Card>
   );
 }
+// LOCAL-PILOT-FIX-11: Kenyan-practice stage suggestions covering litigation and
+// non-litigation work. Stages are stored as free text, so this list only drives the
+// dropdowns; matters with older values (Discovery, Trial Prep, Active, Engagement)
+// keep displaying and remain selectable via a "(legacy)" option while editing.
+// 'Closed' and 'On Hold' keep their exact legacy values because closed/on-hold
+// semantics are string-checked across the app (open filter, archive, client portal
+// active counts, snapshot activeCount, HR offboarding).
+const KENYAN_MATTER_STAGES = [
+  'Intake / Initial Consultation',
+  'Conflict Check',
+  'Engagement / Retainer',
+  'Instructions Received',
+  'Demand / Pre-action',
+  'Pleadings / Filing',
+  'Service',
+  'Pre-trial / Directions',
+  'Hearing',
+  'Submissions',
+  'Ruling / Judgment',
+  'Taxation / Costs',
+  'Execution / Enforcement',
+  'Appeal',
+  'Negotiation / Settlement',
+  'Mediation',
+  'Arbitration',
+  'Conveyancing / Completion',
+  'Probate / Confirmation',
+  'Advisory / Opinion',
+  'Ongoing Compliance',
+  'On Hold',
+  'Closed',
+];
+// Display label only — the stored value stays the literal 'Closed'.
+const MATTER_STAGE_LABELS = { Closed: 'Closed / Archived' };
+const matterStageLabel = stage => MATTER_STAGE_LABELS[stage] || stage;
 export function Matters({ data, canManage, reload, notify, focus, onNavigate, onMatterOpened }) {
   const [selectedId, setSelectedId] = useState('');
   const [detail, setDetail] = useState(null);
@@ -1971,7 +2006,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
   // PRODUCT-16M: client-side Matter list filters (UI convenience only; no fetch/API/selection/semantics change).
   const [matterSearch, setMatterSearch] = useState('');
   const [matterStage, setMatterStage] = useState('open');
-  const emptyMatterForm = { clientId: '', title: '', practiceArea: '', stage: 'Intake', assignedTo: '', paralegal: '', description: '', court: '', judge: '', caseNo: '', opposingCounsel: '', priority: 'Medium', solDate: '', billingType: 'hourly', billingRate: '', fixedFee: '', retainerBalance: 0, remindersEnabled: 'firm_default', courtRemindersEnabled: 'firm_default', invoiceRemindersEnabled: 'firm_default' };
+  const emptyMatterForm = { clientId: '', title: '', practiceArea: '', stage: 'Intake / Initial Consultation', assignedTo: '', paralegal: '', description: '', court: '', judge: '', caseNo: '', opposingCounsel: '', priority: 'Medium', solDate: '', billingType: 'hourly', billingRate: '', fixedFee: '', retainerBalance: 0, remindersEnabled: 'firm_default', courtRemindersEnabled: 'firm_default', invoiceRemindersEnabled: 'firm_default' };
   const [form, setForm] = useState(emptyMatterForm);
   const [time, setTime] = useState({ hours: 1, description: '', rate: 15000, billable: true });
   const emptyEventForm = { title: '', date: '', time: '9:00 AM', type: 'Hearing', location: '', meetingLink: '', attorney: '', prepNote: '' };
@@ -2206,14 +2241,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
               <select aria-label="Filter matters by stage" value={matterStage} onChange={e => setMatterStage(e.target.value)} style={{ ...styles.input, width: 'auto', minWidth: 132 }}>
                 <option value="open">Active (hide Closed)</option>
                 <option value="all">All stages</option>
-                <option value="Intake">Intake</option>
-                <option value="Conflict Check">Conflict Check</option>
-                <option value="Engagement">Engagement</option>
-                <option value="Active">Active</option>
-                <option value="Discovery">Discovery</option>
-                <option value="Trial Prep">Trial Prep</option>
-                <option value="On Hold">On Hold</option>
-                <option value="Closed">Closed</option>
+                {[...new Set(data.matters.map(m => m.stage || 'Intake'))].sort().map(s => <option key={s} value={s}>{matterStageLabel(s)}</option>)}
               </select>
               <button type="button" style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 12px' }} onClick={exportMatters} disabled={!filteredMatters.length} title="Download the filtered matters as a CSV file">Export CSV</button>
             </div>
@@ -2235,8 +2263,8 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
               <Field label="Client"><select required style={styles.input} value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })}><option value="">Select client</option>{data.clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
               <Field label="Title"><input required style={styles.input} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g. Civil Suit E001 of 2025" /></Field>
               <Field label="Practice"><input style={styles.input} value={form.practiceArea} onChange={e => setForm({ ...form, practiceArea: e.target.value })} placeholder="e.g. Civil Litigation" title="Area of legal practice / department" list="practice-list" /></Field>
-              <datalist id="practice-list"><option value="Civil Litigation" /><option value="Criminal Defence" /><option value="Commercial &amp; Corporate" /><option value="Conveyancing &amp; Property" /><option value="Employment &amp; Labour" /><option value="Family &amp; Divorce" /><option value="Succession &amp; Probate" /><option value="Constitutional &amp; Judicial Review" /><option value="Environment &amp; Land (ELC)" /><option value="Tax" /><option value="Debt Recovery" /><option value="Intellectual Property" /><option value="Immigration" /><option value="Banking &amp; Finance" /></datalist>
-              <Field label="Stage"><select style={styles.input} value={form.stage} onChange={e => setForm({ ...form, stage: e.target.value })}><option>Intake</option><option>Conflict Check</option><option>Engagement</option><option>Active</option><option>Discovery</option><option>Trial Prep</option><option>On Hold</option><option>Closed</option></select></Field>
+              <datalist id="practice-list"><option value="Civil Litigation" /><option value="Criminal Defence" /><option value="Commercial" /><option value="Conveyancing" /><option value="Employment" /><option value="Family" /><option value="Succession" /><option value="Constitutional &amp; Judicial Review" /><option value="Environment &amp; Land (ELC)" /><option value="Tax" /><option value="Debt Recovery" /><option value="Arbitration" /><option value="Mediation" /><option value="Advisory / Opinion" /><option value="Corporate / Compliance" /><option value="Intellectual Property" /><option value="Immigration" /><option value="Banking &amp; Finance" /></datalist>
+              <Field label="Stage"><select style={styles.input} value={form.stage} onChange={e => setForm({ ...form, stage: e.target.value })}>{form.stage && !KENYAN_MATTER_STAGES.includes(form.stage) ? <option value={form.stage}>{form.stage} (legacy)</option> : null}{KENYAN_MATTER_STAGES.map(s => <option key={s} value={s}>{matterStageLabel(s)}</option>)}</select><div style={{ fontSize: 11, color: theme.muted, fontWeight: 400, marginTop: 2 }}>Select the current procedural or workflow stage. Custom values remain allowed where supported.</div></Field>
               <Field label="Advocate"><input style={styles.input} value={form.assignedTo || ''} onChange={e => setForm({ ...form, assignedTo: e.target.value })} /></Field>
               <Field label="Court"><input style={styles.input} value={form.court || ''} onChange={e => setForm({ ...form, court: e.target.value })} placeholder="e.g. Milimani Law Courts, Nairobi" /></Field>
               <Field label="Judge"><input style={styles.input} value={form.judge || ''} onChange={e => setForm({ ...form, judge: e.target.value })} placeholder="e.g. Hon. Justice Odunga" /></Field>
