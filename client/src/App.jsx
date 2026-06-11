@@ -278,6 +278,16 @@ export default function App() {
     };
   }, []);
 
+  // LOCAL-PILOT-FIX-14: toasts must never linger permanently. Success/info clear
+  // after 4s; danger/warning stay longer (7.5s) so errors remain readable. Manual
+  // close still works, and each new toast restarts the timer.
+  useEffect(() => {
+    if (!toast) return undefined;
+    const delay = toast.type === 'danger' || toast.type === 'warning' ? 7500 : 4000;
+    const timer = setTimeout(() => setToast(null), delay);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
   useEffect(() => {
     function handleBeforeInstall(e) {
       e.preventDefault();
@@ -695,10 +705,10 @@ export default function App() {
       <button
         type="button"
         className="lf-timer-bubble"
-        onClick={() => setView('Matters')}
+        onClick={() => { setView('Matters'); setMatterFocus({ section: 'tasks', ts: Date.now() }); }}
         style={styles.timerBubble}
-        aria-label="Open Matters to log billable time"
-        title="Open Matters to log billable time"
+        aria-label="Open time logging — log hours or start a task timer"
+        title="Open time logging — log hours or start a task timer"
       >
         <span style={styles.liveDot} />
         <div>

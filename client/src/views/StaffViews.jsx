@@ -1990,6 +1990,41 @@ const KENYAN_MATTER_STAGES = [
 // Display label only — the stored value stays the literal 'Closed'.
 const MATTER_STAGE_LABELS = { Closed: 'Closed / Archived' };
 const matterStageLabel = stage => MATTER_STAGE_LABELS[stage] || stage;
+// LOCAL-PILOT-FIX-14: the pilot firm does not use matter checklists or checklist
+// templates. The UI entry points are hidden, but backend routes, tables, tests and
+// any existing data are retained for compatibility. Flip to true to restore the UI.
+const CHECKLISTS_UI_ENABLED = false;
+// LOCAL-PILOT-FIX-14: realistic Kenyan court diary event types. The value is stored
+// as free text, so any older/custom value keeps displaying via a "(legacy)" option.
+const APPEARANCE_TYPES = [
+  'Mention',
+  'Hearing',
+  'Further Hearing',
+  'Ruling',
+  'Judgment',
+  'Delivery of Judgment',
+  'Directions',
+  'Pre-trial Conference',
+  'Case Management Conference',
+  'Submissions',
+  'Taxation',
+  'Compliance',
+  'Site Visit',
+  'Mediation',
+  'Arbitration',
+  'Sentencing',
+  'Plea Taking',
+  'Other',
+];
+function AppearanceTypeSelect({ value, onChange }) {
+  const isKnown = !value || APPEARANCE_TYPES.includes(value);
+  return (
+    <select style={styles.input} value={value || 'Hearing'} onChange={onChange}>
+      {!isKnown && <option value={value}>{value} (legacy)</option>}
+      {APPEARANCE_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
+    </select>
+  );
+}
 export function Matters({ data, canManage, reload, notify, focus, onNavigate, onMatterOpened }) {
   const [selectedId, setSelectedId] = useState('');
   const [detail, setDetail] = useState(null);
@@ -2008,7 +2043,9 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
   const [matterStage, setMatterStage] = useState('open');
   const emptyMatterForm = { clientId: '', title: '', practiceArea: '', stage: 'Intake / Initial Consultation', assignedTo: '', paralegal: '', description: '', court: '', judge: '', caseNo: '', opposingCounsel: '', priority: 'Medium', solDate: '', billingType: 'hourly', billingRate: '', fixedFee: '', retainerBalance: 0, remindersEnabled: 'firm_default', courtRemindersEnabled: 'firm_default', invoiceRemindersEnabled: 'firm_default' };
   const [form, setForm] = useState(emptyMatterForm);
-  const [time, setTime] = useState({ hours: 1, description: '', rate: 15000, billable: true });
+  // LOCAL-PILOT-FIX-14: hours kept as a string while typing so decimals like 1.25
+  // can be entered directly; coerced to a number in logTime before saving.
+  const [time, setTime] = useState({ hours: '1', description: '', rate: 15000, billable: true });
   const emptyEventForm = { title: '', date: '', time: '9:00 AM', type: 'Hearing', location: '', meetingLink: '', attorney: '', prepNote: '' };
   const [eventForm, setEventForm] = useState(emptyEventForm);
   const [note, setNote] = useState('');
@@ -2026,6 +2063,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   const [templateSaving, setTemplateSaving] = useState(false);
   const [applyingTemplate, setApplyingTemplate] = useState(false);
+  const timekeeperFocusHandled = useRef(null);
   const session = readSession();
   const isAdmin = session?.user?.role === 'admin';
   const userRole = session?.user?.role || '';
@@ -2052,12 +2090,27 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
 
   useEffect(() => { if (selected?.id) { setSelectedId(selected.id); loadDetail(selected.id); } else { setDetail(null); setSuggestions([]); } }, [selected?.id]);
   useEffect(() => { if (detail && isAdmin) getUsers(true).then(users => { setAdvocates((users || []).filter(u => u.role === 'advocate' && u.isActive)); setReassignTo(detail.assignedTo || ''); }).catch(() => {}); }, [detail?.id]);
-  useEffect(() => { if (['admin', 'advocate', 'assistant'].includes(userRole)) loadChecklistTemplates(); }, [userRole]);
+  useEffect(() => { if (CHECKLISTS_UI_ENABLED && ['admin', 'advocate', 'assistant'].includes(userRole)) loadChecklistTemplates(); }, [userRole]);
   useEffect(() => {
     if (!focus?.matterId) return;
     setSelectedId(focus.matterId);
     setCockpitSection('overview');
   }, [focus?.matterId, focus?.ts]);
+  // LOCAL-PILOT-FIX-14: the Timekeeper bubble sends focus.section='tasks'. Once the
+  // open matter's detail is ready this jumps straight to its time-logging form
+  // (handled once per click via the ts ref); with no matters at all, explain why.
+  useEffect(() => {
+    if (!focus?.section || focus?.matterId) return;
+    if (timekeeperFocusHandled.current === focus.ts) return;
+    if (detail) {
+      timekeeperFocusHandled.current = focus.ts;
+      setCockpitSection(focus.section);
+      setTimeout(() => { document.getElementById('matter-section-time')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 120);
+    } else if (!(data.matters || []).length) {
+      timekeeperFocusHandled.current = focus.ts;
+      notify?.({ type: 'info', message: 'Create or open a matter to log time or start a task timer.' });
+    }
+  }, [focus?.section, focus?.ts, detail?.id]);
 
   async function loadDetail(id) {
     setLoading(true);
@@ -2152,7 +2205,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
     }
   }
   async function createMatter(event) { event.preventDefault(); try { if (editingMatter && detail) { await api(`/matters/${detail.id}`, { method: 'PATCH', body: form }); setEditingMatter(false); notify({ type: 'success', message: 'Matter updated.' }); await loadDetail(detail.id); } else { await api('/matters', { method: 'POST', body: form }); notify({ type: 'success', message: 'Matter created.' }); } setForm(emptyMatterForm); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
-  async function logTime(event) { event.preventDefault(); if (!detail) return; try { const body = { ...time, billable: Boolean(time.billable), matterId: detail.id }; if (!canViewBilling) delete body.rate; await api('/time-entries', { method: 'POST', body }); setTime({ hours: 1, description: '', rate: canViewBilling ? detail.billingRate || 15000 : 0, billable: true }); notify({ type: 'success', message: 'Time logged.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
+  async function logTime(event) { event.preventDefault(); if (!detail) return; const hours = Number(time.hours); if (!Number.isFinite(hours) || hours <= 0) { notify({ type: 'warning', message: 'Enter the hours worked as a number, e.g. 0.5 or 1.25.' }); return; } try { const body = { ...time, hours, billable: Boolean(time.billable), matterId: detail.id }; if (!canViewBilling) delete body.rate; await api('/time-entries', { method: 'POST', body }); setTime({ hours: '1', description: '', rate: canViewBilling ? detail.billingRate || 15000 : 0, billable: true }); notify({ type: 'success', message: 'Time logged.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function addNote(event) { event.preventDefault(); if (!detail || !note.trim()) return; try { await api(`/matters/${detail.id}/notes`, { method: 'POST', body: { content: note } }); setNote(''); notify({ type: 'success', message: 'Case note saved.' }); await loadDetail(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function createEvent(event) { event.preventDefault(); if (!detail) return; try { await api('/appearances', { method: 'POST', body: { ...eventForm, matterId: detail.id } }); setEventForm(emptyEventForm); notify({ type: 'success', message: 'Court appearance scheduled.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function uploadDoc(event) { const file = event.target.files?.[0]; if (!file || !detail) return; try { await api(`/matters/${detail.id}/documents`, { method: 'POST', body: { name: file.name, mimeType: file.type || 'application/octet-stream', data: await fileToDataUrl(file) } }); notify({ type: 'success', message: 'Document uploaded.' }); event.target.value = ''; await loadDetail(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
@@ -2206,7 +2259,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
   async function handleReassign() { if (!detail || !reassignTo || reassignTo === detail.assignedTo) return; setReassigning(true); try { await reassignMatter(detail.id, reassignTo); notify({ type: 'success', message: `Matter reassigned to ${reassignTo}.` }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } finally { setReassigning(false); } }
   async function saveEvent(event, values) { try { await api(`/appearances/${event.id}`, { method: 'PATCH', body: values }); setEditingEvent(null); notify({ type: 'success', message: 'Appearance updated.' }); await loadDetail(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteEventRecord(event) { try { await api(`/appearances/${event.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Appearance deleted.' }); await loadDetail(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
-  async function saveTimeEntry(entry, values) { try { const body = { ...values }; if (!canViewBilling) delete body.rate; await api(`/time-entries/${entry.id}`, { method: 'PATCH', body }); setEditingTime(null); notify({ type: 'success', message: 'Time entry updated.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
+  async function saveTimeEntry(entry, values) { const body = { ...values }; if (body.hours !== undefined) { const hours = Number(body.hours); if (!Number.isFinite(hours) || hours <= 0) { notify({ type: 'warning', message: 'Enter the hours worked as a number, e.g. 0.5 or 1.25.' }); return; } body.hours = hours; } try { if (!canViewBilling) delete body.rate; await api(`/time-entries/${entry.id}`, { method: 'PATCH', body }); setEditingTime(null); notify({ type: 'success', message: 'Time entry updated.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteTimeEntryRecord(entry) { try { await api(`/time-entries/${entry.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Time entry deleted.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
 
   // PRODUCT-16M: filter the already-loaded matters for the list only. Stage 'open' hides Closed files,
@@ -2278,7 +2331,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
             </form>
           </Card>
         )}
-        {isAdmin && (
+        {CHECKLISTS_UI_ENABLED && isAdmin && (
           <ChecklistTemplateLibrary
             templates={activeChecklistTemplates}
             form={templateForm}
@@ -2369,7 +2422,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
               {cockpitSection === 'tasks' && (
                 <>
                   <form id="matter-section-time" onSubmit={logTime} style={styles.formGrid}>
-                    <Field label="Hours"><input type="number" min="0" step="0.1" style={styles.input} value={time.hours} onChange={e => setTime({ ...time, hours: Number(e.target.value) })} /></Field>
+                    <Field label="Hours"><input type="number" min="0" step="any" inputMode="decimal" placeholder="e.g. 1.25" style={styles.input} value={time.hours} onChange={e => setTime({ ...time, hours: e.target.value })} /></Field>
                     <Field label="Description"><input style={styles.input} value={time.description} onChange={e => setTime({ ...time, description: e.target.value })} /></Field>
                     {canViewBilling && <Field label="Rate"><input type="number" style={styles.input} value={time.rate} onChange={e => setTime({ ...time, rate: Number(e.target.value) })} /></Field>}
                     <Field label="Billing class"><select style={styles.input} value={time.billable ? 'billable' : 'non_billable'} onChange={e => setTime({ ...time, billable: e.target.value === 'billable' })}><option value="billable">Billable</option><option value="non_billable">Non-billable</option></select></Field>
@@ -2377,7 +2430,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
                     <button style={styles.primaryButton}>Log time</button>
                   </form>
                   <div style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Time entries"><TimeEntryEditorList entries={detail.timeEntries || []} canManage={canManage} canViewBilling={canViewBilling} editingTime={editingTime} setEditingTime={setEditingTime} saveTimeEntry={saveTimeEntry} confirmDelete={entry => setConfirm({ title: 'Delete time entry?', message: 'Delete this time entry?', onConfirm: () => deleteTimeEntryRecord(entry) })} /></Sub></div>
-                  <Sub title="Checklist"><MatterChecklistPanel items={detail.checklistItems || []} templates={activeChecklistTemplates} canManage={canManageChecklist} canToggle={canToggleChecklist} canApplyTemplate={canApplyChecklistTemplate} selectedTemplateId={selectedTemplateId} setSelectedTemplateId={setSelectedTemplateId} onApplyTemplate={applySelectedChecklistTemplate} applyingTemplate={applyingTemplate} form={checklistForm} setForm={setChecklistForm} onAdd={addChecklistItem} editingItem={editingChecklistItem} setEditingItem={setEditingChecklistItem} onToggle={toggleChecklistItem} onSave={saveChecklistItem} confirmDelete={item => setConfirm({ title: 'Delete checklist item?', message: 'Delete this checklist item?', onConfirm: () => deleteChecklistItemRecord(item) })} /></Sub>
+                  {CHECKLISTS_UI_ENABLED && <Sub title="Checklist"><MatterChecklistPanel items={detail.checklistItems || []} templates={activeChecklistTemplates} canManage={canManageChecklist} canToggle={canToggleChecklist} canApplyTemplate={canApplyChecklistTemplate} selectedTemplateId={selectedTemplateId} setSelectedTemplateId={setSelectedTemplateId} onApplyTemplate={applySelectedChecklistTemplate} applyingTemplate={applyingTemplate} form={checklistForm} setForm={setChecklistForm} onAdd={addChecklistItem} editingItem={editingChecklistItem} setEditingItem={setEditingChecklistItem} onToggle={toggleChecklistItem} onSave={saveChecklistItem} confirmDelete={item => setConfirm({ title: 'Delete checklist item?', message: 'Delete this checklist item?', onConfirm: () => deleteChecklistItemRecord(item) })} /></Sub>}
                   <div id="matter-section-tasks" style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Tasks"><TaskEditorList tasks={detail.tasks || []} entries={detail.timeEntries || []} matter={detail} canManage={canManage} canViewBilling={canViewBilling} editingTask={editingTask} setEditingTask={setEditingTask} saveTask={saveTask} taskTimer={taskTimer} setTaskTimer={setTaskTimer} notify={notify} onTimerSaved={async () => { await loadDetail(detail.id); await reload(); }} confirmDelete={task => setConfirm({ title: 'Delete task?', message: 'Delete this task?', onConfirm: () => deleteTaskRecord(task) })} /></Sub></div>
                 </>
               )}
@@ -2417,7 +2470,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
                       </div>
                     </section>
                   )}
-                  <div id="matter-section-court" style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Court Diary / Appearances" hint="View and manage court appearances. All appearances also appear in the Court Diary under Deadlines.">{canManage && <form onSubmit={createEvent} style={{ ...styles.formGrid, marginBottom: 12 }}><Field label="Title"><input required style={styles.input} value={eventForm.title} onChange={e => setEventForm({ ...eventForm, title: e.target.value })} placeholder="e.g. Mention in Civil Suit E001/2025" /></Field><Field label="Date"><input required type="date" style={styles.input} value={eventForm.date} onChange={e => setEventForm({ ...eventForm, date: e.target.value })} /></Field><Field label="Time"><input style={styles.input} value={eventForm.time} onChange={e => setEventForm({ ...eventForm, time: e.target.value })} /></Field><Field label="Type"><input style={styles.input} value={eventForm.type} onChange={e => setEventForm({ ...eventForm, type: e.target.value })} placeholder="e.g. Mention" list="appearance-type-list" /></Field><datalist id="appearance-type-list"><option value="Mention" /><option value="Hearing" /><option value="Pre-Trial Conference" /><option value="Case Conference" /><option value="Ruling" /><option value="Sentencing" /><option value="Status Conference" /><option value="Directions" /><option value="Summons" /><option value="Plea Taking" /><option value="Trial" /><option value="Appeal" /><option value="Taxation" /><option value="Arbitration" /><option value="Mediation" /><option value="Case Management" /></datalist><Field label="Location"><input style={styles.input} value={eventForm.location} onChange={e => setEventForm({ ...eventForm, location: e.target.value })} placeholder="e.g. Milimani Law Courts" list="appearance-location-list" /></Field><datalist id="appearance-location-list"><option value="Milimani Law Courts, Nairobi" /><option value="Kiambu Law Courts" /><option value="Kajiado Law Courts" /><option value="Machakos Law Courts" /><option value="Makadara Law Courts, Nairobi" /><option value="Kibera Law Courts, Nairobi" /><option value="Mombasa Law Courts" /><option value="Kisumu Law Courts" /><option value="Nakuru Law Courts" /><option value="Eldoret Law Courts" /><option value="Nyeri Law Courts" /><option value="Kakamega Law Courts" /><option value="Meru Law Courts" /><option value="Kerugoya Law Courts" /><option value="Bungoma Law Courts" /><option value="Busia Law Courts" /><option value="Kisii Law Courts" /><option value="Malindi Law Courts" /><option value="Garissa Law Courts" /><option value="Court of Appeal, Nairobi" /><option value="Supreme Court of Kenya" /></datalist><Field label="Meeting Link"><input type="url" placeholder="https://..." style={styles.input} value={eventForm.meetingLink} onChange={e => setEventForm({ ...eventForm, meetingLink: e.target.value })} /></Field><button style={styles.ghostButton}>Schedule event</button></form>}<AppearanceEditorList events={detail.appearances || []} canManage={canManage} editingEvent={editingEvent} setEditingEvent={setEditingEvent} saveEvent={saveEvent} confirmDelete={event => setConfirm({ title: 'Delete appearance?', message: 'Delete this court appearance?', onConfirm: () => deleteEventRecord(event) })} /></Sub></div>
+                  <div id="matter-section-court" style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Court Diary / Appearances" hint="Diary entries here are recorded under this matter. They also appear in the firm-wide Court Diary under Deadlines.">{canManage && <form onSubmit={createEvent} style={{ ...styles.formGrid, marginBottom: 12 }}><Field label="Court diary title / brief note"><input required style={styles.input} value={eventForm.title} onChange={e => setEventForm({ ...eventForm, title: e.target.value })} placeholder="e.g. Mention for directions" /></Field><Field label="Date"><input required type="date" style={styles.input} value={eventForm.date} onChange={e => setEventForm({ ...eventForm, date: e.target.value })} /></Field><Field label="Time"><input style={styles.input} value={eventForm.time} onChange={e => setEventForm({ ...eventForm, time: e.target.value })} /></Field><Field label="Type"><AppearanceTypeSelect value={eventForm.type} onChange={e => setEventForm({ ...eventForm, type: e.target.value })} /></Field><Field label="Location"><input style={styles.input} value={eventForm.location} onChange={e => setEventForm({ ...eventForm, location: e.target.value })} placeholder="e.g. Milimani Law Courts" list="appearance-location-list" /></Field><datalist id="appearance-location-list"><option value="Milimani Law Courts, Nairobi" /><option value="Kiambu Law Courts" /><option value="Kajiado Law Courts" /><option value="Machakos Law Courts" /><option value="Makadara Law Courts, Nairobi" /><option value="Kibera Law Courts, Nairobi" /><option value="Mombasa Law Courts" /><option value="Kisumu Law Courts" /><option value="Nakuru Law Courts" /><option value="Eldoret Law Courts" /><option value="Nyeri Law Courts" /><option value="Kakamega Law Courts" /><option value="Meru Law Courts" /><option value="Kerugoya Law Courts" /><option value="Bungoma Law Courts" /><option value="Busia Law Courts" /><option value="Kisii Law Courts" /><option value="Malindi Law Courts" /><option value="Garissa Law Courts" /><option value="Court of Appeal, Nairobi" /><option value="Supreme Court of Kenya" /></datalist><Field label="Meeting Link"><input type="url" placeholder="https://..." style={styles.input} value={eventForm.meetingLink} onChange={e => setEventForm({ ...eventForm, meetingLink: e.target.value })} /></Field><button style={styles.ghostButton}>Schedule event</button></form>}<AppearanceEditorList events={detail.appearances || []} canManage={canManage} editingEvent={editingEvent} setEditingEvent={setEditingEvent} saveEvent={saveEvent} confirmDelete={event => setConfirm({ title: 'Delete appearance?', message: 'Delete this court appearance?', onConfirm: () => deleteEventRecord(event) })} /></Sub></div>
                   <MatterCourtMode detail={detail} nextActionHints={nextActionHints} />
                 </>
               )}
@@ -5890,7 +5943,7 @@ function AppearanceEditorList({ events, canManage, editingEvent, setEditingEvent
               <td>{editing ? <input style={styles.input} value={editingEvent.title || ''} onChange={e => setEditingEvent({ ...editingEvent, title: e.target.value })} placeholder="e.g. Mention in Civil Suit E001/2025" /> : event.title || '-'}</td>
               <td>{editing ? <input type="date" style={styles.input} value={editingEvent.date || ''} onChange={e => setEditingEvent({ ...editingEvent, date: e.target.value })} /> : event.date || '-'}</td>
               <td>{editing ? <input style={styles.input} value={editingEvent.time || ''} onChange={e => setEditingEvent({ ...editingEvent, time: e.target.value })} /> : event.time || '-'}</td>
-              <td>{editing ? <><input style={styles.input} value={editingEvent.type || ''} onChange={e => setEditingEvent({ ...editingEvent, type: e.target.value })} placeholder="e.g. Mention" list="appearance-type-list" /><datalist id="appearance-type-list"><option value="Mention" /><option value="Hearing" /><option value="Pre-Trial Conference" /><option value="Case Conference" /><option value="Ruling" /><option value="Sentencing" /><option value="Status Conference" /><option value="Directions" /><option value="Summons" /><option value="Plea Taking" /><option value="Trial" /><option value="Appeal" /><option value="Taxation" /><option value="Arbitration" /><option value="Mediation" /><option value="Case Management" /></datalist></> : event.type || '-'}</td>
+              <td>{editing ? <AppearanceTypeSelect value={editingEvent.type || ''} onChange={e => setEditingEvent({ ...editingEvent, type: e.target.value })} /> : event.type || '-'}</td>
               <td>{editing ? <><input style={styles.input} value={editingEvent.location || ''} onChange={e => setEditingEvent({ ...editingEvent, location: e.target.value })} placeholder="e.g. Milimani Law Courts" list="appearance-location-list" /><datalist id="appearance-location-list"><option value="Milimani Law Courts, Nairobi" /><option value="Kiambu Law Courts" /><option value="Kajiado Law Courts" /><option value="Machakos Law Courts" /><option value="Makadara Law Courts, Nairobi" /><option value="Kibera Law Courts, Nairobi" /><option value="Mombasa Law Courts" /><option value="Kisumu Law Courts" /><option value="Nakuru Law Courts" /><option value="Eldoret Law Courts" /><option value="Nyeri Law Courts" /><option value="Kakamega Law Courts" /><option value="Meru Law Courts" /><option value="Kerugoya Law Courts" /><option value="Bungoma Law Courts" /><option value="Busia Law Courts" /><option value="Kisii Law Courts" /><option value="Malindi Law Courts" /><option value="Garissa Law Courts" /><option value="Court of Appeal, Nairobi" /><option value="Supreme Court of Kenya" /></datalist></> : event.location || '-'}</td>
               <td>{editing ? <input type="url" placeholder="https://..." style={styles.input} value={editingEvent.meetingLink || ''} onChange={e => setEditingEvent({ ...editingEvent, meetingLink: e.target.value })} /> : <MeetingLink event={event} />}</td>
               <td>{editing ? <select style={styles.input} value={editingEvent.attendanceStatus || 'scheduled'} onChange={e => setEditingEvent({ ...editingEvent, attendanceStatus: e.target.value })}>{attendanceStatuses.map(status => <option key={status} value={status}>{attendanceLabels[status]}</option>)}</select> : attendanceLabels[event.attendanceStatus || 'scheduled'] || '-'}</td>
@@ -5923,7 +5976,7 @@ function TimeEntryEditorList({ entries, canManage, canViewBilling = true, editin
             <tr key={entry.id}>
               <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}>{editing ? <input type="date" style={styles.input} value={editingTime.date || ''} onChange={e => setEditingTime({ ...editingTime, date: e.target.value })} /> : <span style={{ fontWeight: 500 }}>{entry.date || '-'}</span>}</td>
               <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}>{editing ? <><input style={styles.input} value={editingTime.description || ''} onChange={e => setEditingTime({ ...editingTime, description: e.target.value })} placeholder="e.g. Drafting, Legal research, Court attendance" list="time-desc-list" /><datalist id="time-desc-list"><option value="Drafting" /><option value="Legal research" /><option value="Client consultation" /><option value="Court attendance" /><option value="Document review" /><option value="Travel" /><option value="Correspondence" /><option value="Pleadings preparation" /><option value="Conference with counsel" /><option value="Negotiations" /><option value="Mediation / Arbitration" /><option value="Witness preparation" /><option value="Opinion writing" /><option value="Settlement discussions" /><option value="Case analysis" /></datalist></> : <span>{entry.description || entry.activity || '-'}{entry.taskId ? <small style={{ display: 'block', color: theme.muted, fontSize: 12 }}>Task: {entry.taskId}</small> : null}</span>}</td>
-              <td style={{ padding: warmCellPad, verticalAlign: 'middle', fontWeight: 600 }}>{editing ? <input type="number" step="0.1" style={styles.input} value={editingTime.hours || 0} onChange={e => setEditingTime({ ...editingTime, hours: Number(e.target.value) })} /> : Number(entry.hours || 0).toFixed(1)}</td>
+              <td style={{ padding: warmCellPad, verticalAlign: 'middle', fontWeight: 600 }}>{editing ? <input type="number" min="0" step="any" inputMode="decimal" style={styles.input} value={editingTime.hours ?? ''} onChange={e => setEditingTime({ ...editingTime, hours: e.target.value })} /> : Number(entry.hours || 0).toFixed(1)}</td>
               {canViewBilling && <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}>{editing ? <input type="number" style={styles.input} value={editingTime.rate || 0} onChange={e => setEditingTime({ ...editingTime, rate: Number(e.target.value) })} /> : <span style={{ fontWeight: 600 }}>{kes(entry.rate)}</span>}</td>}
               <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}>{editing ? <select style={styles.tableSelect} value={isBillableValue(editingTime.billable) ? 'billable' : 'non_billable'} onChange={e => setEditingTime({ ...editingTime, billable: e.target.value === 'billable' })}><option value="billable">Billable</option><option value="non_billable">Non-billable</option></select> : <BillableBadge value={entry.billable} />}</td>
               <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}><Badge tone={entry.billed ? 'green' : 'amber'}>{entry.billed ? 'Billed' : 'Unbilled'}</Badge></td>

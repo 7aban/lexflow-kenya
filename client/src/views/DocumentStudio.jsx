@@ -53,6 +53,11 @@ function SignatureAssetPreview({ asset }) {
   );
 }
 
+// LOCAL-PILOT-FIX-14: checklist templates are hidden from the UI per the pilot
+// firm's request. Backend routes, tables, tests and data are retained for
+// compatibility. Flip to true to restore the card below.
+const CHECKLISTS_UI_ENABLED = false;
+
 export default function DocumentStudio({ notify, onNavigate }) {
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -254,7 +259,7 @@ export default function DocumentStudio({ notify, onNavigate }) {
 
   useEffect(() => {
     load();
-    loadChecklistTemplates();
+    if (CHECKLISTS_UI_ENABLED) loadChecklistTemplates();
     loadMatters();
     loadSignatureAssets();
     // Best-effort firm name for prefilling the optional cover "prepared by" field.
@@ -1617,7 +1622,7 @@ export default function DocumentStudio({ notify, onNavigate }) {
         />
       </Card>
 
-      <Card title="Checklist Templates" hint="Operational workflow templates — not pleadings or generated documents">
+      {CHECKLISTS_UI_ENABLED && <Card title="Checklist Templates" hint="Operational workflow templates — not pleadings or generated documents">
         <div style={{ display: 'grid', gap: 10, minWidth: 0 }}>
           <span style={{ fontSize: 13, color: theme.ink }}>Create reusable task/checklist templates for common legal workflows, then apply them to matters.</span>
           <span style={{ fontSize: 12, color: theme.muted }}>These are step-by-step working checklists (e.g. Civil suit filing, Appeal preparation, Conveyancing completion, Client onboarding / KYC, Hearing preparation) — they do not generate documents.</span>
@@ -1654,7 +1659,7 @@ export default function DocumentStudio({ notify, onNavigate }) {
             </div>
           )}
         </div>
-      </Card>
+      </Card>}
 
       <Card title="Document Tools" hint="Prepare, combine, paginate, and format court-ready documents">
         <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>

@@ -488,13 +488,13 @@ export default function Communications({ clients = [], matters = [], focus, noti
                 </div>
 
                 <form onSubmit={sendReply} style={{ display: 'grid', gap: 10, borderTop: `1px solid ${theme.line}`, paddingTop: 12 }}>
-                  <Field label="Reply">
-                    <textarea style={{ ...styles.input, minHeight: 96, resize: 'vertical' }} value={reply.body} onChange={event => setReply({ ...reply, body: event.target.value })} placeholder="Write a clear client-friendly reply..." />
+                  <Field label="Message">
+                    <textarea style={{ ...styles.input, minHeight: 96, resize: 'vertical' }} value={reply.body} onChange={event => setReply({ ...reply, body: event.target.value })} placeholder="Write a clear client-friendly message..." />
                   </Field>
                   <Field label="Attachment">
                     <input type="file" style={styles.input} onChange={event => setReply({ ...reply, file: event.target.files?.[0] || null })} />
                   </Field>
-                  <button style={commStyles.primaryButton}>Send reply</button>
+                  <button style={commStyles.primaryButton}>Send message</button>
                 </form>
               </div>
             )}
