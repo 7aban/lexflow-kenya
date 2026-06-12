@@ -37,13 +37,15 @@ const faqItems = [
   ['Where do I download documents?', 'Use the Documents page for all shared files, or open a specific matter and use its document browser.'],
 ];
 
-export default function ClientChatWidget({ firm, matters = [], selectedMatterId = '', user, notify, open: openProp, onClose }) {
+export default function ClientChatWidget({ firm, matters = [], selectedMatterId = '', user, notify, open: openProp, onOpen, onClose }) {
   const [internalOpen, setInternalOpen] = useState(false);
   const isOpen = openProp !== undefined ? openProp : internalOpen;
   function toggleOpen(v) {
     if (openProp === undefined) setInternalOpen(v);
+    if (v) onOpen?.();
     if (!v) onClose?.();
   }
+  const [tab, setTab] = useState('FAQ');
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState(faqItems[0][0]);
   const [matterId, setMatterId] = useState(selectedMatterId || matters[0]?.id || '');

@@ -1,10 +1,11 @@
-import { Component, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { IconLayoutDashboard, IconChartLine, IconReportAnalytics, IconUsers, IconUserPlus, IconBriefcase, IconCheckbox, IconCalendarDue, IconFileInvoice, IconMessages, IconUsersGroup, IconSettings, IconListSearch, IconExternalLink, IconChevronDown, IconShield, IconSearch, IconBell, IconRefresh, IconTemplate, IconLink } from '@tabler/icons-react';
 import { api, API_BASE, AUTH_FAILURE_MESSAGE, clearSession, clearAllLexFlowStorage, fetchAvatarObjectUrl, getNotifications, markNotificationsRead, readSession, saveSession } from './lib/apiClient.js';
 import { globalSearch } from './api.js';
 import { defaultFirmSettings, styles, StyleTag, theme, loadAndApplyFirmTheme } from './theme.jsx';
 import { Logo, Skeleton, Toast, Alert } from './components/ui.jsx';
 import LoginPage from './components/LoginPage.jsx';
+import ViewErrorBoundary from './components/ViewErrorBoundary.jsx';
 import OAuthCallback from './views/OAuthCallback.jsx';
 import AcceptInvitation from './views/AcceptInvitation.jsx';
 import AdvocatePerformance from './views/AdvocatePerformance.jsx';
@@ -164,41 +165,6 @@ function StaffNavigation({ visibleGroups, openNavGroups, setOpenNavGroups, view,
       })}
     </nav>
   );
-}
-
-class ViewErrorBoundary extends Component {
-  state = { error: null };
-
-  static getDerivedStateFromError(error) {
-    return { error };
-  }
-
-  componentDidCatch(error, info) {
-    console.error('LexFlow view render error', error, info);
-  }
-
-  componentDidUpdate(prevProps) {
-    if (prevProps.resetKey !== this.props.resetKey && this.state.error) {
-      this.setState({ error: null });
-    }
-  }
-
-  render() {
-    if (!this.state.error) return this.props.children;
-
-    return (
-      <section role="alert" style={{ background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, boxShadow: theme.shadow, padding: 24, display: 'grid', gap: 12 }}>
-        <div>
-          <h2 style={{ margin: '0 0 6px', fontSize: 18, color: theme.ink }}>Something went wrong in this view</h2>
-          <p style={{ margin: 0, color: theme.muted }}>The rest of LexFlow is still available. Return to Dashboard or reload the app.</p>
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button type="button" style={styles.primaryButton} onClick={() => { this.setState({ error: null }); this.props.onDashboard?.(); }}>Return to Dashboard</button>
-          <button type="button" style={styles.ghostButton} onClick={() => window.location.reload()}>Reload app</button>
-        </div>
-      </section>
-    );
-  }
 }
 
 export default function App() {
@@ -526,7 +492,16 @@ export default function App() {
   }
 
   if (user?.role === 'client') {
-    return <ClientApp user={user} firm={firm} logout={logout} notify={setToast} toast={toast} setToast={setToast} />;
+    return (
+      <ViewErrorBoundary
+        resetKey={user?.id}
+        title="Something went wrong"
+        message="We could not load your portal just now. Please refresh the page and try again."
+        reloadLabel="Refresh portal"
+      >
+        <ClientApp user={user} firm={firm} logout={logout} notify={setToast} toast={toast} setToast={setToast} />
+      </ViewErrorBoundary>
+    );
   }
 
   const subtitles = {
@@ -679,7 +654,7 @@ export default function App() {
             <p className="lf-page-sub" style={styles.pageSub}>{subtitles[view]}</p>
           </div>
 
-          <ViewErrorBoundary resetKey={view} onDashboard={() => setView('Dashboard')}>
+          <ViewErrorBoundary resetKey={view} onReset={() => setView('Dashboard')}>
             {loading && !bootstrapped && <Skeleton />}
             {(!loading || bootstrapped) && view === 'Dashboard' && <Dashboard data={data} user={user} onNavigate={setView} />}
             {(!loading || bootstrapped) && view === 'Clients' && <Clients clients={data.clients} matters={data.matters} canManage={canManage} isAdmin={isAdmin} reload={refresh} notify={setToast} focus={clientFocus} />}

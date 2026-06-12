@@ -405,7 +405,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
         {!loading && view === 'Account' && <Account user={user} client={dashboard.client} firm={firm} matters={dashboard.matters} avatarUrl={myAvatarUrl} hasAvatar={selfHasAvatar} onAvatarUpload={handleAvatarUpload} onAvatarRemove={handleAvatarRemove} onNavigate={switchView} logout={logout} notify={notify} />}
         {!loading && view === 'Court Dates' && <CourtDates appearances={dashboard.appearances} matters={dashboard.matters} />}
       </main>
-      <ClientChatWidget firm={firm} matters={dashboard.matters} selectedMatterId={selected?.id || ''} user={user} notify={notify} open={chatOpen} onClose={() => setChatOpen(false)} />
+      <ClientChatWidget firm={firm} matters={dashboard.matters} selectedMatterId={selected?.id || ''} user={user} notify={notify} open={chatOpen} onOpen={() => setChatOpen(true)} onClose={() => setChatOpen(false)} />
       <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   );
