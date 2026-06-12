@@ -533,7 +533,7 @@ export default function App() {
     Dashboard: 'Command center for active work, hearings, billing and firm movement.',
     Clients: 'A polished directory for intake, contacts and relationship context.',
     Matters: 'Matter pipeline, billing, documents, notes and invoice actions.',
-    Tasks: 'Daily execution board for deadlines and delegated legal work.',
+    Tasks: 'Track pending and completed work across matters — add tasks, mark them done, and log time as you go.',
     Deadlines: 'Court, client, internal and statutory obligations in one timeline.',
     Communications: 'Client messages, secure attachments and portal activity in one inbox.',
     Invoices: 'Receivables, invoice status and PDF export for client billing.',
