@@ -7,9 +7,6 @@ import { Card, Empty, Stat, Table, kes, isInvoiceOverdue } from '../components/u
 // data already loaded by the staff app (matters, invoices, clients) plus a read-only
 // deadlines fetch via the existing apiClient helper. Nothing here mutates state.
 
-// Local CSV helpers (duplicated intentionally to keep this view self-contained and
-// avoid widening the blast radius into shared components — mirrors the helpers in
-// DeadlineCenter.jsx / StaffViews.jsx).
 function csvCell(value) {
   let text = value === null || value === undefined ? '' : String(value);
   if (/^[=+\-@\t\r]/.test(text.replace(/^ +/, ''))) text = `'${text}`;
@@ -31,7 +28,6 @@ function downloadCsv(filename, columns, rows) {
   URL.revokeObjectURL(url);
 }
 
-// Whole days from today to a YYYY-MM-DD date: negative = past, 0 = today, positive = future.
 function dayDiff(date) {
   const raw = date ? String(date).slice(0, 10) : '';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
@@ -53,6 +49,49 @@ function ExportButton({ onClick, disabled }) {
     >
       Export CSV
     </button>
+  );
+}
+
+function maxValue(rows, key = 'count') {
+  return Math.max(1, ...rows.map(row => Number(row[key] || 0)));
+}
+
+function ReportBars({ rows, valueKey = 'count', formatValue = value => value, tone = 'gold', emptyTitle, emptyText }) {
+  const max = maxValue(rows, valueKey);
+  const fill = tone === 'red' ? theme.red : tone === 'green' ? theme.green : tone === 'blue' ? theme.blue : theme.gold;
+  if (!rows.length) return <Empty title={emptyTitle} text={emptyText} />;
+  return (
+    <div style={{ display: 'grid', gap: 10, marginBottom: 12 }}>
+      {rows.map(row => {
+        const rawValue = Number(row[valueKey] || 0);
+        const width = `${Math.max(rawValue > 0 ? 5 : 0, Math.round((rawValue / max) * 100))}%`;
+        return (
+          <div key={row.label} style={{ display: 'grid', gap: 5 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline' }}>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: theme.ink, minWidth: 0, overflowWrap: 'anywhere' }}>{row.label}</span>
+              <span style={{ fontSize: 12, color: theme.muted, whiteSpace: 'nowrap' }}>{formatValue(rawValue, row)}</span>
+            </div>
+            <div style={{ height: 8, borderRadius: 999, background: '#EEF2F7', overflow: 'hidden' }} aria-hidden="true">
+              <div style={{ width, height: '100%', borderRadius: 999, background: fill }} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function reportTable(className, columns, rows, empty) {
+  const labelledRows = rows.map(row => row.map((cell, index) => (
+    <span key={`${columns[index]}-${index}`} className="lf-report-cell">
+      <span className="lf-report-mobile-label">{columns[index]}</span>
+      <span>{cell}</span>
+    </span>
+  )));
+  return (
+    <div className={className}>
+      <Table columns={columns} rows={labelledRows} empty={empty} />
+    </div>
   );
 }
 
@@ -81,7 +120,6 @@ export default function Reports({ data = {}, notify }) {
     return () => { active = false; };
   }, []);
 
-  // --- Matter pipeline by stage ---
   const pipeline = useMemo(() => {
     const counts = new Map();
     matters.forEach(m => {
@@ -96,7 +134,8 @@ export default function Reports({ data = {}, notify }) {
     [matters],
   );
 
-  // --- Practice-area mix ---
+  const closedMatters = Math.max(0, matters.length - activeMatters);
+
   const practiceMix = useMemo(() => {
     const counts = new Map();
     matters.forEach(m => {
@@ -106,27 +145,30 @@ export default function Reports({ data = {}, notify }) {
     return [...counts.entries()].map(([area, count]) => ({ area, count })).sort((a, b) => b.count - a.count);
   }, [matters]);
 
-  // --- Invoice aging / collections (reuses shared derived-overdue rule) ---
   const aging = useMemo(() => {
     const sum = (rows, field) => rows.reduce((acc, inv) => acc + Number(inv[field] || 0), 0);
     const paid = invoices.filter(i => i.status === 'Paid');
     const unpaid = invoices.filter(i => i.status !== 'Paid');
     const overdue = unpaid.filter(i => i.status === 'Overdue' || isInvoiceOverdue(i));
-    const outstanding = unpaid.filter(i => !(i.status === 'Overdue' || isInvoiceOverdue(i)));
+    const outstanding = unpaid.filter(i => !(i.status === 'Overdue' || isInvoiceOverdue(i)) && String(i.status || '').toLowerCase() !== 'draft');
     const draft = invoices.filter(i => String(i.status || '').toLowerCase() === 'draft');
+    const billedTotal = sum(invoices, 'amount');
+    const collectedTotal = sum(paid, 'amount');
+    const outstandingBalance = sum(unpaid, 'balance');
     return {
       rows: [
-        { bucket: 'Paid', count: paid.length, amount: sum(paid, 'amount') },
+        { bucket: 'Collected', count: paid.length, amount: collectedTotal },
         { bucket: 'Overdue', count: overdue.length, amount: sum(overdue, 'balance') },
-        { bucket: 'Outstanding (not overdue)', count: outstanding.length, amount: sum(outstanding, 'balance') },
+        { bucket: 'Outstanding', count: outstanding.length, amount: sum(outstanding, 'balance') },
         { bucket: 'Draft', count: draft.length, amount: sum(draft, 'balance') },
       ],
       overdueCount: overdue.length,
-      outstandingBalance: sum(unpaid, 'balance'),
+      outstandingBalance,
+      billedTotal,
+      collectedTotal,
     };
   }, [invoices]);
 
-  // --- Deadline compliance ---
   const compliance = useMemo(() => {
     const isDone = row => String(row.status || '').toLowerCase() === 'done';
     let overdue = 0;
@@ -153,6 +195,10 @@ export default function Reports({ data = {}, notify }) {
   }, [deadlines]);
 
   const noData = matters.length === 0 && invoices.length === 0 && clients.length === 0 && deadlines.length === 0;
+  const pipelineBars = pipeline.map(row => ({ label: row.stage, count: row.count }));
+  const practiceBars = practiceMix.map(row => ({ label: row.area, count: row.count }));
+  const agingBars = aging.rows.map(row => ({ label: row.bucket, amount: row.amount, count: row.count }));
+  const complianceBars = compliance.rows.map(row => ({ label: row.bucket, count: row.count }));
 
   function exportPipeline() {
     downloadCsv('matter-pipeline.csv', ['Stage', 'Matters'], pipeline.map(r => [r.stage, r.count]));
@@ -172,76 +218,116 @@ export default function Reports({ data = {}, notify }) {
   }
 
   return (
-    <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
-      <Card title="Firm reports" hint="Read-only summary of matters, billing, and obligations">
+    <div className="lf-reports-page" style={{ display: 'grid', gap: 16, minWidth: 0 }}>
+      <Card title="Reports overview" hint="Billing, collections, matter activity, and workload trends from current LexFlow records.">
         {noData && deadlinesState !== 'loading' ? (
-          <Empty title="No data to report yet" text="Reports populate automatically once matters, invoices, clients, or deadlines exist." />
+          <Empty title="No report data yet" text="Reports populate once matters, invoices, clients, or deadlines are recorded." />
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
-            <Stat label="Active matters" value={activeMatters} tone="navy" />
-            <Stat label="Total clients" value={clients.length} tone="navy" />
-            <Stat label="Outstanding balance" value={kes(aging.outstandingBalance)} tone="gold" />
-            <Stat label="Overdue invoices" value={aging.overdueCount} tone={aging.overdueCount ? 'red' : 'green'} />
-            <Stat
-              label="Open deadlines"
-              value={deadlinesState === 'ready' ? compliance.openCount : deadlinesState === 'loading' ? '…' : '—'}
-              tone={deadlinesState === 'ready' && compliance.openCount ? 'gold' : 'navy'}
-            />
+          <div style={{ display: 'grid', gap: 14 }}>
+            <p style={{ margin: 0, color: theme.muted, maxWidth: 760 }}>
+              Use these read-only summaries for partner review. Billed is the total invoice amount, collected is paid invoices, and outstanding is the unpaid balance.
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
+              <Stat label="Open matters" value={activeMatters} tone="navy" />
+              <Stat label="Closed matters" value={closedMatters} tone="green" />
+              <Stat label="Billed" value={kes(aging.billedTotal)} tone="navy" />
+              <Stat label="Collected" value={kes(aging.collectedTotal)} tone="green" />
+              <Stat label="Outstanding" value={kes(aging.outstandingBalance)} tone={aging.outstandingBalance ? 'gold' : 'green'} />
+              <Stat label="Overdue invoices" value={aging.overdueCount} tone={aging.overdueCount ? 'red' : 'green'} />
+              <Stat
+                label="Open deadlines"
+                value={deadlinesState === 'ready' ? compliance.openCount : deadlinesState === 'loading' ? '...' : '-'}
+                tone={deadlinesState === 'ready' && compliance.openCount ? 'gold' : 'navy'}
+              />
+            </div>
           </div>
         )}
       </Card>
 
-      <Card
-        title="Matter pipeline"
-        hint="Matters grouped by stage"
-        action={<ExportButton onClick={exportPipeline} disabled={!pipeline.length} />}
-      >
-        <Table
-          columns={['Stage', 'Matters']}
-          rows={pipeline.map(r => [r.stage, String(r.count)])}
-          empty="No matters yet"
-        />
-      </Card>
+      <div className="lf-split-grid" style={styles.splitGrid}>
+        <Card
+          title="Matter activity"
+          hint="Open and closed matters grouped by current stage."
+          action={<ExportButton onClick={exportPipeline} disabled={!pipeline.length} />}
+        >
+          <ReportBars
+            rows={pipelineBars}
+            emptyTitle="No matter activity yet"
+            emptyText="Matter activity appears after client matters are opened."
+          />
+          {reportTable(
+            'lf-report-cards lf-report-pipeline-cards',
+            ['Stage', 'Matters'],
+            pipeline.map(r => [r.stage, String(r.count)]),
+            'No matters yet',
+          )}
+        </Card>
+
+        <Card
+          title="Workload by practice area"
+          hint="Matter count by practice area, using the matter profile value where available."
+          action={<ExportButton onClick={exportPractice} disabled={!practiceMix.length} />}
+        >
+          <ReportBars
+            rows={practiceBars}
+            tone="blue"
+            emptyTitle="No practice-area records yet"
+            emptyText="Practice-area mix appears after matters are created and classified."
+          />
+          {reportTable(
+            'lf-report-cards lf-report-practice-cards',
+            ['Practice area', 'Matters'],
+            practiceMix.map(r => [r.area, String(r.count)]),
+            'No matters yet',
+          )}
+        </Card>
+      </div>
 
       <Card
-        title="Practice-area mix"
-        hint="Matters grouped by practice area"
-        action={<ExportButton onClick={exportPractice} disabled={!practiceMix.length} />}
-      >
-        <Table
-          columns={['Practice area', 'Matters']}
-          rows={practiceMix.map(r => [r.area, String(r.count)])}
-          empty="No matters yet"
-        />
-      </Card>
-
-      <Card
-        title="Invoice aging & collections"
-        hint="Derived overdue matches the invoice register; stored statuses are unchanged"
+        title="Billing and collections"
+        hint="Billed, collected, outstanding, overdue, and draft invoice balances. Unpaid invoices are not counted as collected."
         action={<ExportButton onClick={exportAging} disabled={!invoices.length} />}
       >
-        <Table
-          columns={['Status', 'Invoices', 'Balance']}
-          rows={aging.rows.map(r => [r.bucket, String(r.count), kes(r.amount)])}
-          empty="No invoices yet"
+        <ReportBars
+          rows={agingBars}
+          valueKey="amount"
+          tone={aging.overdueCount ? 'red' : 'green'}
+          formatValue={value => kes(value)}
+          emptyTitle="No billing data yet"
+          emptyText="Billing reports appear after invoices are generated or marked paid."
         />
+        {reportTable(
+          'lf-report-cards lf-report-aging-cards',
+          ['Status', 'Invoices', 'Amount'],
+          aging.rows.map(r => [r.bucket, String(r.count), kes(r.amount)]),
+          'No invoices yet',
+        )}
       </Card>
 
       <Card
-        title="Deadline compliance"
-        hint="Court dates and statutory obligations by urgency"
+        title="Deadline workload"
+        hint="Court dates, filing dates, and statutory obligations grouped by urgency."
         action={<ExportButton onClick={exportCompliance} disabled={deadlinesState !== 'ready' || !deadlines.length} />}
       >
         {deadlinesState === 'loading' ? (
-          <Empty title="Loading deadlines…" text="Compliance figures will appear shortly." />
+          <Empty title="Loading deadline workload" text="Deadline and court diary figures will appear shortly." />
         ) : deadlinesState === 'error' ? (
           <Empty title="Deadline data unavailable" text="Deadlines could not be loaded right now. Other reports above are unaffected." />
         ) : (
-          <Table
-            columns={['Bucket', 'Deadlines']}
-            rows={compliance.rows.map(r => [r.bucket, String(r.count)])}
-            empty="No deadlines yet"
-          />
+          <>
+            <ReportBars
+              rows={complianceBars}
+              tone={compliance.rows.some(row => row.bucket === 'Overdue' && row.count > 0) ? 'red' : 'gold'}
+              emptyTitle="No deadline workload yet"
+              emptyText="Deadline workload appears after court dates, task due dates, invoices, or custom deadlines exist."
+            />
+            {reportTable(
+              'lf-report-cards lf-report-compliance-cards',
+              ['Bucket', 'Deadlines'],
+              compliance.rows.map(r => [r.bucket, String(r.count)]),
+              'No deadlines yet',
+            )}
+          </>
         )}
       </Card>
     </div>

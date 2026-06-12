@@ -36,6 +36,7 @@ export function StyleTag() { return <style>{`
   .lf-nav:hover, .lf-nav-group:hover { background: rgba(255,255,255,.08) !important; color: #fff !important; }
   .lf-resource-link:hover { background: rgba(255,255,255,.08) !important; color: #fff !important; }
   #root .lf-mobile-only, #root .lf-mobile-drawer-layer { display: none !important; }
+  #root .lf-report-mobile-label { display: none; }
   @media (max-width: 980px) {
     #root .lf-page-inner { padding: 20px 18px 110px !important; }
     #root header.lf-topbar { padding: 0 18px !important; }
@@ -129,6 +130,22 @@ export function StyleTag() { return <style>{`
     #root .lf-deadline-cards td:nth-child(5)::before { content: "Owner"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
     #root .lf-deadline-cards td:nth-child(6)::before { content: "Status"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
     #root .lf-deadline-cards td:nth-child(7)::before { content: "Action"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    /* LOCAL-PILOT-FIX-20: Reports mobile cards */
+    #root .lf-reports-page { max-width: 100% !important; overflow-x: hidden !important; }
+    #root .lf-report-cards,
+    #root .lf-report-cards * { box-sizing: border-box !important; }
+    #root .lf-report-cards { width: 100% !important; max-width: 100% !important; overflow: visible !important; }
+    #root .lf-report-cards > div { overflow: visible !important; border: none !important; border-radius: 0 !important; width: 100% !important; max-width: 100% !important; }
+    #root .lf-report-cards table,
+    #root .lf-report-cards tbody { display: block !important; width: 100% !important; min-width: 0 !important; max-width: 100% !important; }
+    #root .lf-report-cards thead { display: none !important; }
+    #root .lf-report-cards tbody tr { display: block; width: 100%; min-width: 0; background: #fff; border: 1px solid #E5E7EB; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    #root .lf-report-cards tbody td { display: grid; grid-template-columns: minmax(0,1fr); align-items: start; gap: 4px; width: 100%; min-width: 0; padding: 6px 0; border-top: none; background: transparent !important; white-space: normal !important; overflow-wrap: anywhere; word-break: break-word; }
+    #root .lf-report-cards tbody td > * { min-width: 0 !important; max-width: 100% !important; overflow-wrap: anywhere; }
+    #root .lf-report-cards tbody tr:hover td { background: transparent !important; }
+    #root .lf-report-cards tbody td::before { display: none !important; content: none !important; }
+    #root .lf-report-cell { display: grid; gap: 3px; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+    #root .lf-report-mobile-label { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; line-height: 1.2; }
     /* R15d-9: MatterDocuments staff mobile cards (8 columns) */
     #root .lf-doc-cards-staff > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
     #root .lf-doc-cards-staff table { min-width: 0 !important; }

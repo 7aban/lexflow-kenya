@@ -500,6 +500,7 @@ export default function App() {
     Deadlines: 'Track court appearances, limitation dates, filing dates, and urgent action items.',
     Communications: 'Client messages, secure attachments and portal activity in one inbox.',
     Invoices: 'Receivables, invoice status and PDF export for client billing.',
+    Reports: 'Review billing, collections, matter activity, and workload trends.',
     Performance: 'Managing partner view of advocate output, workload and court attendance.',
     'Firm Settings': 'Client-ready branding, invoice identity and contact details.',
     Users: 'Role-based access for advocates, assistants and administrators.',
