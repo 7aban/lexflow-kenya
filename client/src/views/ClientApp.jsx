@@ -16,9 +16,43 @@ const portalIcons = {
   'Court Dates': IconCalendarEvent,
 };
 
-const portalNav = ['Dashboard', 'My Matters', 'Notices', 'Documents', 'Invoices', 'Account', 'Court Dates'];
+const portalNav = ['Dashboard', 'My Matters', 'Court Dates', 'Documents', 'Invoices', 'Notices', 'Account'];
 const AVATAR_ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp'];
 const AVATAR_MAX_BYTES = 512 * 1024;
+
+const clientPortalChromeCss = `
+  .lf-client-mobile-actions { display: none; }
+  .lf-client-welcome-name {
+    display: block;
+    color: var(--lf-accent, #D4A34A);
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
+  @media (max-width: 767px) {
+    #root .lf-client-desktop-actions { display: none !important; }
+    #root .lf-client-mobile-actions {
+      display: grid;
+      gap: 8px;
+      padding: 10px 12px;
+      border-top: 1px solid rgba(255,255,255,.08);
+    }
+    #root .lf-client-mobile-actions a,
+    #root .lf-client-mobile-actions button {
+      width: 100%;
+      justify-content: center;
+      text-align: center;
+    }
+    #root .lf-client-hero {
+      padding: 18px 16px !important;
+      gap: 12px !important;
+      align-items: start !important;
+    }
+    #root .lf-client-hero h2 {
+      font-size: 21px !important;
+      line-height: 1.2 !important;
+    }
+  }
+`;
 
 function AvatarCircle({ src, name, size = 30 }) {
   const initial = (name || 'C').slice(0, 1).toUpperCase();
@@ -314,6 +348,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
   return (
     <div className="lf-app-shell" style={{ ...styles.shell, '--lf-primary': firm?.primaryColor || theme.navy800, '--lf-accent': firm?.accentColor || theme.gold }}>
       <StyleTag />
+      <style>{clientPortalChromeCss}</style>
       <aside className="lf-desktop-sidebar" style={styles.sidebar}>
         <div style={styles.brandPanel}>
           <Logo firm={firm} />
@@ -348,6 +383,10 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
             </div>
             <div style={styles.sideSectionLabel}>Portal</div>
             <PortalNavigation view={view} onSelect={switchMobileView} />
+            <div className="lf-client-mobile-actions">
+              {safeHttpUrl(firm?.websiteURL) && <a style={styles.ghostButton} href={safeHttpUrl(firm.websiteURL)} target="_blank" rel="noopener noreferrer">Visit website</a>}
+              <button type="button" onClick={load} disabled={loading} style={styles.ghostButton}>{loading ? 'Refreshing...' : 'Refresh'}</button>
+            </div>
             <div style={styles.timerCard}>
               <div style={styles.timerTop}>Secure access</div>
               <strong>{dashboard.matters.length} matter{dashboard.matters.length === 1 ? '' : 's'}</strong>
@@ -371,7 +410,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
               <p style={styles.subtitle}>Your secure matter portal for documents, court dates, invoices and firm notices.</p>
             </div>
           </div>
-          <div className="lf-top-actions" style={styles.topActions}>
+          <div className="lf-top-actions lf-client-desktop-actions" style={styles.topActions}>
             {safeHttpUrl(firm?.websiteURL) && <a style={styles.ghostButton} href={safeHttpUrl(firm.websiteURL)} target="_blank" rel="noopener noreferrer">Visit website</a>}
             <button type="button" onClick={load} disabled={loading} style={styles.ghostButton}>{loading ? 'Refreshing...' : 'Refresh'}</button>
           </div>
@@ -419,11 +458,15 @@ function ClientDashboard({ data, stats, user, avatarUrl, selectMatter, onNavigat
   const [activityOpen, setActivityOpen] = useState(false);
   return (
     <div style={styles.pageStack}>
-      <section style={{ ...styles.heroCard, background: 'linear-gradient(135deg, #112219, #1A3628)' }}>
-        <div><div style={styles.heroKicker}>Client workspace</div><h2 style={{ color: '#fff', margin: '0 0 6px' }}>Your matters at a glance.</h2><p style={{ color: 'rgba(255,255,255,.82)' }}>Track active files, court appearances, invoices and documents shared by the firm.</p></div>
-        <div style={{ ...styles.heroFigure, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, minWidth: 0 }}>
+      <section className="lf-client-hero" style={{ ...styles.heroCard, background: 'linear-gradient(135deg, #112219, #1A3628)', alignItems: 'center' }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={styles.heroKicker}>Client workspace</div>
+          <h2 style={{ color: '#fff', margin: '0 0 6px', lineHeight: 1.15 }}>Welcome, <span className="lf-client-welcome-name">{identityName}</span></h2>
+          <p style={{ color: 'rgba(255,255,255,.82)', margin: 0 }}>Track active files, court appearances, invoices and documents shared by the firm.</p>
+        </div>
+        <div style={{ ...styles.heroFigure, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, minWidth: 0, fontSize: 14 }}>
           <AvatarCircle src={avatarUrl} name={identityName} size={46} />
-          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{identityName}</span>
+          <span style={{ minWidth: 0, overflowWrap: 'anywhere', lineHeight: 1.25 }}>{stats.activeMatters} active matter{stats.activeMatters === 1 ? '' : 's'}</span>
         </div>
       </section>
       <section style={{ background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 14 }}>
@@ -974,7 +1017,7 @@ function Notices({ notices, matters, notify }) {
   const audienceLabel = val => val === 'direct' ? 'For you' : val === 'broadcast' ? 'Broadcast' : val;
 
   return (
-    <Card title="Firm Notices" hint="Updates and bulletins from the firm">
+    <Card title="Notices" hint="Firm updates and matter notices shared with you">
       <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         <input
           type="search"
@@ -1019,7 +1062,7 @@ function Notices({ notices, matters, notify }) {
             : `Showing ${filtered.length} of ${notices.length} update${notices.length === 1 ? '' : 's'}`}
         </p>
       )}
-      {filtered.length ? <div style={styles.noticeList}>{filtered.map(notice => <NoticeItem key={notice.id} notice={notice} notify={notify} />)}</div> : notices.length === 0 ? <Empty title="No notices" text="The firm has not posted any notices yet." /> : null}
+      {filtered.length ? <div style={styles.noticeList}>{filtered.map(notice => <NoticeItem key={notice.id} notice={notice} notify={notify} />)}</div> : notices.length === 0 ? <Empty title="No notices" text="Firm updates will appear here when available." /> : null}
     </Card>
   );
 }
@@ -1179,12 +1222,12 @@ function Documents({ documents, matters, notify }) {
   }, [documents, matters, search, matterFilter, sortOrder]);
 
   const hasFilter = search.trim() || matterFilter;
-  const emptyText = documents.length === 0 ? 'No documents shared yet across your matters.' : 'No shared documents match your search.';
+  const emptyText = documents.length === 0 ? 'No documents shared yet. When the firm shares documents with you, they will appear here.' : 'No shared documents match your search.';
 
   return (
     <>
       <ClientDocumentRequests matters={matters} notify={notify} />
-      <Card title="All Documents" hint="Files shared across your matters">
+      <Card title="Documents" hint="Files shared across your matters">
       <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         <input
           type="search"
@@ -1435,7 +1478,7 @@ function CourtDates({ appearances, matters }) {
   }, [todayCount]);
 
   return (
-    <Card title="Court Dates / Appearances" hint="All court dates across your matters">
+    <Card title="Court Dates" hint="Upcoming and past court appearances across your matters">
       <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         <input
           type="search"
@@ -1506,7 +1549,7 @@ function CourtDates({ appearances, matters }) {
             a.location || '-',
             <MeetingLink key={a.id} event={a} />
           ])}
-          empty={appearances.length === 0 ? 'No court dates shared yet.' : 'No court dates match your search or filters.'}
+          empty={appearances.length === 0 ? 'No court dates shared yet. When the firm adds an appearance, it will appear here.' : 'No court dates match your search or filters.'}
         />
       </div>
     </Card>
