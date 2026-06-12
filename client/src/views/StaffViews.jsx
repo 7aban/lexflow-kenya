@@ -10,6 +10,7 @@ import TaskTimer, { taskTimerActive } from '../components/TaskTimer.jsx';
 const BILLABLE_TIME_GUIDANCE = 'Billable time may be included in hourly invoices. Non-billable time is tracked for workload and productivity but excluded from hourly invoice generation.';
 const AVATAR_ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp'];
 const AVATAR_MAX_BYTES = 512 * 1024;
+const MATTER_COCKPIT_SECTION_IDS = ['overview', 'tasks', 'court-diary', 'documents', 'billing', 'timeline', 'client-portal', 'notes'];
 
 function listFromResponse(response, key) {
   if (Array.isArray(response)) return response;
@@ -2077,7 +2078,7 @@ function AppearanceTypeSelect({ value, onChange }) {
     </select>
   );
 }
-export function Matters({ data, canManage, reload, notify, focus, onNavigate, onMatterOpened }) {
+export function Matters({ data, canManage, reload, notify, focus, onNavigate, onMatterOpened, onMatterSelected, onMatterSectionChange }) {
   const [selectedId, setSelectedId] = useState('');
   const [detail, setDetail] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
@@ -2121,6 +2122,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
   const [templateSaving, setTemplateSaving] = useState(false);
   const [applyingTemplate, setApplyingTemplate] = useState(false);
   const timekeeperFocusHandled = useRef(null);
+  const missingMatterFocusHandled = useRef(null);
   const matterDetailRef = useRef(null);
   const session = readSession();
   const isAdmin = session?.user?.role === 'admin';
@@ -2151,9 +2153,18 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
   useEffect(() => { if (CHECKLISTS_UI_ENABLED && ['admin', 'advocate', 'assistant'].includes(userRole)) loadChecklistTemplates(); }, [userRole]);
   useEffect(() => {
     if (!focus?.matterId) return;
+    if (!data.matters.some(matter => matter.id === focus.matterId)) {
+      if (missingMatterFocusHandled.current !== focus.matterId) {
+        missingMatterFocusHandled.current = focus.matterId;
+        notify?.({ type: 'warning', message: 'Matter could not be opened. Showing Matters instead.' });
+      }
+      if (data.matters[0]?.id) setSelectedId(data.matters[0].id);
+      setCockpitSection('overview');
+      return;
+    }
     setSelectedId(focus.matterId);
-    setCockpitSection('overview');
-  }, [focus?.matterId, focus?.ts]);
+    setCockpitSection(MATTER_COCKPIT_SECTION_IDS.includes(focus.section) ? focus.section : 'overview');
+  }, [focus?.matterId, focus?.section, focus?.ts, data.matters]);
   // LOCAL-PILOT-FIX-14 / FIX-21: external entry points can focus a matter
   // cockpit section. Timekeeper still scrolls to the time form inside Tasks.
   useEffect(() => {
@@ -2274,9 +2285,14 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
   function closeMatterForm() { setEditingMatter(false); setForm(emptyMatterForm); setMatterFormOpen(false); }
   function openMatterDetail(id) {
     setSelectedId(id);
+    onMatterSelected?.(id);
     if (window.matchMedia?.('(max-width: 760px)').matches) {
       setTimeout(() => matterDetailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
     }
+  }
+  function selectCockpitSection(section) {
+    setCockpitSection(section);
+    onMatterSectionChange?.(detail?.id || selectedId || selected?.id, section);
   }
   async function archiveMatter() { if (!detail) return; try { await api(`/matters/${detail.id}/status`, { method: 'PATCH', body: { stage: 'Closed' } }); notify({ type: 'success', message: 'Matter archived.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteMatterRecord() { if (!detail) return; try { const id = detail.id; await api(`/matters/${id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Matter deleted.' }); setDetail(null); setSelectedId(''); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
@@ -2442,7 +2458,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
                 {cockpitSections.map(s => {
                   const active = cockpitSection === s.id;
                   return (
-                    <button key={s.id} type="button" aria-pressed={active} onClick={() => setCockpitSection(s.id)} style={{ ...(active ? styles.primaryButton : styles.ghostButton), fontSize: 12, padding: '5px 10px', display: 'inline-flex', alignItems: 'center', gap: 4, margin: 0 }}>
+                    <button key={s.id} type="button" aria-pressed={active} onClick={() => selectCockpitSection(s.id)} style={{ ...(active ? styles.primaryButton : styles.ghostButton), fontSize: 12, padding: '5px 10px', display: 'inline-flex', alignItems: 'center', gap: 4, margin: 0 }}>
                       <s.icon size={14} stroke={1.75} />
                       <span>{s.label}</span>
                       {s.badge ? <span style={{ fontSize: 11, opacity: 0.75, marginLeft: 1 }}>({s.badge})</span> : null}
@@ -2458,32 +2474,32 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
               {cockpitSection === 'overview' && (
                 <>
                   <div className="lf-matter-quick-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-                    <button type="button" onClick={() => setCockpitSection('tasks')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="Log time for this matter">
+                    <button type="button" onClick={() => selectCockpitSection('tasks')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="Log time for this matter">
                       <IconClock size={14} stroke={1.75} /> Log time
                     </button>
-                    <button type="button" onClick={() => setCockpitSection('tasks')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="View and add matter tasks">
+                    <button type="button" onClick={() => selectCockpitSection('tasks')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="View and add matter tasks">
                       <IconListCheck size={14} stroke={1.75} /> Task
                     </button>
-                    <button type="button" onClick={() => setCockpitSection('court-diary')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="Add court appearance or date">
+                    <button type="button" onClick={() => selectCockpitSection('court-diary')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="Add court appearance or date">
                       <IconCalendarEvent size={14} stroke={1.75} /> Court / Diary
                     </button>
                     <button type="button" onClick={() => onNavigate?.('Deadlines')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="View full Court Diary in Deadlines view">
                       <IconCalendarEvent size={14} stroke={1.75} /> Court Diary
                     </button>
-                    <button type="button" onClick={() => setCockpitSection('documents')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="Upload or view documents">
+                    <button type="button" onClick={() => selectCockpitSection('documents')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="Upload or view documents">
                       <IconUpload size={14} stroke={1.75} /> Document
                     </button>
-                    <button type="button" onClick={() => setCockpitSection('notes')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="Add case note">
+                    <button type="button" onClick={() => selectCockpitSection('notes')} style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }} aria-label="Add case note">
                       <IconNote size={14} stroke={1.75} /> Note
                     </button>
                   </div>
                   <div className="lf-matter-cockpit-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12, marginBottom: 12 }}>
-                    <MatterNextStepPanel detail={detail} onSectionNav={setCockpitSection} />
-                    <MatterCourtPrepCard detail={detail} onSectionNav={setCockpitSection} />
-                    <MatterKeyDocumentsPanel detail={detail} onSectionNav={setCockpitSection} />
-                    <MatterBillingSnapshot detail={detail} onSectionNav={setCockpitSection} />
+                    <MatterNextStepPanel detail={detail} onSectionNav={selectCockpitSection} />
+                    <MatterCourtPrepCard detail={detail} onSectionNav={selectCockpitSection} />
+                    <MatterKeyDocumentsPanel detail={detail} onSectionNav={selectCockpitSection} />
+                    <MatterBillingSnapshot detail={detail} onSectionNav={selectCockpitSection} />
                   </div>
-                  <HearingBriefCard detail={detail} canManage={canManage} notify={notify} onChanged={() => loadDetail(detail.id)} onSectionNav={setCockpitSection} />
+                  <HearingBriefCard detail={detail} canManage={canManage} notify={notify} onChanged={() => loadDetail(detail.id)} onSectionNav={selectCockpitSection} />
                   <MatterCommandSummary detail={detail} nextActionHints={nextActionHints} />
                   <MatterNextActionHints hints={nextActionHints} />
                   <AssistantSuggestions suggestions={suggestions} hints={nextActionHints} />
@@ -2633,7 +2649,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
               {cockpitSection === 'notes' && (
                 <>
                   <div id="matter-section-notes" style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Case notes"><form onSubmit={addNote} style={styles.noteForm}><input style={styles.input} value={note} onChange={e => setNote(e.target.value)} placeholder="Add a note" /><button style={styles.ghostButton}>Save note</button></form><div className="lf-matter-notes-cards"><Table columns={['Note', 'Author', 'Created']} rows={(detail.notes || []).map(n => [n.content, n.author || '-', n.createdAt ? new Date(n.createdAt).toLocaleString() : '-'])} empty="No notes yet." /></div></Sub></div>
-                  <HearingBriefCard detail={detail} canManage={canManage} notify={notify} onChanged={() => loadDetail(detail.id)} onSectionNav={setCockpitSection} />
+                  <HearingBriefCard detail={detail} canManage={canManage} notify={notify} onChanged={() => loadDetail(detail.id)} onSectionNav={selectCockpitSection} />
                 </>
               )}
             </div>

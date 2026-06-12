@@ -17,8 +17,52 @@ const portalIcons = {
 };
 
 const portalNav = ['Dashboard', 'My Matters', 'Court Dates', 'Documents', 'Invoices', 'Notices', 'Account'];
+const clientViewSlugs = {
+  Dashboard: 'dashboard',
+  'My Matters': 'my-matters',
+  'Court Dates': 'court-dates',
+  Documents: 'documents',
+  Invoices: 'invoices',
+  Notices: 'notices',
+  Account: 'account',
+};
+const clientSlugViews = Object.entries(clientViewSlugs).reduce((acc, [view, slug]) => ({ ...acc, [slug]: view }), {});
 const AVATAR_ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp'];
 const AVATAR_MAX_BYTES = 512 * 1024;
+
+function clientHashFor(view) {
+  return `#/client/${clientViewSlugs[view] || clientViewSlugs.Dashboard}`;
+}
+
+function parseClientRoute(hash = window.location.hash) {
+  const parts = String(hash || '').replace(/^#\/?/, '').split('/').filter(Boolean).map(part => {
+    try { return decodeURIComponent(part); }
+    catch { return part; }
+  });
+  if (parts[0] !== 'client') return null;
+  const view = clientSlugViews[parts[1] || 'dashboard'];
+  return view ? { view } : { view: 'Dashboard', replace: true };
+}
+
+function parseClientHash(hash = window.location.hash) {
+  return parseClientRoute(hash)?.view || null;
+}
+
+function setClientHash(view, { replace = false } = {}) {
+  if (typeof window === 'undefined') return;
+  const hash = clientHashFor(view);
+  if (window.location.hash === hash) return;
+  if (replace) {
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${hash}`);
+    return;
+  }
+  window.history.pushState(null, '', `${window.location.pathname}${window.location.search}${hash}`);
+}
+
+function initialClientView() {
+  if (typeof window === 'undefined') return 'Dashboard';
+  return parseClientHash() || 'Dashboard';
+}
 
 const clientPortalChromeCss = `
   .lf-client-mobile-actions { display: none; }
@@ -203,7 +247,7 @@ function ClientMobileEmpty({ children }) {
 }
 
 export default function ClientApp({ user, firm, logout, notify, toast, setToast }) {
-  const [view, setView] = useState('Dashboard');
+  const [view, setView] = useState(initialClientView);
   const [dashboard, setDashboard] = useState({ client: null, matters: [], documents: [], invoices: [], appearances: [], notices: [], paymentProofs: [], invoicePayments: [] });
   const [selectedId, setSelectedId] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -222,6 +266,25 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
   const firmName = firm?.name || 'LexFlow Kenya';
 
   useEffect(() => { load(); loadAndApplyFirmTheme(); }, []);
+  useEffect(() => {
+    function handleHashChange() {
+      const route = parseClientRoute();
+      if (!route) {
+        setView('Dashboard');
+        setClientHash('Dashboard', { replace: true });
+        return;
+      }
+      setView(route.view);
+      if (route.replace) setClientHash(route.view, { replace: true });
+    }
+    window.addEventListener('hashchange', handleHashChange);
+    window.addEventListener('popstate', handleHashChange);
+    handleHashChange();
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange);
+      window.removeEventListener('popstate', handleHashChange);
+    };
+  }, []);
   useEffect(() => { setSelfHasAvatar(Boolean(user?.hasAvatar)); setAvatarVersion(v => v + 1); }, [user?.id, user?.hasAvatar]);
   useEffect(() => {
     function revokeExisting() {
@@ -274,8 +337,9 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
     finally { setLoading(false); }
   }
 
-  function switchView(next) {
+  function switchView(next, options = {}) {
     setView(next);
+    if (options.hash !== false) setClientHash(next, { replace: Boolean(options.replace) });
     if (next === 'Dashboard') load();
   }
 
@@ -416,7 +480,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
           </div>
         </header>
         {loading && <Skeleton />}
-        {!loading && view === 'Dashboard' && <ClientDashboard data={dashboard} stats={stats} user={user} avatarUrl={myAvatarUrl} selectMatter={id => { setSelectedId(id); setView('My Matters'); }} onNavigate={switchView} />}
+        {!loading && view === 'Dashboard' && <ClientDashboard data={dashboard} stats={stats} user={user} avatarUrl={myAvatarUrl} selectMatter={id => { setSelectedId(id); switchView('My Matters'); }} onNavigate={switchView} />}
         {!loading && view === 'My Matters' && (
           <ClientMatterDetail
             matters={dashboard.matters}
@@ -440,7 +504,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
         )}
         {!loading && view === 'Notices' && <Notices notices={dashboard.notices} matters={dashboard.matters} notify={notify} />}
         {!loading && view === 'Documents' && <Documents documents={dashboard.documents} matters={dashboard.matters} notify={notify} />}
-        {!loading && view === 'Invoices' && <BillingInvoices data={dashboard} matters={dashboard.matters} firm={firm} notify={notify} selectMatter={id => { setSelectedId(id); setView('My Matters'); }} onNavigate={switchView} />}
+        {!loading && view === 'Invoices' && <BillingInvoices data={dashboard} matters={dashboard.matters} firm={firm} notify={notify} selectMatter={id => { setSelectedId(id); switchView('My Matters'); }} onNavigate={switchView} />}
         {!loading && view === 'Account' && <Account user={user} client={dashboard.client} firm={firm} matters={dashboard.matters} avatarUrl={myAvatarUrl} hasAvatar={selfHasAvatar} onAvatarUpload={handleAvatarUpload} onAvatarRemove={handleAvatarRemove} onNavigate={switchView} logout={logout} notify={notify} />}
         {!loading && view === 'Court Dates' && <CourtDates appearances={dashboard.appearances} matters={dashboard.matters} />}
       </main>

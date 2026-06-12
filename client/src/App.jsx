@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconLayoutDashboard, IconChartLine, IconReportAnalytics, IconUsers, IconUserPlus, IconBriefcase, IconCheckbox, IconCalendarDue, IconFileInvoice, IconMessages, IconUsersGroup, IconSettings, IconListSearch, IconExternalLink, IconChevronDown, IconShield, IconSearch, IconBell, IconRefresh, IconTemplate, IconLink, IconX } from '@tabler/icons-react';
 import { api, API_BASE, AUTH_FAILURE_MESSAGE, clearSession, clearAllLexFlowStorage, fetchAvatarObjectUrl, getNotifications, markNotificationsRead, readSession, saveSession } from './lib/apiClient.js';
 import { globalSearch } from './api.js';
@@ -62,6 +62,79 @@ const navGroups = [
     ['Ardhi Sasa', ['admin', 'advocate', 'assistant'], 'https://ardhisasa.lands.go.ke/home'],
   ] },
 ];
+
+const staffViewSlugs = {
+  Dashboard: 'dashboard',
+  Clients: 'clients',
+  Matters: 'matters',
+  Tasks: 'tasks',
+  Deadlines: 'court-diary-deadlines',
+  Communications: 'communications',
+  Invoices: 'invoices',
+  Reports: 'reports',
+  'Document Studio': 'document-studio',
+  Users: 'users',
+  HR: 'hr',
+  'Firm Settings': 'firm-settings',
+  'Audit Log': 'audit',
+  Performance: 'performance',
+  Invitations: 'invitations',
+  'Connected Accounts': 'connected-accounts',
+  'My Leave': 'my-leave',
+  'Structured Audit': 'structured-audit',
+};
+
+const staffSlugViews = Object.entries(staffViewSlugs).reduce((acc, [view, slug]) => ({ ...acc, [slug]: view }), {});
+const validMatterSections = new Set(['overview', 'tasks', 'court-diary', 'documents', 'billing', 'timeline', 'client-portal', 'notes']);
+
+function readHashParts(hash = window.location.hash) {
+  return String(hash || '')
+    .replace(/^#\/?/, '')
+    .split('/')
+    .filter(Boolean)
+    .map(part => {
+      try { return decodeURIComponent(part); }
+      catch { return part; }
+    });
+}
+
+function replaceHash(hash) {
+  if (typeof window === 'undefined') return;
+  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${hash}`);
+}
+
+function setAppHash(hash, { replace = false } = {}) {
+  if (typeof window === 'undefined' || window.location.hash === hash) return;
+  if (replace) {
+    replaceHash(hash);
+    return;
+  }
+  window.history.pushState(null, '', `${window.location.pathname}${window.location.search}${hash}`);
+}
+
+function staffHashFor(view, options = {}) {
+  const slug = staffViewSlugs[view] || staffViewSlugs.Dashboard;
+  if (view !== 'Matters') return `#/staff/${slug}`;
+  const matterId = options.matterId ? encodeURIComponent(options.matterId) : '';
+  const section = options.section && validMatterSections.has(options.section) ? encodeURIComponent(options.section) : '';
+  if (matterId && section) return `#/staff/matters/${matterId}/${section}`;
+  if (matterId) return `#/staff/matters/${matterId}`;
+  return '#/staff/matters';
+}
+
+function parseStaffRoute(hash = window.location.hash) {
+  const [area, slug, matterId, section] = readHashParts(hash);
+  if (area !== 'staff') return null;
+  if (slug === 'matters') {
+    return {
+      view: 'Matters',
+      matterId: matterId || '',
+      section: validMatterSections.has(section) ? section : '',
+    };
+  }
+  const view = staffSlugViews[slug || 'dashboard'];
+  return view ? { view } : { view: 'Dashboard', replace: true };
+}
 
 function allowedNavGroups(role) {
   return navGroups
@@ -183,6 +256,37 @@ export default function App() {
   const role = user?.role || 'assistant';
   const visibleGroups = allowedNavGroups(role);
   const visibleViews = visibleGroups.flatMap(group => group.items.map(([label]) => label));
+  const visibleViewKey = useMemo(() => visibleViews.join('|'), [visibleViews]);
+  const visibleViewSet = useMemo(() => new Set(visibleViews), [visibleViewKey]);
+
+  function navigateToView(nextView, options = {}) {
+    const safeView = visibleViewSet.has(nextView) ? nextView : 'Dashboard';
+    setView(safeView);
+    if (safeView === 'Matters' && (options.matterId || options.section)) {
+      setMatterFocus({ matterId: options.matterId || '', section: options.section || '', ts: Date.now() });
+    }
+    if (safeView === 'Clients' && options.clientId) setClientFocus({ clientId: options.clientId, ts: Date.now() });
+    if (safeView === 'Tasks' && options.taskId) setTaskFocus({ taskId: options.taskId, ts: Date.now() });
+    if (safeView === 'Deadlines' && options.appearanceId) setAppearanceFocus({ appearanceId: options.appearanceId, ts: Date.now() });
+    if (safeView === 'Communications') setCommunicationFocus({ matterId: options.matterId || '', clientId: options.clientId || '', ts: Date.now() });
+    if (options.hash !== false) setAppHash(staffHashFor(safeView, options), { replace: Boolean(options.replace) });
+  }
+
+  function applyStaffHash({ replace = false } = {}) {
+    const route = parseStaffRoute();
+    if (!route) {
+      navigateToView('Dashboard', { replace: true });
+      return;
+    }
+    const safeView = visibleViewSet.has(route.view) ? route.view : 'Dashboard';
+    setView(safeView);
+    if (safeView === 'Matters') {
+      setMatterFocus({ matterId: route.matterId || '', section: route.section || '', ts: Date.now() });
+    }
+    if (replace || route.replace || safeView !== route.view) {
+      setAppHash(staffHashFor(safeView, safeView === 'Matters' ? route : {}), { replace: true });
+    }
+  }
 
   useEffect(() => {
     async function loadPublicFirmSettings() {
@@ -306,7 +410,7 @@ export default function App() {
 
   useEffect(() => {
     if (!user || user.role === 'client') return;
-    if (!visibleViews.includes(view)) setView('Dashboard');
+    if (!visibleViews.includes(view)) navigateToView('Dashboard', { replace: true });
     const activeGroup = visibleGroups.find(group => group.items.some(([label]) => label === view));
     if (activeGroup) {
       setOpenNavGroups(prev => {
@@ -318,6 +422,20 @@ export default function App() {
       });
     }
   }, [user?.role, view]);
+
+  useEffect(() => {
+    if (!authenticated || !user || user.role === 'client') return undefined;
+    function handleHashChange() {
+      applyStaffHash();
+    }
+    window.addEventListener('hashchange', handleHashChange);
+    window.addEventListener('popstate', handleHashChange);
+    applyStaffHash({ replace: true });
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange);
+      window.removeEventListener('popstate', handleHashChange);
+    };
+  }, [authenticated, user?.role, visibleViewKey]);
 
   useEffect(() => {
     const trimmed = search.trim();
@@ -440,8 +558,7 @@ export default function App() {
   }
 
   function openMatterDocumentsFromStudio() {
-    setView('Matters');
-    setMatterFocus({ section: 'documents', ts: Date.now() });
+    navigateToView('Matters', { section: 'documents' });
   }
 
   if (window.location.pathname.startsWith('/invite/')) {
@@ -460,15 +577,12 @@ export default function App() {
   async function openNotification(notification) {
     setNotificationsOpen(false);
     if (notification.matterId) {
-      setMatterFocus({ matterId: notification.matterId, tab: 'Case notes', ts: Date.now() });
-      setCommunicationFocus({ matterId: notification.matterId, clientId: notification.clientId || '', ts: Date.now() });
-      setView('Communications');
+      navigateToView('Communications', { matterId: notification.matterId, clientId: notification.clientId || '' });
       setNotifications(current => current.filter(item => item.matterId !== notification.matterId));
       try { await markNotificationsRead({ matterId: notification.matterId }); }
       catch { /* Keep navigation responsive even if read marking fails. */ }
     } else if (notification.clientId) {
-      setCommunicationFocus({ matterId: '', clientId: notification.clientId, ts: Date.now() });
-      setView('Communications');
+      navigateToView('Communications', { clientId: notification.clientId });
       setNotifications(current => current.filter(item => item.id !== notification.id));
       try { await markNotificationsRead({ id: notification.id }); }
       catch { /* Keep navigation responsive even if read marking fails. */ }
@@ -529,7 +643,7 @@ export default function App() {
           </div>
         </div>
 
-        <StaffNavigation visibleGroups={visibleGroups} openNavGroups={openNavGroups} setOpenNavGroups={setOpenNavGroups} view={view} setView={setView} />
+        <StaffNavigation visibleGroups={visibleGroups} openNavGroups={openNavGroups} setOpenNavGroups={setOpenNavGroups} view={view} setView={navigateToView} />
 
         <div style={styles.userCard}>
           <div style={styles.avatar}>
@@ -549,7 +663,7 @@ export default function App() {
               <div style={{ ...styles.actionMenu, position: 'absolute', bottom: '100%', right: 0, marginBottom: 4 }}>
                 <button type="button" style={styles.actionMenuItem} onClick={() => {
                   setAccountMenuOpen(false);
-                  if (isAdmin) { setView('Firm Settings'); }
+                  if (isAdmin) { navigateToView('Firm Settings'); }
                   else { setToast({ type: 'info', message: 'Account settings coming soon' }); }
                 }}>
                   Account
@@ -577,7 +691,7 @@ export default function App() {
               </div>
               <button type="button" aria-label="Close navigation menu" title="Close navigation menu" onClick={() => setMobileMenuOpen(false)} style={styles.mobileCloseButton}><IconX size={18} stroke={1.8} aria-hidden="true" /></button>
             </div>
-            <StaffNavigation visibleGroups={visibleGroups} openNavGroups={openNavGroups} setOpenNavGroups={setOpenNavGroups} view={view} setView={setView} onNavigate={() => setMobileMenuOpen(false)} />
+            <StaffNavigation visibleGroups={visibleGroups} openNavGroups={openNavGroups} setOpenNavGroups={setOpenNavGroups} view={view} setView={navigateToView} onNavigate={() => setMobileMenuOpen(false)} />
             <div style={styles.userCard}>
               <div style={styles.avatar}>
                 {myAvatarUrl
@@ -608,13 +722,13 @@ export default function App() {
                 ) : searchResults.length ? (
                   searchResults.map(item => (
                     <button key={item.id} type="button" onClick={() => {
-                      if (item.type === 'Matter') { setView('Matters'); setMatterFocus({ matterId: item.matterId, ts: Date.now() }); }
-                      if (item.type === 'Client') { setView('Clients'); setClientFocus({ clientId: item.id, ts: Date.now() }); }
-                      if (item.type === 'Task') { setView('Tasks'); setTaskFocus({ taskId: item.id, ts: Date.now() }); }
-                      if (item.type === 'Invoice') { if (isAdmin) setView('Invoices'); else if (item.matterId) { setView('Matters'); setMatterFocus({ matterId: item.matterId, ts: Date.now() }); } }
-                      if (item.type === 'Appearance') { setView('Deadlines'); setAppearanceFocus({ appearanceId: item.id, ts: Date.now() }); }
-                      if (item.type === 'Document' && item.matterId) { setView('Matters'); setMatterFocus({ matterId: item.matterId, ts: Date.now() }); }
-                      if (item.type === 'Conversation') { setView('Communications'); setCommunicationFocus({ matterId: item.matterId, clientId: '', ts: Date.now() }); }
+                      if (item.type === 'Matter') navigateToView('Matters', { matterId: item.matterId });
+                      if (item.type === 'Client') navigateToView('Clients', { clientId: item.id });
+                      if (item.type === 'Task') navigateToView('Tasks', { taskId: item.id });
+                      if (item.type === 'Invoice') { if (isAdmin) navigateToView('Invoices'); else if (item.matterId) navigateToView('Matters', { matterId: item.matterId }); }
+                      if (item.type === 'Appearance') navigateToView('Deadlines', { appearanceId: item.id });
+                      if (item.type === 'Document' && item.matterId) navigateToView('Matters', { matterId: item.matterId });
+                      if (item.type === 'Conversation') navigateToView('Communications', { matterId: item.matterId, clientId: '' });
                       setSearch(item.title || '');
                       setSearchOpen(false);
                     }} style={{ width: '100%', textAlign: 'left', border: 0, borderTop: `1px solid ${theme.line}`, background: '#fff', padding: '10px 12px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -648,11 +762,11 @@ export default function App() {
             <p className="lf-page-sub" style={styles.pageSub}>{subtitles[view]}</p>
           </div>
 
-          <ViewErrorBoundary resetKey={view} onReset={() => setView('Dashboard')}>
+          <ViewErrorBoundary resetKey={view} onReset={() => navigateToView('Dashboard', { replace: true })}>
             {loading && !bootstrapped && <Skeleton />}
-            {(!loading || bootstrapped) && view === 'Dashboard' && <Dashboard data={data} user={user} onNavigate={setView} />}
+            {(!loading || bootstrapped) && view === 'Dashboard' && <Dashboard data={data} user={user} onNavigate={navigateToView} />}
             {(!loading || bootstrapped) && view === 'Clients' && <Clients clients={data.clients} matters={data.matters} canManage={canManage} isAdmin={isAdmin} reload={refresh} notify={setToast} focus={clientFocus} />}
-            {(!loading || bootstrapped) && view === 'Matters' && <Matters data={data} canManage={canManage} reload={refresh} notify={setToast} focus={matterFocus} onNavigate={setView} onMatterOpened={async matterId => { setNotifications(current => current.filter(item => item.matterId !== matterId)); try { await markNotificationsRead({ matterId }); } catch {} }} />}
+            {(!loading || bootstrapped) && view === 'Matters' && <Matters data={data} canManage={canManage} reload={refresh} notify={setToast} focus={matterFocus} onNavigate={navigateToView} onMatterSelected={matterId => navigateToView('Matters', { matterId })} onMatterSectionChange={(matterId, section) => navigateToView('Matters', { matterId, section })} onMatterOpened={async matterId => { setNotifications(current => current.filter(item => item.matterId !== matterId)); try { await markNotificationsRead({ matterId }); } catch {} }} />}
             {(!loading || bootstrapped) && view === 'Tasks' && <Tasks data={data} canManage={canManage} reload={refresh} notify={setToast} focus={taskFocus} />}
             {(!loading || bootstrapped) && view === 'Deadlines' && <DeadlineCenter data={data} canManage={canManage} notify={setToast} focus={appearanceFocus} />}
             {(!loading || bootstrapped) && view === 'Communications' && <Communications clients={data.clients} matters={data.matters} focus={communicationFocus} notify={setToast} />}
@@ -665,16 +779,16 @@ export default function App() {
             {(!loading || bootstrapped) && view === 'My Leave' && <MyLeave notify={setToast} />}
             {(!loading || bootstrapped) && view === 'HR' && isAdmin && <HR notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Invitations' && isAdmin && <Invitations clients={data.clients} notify={setToast} />}
-            {(!loading || bootstrapped) && view === 'Audit Log' && isAdmin && <AuditLog notify={setToast} navigate={setView} />}
+            {(!loading || bootstrapped) && view === 'Audit Log' && isAdmin && <AuditLog notify={setToast} navigate={navigateToView} />}
             {(!loading || bootstrapped) && view === 'Structured Audit' && isAdmin && <StructuredAuditLog notify={setToast} />}
-            {(!loading || bootstrapped) && view === 'Document Studio' && canManage && <DocumentStudio notify={setToast} onNavigate={setView} onOpenMatterDocuments={openMatterDocumentsFromStudio} />}
+            {(!loading || bootstrapped) && view === 'Document Studio' && canManage && <DocumentStudio notify={setToast} onNavigate={navigateToView} onOpenMatterDocuments={openMatterDocumentsFromStudio} />}
           </ViewErrorBoundary>
         </div>
       </main>
       <button
         type="button"
         className="lf-timer-bubble"
-        onClick={() => { setView('Matters'); setMatterFocus({ section: 'tasks', ts: Date.now() }); }}
+        onClick={() => navigateToView('Matters', { section: 'tasks' })}
         style={styles.timerBubble}
         aria-label="Open time logging — log hours or start a task timer"
         title="Open time logging — log hours or start a task timer"
