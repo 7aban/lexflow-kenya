@@ -18,6 +18,13 @@ function ruleNeedsAttention(rule, todayIso) {
   return false;
 }
 const typeOptions = ['all', 'Court Date', 'Internal Task', 'SOL / Limitation', 'Invoice Due', 'client', 'internal', 'statutory', 'tax', 'regulatory'];
+const LIST_BATCH_SIZE = 25;
+const triageTabs = [
+  { id: 'overdue', label: 'Overdue' },
+  { id: 'upcoming', label: 'Upcoming' },
+  { id: 'court', label: 'Court Diary' },
+  { id: 'all', label: 'All' },
+];
 
 function dayDiff(date) {
   if (!date) return null;
@@ -81,6 +88,9 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
   const [guidance, setGuidance] = useState([]);
   const [guidanceOpen, setGuidanceOpen] = useState(false);
   const [filters, setFilters] = useState({ type: '', status: '' });
+  const [activeTab, setActiveTab] = useState('overdue');
+  const [visibleCount, setVisibleCount] = useState(LIST_BATCH_SIZE);
+  const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(blankForm);
   const [confirm, setConfirm] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -124,6 +134,7 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
   }
 
   useEffect(() => { load(); }, [filters.type, filters.status]);
+  useEffect(() => { setVisibleCount(LIST_BATCH_SIZE); }, [activeTab, filters.type, filters.status]);
   useEffect(() => {
     if (!focus?.appearanceId) return;
     const targetId = `appearance:${focus.appearanceId}`;
@@ -191,6 +202,7 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
         clientId: form.clientId || null,
       });
       setForm(blankForm);
+      setFormOpen(false);
       notify?.({ type: 'success', message: 'Deadline added.' });
       await load();
     } catch (err) {
@@ -411,7 +423,43 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
 
   const matterOptions = data.matters || [];
   const clientOptions = data.clients || [];
-  const rows = deadlines.map(row => [
+
+  const tabCounts = useMemo(() => {
+    const open = deadlines.filter(row => row.status !== 'Done');
+    return {
+      overdue: open.filter(row => dayDiff(row.dueDate) < 0).length,
+      upcoming: open.filter(row => {
+        const days = dayDiff(row.dueDate);
+        return days !== null && days >= 0;
+      }).length,
+      court: deadlines.filter(row => row.type === 'Court Date').length,
+      all: deadlines.length,
+    };
+  }, [deadlines]);
+
+  const triageRows = useMemo(() => {
+    const list = deadlines.slice();
+    if (activeTab === 'overdue') return list.filter(row => row.status !== 'Done' && dayDiff(row.dueDate) < 0);
+    if (activeTab === 'upcoming') return list.filter(row => {
+      const days = dayDiff(row.dueDate);
+      return row.status !== 'Done' && days !== null && days >= 0;
+    });
+    if (activeTab === 'court') return list.filter(row => row.type === 'Court Date');
+    return list;
+  }, [activeTab, deadlines]);
+
+  const visibleDeadlines = triageRows.slice(0, visibleCount);
+  const hiddenCount = Math.max(0, triageRows.length - visibleDeadlines.length);
+
+  const tabEmptyCopy = {
+    overdue: ['No overdue items', 'Nothing needs late-action triage under the current filters.'],
+    upcoming: ['No upcoming items', 'Future court dates, filing dates and action items will appear here.'],
+    court: ['No court diary entries', 'Court appearances recorded on matters will appear here.'],
+    all: ['No deadlines found', 'Create a custom deadline or add tasks, appearances, invoices and limitation dates to populate this list.'],
+  };
+
+  function deadlineRows(list) {
+    return list.map(row => [
     <div key={`${row.id}-due`} style={{ display: 'grid', gap: 2 }}>
       <strong>{row.dueDate || '-'}</strong>
       <span style={{ color: theme.muted, fontSize: 12 }}>{dueLabel(row.dueDate)}</span>
@@ -431,25 +479,28 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
         </button>
         <button type="button" style={styles.dangerTinyButton} onClick={() => setConfirm({ title: 'Delete deadline?', message: `Delete "${row.title}"?`, onConfirm: () => remove(row) })}>Delete</button>
       </div>
-    ) : <span key={`${row.id}-system`} style={styles.mutedText}>System</span>,
-  ]);
+      ) : <span key={`${row.id}-system`} style={styles.mutedText}>System</span>,
+    ]);
+  }
+
+  const rows = deadlineRows(visibleDeadlines);
 
   return (
     <div style={styles.pageStack}>
       <div style={styles.statsGrid}>
-        <Stat label="Overdue" value={summary.overdue} tone="red" />
-        <Stat label="Next 7 days" value={summary.week} tone="gold" />
-        <Stat label="Next 30 days" value={summary.month} tone="gold" />
-        <Stat label="Open deadlines" value={summary.open} tone="navy" />
+        <Stat label="Needs action" value={summary.overdue} tone="red" onClick={() => setActiveTab('overdue')} ariaLabel="Show overdue items" />
+        <Stat label="Due next 7 days" value={summary.week} tone="gold" onClick={() => setActiveTab('upcoming')} ariaLabel="Show upcoming items" />
+        <Stat label="Due next 30 days" value={summary.month} tone="gold" onClick={() => setActiveTab('upcoming')} ariaLabel="Show upcoming items" />
+        <Stat label="Open items" value={summary.open} tone="navy" onClick={() => setActiveTab('all')} ariaLabel="Show all items" />
       </div>
 
       <div style={{ border: `1px solid ${theme.line}`, borderRadius: 10, padding: 16, background: '#fff', boxShadow: theme.shadow, display: 'grid', gap: 12 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <strong style={{ fontSize: 17 }}>Court Diary</strong>
-            {courtItems.length > 0 && <Badge tone="red">{courtItems.length} upcoming</Badge>}
+            {courtItems.length > 0 && <Badge tone="blue">{courtItems.length} open court date{courtItems.length === 1 ? '' : 's'}</Badge>}
           </div>
-          {courtItems.length > 0 && <button type="button" onClick={scrollToTimeline} style={styles.ghostButton}>View in timeline</button>}
+          {courtItems.length > 0 && <button type="button" onClick={() => { setActiveTab('court'); scrollToTimeline(); }} style={styles.ghostButton}>View court diary</button>}
         </div>
         {upcomingCourtItems.length ? (
           <>
@@ -520,47 +571,56 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
       </Card>
 
       <div className="lf-split-grid" style={styles.splitGrid}>
-        <Card title="Add Deadline" hint="Capture client promises, internal bring-ups, tax and statutory filing dates.">
-          <form onSubmit={submit} style={styles.formGrid}>
-            <Field label="Title">
-              <input required style={styles.input} value={form.title} onChange={event => setForm({ ...form, title: event.target.value })} placeholder="e.g. File VAT return" />
-            </Field>
-            <Field label="Type">
-              <select title="Choose statutory or tax for filing obligations; client for client response dates; internal for firm bring-ups." style={styles.input} value={form.type} onChange={event => setForm({ ...form, type: event.target.value })}>
-                <option value="statutory">Statutory</option>
-                <option value="tax">Tax</option>
-                <option value="regulatory">Regulatory</option>
-                <option value="client">Client</option>
-                <option value="internal">Internal</option>
-              </select>
-            </Field>
-            <Field label="Due Date">
-              <input required type="date" style={styles.input} value={form.dueDate} onChange={event => setForm({ ...form, dueDate: event.target.value })} />
-            </Field>
-            <Field label="Matter">
-              <select style={styles.input} value={form.matterId} onChange={event => setForm({ ...form, matterId: event.target.value })}>
-                <option value="">No matter</option>
-                {matterOptions.map(matter => <option key={matter.id} value={matter.id}>{matter.reference || matter.id} - {matter.title}</option>)}
-              </select>
-            </Field>
-            <Field label="Client">
-              <select style={styles.input} value={form.clientId} onChange={event => setForm({ ...form, clientId: event.target.value })}>
-                <option value="">No client</option>
-                {clientOptions.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
-              </select>
-            </Field>
-            <Field label="Owner">
-              <input style={styles.input} value={form.owner} onChange={event => setForm({ ...form, owner: event.target.value })} placeholder="Responsible person" />
-            </Field>
-            <Field label="Notes">
-              <input style={styles.input} value={form.notes} onChange={event => setForm({ ...form, notes: event.target.value })} placeholder="Action required or filing context" />
-            </Field>
-            <button type="submit" style={styles.primaryButton} disabled={!canManage || saving}>{saving ? 'Saving...' : 'Add deadline'}</button>
-          </form>
+        <Card title="Add court date / deadline" hint="Capture client promises, internal bring-ups, tax and statutory filing dates." action={
+          canManage ? <button type="button" style={formOpen ? styles.ghostButton : styles.primaryButton} onClick={() => setFormOpen(open => !open)}>{formOpen ? 'Cancel' : '+ Add court date / deadline'}</button> : null
+        }>
+          {formOpen ? (
+            <form onSubmit={submit} style={styles.formGrid}>
+              <Field label="Title">
+                <input required style={styles.input} value={form.title} onChange={event => setForm({ ...form, title: event.target.value })} placeholder="e.g. File VAT return" />
+              </Field>
+              <Field label="Type">
+                <select title="Choose statutory or tax for filing obligations; client for client response dates; internal for firm bring-ups." style={styles.input} value={form.type} onChange={event => setForm({ ...form, type: event.target.value })}>
+                  <option value="statutory">Statutory</option>
+                  <option value="tax">Tax</option>
+                  <option value="regulatory">Regulatory</option>
+                  <option value="client">Client</option>
+                  <option value="internal">Internal</option>
+                </select>
+              </Field>
+              <Field label="Due Date">
+                <input required type="date" style={styles.input} value={form.dueDate} onChange={event => setForm({ ...form, dueDate: event.target.value })} />
+              </Field>
+              <Field label="Matter">
+                <select style={styles.input} value={form.matterId} onChange={event => setForm({ ...form, matterId: event.target.value })}>
+                  <option value="">No matter</option>
+                  {matterOptions.map(matter => <option key={matter.id} value={matter.id}>{matter.reference || matter.id} - {matter.title}</option>)}
+                </select>
+              </Field>
+              <Field label="Client">
+                <select style={styles.input} value={form.clientId} onChange={event => setForm({ ...form, clientId: event.target.value })}>
+                  <option value="">No client</option>
+                  {clientOptions.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
+                </select>
+              </Field>
+              <Field label="Owner">
+                <input style={styles.input} value={form.owner} onChange={event => setForm({ ...form, owner: event.target.value })} placeholder="Responsible person" />
+              </Field>
+              <Field label="Notes">
+                <input style={styles.input} value={form.notes} onChange={event => setForm({ ...form, notes: event.target.value })} placeholder="Action required or filing context" />
+              </Field>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button type="submit" style={styles.primaryButton} disabled={!canManage || saving}>{saving ? 'Saving...' : 'Add deadline'}</button>
+                <button type="button" style={styles.ghostButton} onClick={() => { setForm(blankForm); setFormOpen(false); }}>Cancel</button>
+              </div>
+            </form>
+          ) : (
+            <p style={{ margin: 0, color: theme.muted, fontSize: 13 }}>Use this only for custom deadlines. Court appearances created inside a matter also appear in the Court Diary tab.</p>
+          )}
           {!canManage && <p>Assistants can view the calendar of obligations, but only advocates and admins can create custom deadlines.</p>}
         </Card>
 
-        <Card title="Filters" hint="Use this to focus on statutory, court or internal obligations.">
+        <Card title="List filters" hint="Optional filters for statutory, court or internal obligations.">
           <div style={styles.formGrid}>
             <Field label="Type">
               <select style={styles.input} value={filters.type || 'all'} onChange={event => setFilters(current => ({ ...current, type: event.target.value === 'all' ? '' : event.target.value }))}>
@@ -579,15 +639,55 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
         </Card>
       </div>
 
-      <Card title="Deadline Timeline" hint="Court dates, tasks, invoices, limitation dates and custom obligations in one list." action={
+      <Card title="Deadline list" hint="Court dates, tasks, invoices, limitation dates and custom obligations. Use tabs to triage the list." action={
         <button type="button" style={styles.ghostButton} disabled={deadlines.length === 0} onClick={() => downloadCsv('lexflow-deadlines.csv', ['Due Date', 'Type', 'Title', 'Matter / Client', 'Owner', 'Status'], deadlines.map(d => [d.dueDate, d.type, d.title, d.matterTitle || d.reference || d.clientName || '', d.owner, d.status || 'Open']))}>Export CSV</button>
       }>
-        {loading ? <Skeleton rows={3} /> : rows.length ? (
-          <div className="lf-deadline-cards">
-            <Table columns={['Due', 'Type', 'Deadline', 'Matter / Client', 'Owner', 'Status', 'Action']} rows={rows} rowIds={deadlines.map(r => `deadline-${r.id}`)} empty="No deadlines found." />
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }} role="tablist" aria-label="Deadline list views">
+          {triageTabs.map(tab => {
+            const selected = activeTab === tab.id;
+            const count = tabCounts[tab.id] || 0;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() => setActiveTab(tab.id)}
+                style={{
+                  ...(selected ? styles.primaryButton : styles.ghostButton),
+                  fontSize: 12,
+                  padding: '7px 12px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                {tab.label}
+                <Badge tone={tab.id === 'overdue' && count ? 'red' : selected ? 'blue' : 'amber'}>{count}</Badge>
+              </button>
+            );
+          })}
+        </div>
+        {activeTab === 'overdue' && tabCounts.overdue > 0 && (
+          <div style={{ marginBottom: 12, border: `1px solid ${theme.redBg}`, borderRadius: 8, padding: '10px 12px', background: theme.redBg, color: theme.red, fontSize: 13, fontWeight: 700 }}>
+            Needs action: {tabCounts.overdue} overdue item{tabCounts.overdue === 1 ? '' : 's'} under the current filters.
           </div>
+        )}
+        {loading ? <Skeleton rows={3} /> : rows.length ? (
+          <>
+            <div className="lf-deadline-cards">
+              <Table columns={['Due', 'Type', 'Deadline', 'Matter / Client', 'Owner', 'Status', 'Action']} rows={rows} rowIds={visibleDeadlines.map(r => `deadline-${r.id}`)} empty="No deadlines found." />
+            </div>
+            {hiddenCount > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12 }}>
+                <button type="button" style={styles.ghostButton} onClick={() => setVisibleCount(count => count + LIST_BATCH_SIZE)}>
+                  Show next {Math.min(LIST_BATCH_SIZE, hiddenCount)}
+                </button>
+              </div>
+            )}
+          </>
         ) : (
-          <Empty title="No deadlines found" text="Create a custom deadline or add tasks, appearances, invoices and SOL dates to populate this timeline." />
+          <Empty title={tabEmptyCopy[activeTab][0]} text={tabEmptyCopy[activeTab][1]} />
         )}
       </Card>
       {/* KENYA-32B: Deadline Intelligence (Legal Deadline Rule Library + stateless preview). */}

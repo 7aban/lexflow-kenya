@@ -497,7 +497,7 @@ export default function App() {
     Clients: 'A polished directory for intake, contacts and relationship context.',
     Matters: 'Matter pipeline, billing, documents, notes and invoice actions.',
     Tasks: 'Track pending and completed work across matters — add tasks, mark them done, and log time as you go.',
-    Deadlines: 'Court, client, internal and statutory obligations in one timeline.',
+    Deadlines: 'Track court appearances, limitation dates, filing dates, and urgent action items.',
     Communications: 'Client messages, secure attachments and portal activity in one inbox.',
     Invoices: 'Receivables, invoice status and PDF export for client billing.',
     Performance: 'Managing partner view of advocate output, workload and court attendance.',
@@ -638,7 +638,7 @@ export default function App() {
         <div className="lf-page-inner" style={styles.pageInner}>
           <div className="lf-page-header" style={styles.pageHeader}>
             <div className="lf-page-crumb" style={styles.pageCrumb}>{firm.name || 'LexFlow Kenya'}</div>
-            <h1 className="lf-page-title" style={styles.pageTitle}>{view}</h1>
+            <h1 className="lf-page-title" style={styles.pageTitle}>{navDisplayLabels[view] || view}</h1>
             <p className="lf-page-sub" style={styles.pageSub}>{subtitles[view]}</p>
           </div>
 
