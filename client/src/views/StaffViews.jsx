@@ -147,6 +147,47 @@ function connectedProviderLabel(provider) {
   return provider || 'Provider';
 }
 
+function friendlyEnumLabel(value) {
+  const labels = {
+    firm_sent_message: 'Firm sent message',
+    sent_message: 'Sent message',
+    both: 'Staff and client',
+    staff: 'Staff only',
+    client: 'Client only',
+    firm_default: 'Firm default',
+    whatsapp: 'WhatsApp only',
+    email: 'Email only',
+    none: 'None',
+    fixed: 'Fixed',
+    hourly: 'Hourly',
+    capped: 'Capped',
+    retainer: 'Retainer',
+    contingency: 'Contingency',
+    pro_bono: 'Pro bono',
+    mixed: 'Mixed',
+    upfront: 'Upfront',
+    monthly: 'Monthly',
+    milestone: 'Milestone',
+    on_completion: 'On completion',
+    as_incurred: 'As incurred',
+    exclusive: 'Exclusive',
+    inclusive: 'Inclusive',
+    exempt: 'Exempt',
+    not_applicable: 'Not applicable',
+    billed_separately: 'Billed separately',
+    estimated: 'Estimated',
+    deposit: 'Deposit',
+    fee_application: 'Fee application',
+    refund: 'Refund',
+    adjustment: 'Adjustment',
+    credit: 'Credit',
+    debit: 'Debit',
+    firm: 'Firm',
+  };
+  if (!value) return '';
+  return labels[value] || String(value).replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+}
+
 function connectedAccountDate(value) {
   const parsed = parseDateValue(value);
   return parsed ? parsed.toLocaleDateString() : '-';
@@ -1115,7 +1156,10 @@ export function Dashboard({ data, user, onNavigate }) {
             <span style={styles.dashBannerSumStrong}>{overdueCount} overdue</span> requiring attention
           </div>
         </div>
-        <div className="lf-dash-banner-amount" style={styles.dashBannerAmount}>{kes(totalBilled)}</div>
+        <div className="lf-dash-banner-amount" style={styles.dashBannerAmount}>
+          <span style={{ display: 'block', fontSize: 10, color: 'rgba(255,255,255,.58)', textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: 700, marginBottom: 2 }}>Billed to date</span>
+          <span>{kes(totalBilled)}</span>
+        </div>
       </section>
 
       {showAlert && (
@@ -1449,7 +1493,7 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   function reminderCell(client) {
     if (client.remindersEnabled === 0) return <Badge tone="red">Off</Badge>;
     const channel = client.preferredChannel || 'firm_default';
-    return <Badge tone={channel === 'none' ? 'red' : channel === 'firm_default' ? 'blue' : 'green'}>{channel === 'firm_default' ? 'Firm default' : channel}</Badge>;
+    return <Badge tone={channel === 'none' ? 'red' : channel === 'firm_default' ? 'blue' : 'green'}>{friendlyEnumLabel(channel)}</Badge>;
   }
   async function handleClientAvatarUpload(client, file) {
     if (!file) return;
@@ -1866,8 +1910,8 @@ function ClientSnapshotCard({ clientId, onClose }) {
                   {snapshot.feePlan.latest.estimatedAmount != null && <div>Estimated: {snapshot.feePlan.latest.currency} {snapshot.feePlan.latest.estimatedAmount}</div>}
                   {snapshot.feePlan.latest.hourlyRate != null && <div>Hourly: {snapshot.feePlan.latest.currency} {snapshot.feePlan.latest.hourlyRate}</div>}
                   {snapshot.feePlan.latest.capAmount != null && <div>Cap: {snapshot.feePlan.latest.currency} {snapshot.feePlan.latest.capAmount}</div>}
-                  {snapshot.feePlan.latest.billingFrequency && <div>Frequency: {snapshot.feePlan.latest.billingFrequency}</div>}
-                  {snapshot.feePlan.latest.vatTreatment && <div>VAT: {snapshot.feePlan.latest.vatTreatment}</div>}
+                  {snapshot.feePlan.latest.billingFrequency && <div>Frequency: {friendlyEnumLabel(snapshot.feePlan.latest.billingFrequency)}</div>}
+                  {snapshot.feePlan.latest.vatTreatment && <div>VAT: {friendlyEnumLabel(snapshot.feePlan.latest.vatTreatment)}</div>}
                 </div>
               ) : <div style={{ fontSize: 12, color: theme.muted }}>No active fee plan.</div>}
             </SnapshotSection>
@@ -3101,7 +3145,7 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
         </div>
         {detail.source && (
           <div style={{ fontSize: 12, color: '#697386', marginBottom: 12 }}>
-            <span style={{ fontWeight: 500 }}>Source:</span> {detail.source}
+            <span style={{ fontWeight: 500 }}>Source:</span> {friendlyEnumLabel(detail.source)}
           </div>
         )}
         {items.length > 0 ? (
@@ -4936,7 +4980,7 @@ export function HR({ notify }) {
 
   return (
     <div style={styles.pageStack}>
-      <div style={styles.tabList}>
+      <div className="lf-hr-tabs" style={{ ...styles.tabList, flexWrap: 'wrap', minWidth: 0, overflowX: 'hidden' }}>
         <button type="button" onClick={() => setHrTab('dashboard')} style={{ ...styles.tabButton, ...(hrTab === 'dashboard' ? styles.tabActive : {}) }}>Dashboard</button>
         <button type="button" onClick={() => setHrTab('balances')} style={{ ...styles.tabButton, ...(hrTab === 'balances' ? styles.tabActive : {}) }}>Leave Balances</button>
         <button type="button" onClick={() => setHrTab('profiles')} style={{ ...styles.tabButton, ...(hrTab === 'profiles' ? styles.tabActive : {}) }}>Staff Profiles</button>
@@ -6395,7 +6439,7 @@ function MatterKeyDocumentsPanel({ detail, onSectionNav }) {
           <div key={doc.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', borderBottom: `1px solid ${theme.line}`, paddingBottom: 6, flexWrap: 'wrap' }}>
             <div style={{ display: 'grid', gap: 1, minWidth: 0 }}>
               <span style={{ fontSize: 13, fontWeight: 600, color: theme.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.displayName || doc.friendlyName || doc.name || 'Document'}</span>
-              <span style={{ fontSize: 11, color: theme.muted }}>{doc.date || ''}{doc.source ? ` · ${doc.source}` : ''}</span>
+              <span style={{ fontSize: 11, color: theme.muted }}>{doc.date || ''}{doc.source ? ` · ${friendlyEnumLabel(doc.source)}` : ''}</span>
             </div>
             <span style={{ fontSize: 11, color: theme.muted, whiteSpace: 'nowrap', flexShrink: 0 }}>{doc.clientVisible ? 'Shared' : doc.source === 'client' ? 'Client upload' : 'Internal'}</span>
           </div>

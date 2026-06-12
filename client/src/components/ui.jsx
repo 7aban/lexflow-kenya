@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { IconChartBar, IconX } from '@tabler/icons-react';
 import { theme, styles } from '../theme.jsx';
 
 // Constrain admin/staff-entered external URLs to http(s); returns '' for missing,
@@ -119,7 +120,7 @@ export function ConfirmModal({ confirm, onClose }) {
       <div style={styles.modalCard}>
         <div style={styles.modalHead}>
           <h2>{confirm.title || 'Confirm action'}</h2>
-          <button type="button" aria-label="Close" onClick={onClose} style={styles.toastClose}>x</button>
+          <button type="button" aria-label="Close" onClick={onClose} style={styles.toastClose}><IconX size={16} stroke={1.8} aria-hidden="true" /></button>
         </div>
         <p>{confirm.message}</p>
         <div style={styles.modalActions}>
@@ -134,7 +135,7 @@ export function ConfirmModal({ confirm, onClose }) {
 export function Card({ title, hint, action, children }) { return <section style={styles.card}><div style={styles.cardHead}><div><h2>{title}</h2>{hint && <p>{hint}</p>}</div>{action}</div>{children}</section>; }
 export function Sub({ title, children }) { return <div style={styles.sub}><h3>{title}</h3>{children}</div>; }
 export function Field({ label, children }) { return <label style={styles.field}><span>{label}</span>{children}</label>; }
-export function Stat({ label, value, tone, icon: Icon, onClick, ariaLabel }) { const colors = { navy: theme.navy600, gold: theme.gold, green: theme.green, red: theme.red }; const color = colors[tone] || theme.navy600; const content = <>{Icon ? <Icon size={20} style={{ background: `${color}16`, color, padding: 6, borderRadius: 8, width: 32, height: 32 }} /> : <i style={{ background: `${color}16`, color }}>{label.slice(0, 2).toUpperCase()}</i>}<span>{label}</span><strong>{value}</strong></>; if (onClick) { return <button type="button" onClick={onClick} aria-label={ariaLabel || label} style={{ ...styles.stat, borderLeftColor: color, cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'inherit', width: '100%' }}>{content}</button>; } return <div style={{ ...styles.stat, borderLeftColor: color }}>{content}</div>; }
+export function Stat({ label, value, tone, icon: Icon, onClick, ariaLabel }) { const colors = { navy: theme.navy600, gold: theme.gold, green: theme.green, red: theme.red }; const color = colors[tone] || theme.navy600; const StatIcon = Icon || IconChartBar; const content = <><StatIcon size={20} style={{ background: `${color}16`, color, padding: 6, borderRadius: 8, width: 32, height: 32 }} aria-hidden="true" /><span>{label}</span><strong>{value}</strong></>; if (onClick) { return <button type="button" onClick={onClick} aria-label={ariaLabel || label} style={{ ...styles.stat, borderLeftColor: color, cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'inherit', width: '100%' }}>{content}</button>; } return <div style={{ ...styles.stat, borderLeftColor: color }}>{content}</div>; }
 export function Badge({ tone = 'blue', children }) { const map = { green: [theme.greenBg, theme.green], amber: [theme.amberBg, theme.amber], red: [theme.redBg, theme.red], blue: [theme.blueBg, theme.blue] }; const [bg, color] = map[tone] || map.blue; return <span style={{ ...styles.badge, background: bg, color }}>{children}</span>; }
 export function Alert({ tone, children }) { return <div style={{ ...styles.alert, ...(tone === 'danger' ? styles.alertDanger : {}) }}>{children}</div>; }
 export function Toast({ toast, onClose }) {
@@ -148,7 +149,7 @@ export function Toast({ toast, onClose }) {
   const tone = toast.type === 'danger' ? 'red' : toast.type === 'success' ? 'green' : toast.type === 'warning' ? 'amber' : 'blue';
   const map = { green: [theme.greenBg, theme.green, '#A7F3D0'], red: [theme.redBg, theme.red, '#FECACA'], amber: [theme.amberBg, theme.amber, '#FDE68A'], blue: [theme.blueBg, theme.blue, '#BFDBFE'] };
   const [bg, color, borderColor] = map[tone];
-  return <div style={{ ...styles.toast, background: bg, color, borderColor }} role="status" aria-live="polite"><strong>{toast.message}</strong><button type="button" aria-label="Dismiss notification" onClick={onClose} style={styles.toastClose}>x</button></div>;
+  return <div style={{ ...styles.toast, background: bg, color, borderColor }} role="status" aria-live="polite"><strong>{toast.message}</strong><button type="button" aria-label="Dismiss notification" onClick={onClose} style={styles.toastClose}><IconX size={16} stroke={1.8} aria-hidden="true" /></button></div>;
 }
 export function Empty({ title, text }) { return <div style={styles.empty}><div style={styles.emptyIcon}>LF</div><strong>{title}</strong><span>{text}</span></div>; }
 export function Skeleton({ rows = 4 }) { return <div style={styles.skeletonGrid}>{Array.from({ length: rows }).map((_, index) => <div key={index} style={styles.skeleton}><span style={styles.skeletonLineLarge} /><span style={styles.skeletonLine} /><span style={styles.skeletonLineShort} /></div>)}</div>; }

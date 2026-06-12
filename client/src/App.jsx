@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { IconLayoutDashboard, IconChartLine, IconReportAnalytics, IconUsers, IconUserPlus, IconBriefcase, IconCheckbox, IconCalendarDue, IconFileInvoice, IconMessages, IconUsersGroup, IconSettings, IconListSearch, IconExternalLink, IconChevronDown, IconShield, IconSearch, IconBell, IconRefresh, IconTemplate, IconLink } from '@tabler/icons-react';
+import { IconLayoutDashboard, IconChartLine, IconReportAnalytics, IconUsers, IconUserPlus, IconBriefcase, IconCheckbox, IconCalendarDue, IconFileInvoice, IconMessages, IconUsersGroup, IconSettings, IconListSearch, IconExternalLink, IconChevronDown, IconShield, IconSearch, IconBell, IconRefresh, IconTemplate, IconLink, IconX } from '@tabler/icons-react';
 import { api, API_BASE, AUTH_FAILURE_MESSAGE, clearSession, clearAllLexFlowStorage, fetchAvatarObjectUrl, getNotifications, markNotificationsRead, readSession, saveSession } from './lib/apiClient.js';
 import { globalSearch } from './api.js';
 import { defaultFirmSettings, styles, StyleTag, theme, loadAndApplyFirmTheme } from './theme.jsx';
@@ -51,15 +51,11 @@ const navDisplayLabels = {
 
 const initialData = { dashboard: {}, clients: [], matters: [], tasks: [], invoices: [], firmSettings: defaultFirmSettings };
 const navGroups = [
-  { title: 'Overview', items: [['Dashboard', ['admin', 'advocate', 'assistant']], ['Performance', ['admin']], ['Reports', ['admin']]] },
-  { title: 'Relationships', items: [['Clients', ['admin', 'advocate', 'assistant']], ['Invitations', ['admin']]] },
-  { title: 'Matters', items: [['Matters', ['admin', 'advocate', 'assistant']]] },
-  { title: 'Work', items: [['Tasks', ['admin', 'advocate', 'assistant']], ['Deadlines', ['admin', 'advocate', 'assistant']], ['My Leave', ['advocate', 'assistant']]] },
-  { title: 'Document Studio', items: [['Document Studio', ['admin', 'advocate']]] },
-  { title: 'Finance', items: [['Invoices', ['admin']]] },
-  { title: 'Communications', items: [['Communications', ['admin', 'advocate', 'assistant']]] },
-  { title: 'Administration', items: [['Users', ['admin']], ['HR', ['admin']], ['Firm Settings', ['admin']], ['Audit Log', ['admin']], ['Structured Audit', ['admin']]] },
-  { title: 'Account', items: [['Connected Accounts', ['admin', 'advocate', 'assistant']]] },
+  { title: 'Work', items: [['Dashboard', ['admin', 'advocate', 'assistant']], ['Matters', ['admin', 'advocate', 'assistant']], ['Tasks', ['admin', 'advocate', 'assistant']], ['Deadlines', ['admin', 'advocate', 'assistant']], ['Communications', ['admin', 'advocate', 'assistant']]] },
+  { title: 'People', items: [['Clients', ['admin', 'advocate', 'assistant']], ['Invitations', ['admin']], ['My Leave', ['advocate', 'assistant']]] },
+  { title: 'Money', items: [['Invoices', ['admin']], ['Reports', ['admin']]] },
+  { title: 'Tools', items: [['Document Studio', ['admin', 'advocate']], ['Connected Accounts', ['admin', 'advocate', 'assistant']]] },
+  { title: 'Admin', items: [['Users', ['admin']], ['HR', ['admin']], ['Firm Settings', ['admin']], ['Audit Log', ['admin']], ['Structured Audit', ['admin']], ['Performance', ['admin']]] },
   { title: 'Resources', items: [
     ['eFiling CTS', ['admin', 'advocate', 'assistant'], 'https://efiling.court.go.ke/auth'],
     ['eCitizen', ['admin', 'advocate', 'assistant'], 'https://www.ecitizen.go.ke'],
@@ -116,50 +112,28 @@ function StaffNavigation({ visibleGroups, openNavGroups, setOpenNavGroups, view,
   return (
     <nav style={styles.navList}>
       {visibleGroups.map(group => {
-        const isFlattened = (group.title === 'Matters' || group.title === 'Communications') && group.items.length === 1;
         return (
           <div key={group.title} style={styles.navGroup}>
-            {!isFlattened && (
-              <button
-                type="button"
-                className="lf-nav-group"
-                onClick={() => {
-                  setOpenNavGroups(prev => {
-                    const next = new Set(prev);
-                    if (next.has(group.title)) { next.delete(group.title); }
-                    else { next.add(group.title); }
-                    try { localStorage.setItem(OPEN_NAV_GROUPS_STORAGE_KEY, JSON.stringify([...next])); } catch {}
-                    return next;
-                  });
-                }}
-                style={styles.navGroupButton}
-                aria-expanded={openNavGroups.has(group.title)}
-              >
-                <span>{group.title}</span>
-                <span style={styles.navGroupChevron}>{openNavGroups.has(group.title) ? 'v' : '>'}</span>
-              </button>
-            )}
-            {(isFlattened || openNavGroups.has(group.title)) && (
-              <div style={styles.navGroupItems}>
-                {group.items.map(([label, , url]) => {
-                  const NavIcon = navIcons[label];
-                  if (url) {
-                    return (
-                      <a key={label} className="lf-nav lf-resource-link" style={{ ...styles.navItem, textDecoration: 'none' }} href={url} target="_blank" rel="noopener noreferrer" onClick={onNavigate}>
-                        <span style={styles.navNumber}>{NavIcon ? <NavIcon size={16} /> : null}</span>
-                        <span>{label}</span>
-                      </a>
-                    );
-                  }
+            <div className="lf-nav-group" style={styles.navGroupButton}>{group.title}</div>
+            <div style={styles.navGroupItems}>
+              {group.items.map(([label, , url]) => {
+                const NavIcon = navIcons[label];
+                if (url) {
                   return (
-                    <button key={label} type="button" className={`lf-nav${view === label ? ' is-active' : ''}`} onClick={() => { setView(label); onNavigate?.(); }} style={{ ...styles.navItem, ...(view === label ? styles.navActive : {}) }}>
+                    <a key={label} className="lf-nav lf-resource-link" style={{ ...styles.navItem, textDecoration: 'none' }} href={url} target="_blank" rel="noopener noreferrer" onClick={onNavigate}>
                       <span style={styles.navNumber}>{NavIcon ? <NavIcon size={16} /> : null}</span>
-                      <span>{navDisplayLabels[label] || label}</span>
-                    </button>
+                      <span>{label}</span>
+                    </a>
                   );
-                })}
-              </div>
-            )}
+                }
+                return (
+                  <button key={label} type="button" className={`lf-nav${view === label ? ' is-active' : ''}`} onClick={() => { setView(label); onNavigate?.(); }} style={{ ...styles.navItem, ...(view === label ? styles.navActive : {}) }}>
+                    <span style={styles.navNumber}>{NavIcon ? <NavIcon size={16} /> : null}</span>
+                    <span>{navDisplayLabels[label] || label}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         );
       })}
@@ -176,6 +150,7 @@ export default function App() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const searchRef = useRef(null);
+  const searchInputRef = useRef(null);
   const accountMenuRef = useRef(null);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [openNavGroups, setOpenNavGroups] = useState(() => {
@@ -366,6 +341,19 @@ export default function App() {
     }, 300);
     return () => clearTimeout(timer);
   }, [search]);
+
+  useEffect(() => {
+    if (!authenticated || user?.role === 'client') return undefined;
+    function handleSearchShortcut(event) {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'k') return;
+      event.preventDefault();
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+      setSearchOpen(Boolean(search.trim()));
+    }
+    window.addEventListener('keydown', handleSearchShortcut);
+    return () => window.removeEventListener('keydown', handleSearchShortcut);
+  }, [authenticated, user?.role, search]);
 
   useEffect(() => {
     if (!searchOpen) return;
@@ -581,7 +569,7 @@ export default function App() {
                   <div style={styles.brandSub}>Practice suite</div>
                 </div>
               </div>
-              <button type="button" aria-label="Close navigation menu" title="Close navigation menu" onClick={() => setMobileMenuOpen(false)} style={styles.mobileCloseButton}>x</button>
+              <button type="button" aria-label="Close navigation menu" title="Close navigation menu" onClick={() => setMobileMenuOpen(false)} style={styles.mobileCloseButton}><IconX size={18} stroke={1.8} aria-hidden="true" /></button>
             </div>
             <StaffNavigation visibleGroups={visibleGroups} openNavGroups={openNavGroups} setOpenNavGroups={setOpenNavGroups} view={view} setView={setView} onNavigate={() => setMobileMenuOpen(false)} />
             <div style={styles.userCard}>
@@ -605,7 +593,7 @@ export default function App() {
           <button type="button" className="lf-mobile-only" aria-label="Open navigation menu" title="Open navigation menu" onClick={() => setMobileMenuOpen(true)} style={styles.mobileMenuButton}>Menu</button>
           <div ref={searchRef} className="lf-topbar-search lf-mobile-search" style={styles.topbarSearch}>
             <IconSearch size={15} stroke={1.75} style={styles.topbarSearchIcon} aria-hidden="true" />
-            <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search matters, clients, documents..." aria-label="Search workspace" style={styles.topbarSearchInput} />
+            <input ref={searchInputRef} value={search} onChange={event => setSearch(event.target.value)} placeholder="Search matters, clients, documents..." aria-label="Search workspace" style={styles.topbarSearchInput} />
             <span className="lf-topbar-search-kbd" style={styles.topbarKbd} aria-hidden="true">Ctrl K</span>
             {searchOpen && (
               <div style={{ position: 'absolute', right: 0, left: 0, top: 'calc(100% + 6px)', maxWidth: '100%', zIndex: 2200, background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, boxShadow: theme.shadowLift, padding: 0, maxHeight: 400, overflowY: 'auto', animation: 'lfDropIn .16s ease-out' }}>

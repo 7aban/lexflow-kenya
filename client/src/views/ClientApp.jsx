@@ -420,7 +420,7 @@ function ClientDashboard({ data, stats, user, avatarUrl, selectMatter, onNavigat
   return (
     <div style={styles.pageStack}>
       <section style={{ ...styles.heroCard, background: 'linear-gradient(135deg, #112219, #1A3628)' }}>
-        <div><div style={styles.heroKicker}>Client workspace</div><h2>Your matters at a glance.</h2><p>Track active files, court appearances, invoices and documents shared by the firm.</p></div>
+        <div><div style={styles.heroKicker}>Client workspace</div><h2 style={{ color: '#fff', margin: '0 0 6px' }}>Your matters at a glance.</h2><p style={{ color: 'rgba(255,255,255,.82)' }}>Track active files, court appearances, invoices and documents shared by the firm.</p></div>
         <div style={{ ...styles.heroFigure, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, minWidth: 0 }}>
           <AvatarCircle src={avatarUrl} name={identityName} size={46} />
           <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{identityName}</span>
