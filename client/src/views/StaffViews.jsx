@@ -2154,19 +2154,21 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
     setSelectedId(focus.matterId);
     setCockpitSection('overview');
   }, [focus?.matterId, focus?.ts]);
-  // LOCAL-PILOT-FIX-14: the Timekeeper bubble sends focus.section='tasks'. Once the
-  // open matter's detail is ready this jumps straight to its time-logging form
-  // (handled once per click via the ts ref); with no matters at all, explain why.
+  // LOCAL-PILOT-FIX-14 / FIX-21: external entry points can focus a matter
+  // cockpit section. Timekeeper still scrolls to the time form inside Tasks.
   useEffect(() => {
     if (!focus?.section || focus?.matterId) return;
     if (timekeeperFocusHandled.current === focus.ts) return;
     if (detail) {
       timekeeperFocusHandled.current = focus.ts;
       setCockpitSection(focus.section);
-      setTimeout(() => { document.getElementById('matter-section-time')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 120);
+      setTimeout(() => {
+        const targetId = focus.section === 'tasks' ? 'matter-section-time' : `matter-section-${focus.section}`;
+        document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 120);
     } else if (!(data.matters || []).length) {
       timekeeperFocusHandled.current = focus.ts;
-      notify?.({ type: 'info', message: 'Create or open a matter to log time or start a task timer.' });
+      notify?.({ type: 'info', message: focus.section === 'documents' ? 'Create or open a matter to work with documents.' : 'Create or open a matter to log time or start a task timer.' });
     }
   }, [focus?.section, focus?.ts, detail?.id]);
 

@@ -58,7 +58,7 @@ function SignatureAssetPreview({ asset }) {
 // compatibility. Flip to true to restore the card below.
 const CHECKLISTS_UI_ENABLED = false;
 
-export default function DocumentStudio({ notify, onNavigate }) {
+export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocuments }) {
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -256,6 +256,9 @@ export default function DocumentStudio({ notify, onNavigate }) {
   const bundlePanelRef = useRef(null);
   const stampPanelRef = useRef(null);
   const tenthPanelRef = useRef(null);
+  const signatureSectionRef = useRef(null);
+  const templatesSectionRef = useRef(null);
+  const toolsSectionRef = useRef(null);
 
   useEffect(() => {
     load();
@@ -577,6 +580,24 @@ export default function DocumentStudio({ notify, onNavigate }) {
     setPreviewResult(null);
     setPreviewError(null);
     setSelectedMatterId('');
+  }
+
+  function scrollToRef(ref) {
+    setTimeout(() => ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+  }
+
+  function openTools(toolId) {
+    setToolsOpen(true);
+    if (toolId) setSelectedTool(toolId);
+    scrollToRef(toolsSectionRef);
+  }
+
+  function openMatterDocuments() {
+    if (onOpenMatterDocuments) {
+      onOpenMatterDocuments();
+    } else {
+      onNavigate?.('Matters');
+    }
   }
 
   async function runPreview() {
@@ -1538,6 +1559,37 @@ export default function DocumentStudio({ notify, onNavigate }) {
 
   return (
     <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
+      <Card title="What do you want to do?" hint="Choose the existing workspace for the document task.">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
+          <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: '14px 16px', display: 'grid', gap: 10, alignContent: 'start', minWidth: 0 }}>
+            <strong style={{ fontSize: 14, color: theme.ink }}>Work on matter documents</strong>
+            <span style={{ fontSize: 13, color: theme.muted, lineHeight: 1.5 }}>Upload, organise, request, and manage documents inside a matter.</span>
+            <button type="button" style={{ ...styles.ghostButton, justifySelf: 'start', fontSize: 12, padding: '5px 12px' }} onClick={openMatterDocuments}>Open matter documents</button>
+          </div>
+          <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: '14px 16px', display: 'grid', gap: 10, alignContent: 'start', minWidth: 0 }}>
+            <strong style={{ fontSize: 14, color: theme.ink }}>Create a court bundle</strong>
+            <span style={{ fontSize: 13, color: theme.muted, lineHeight: 1.5 }}>Build indexed, paginated court bundles from matter PDFs.</span>
+            <button type="button" style={{ ...styles.ghostButton, justifySelf: 'start', fontSize: 12, padding: '5px 12px' }} onClick={() => openTools('bundle')}>Open court bundle tool</button>
+          </div>
+          <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: '14px 16px', display: 'grid', gap: 10, alignContent: 'start', minWidth: 0 }}>
+            <strong style={{ fontSize: 14, color: theme.ink }}>PDF tools</strong>
+            <span style={{ fontSize: 13, color: theme.muted, lineHeight: 1.5 }}>Merge, split, rotate, extract, delete pages, paginate, and convert images to PDF.</span>
+            <button type="button" style={{ ...styles.ghostButton, justifySelf: 'start', fontSize: 12, padding: '5px 12px' }} onClick={() => openTools('merge')}>Open PDF tools</button>
+          </div>
+          <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: '14px 16px', display: 'grid', gap: 10, alignContent: 'start', minWidth: 0 }}>
+            <strong style={{ fontSize: 14, color: theme.ink }}>Signatures and stamps</strong>
+            <span style={{ fontSize: 13, color: theme.muted, lineHeight: 1.5 }}>Upload reusable signature or stamp images, then place them on matter PDFs.</span>
+            <button type="button" style={{ ...styles.ghostButton, justifySelf: 'start', fontSize: 12, padding: '5px 12px' }} onClick={() => scrollToRef(signatureSectionRef)}>Manage assets</button>
+          </div>
+          <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: '14px 16px', display: 'grid', gap: 10, alignContent: 'start', minWidth: 0 }}>
+            <strong style={{ fontSize: 14, color: theme.ink }}>Templates</strong>
+            <span style={{ fontSize: 13, color: theme.muted, lineHeight: 1.5 }}>Use existing document templates and preview them against a selected matter.</span>
+            <button type="button" style={{ ...styles.ghostButton, justifySelf: 'start', fontSize: 12, padding: '5px 12px' }} onClick={() => scrollToRef(templatesSectionRef)}>Open templates</button>
+          </div>
+        </div>
+      </Card>
+
+      <div ref={signatureSectionRef} style={{ minWidth: 0 }}>
       <Card title="Signatures & stamps" hint="This stores an image for later placement on documents. It is not a certified electronic signature.">
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))', gap: 14, minWidth: 0 }}>
           <div style={signaturePanelStyle}>
@@ -1572,7 +1624,9 @@ export default function DocumentStudio({ notify, onNavigate }) {
         </div>
         {signatureAssetsError && <Alert tone="danger">{signatureAssetsError}</Alert>}
       </Card>
+      </div>
 
+      <div ref={templatesSectionRef} style={{ minWidth: 0 }}>
       <Card title="Active Templates" hint={hint}>
         {templates.length === 0 ? (
           <Empty title="No templates configured" text="Contact your administrator." />
@@ -1621,6 +1675,7 @@ export default function DocumentStudio({ notify, onNavigate }) {
           panelRef={panelRef}
         />
       </Card>
+      </div>
 
       {CHECKLISTS_UI_ENABLED && <Card title="Checklist Templates" hint="Operational workflow templates — not pleadings or generated documents">
         <div style={{ display: 'grid', gap: 10, minWidth: 0 }}>
@@ -1661,6 +1716,7 @@ export default function DocumentStudio({ notify, onNavigate }) {
         </div>
       </Card>}
 
+      <div ref={toolsSectionRef} style={{ minWidth: 0 }}>
       <Card title="Document Tools" hint="Prepare, combine, paginate, and format court-ready documents">
         <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
           <button
@@ -3054,6 +3110,7 @@ export default function DocumentStudio({ notify, onNavigate }) {
           )}
         </div>
       </Card>
+      </div>
     </div>
   );
 }

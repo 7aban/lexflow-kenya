@@ -439,6 +439,11 @@ export default function App() {
     clearAllLexFlowStorage();
   }
 
+  function openMatterDocumentsFromStudio() {
+    setView('Matters');
+    setMatterFocus({ section: 'documents', ts: Date.now() });
+  }
+
   if (window.location.pathname.startsWith('/invite/')) {
     return (
       <>
@@ -509,7 +514,7 @@ export default function App() {
     Invitations: 'Secure client portal onboarding links and invitation status.',
     'Audit Log': 'A secure activity trail for important changes and accountability.',
     'Structured Audit': 'Structured event trail for security, access, and operational auditing.',
-    'Document Studio': 'Review active document templates and future document tools.',
+    'Document Studio': 'Prepare, organise, stamp, sign, and bundle matter documents.',
   };
 
   return (
@@ -662,7 +667,7 @@ export default function App() {
             {(!loading || bootstrapped) && view === 'Invitations' && isAdmin && <Invitations clients={data.clients} notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Audit Log' && isAdmin && <AuditLog notify={setToast} navigate={setView} />}
             {(!loading || bootstrapped) && view === 'Structured Audit' && isAdmin && <StructuredAuditLog notify={setToast} />}
-            {(!loading || bootstrapped) && view === 'Document Studio' && canManage && <DocumentStudio notify={setToast} onNavigate={setView} />}
+            {(!loading || bootstrapped) && view === 'Document Studio' && canManage && <DocumentStudio notify={setToast} onNavigate={setView} onOpenMatterDocuments={openMatterDocumentsFromStudio} />}
           </ViewErrorBoundary>
         </div>
       </main>
