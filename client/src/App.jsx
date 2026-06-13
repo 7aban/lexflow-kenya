@@ -253,6 +253,34 @@ export default function App() {
   const isAdmin = user?.role === 'admin';
   const canManage = ['admin', 'advocate'].includes(user?.role);
   const firm = data.firmSettings || defaultFirmSettings;
+  const resolvedFirmTheme = firm?.theme && typeof firm.theme === 'object' ? firm.theme : {};
+  const themedFirm = {
+    ...firm,
+    primaryColor: resolvedFirmTheme.primaryColor || firm.primaryColor || theme.navy800,
+    accentColor: resolvedFirmTheme.accentColor || firm.accentColor || theme.gold,
+  };
+  const shellThemeVars = {
+    '--lf-primary': themedFirm.primaryColor,
+    '--lf-accent': themedFirm.accentColor,
+    '--lf-sidebar': resolvedFirmTheme.sidebarColor || themedFirm.primaryColor,
+    '--lf-sidebar-text': resolvedFirmTheme.sidebarTextColor || '#fff',
+    '--lf-header-bg': resolvedFirmTheme.headerColor || '#fff',
+    '--lf-header-text': resolvedFirmTheme.headerTextColor || theme.ink,
+    '--lf-button': resolvedFirmTheme.buttonColor || themedFirm.accentColor,
+    '--lf-button-text': resolvedFirmTheme.buttonTextColor || '#fff',
+    '--lf-background': resolvedFirmTheme.backgroundColor || '#F5F2EB',
+    '--lf-surface': resolvedFirmTheme.surfaceColor || '#fff',
+    '--lf-text': resolvedFirmTheme.textColor || theme.ink,
+    '--lf-text-muted': resolvedFirmTheme.textSecondaryColor || theme.muted,
+    '--lf-border': resolvedFirmTheme.borderColor || theme.line,
+    '--lf-link': resolvedFirmTheme.linkColor || themedFirm.accentColor,
+    '--lf-card': resolvedFirmTheme.cardColor || '#fff',
+    '--lf-card-border': resolvedFirmTheme.cardBorderColor || theme.line,
+    '--lf-success': resolvedFirmTheme.successColor || theme.green,
+    '--lf-warning': resolvedFirmTheme.warningColor || theme.amber,
+    '--lf-danger': resolvedFirmTheme.errorColor || theme.red,
+    '--lf-info': resolvedFirmTheme.infoColor || theme.blue,
+  };
   const role = user?.role || 'assistant';
   const visibleGroups = allowedNavGroups(role);
   const visibleViews = visibleGroups.flatMap(group => group.items.map(([label]) => label));
@@ -564,14 +592,14 @@ export default function App() {
   if (window.location.pathname.startsWith('/invite/')) {
     return (
       <>
-        <AcceptInvitation firm={firm} onAccepted={acceptInvitationLogin} />
+        <AcceptInvitation firm={themedFirm} onAccepted={acceptInvitationLogin} />
         <Toast toast={toast} onClose={() => setToast(null)} />
       </>
     );
   }
 
   if (window.location.pathname === '/oauth/callback') {
-    return <OAuthCallback firm={firm} onLogin={login} />;
+    return <OAuthCallback firm={themedFirm} onLogin={login} />;
   }
 
   async function openNotification(notification) {
@@ -592,7 +620,7 @@ export default function App() {
   if (!authenticated) {
     return (
       <>
-        <LoginPage firm={firm} onLogin={login} deferredPrompt={deferredPrompt} isInstalled={isInstalled} installDismissed={installDismissed} setInstallDismissed={setInstallDismissed} onInstall={handleInstall} />
+        <LoginPage firm={themedFirm} onLogin={login} deferredPrompt={deferredPrompt} isInstalled={isInstalled} installDismissed={installDismissed} setInstallDismissed={setInstallDismissed} onInstall={handleInstall} />
         <Toast toast={toast} onClose={() => setToast(null)} />
       </>
     );
@@ -606,7 +634,7 @@ export default function App() {
         message="We could not load your portal just now. Please refresh the page and try again."
         reloadLabel="Refresh portal"
       >
-        <ClientApp user={user} firm={firm} logout={logout} notify={setToast} toast={toast} setToast={setToast} />
+        <ClientApp user={user} firm={themedFirm} logout={logout} notify={setToast} toast={toast} setToast={setToast} />
       </ViewErrorBoundary>
     );
   }
@@ -632,13 +660,13 @@ export default function App() {
   };
 
   return (
-    <div className="lf-app-shell" style={{ ...styles.shell, '--lf-primary': firm.primaryColor || theme.navy800, '--lf-accent': firm.accentColor || theme.gold, '--lf-sidebar': firm.primaryColor || theme.navy800, '--lf-sidebar-text': '#fff', '--lf-header-bg': '#fff', '--lf-button': firm.accentColor || theme.gold, '--lf-button-text': '#fff', '--lf-background': '#F5F2EB' }}>
+    <div className="lf-app-shell" style={{ ...styles.shell, ...shellThemeVars }}>
       <StyleTag />
       <aside className="lf-desktop-sidebar" style={styles.sidebar}>
         <div style={styles.brandPanel}>
-          <Logo firm={firm} />
+          <Logo firm={themedFirm} />
           <div style={{ minWidth: 0 }}>
-            <div style={styles.brand}>{firm.name || 'LexFlow Kenya'}</div>
+            <div style={styles.brand}>{themedFirm.name || 'LexFlow Kenya'}</div>
             <div style={styles.brandSub}>Practice suite</div>
           </div>
         </div>
@@ -683,9 +711,9 @@ export default function App() {
           <aside aria-label="Mobile navigation" style={styles.mobileDrawer}>
             <div style={styles.mobileDrawerHead}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                <Logo firm={firm} />
+                <Logo firm={themedFirm} />
                 <div style={{ minWidth: 0 }}>
-                  <div style={styles.brand}>{firm.name || 'LexFlow Kenya'}</div>
+                  <div style={styles.brand}>{themedFirm.name || 'LexFlow Kenya'}</div>
                   <div style={styles.brandSub}>Practice suite</div>
                 </div>
               </div>
@@ -757,7 +785,7 @@ export default function App() {
 
         <div className="lf-page-inner" style={styles.pageInner}>
           <div className="lf-page-header" style={styles.pageHeader}>
-            <div className="lf-page-crumb" style={styles.pageCrumb}>{firm.name || 'LexFlow Kenya'}</div>
+            <div className="lf-page-crumb" style={styles.pageCrumb}>{themedFirm.name || 'LexFlow Kenya'}</div>
             <h1 className="lf-page-title" style={styles.pageTitle}>{navDisplayLabels[view] || view}</h1>
             <p className="lf-page-sub" style={styles.pageSub}>{subtitles[view]}</p>
           </div>
@@ -773,7 +801,7 @@ export default function App() {
             {(!loading || bootstrapped) && view === 'Invoices' && <Invoices invoices={data.invoices} isAdmin={isAdmin} canManage={canManage} reload={refresh} notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Performance' && isAdmin && <AdvocatePerformance notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Reports' && isAdmin && <Reports data={data} notify={setToast} />}
-            {(!loading || bootstrapped) && view === 'Firm Settings' && isAdmin && <FirmSettings settings={firm} clients={data.clients} reload={refresh} notify={setToast} />}
+            {(!loading || bootstrapped) && view === 'Firm Settings' && isAdmin && <FirmSettings settings={themedFirm} clients={data.clients} reload={refresh} notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Connected Accounts' && <ConnectedAccounts notify={setToast} onPasswordChanged={logout} />}
             {(!loading || bootstrapped) && view === 'Users' && isAdmin && <Users clients={data.clients} notify={setToast} />}
             {(!loading || bootstrapped) && view === 'My Leave' && <MyLeave notify={setToast} />}

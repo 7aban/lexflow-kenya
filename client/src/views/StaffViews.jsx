@@ -45,6 +45,166 @@ function downloadCsv(filename, columns, rows) {
   URL.revokeObjectURL(url);
 }
 
+const BRAND_THEME_KEYS = [
+  'primaryColor',
+  'accentColor',
+  'backgroundColor',
+  'surfaceColor',
+  'textColor',
+  'textSecondaryColor',
+  'sidebarColor',
+  'sidebarTextColor',
+  'buttonColor',
+  'buttonTextColor',
+  'borderColor',
+  'linkColor',
+  'successColor',
+  'warningColor',
+  'errorColor',
+  'infoColor',
+  'headerColor',
+  'headerTextColor',
+  'footerColor',
+  'footerTextColor',
+  'cardColor',
+  'cardBorderColor',
+  'inputBorderColor',
+  'inputFocusBorderColor',
+  'navColor',
+  'navTextColor',
+  'navActiveColor',
+  'navActiveTextColor',
+  'badgePrimaryColor',
+  'badgePrimaryTextColor',
+  'fontFamily',
+  'headingFontFamily',
+  'fontSizeBase',
+  'fontWeightBase',
+  'borderRadius',
+  'spacingUnit',
+  'logo',
+  'logoDark',
+  'logoLight',
+  'favicon',
+  'source',
+];
+
+const LEXFLOW_DEFAULT_THEME = {
+  primaryColor: '#0F1B33',
+  accentColor: '#D4A34A',
+  sidebarColor: '#0F1B33',
+  sidebarTextColor: '#E5E7EB',
+  buttonColor: '#D4A34A',
+  buttonTextColor: '#FFFFFF',
+  backgroundColor: '#F5F7FA',
+  surfaceColor: '#FFFFFF',
+  textColor: '#101827',
+  textSecondaryColor: '#697386',
+  borderColor: '#E5E7EB',
+  linkColor: '#D4A34A',
+  cardColor: '#FFFFFF',
+  cardBorderColor: '#E5E7EB',
+  headerColor: '#0F1B33',
+  headerTextColor: '#FFFFFF',
+  successColor: '#047857',
+  warningColor: '#B45309',
+  errorColor: '#B91C1C',
+  infoColor: '#1D4ED8',
+  source: 'default',
+};
+
+const PRESET_LABELS = {
+  'lexflow-default': 'LexFlow Default',
+  'emerald-gold': 'Emerald Gold',
+  'midnight-slate': 'Midnight Slate',
+};
+
+function presetLabel(id) {
+  return PRESET_LABELS[id] || String(id || 'Custom').replace(/[-_]+/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function firmInitials(name) {
+  return (name || 'LF').split(/\s+/).filter(Boolean).slice(0, 2).map(word => word[0]).join('').toUpperCase() || 'LF';
+}
+
+function normalizeHexForCompare(value) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function hexToPreviewRgb(value) {
+  if (typeof value !== 'string') return null;
+  let hex = value.trim();
+  if (/^#([0-9A-Fa-f]{3})$/.test(hex)) {
+    hex = `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`;
+  }
+  if (!/^#[0-9A-Fa-f]{6}$/.test(hex)) return null;
+  const int = parseInt(hex.slice(1), 16);
+  return { r: (int >> 16) & 255, g: (int >> 8) & 255, b: int & 255 };
+}
+
+function previewLuminance(hex) {
+  const rgb = hexToPreviewRgb(hex);
+  if (!rgb) return 1;
+  const convert = value => {
+    const s = value / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * convert(rgb.r) + 0.7152 * convert(rgb.g) + 0.0722 * convert(rgb.b);
+}
+
+function previewContrastRatio(foreground, background) {
+  if (!hexToPreviewRgb(foreground) || !hexToPreviewRgb(background)) return 0;
+  const fg = previewLuminance(foreground);
+  const bg = previewLuminance(background);
+  const lighter = Math.max(fg, bg);
+  const darker = Math.min(fg, bg);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function readablePreviewText(background) {
+  return previewContrastRatio('#FFFFFF', background) >= previewContrastRatio('#101827', background) ? '#FFFFFF' : '#101827';
+}
+
+function safePreviewText(background, preferred) {
+  if (preferred && previewContrastRatio(preferred, background) >= 3) return preferred;
+  return readablePreviewText(background);
+}
+
+function completeBrandTheme(draft = {}, firm = {}) {
+  const primaryColor = draft.primaryColor || firm.primaryColor || LEXFLOW_DEFAULT_THEME.primaryColor;
+  const accentColor = draft.accentColor || firm.accentColor || LEXFLOW_DEFAULT_THEME.accentColor;
+  const filled = {
+    ...LEXFLOW_DEFAULT_THEME,
+    ...draft,
+    primaryColor,
+    accentColor,
+    sidebarColor: draft.sidebarColor || primaryColor,
+    buttonColor: draft.buttonColor || accentColor,
+    linkColor: draft.linkColor || accentColor,
+    headerColor: draft.headerColor || primaryColor,
+  };
+  filled.sidebarTextColor = safePreviewText(filled.sidebarColor, draft.sidebarTextColor || filled.sidebarTextColor);
+  filled.buttonTextColor = safePreviewText(filled.buttonColor, draft.buttonTextColor || filled.buttonTextColor);
+  filled.headerTextColor = safePreviewText(filled.headerColor, draft.headerTextColor || filled.headerTextColor);
+  return filled;
+}
+
+function sanitizedThemePayload(draft = {}) {
+  const payload = {};
+  BRAND_THEME_KEYS.forEach(key => {
+    if (draft[key] !== undefined && draft[key] !== null && draft[key] !== '') payload[key] = draft[key];
+  });
+  if (!payload.source) payload.source = 'manual';
+  return payload;
+}
+
+function presetMatchesTheme(preset, draft = {}) {
+  if (!preset || !draft) return false;
+  return ['primaryColor', 'accentColor', 'sidebarColor', 'buttonColor', 'backgroundColor', 'surfaceColor']
+    .filter(key => preset[key])
+    .every(key => normalizeHexForCompare(preset[key]) === normalizeHexForCompare(draft[key]));
+}
+
 // PRODUCT-15I: staff payment-proof queue endpoint (optional status filter; 'All' omits it).
 const paymentProofsPath = status => `/payment-proofs${status && status !== 'All' ? `?status=${encodeURIComponent(status)}` : ''}`;
 
@@ -3802,6 +3962,90 @@ function DownloadButton({ label, path, filename, notify, ariaLabel }) {
   );
 }
 
+function BrandProfilePreview({ draftTheme, firmName, logo }) {
+  const primary = draftTheme.primaryColor;
+  const accent = draftTheme.accentColor;
+  const sidebar = draftTheme.sidebarColor || primary;
+  const sidebarText = safePreviewText(sidebar, draftTheme.sidebarTextColor);
+  const header = draftTheme.headerColor || primary;
+  const headerText = safePreviewText(header, draftTheme.headerTextColor);
+  const button = draftTheme.buttonColor || accent;
+  const buttonText = safePreviewText(button, draftTheme.buttonTextColor);
+  const accentText = safePreviewText(accent, draftTheme.buttonTextColor);
+  const background = draftTheme.backgroundColor || '#F5F7FA';
+  const surface = draftTheme.surfaceColor || '#FFFFFF';
+  const card = draftTheme.cardColor || surface;
+  const border = draftTheme.borderColor || draftTheme.cardBorderColor || theme.line;
+  const text = draftTheme.textColor || theme.ink;
+  const muted = draftTheme.textSecondaryColor || theme.muted;
+  const initials = firmInitials(firmName);
+
+  return (
+    <aside className="lf-brand-preview-panel" style={{ position: 'sticky', top: 74, alignSelf: 'start', minWidth: 0 }}>
+      <div style={{ border: `1px solid ${border}`, borderRadius: 8, overflow: 'hidden', background, boxShadow: '0 14px 34px rgba(15,27,51,.10)' }}>
+        <div className="lf-brand-preview-shell" style={{ display: 'grid', gridTemplateColumns: '112px minmax(0,1fr)', minHeight: 440 }}>
+          <div style={{ background: sidebar, color: sidebarText, padding: 14, display: 'grid', alignContent: 'start', gap: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+              <div style={{ width: 32, height: 32, borderRadius: 8, background: accent, color: accentText, display: 'grid', placeItems: 'center', fontWeight: 900, overflow: 'hidden', flexShrink: 0 }}>
+                {logo ? <img src={logo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : initials}
+              </div>
+              <div style={{ width: 42, height: 7, borderRadius: 999, background: 'currentColor', opacity: .75 }} />
+            </div>
+            <div style={{ display: 'grid', gap: 7 }}>
+              {['Matter dashboard', 'Client portal', 'Invoice summary'].map((label, index) => (
+                <div key={label} style={{ display: 'grid', gap: 4, padding: '7px 8px', borderRadius: 6, background: index === 0 ? 'rgba(255,255,255,.14)' : 'transparent', border: index === 0 ? '1px solid rgba(255,255,255,.16)' : '1px solid transparent' }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 800, lineHeight: 1.15, overflowWrap: 'anywhere' }}>{label}</span>
+                  <span style={{ width: index === 1 ? '70%' : '48%', height: 4, borderRadius: 99, background: 'currentColor', opacity: .28 }} />
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{ minWidth: 0, background, color: text, display: 'grid', gridTemplateRows: 'auto 1fr' }}>
+            <div style={{ minHeight: 54, background: header, color: headerText, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 14px', borderBottom: `1px solid ${border}` }}>
+              <strong style={{ fontSize: 13, overflowWrap: 'anywhere' }}>Matter dashboard</strong>
+              <span style={{ width: 58, height: 8, borderRadius: 99, background: accent, display: 'inline-block' }} />
+            </div>
+            <div style={{ padding: 14, display: 'grid', gap: 12 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                <span style={{ border: 0, borderRadius: 6, padding: '7px 12px', background: button, color: buttonText, fontWeight: 800, fontSize: 12 }}>Primary action</span>
+                <span style={{ border: `1px solid ${accent}`, borderRadius: 6, padding: '7px 12px', background: surface, color: safePreviewText(surface, primary), fontWeight: 800, fontSize: 12 }}>Invoice summary</span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 12, alignItems: 'start', padding: 12, border: `1px solid ${border}`, borderRadius: 8, background: card, color: text }}>
+                <div style={{ minWidth: 0, display: 'grid', gap: 7 }}>
+                  <strong style={{ fontSize: 13 }}>Upcoming court date</strong>
+                  <span style={{ width: '82%', height: 7, borderRadius: 99, background: muted, opacity: .35 }} />
+                  <span style={{ width: '58%', height: 7, borderRadius: 99, background: muted, opacity: .25 }} />
+                </div>
+                <span style={{ width: 42, height: 42, borderRadius: 8, background: accent, opacity: .22, border: `1px solid ${accent}` }} />
+              </div>
+              <div style={{ border: `1px solid ${border}`, borderRadius: 8, overflow: 'hidden', background: card }}>
+                {['Matter dashboard', 'Upcoming court date', 'Invoice summary'].map((label, index) => (
+                  <div key={`${label}-${index}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 64px', gap: 10, alignItems: 'center', padding: '9px 11px', borderTop: index ? `1px solid ${border}` : 0 }}>
+                    <span style={{ color: index === 0 ? text : muted, fontWeight: index === 0 ? 800 : 600, fontSize: 12, overflowWrap: 'anywhere' }}>{label}</span>
+                    <span style={{ height: 7, borderRadius: 99, background: index === 2 ? accent : primary, opacity: index === 0 ? .75 : .32 }} />
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 10 }}>
+                <div style={{ padding: 12, borderRadius: 8, border: `1px solid ${border}`, background: surface, color: text, display: 'grid', gap: 8 }}>
+                  <strong style={{ fontSize: 12 }}>Client portal</strong>
+                  <span style={{ width: '76%', height: 7, borderRadius: 99, background: muted, opacity: .32 }} />
+                  <span style={{ justifySelf: 'start', borderRadius: 6, padding: '6px 10px', background: button, color: buttonText, fontSize: 11, fontWeight: 800 }}>Primary action</span>
+                </div>
+                <div style={{ padding: 12, borderRadius: 8, border: `1px solid ${border}`, background: surface, color: text, display: 'grid', gap: 8 }}>
+                  <strong style={{ fontSize: 12 }}>Invoice summary</strong>
+                  <span style={{ width: '66%', height: 7, borderRadius: 99, background: accent, opacity: .42 }} />
+                  <span style={{ width: '44%', height: 7, borderRadius: 99, background: primary, opacity: .32 }} />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
 export function FirmSettings({ settings, clients = [], reload, notify }) {
   const emptyNoticeForm = { title: '', content: '', clientId: '', files: [] };
   const [form, setForm] = useState({ ...defaultFirmSettings, ...settings });
@@ -3812,6 +4056,7 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
   const [presets, setPresets] = useState([]);
   const [themeLoading, setThemeLoading] = useState(false);
   const [themePreview, setThemePreview] = useState(null);
+  const [previewPresetId, setPreviewPresetId] = useState('');
   const [themeError, setThemeError] = useState('');
   const [settingsSection, setSettingsSection] = useState('identity');
 
@@ -3859,7 +4104,14 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
     try {
       const data = await getFirmTheme();
       setFirmTheme(data?.theme || null);
-      if (data?.theme) applyFirmTheme(data.theme);
+      if (data?.theme) {
+        applyFirmTheme(data.theme);
+        setForm(current => ({
+          ...current,
+          primaryColor: data.theme.primaryColor || current.primaryColor,
+          accentColor: data.theme.accentColor || current.accentColor,
+        }));
+      }
     } catch (err) { setThemeError(err.message); }
   }
 
@@ -3869,14 +4121,34 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
   }
 
   async function handlePreview(presetId) {
+    if (!presetId) {
+      const savedTheme = completeBrandTheme(firmTheme || settings.theme || {}, form);
+      setThemePreview(savedTheme);
+      setPreviewPresetId('');
+      setThemeError('');
+      setForm(current => ({
+        ...current,
+        primaryColor: savedTheme.primaryColor || current.primaryColor,
+        accentColor: savedTheme.accentColor || current.accentColor,
+      }));
+      applyFirmTheme(savedTheme);
+      return;
+    }
     const sourceTheme = presetId ? presets.find(p => p.id === presetId) : firmTheme;
     if (!sourceTheme) return;
     setThemeLoading(true);
     setThemeError('');
     try {
-      const data = await previewFirmTheme({ ...sourceTheme, source: presetId ? 'preset' : sourceTheme.source });
+      const payload = sanitizedThemePayload({ ...sourceTheme, source: presetId ? 'preset' : sourceTheme.source });
+      const data = await previewFirmTheme(payload);
       if (data?.theme) {
         setThemePreview(data.theme);
+        setPreviewPresetId(presetId || '');
+        setForm(current => ({
+          ...current,
+          primaryColor: data.theme.primaryColor || current.primaryColor,
+          accentColor: data.theme.accentColor || current.accentColor,
+        }));
         applyFirmTheme(data.theme);
       }
       if (data?.warnings?.length) setThemeError(`Preview warnings: ${data.warnings.join(', ')}`);
@@ -3884,36 +4156,70 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
     finally { setThemeLoading(false); }
   }
 
-  async function handleSave() {
-    if (!themePreview && !firmTheme) return;
+  function updateThemeDraft(nextValues) {
+    setThemeError('');
+    setPreviewPresetId('');
+    if (nextValues.primaryColor || nextValues.accentColor) {
+      setForm(formCurrent => ({
+        ...formCurrent,
+        ...(nextValues.primaryColor ? { primaryColor: nextValues.primaryColor } : {}),
+        ...(nextValues.accentColor ? { accentColor: nextValues.accentColor } : {}),
+      }));
+    }
+    setThemePreview(current => {
+      const base = current || firmTheme || settings.theme || {};
+      const next = { ...base, ...nextValues, source: 'manual' };
+      return next;
+    });
+  }
+
+  function handleWorkspacePreview() {
+    applyFirmTheme(completeBrandTheme(themePreview || firmTheme || settings.theme || {}, form));
+    setThemeError('');
+  }
+
+  async function handleSaveBrandProfile(event) {
+    event?.preventDefault?.();
+    const draft = completeBrandTheme(themePreview || firmTheme || settings.theme || {}, form);
     setThemeLoading(true);
     setThemeError('');
     try {
-      const payload = themePreview || firmTheme;
+      const payload = sanitizedThemePayload({ ...(themePreview || {}), ...draft, source: (themePreview || firmTheme || settings.theme || {}).source || 'manual' });
       const data = await updateFirmTheme(payload);
+      const savedTheme = data?.theme || payload;
+      await api('/firm-settings', { method: 'PUT', body: { ...form, primaryColor: draft.primaryColor, accentColor: draft.accentColor } });
       if (data?.theme) {
-        setFirmTheme(data.theme);
-        setThemePreview(null);
-        applyFirmTheme(data.theme);
-        notify({ type: 'success', message: 'Theme saved.' });
+        setFirmTheme(savedTheme);
       }
+      setThemePreview(null);
+      setPreviewPresetId('');
+      setForm(current => ({ ...current, primaryColor: draft.primaryColor, accentColor: draft.accentColor }));
+      applyFirmTheme(completeBrandTheme(savedTheme, { ...form, primaryColor: draft.primaryColor, accentColor: draft.accentColor }));
+      await reload();
+      notify({ type: 'success', message: 'Brand profile saved.' });
     } catch (err) { setThemeError(err.message); }
     finally { setThemeLoading(false); }
   }
 
   async function handleReset() {
-    if (!window.confirm('Reset firm theme to default? This clears custom colors.')) return;
     setThemeLoading(true);
     setThemeError('');
     try {
       const data = await resetFirmTheme();
       setFirmTheme(null);
       setThemePreview(null);
+      setPreviewPresetId('');
       clearFirmTheme();
       if (data?.theme) {
         setFirmTheme(data.theme);
+        setForm(current => ({
+          ...current,
+          primaryColor: data.theme.primaryColor || defaultFirmSettings.primaryColor,
+          accentColor: data.theme.accentColor || defaultFirmSettings.accentColor,
+        }));
         applyFirmTheme(data.theme);
       }
+      await reload();
       notify({ type: 'success', message: data?.message || 'Theme reset to default.' });
     } catch (err) { setThemeError(err.message); }
     finally { setThemeLoading(false); }
@@ -3966,11 +4272,29 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
 
   const reminder = form.reminderSettings || {};
   const clientOptions = Array.isArray(clients) ? clients : [];
-  const effectiveTheme = themePreview || firmTheme || {};
+  const effectiveTheme = completeBrandTheme(themePreview || firmTheme || settings.theme || {}, form);
+  const savedThemeForPreset = completeBrandTheme(firmTheme || settings.theme || {}, settings);
+  const savedPresetId = presets.find(preset => presetMatchesTheme(preset, savedThemeForPreset))?.id || '';
+  const advancedThemeFields = [
+    ['backgroundColor', 'Background'],
+    ['surfaceColor', 'Surface'],
+    ['textColor', 'Text'],
+    ['textSecondaryColor', 'Muted text'],
+    ['borderColor', 'Border'],
+    ['sidebarColor', 'Sidebar'],
+    ['sidebarTextColor', 'Sidebar text'],
+    ['buttonColor', 'Button'],
+    ['buttonTextColor', 'Button text'],
+    ['headerColor', 'Header'],
+    ['headerTextColor', 'Header text'],
+    ['cardColor', 'Card'],
+    ['cardBorderColor', 'Card border'],
+    ['linkColor', 'Link'],
+  ];
   const settingsSections = [
-    { id: 'identity', label: 'Firm Identity', hint: 'Contact details, website, and logo shown across firm and client-facing surfaces.' },
+    { id: 'identity', label: 'Firm Identity', hint: 'Contact details and website shown across firm and client-facing surfaces.' },
     { id: 'billing', label: 'Billing & Payment', hint: 'Invoice defaults, payment guidance, tax identifiers, and billing visibility.' },
-    { id: 'branding', label: 'Branding & Theme', hint: 'Saved firm colors plus the live workspace theme preview controls.' },
+    { id: 'branding', label: 'Branding & Theme', hint: 'Logo, colours, presets, and the live workspace theme preview.' },
     { id: 'reminders', label: 'Reminders & Automation', hint: 'Firm-wide reminder channels and provider credentials.' },
     { id: 'modules', label: 'Practice Modules', hint: 'Enable optional practice modules for this firm.' },
   ];
@@ -4011,11 +4335,6 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
             <Field label="Email"><input style={styles.input} value={form.email || ''} onChange={e => setForm({ ...form, email: e.target.value })} /></Field>
             <Field label="Phone"><input style={styles.input} value={form.phone || ''} onChange={e => setForm({ ...form, phone: e.target.value })} /></Field>
             <Field label="Address"><input style={styles.input} value={form.address || ''} onChange={e => setForm({ ...form, address: e.target.value })} /></Field>
-            <Field label="Logo"><input type="file" accept="image/*" style={styles.input} onChange={chooseLogo} /></Field>
-            <div className="lf-logo-preview" style={styles.logoPreview}>
-              {form.logo ? <img src={form.logo} alt="Firm logo preview" /> : <span>LF</span>}
-              <button type="button" style={styles.tinyButton} onClick={() => setForm({ ...form, logo: '' })}>Clear logo</button>
-            </div>
             <button style={styles.primaryButton}>Save settings</button>
           </form>
         </Card>
@@ -4055,105 +4374,108 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
       )}
 
       {settingsSection === 'branding' && (
-        <>
-          <Card title="Firm Branding" hint="Saved firm colors used by firm identity and client-facing details">
-            <form onSubmit={submit} style={styles.formGrid}>
-              <Field label="Primary Color"><input type="color" style={styles.colorInput} value={form.primaryColor || '#0F1B33'} onChange={e => setForm({ ...form, primaryColor: e.target.value })} /></Field>
-              <Field label="Accent Color"><input type="color" style={styles.colorInput} value={form.accentColor || '#D4A34A'} onChange={e => setForm({ ...form, accentColor: e.target.value })} /></Field>
-              <button style={styles.primaryButton}>Save settings</button>
-            </form>
-          </Card>
-
-          <Card title="Firm Identity Preview" hint="Current firm identity for documents, invoices, and client-facing information">
-            {(() => {
-              const previewInitials = (settings.name || 'LF').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || 'LF';
-              return (
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
-                    <div style={{ width: 56, height: 56, borderRadius: 10, background: settings.primaryColor || '#0F1B33', display: 'grid', placeItems: 'center', color: '#fff', fontWeight: 900, fontSize: 18, overflow: 'hidden', flexShrink: 0 }}>
-                      {settings.logo ? <img src={settings.logo} alt="Firm logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span>{previewInitials}</span>}
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: theme.ink }}>{settings.name || <span style={styles.mutedText}>Not set</span>}</div>
-                    </div>
+        <Card title="Firm Brand Profile" hint="Set the logo, colours, and workspace style LexFlow uses across the staff and client portals.">
+          <form onSubmit={handleSaveBrandProfile} className="lf-brand-profile-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(320px,420px)', gap: 18, alignItems: 'start' }}>
+            <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
+              <div style={{ display: 'grid', gap: 10, padding: 14, border: `1px solid ${theme.line}`, borderRadius: 8, background: theme.wash }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <div style={{ width: 64, height: 64, borderRadius: 8, background: effectiveTheme.primaryColor, color: safePreviewText(effectiveTheme.primaryColor, '#FFFFFF'), display: 'grid', placeItems: 'center', fontSize: 20, fontWeight: 900, overflow: 'hidden', border: `1px solid ${theme.line}`, flexShrink: 0 }}>
+                    {form.logo ? <img src={form.logo} alt="Firm logo preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : firmInitials(form.name)}
                   </div>
-                  <div style={styles.formGrid}>
-                    <div style={styles.field}>
-                      <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: theme.muted }}>Email</label>
-                      <div>{settings.email || <span style={styles.mutedText}>Not set</span>}</div>
-                    </div>
-                    <div style={styles.field}>
-                      <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: theme.muted }}>Phone</label>
-                      <div>{settings.phone || <span style={styles.mutedText}>Not set</span>}</div>
-                    </div>
-                    <div style={styles.field}>
-                      <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: theme.muted }}>Address</label>
-                      <div>{settings.address || <span style={styles.mutedText}>Not set</span>}</div>
-                    </div>
-                    <div style={styles.field}>
-                      <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: theme.muted }}>Website</label>
-                      <div>{settings.websiteURL || <span style={styles.mutedText}>Not set</span>}</div>
-                    </div>
+                  <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+                    <Field label="Firm logo">
+                      <input type="file" accept="image/*" style={styles.input} onChange={chooseLogo} />
+                    </Field>
                   </div>
-                  <div style={{ display: 'flex', gap: 16, marginTop: 12, marginBottom: 12 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ width: 20, height: 20, borderRadius: 5, background: settings.primaryColor || '#0F1B33', flexShrink: 0, border: '1px solid rgba(0,0,0,.08)' }} />
-                      <span style={{ fontSize: 12, color: theme.ink, fontWeight: 600 }}>Primary</span>
-                      <span style={{ fontSize: 12, color: theme.muted }}>{settings.primaryColor || 'default'}</span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ width: 20, height: 20, borderRadius: 5, background: settings.accentColor || '#D4A34A', flexShrink: 0, border: '1px solid rgba(0,0,0,.08)' }} />
-                      <span style={{ fontSize: 12, color: theme.ink, fontWeight: 600 }}>Accent</span>
-                      <span style={{ fontSize: 12, color: theme.muted }}>{settings.accentColor || 'default'}</span>
-                    </div>
-                  </div>
-                  <div style={styles.formHelper}>This preview shows the identity currently available for LexFlow documents, invoices, receipts, and client-facing firm information. Later phases will apply branding more deeply to generated documents and letterheads.</div>
+                  {form.logo ? <button type="button" style={styles.tinyButton} onClick={() => setForm({ ...form, logo: '' })}>Clear logo</button> : null}
                 </div>
-              );
-            })()}
-          </Card>
+              </div>
 
-          <Card title="Workspace Theme" hint="Choose a preset or adjust colors, then save the workspace theme.">
-            <div style={{ ...styles.formGrid, marginBottom: 16 }}>
-              <div>
-                <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: theme.muted }}><span>Presets</span></label>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
-                  {presets.map(p => (
-                    <button key={p.id} type="button" onClick={() => handlePreview(p.id)} style={{ ...styles.ghostButton, borderColor: themePreview?.source === 'preset' && themePreview?.id === p.id ? theme.gold : undefined }} disabled={themeLoading}>
-                      {p.id === 'lexflow-default' ? 'LexFlow Default' : p.id === 'emerald-gold' ? 'Emerald Gold' : p.id === 'midnight-slate' ? 'Midnight Slate' : p.id}
-                    </button>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 12 }}>
+                <Field label="Primary colour">
+                  <input type="color" style={styles.colorInput} value={effectiveTheme.primaryColor} onChange={e => updateThemeDraft({ primaryColor: e.target.value, sidebarColor: e.target.value, headerColor: e.target.value })} />
+                  <span style={styles.formHelper}>{effectiveTheme.primaryColor}</span>
+                </Field>
+                <Field label="Accent colour">
+                  <input type="color" style={styles.colorInput} value={effectiveTheme.accentColor} onChange={e => updateThemeDraft({ accentColor: e.target.value, buttonColor: e.target.value, linkColor: e.target.value })} />
+                  <span style={styles.formHelper}>{effectiveTheme.accentColor}</span>
+                </Field>
+              </div>
+
+              <div style={{ display: 'grid', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'end', flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', color: theme.muted, letterSpacing: .8 }}>Presets</div>
+                    <div style={styles.formHelper}>Choose a starting profile, then save when it looks right.</div>
+                  </div>
+                  <button type="button" onClick={() => handlePreview(null)} style={styles.tinyButton} disabled={themeLoading || !firmTheme}>Preview saved theme</button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 10 }}>
+                  {presets.map(preset => {
+                    const isPreviewed = previewPresetId === preset.id;
+                    const isSelected = !previewPresetId && savedPresetId === preset.id;
+                    const stateLabel = isPreviewed ? 'Previewing' : isSelected ? 'Saved' : 'Available';
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => handlePreview(preset.id)}
+                        disabled={themeLoading}
+                        aria-pressed={isPreviewed || isSelected}
+                        style={{
+                          display: 'grid',
+                          gap: 9,
+                          textAlign: 'left',
+                          border: `1px solid ${isPreviewed || isSelected ? theme.gold : theme.line}`,
+                          borderRadius: 8,
+                          background: '#fff',
+                          padding: 12,
+                          cursor: 'pointer',
+                          boxShadow: isPreviewed ? '0 8px 20px rgba(212,163,74,.20)' : theme.shadow,
+                        }}
+                      >
+                        <span style={{ display: 'flex', gap: 6 }}>
+                          {[preset.primaryColor, preset.accentColor, preset.backgroundColor, preset.surfaceColor].filter(Boolean).map((color, index) => (
+                            <span key={`${preset.id}-${color}-${index}`} style={{ width: 24, height: 24, borderRadius: 6, background: color, border: '1px solid rgba(0,0,0,.10)' }} />
+                          ))}
+                        </span>
+                        <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                          <strong style={{ color: theme.ink, fontSize: 13 }}>{presetLabel(preset.id)}</strong>
+                          <span style={{ fontSize: 11, fontWeight: 800, color: isPreviewed || isSelected ? theme.goldDark : theme.muted }}>{stateLabel}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <details style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: '8px 12px', background: '#fff' }}>
+                <summary style={{ fontSize: 12, fontWeight: 800, color: theme.muted, cursor: 'pointer', padding: '4px 0', userSelect: 'none' }}>Advanced colours</summary>
+                <div style={{ ...styles.formGrid, marginTop: 12 }}>
+                  {advancedThemeFields.map(([key, label]) => (
+                    <Field key={key} label={label}>
+                      <input type="color" style={styles.colorInput} value={effectiveTheme[key] || LEXFLOW_DEFAULT_THEME[key] || '#FFFFFF'} onChange={e => updateThemeDraft({ [key]: e.target.value })} />
+                    </Field>
                   ))}
-                  <button type="button" onClick={() => handlePreview(null)} style={styles.ghostButton} disabled={themeLoading}>Custom (current)</button>
                 </div>
+              </details>
+
+              <div style={{ border: `1px dashed ${theme.line}`, borderRadius: 8, padding: 12, color: theme.muted, fontSize: 12, background: '#fff' }}>
+                Smart palette suggestions from logo or letterhead will be added later.
               </div>
-              <Field label="Primary Color"><input type="color" style={styles.colorInput} value={effectiveTheme.primaryColor || '#0F1B33'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), primaryColor: e.target.value, source: 'manual' })); }} /></Field>
-              <Field label="Accent Color"><input type="color" style={styles.colorInput} value={effectiveTheme.accentColor || '#D4A34A'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), accentColor: e.target.value, source: 'manual' })); }} /></Field>
-            </div>
-            <details style={{ marginBottom: 16 }}>
-              <summary style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: theme.muted, cursor: 'pointer', padding: '6px 0', userSelect: 'none' }}>Advanced colour settings</summary>
-              <div style={{ ...styles.formGrid, marginTop: 8 }}>
-                <Field label="Background"><input type="color" style={styles.colorInput} value={effectiveTheme.backgroundColor || '#0A0F1A'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), backgroundColor: e.target.value, source: 'manual' })); }} /></Field>
-                <Field label="Surface"><input type="color" style={styles.colorInput} value={effectiveTheme.surfaceColor || '#111827'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), surfaceColor: e.target.value, source: 'manual' })); }} /></Field>
-                <Field label="Text"><input type="color" style={styles.colorInput} value={effectiveTheme.textColor || '#E5E7EB'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), textColor: e.target.value, source: 'manual' })); }} /></Field>
-                <Field label="Text Muted"><input type="color" style={styles.colorInput} value={effectiveTheme.textSecondaryColor || '#9CA3AF'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), textSecondaryColor: e.target.value, source: 'manual' })); }} /></Field>
+
+              {themeError && <div style={{ ...styles.alert, ...(themeError.startsWith('Preview warnings') ? {} : styles.alertDanger), padding: 10, borderRadius: 6 }}>{themeError}</div>}
+
+              <div className="lf-brand-profile-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button type="submit" style={styles.primaryButton} disabled={themeLoading}>{themeLoading ? 'Saving...' : 'Save brand profile'}</button>
+                <button type="button" style={styles.ghostButton} onClick={handleWorkspacePreview} disabled={themeLoading}>Preview in workspace</button>
+                <button type="button" style={styles.ghostButton} onClick={handleReset} disabled={themeLoading}>{themeLoading ? 'Resetting...' : 'Reset to LexFlow default'}</button>
               </div>
-            </details>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-              <button style={styles.primaryButton} onClick={handleSave} disabled={themeLoading}>{themeLoading ? 'Saving...' : 'Save Theme'}</button>
-              <button style={styles.ghostButton} onClick={() => { applyFirmTheme(themePreview || firmTheme || {}); setThemePreview(null); setThemeError(''); }} disabled={!themePreview || themeLoading}>Apply Preview</button>
-              <button style={styles.ghostButton} onClick={handleReset} disabled={themeLoading}>{themeLoading ? 'Resetting...' : 'Restore Defaults'}</button>
             </div>
-            {themeError && <div style={{ ...styles.alert, ...(themeError.startsWith('Preview warnings') ? {} : styles.alertDanger), padding: 10, borderRadius: 6 }}>{themeError}</div>}
-            <div style={{ marginTop: 12, padding: 14, borderRadius: 8, background: 'var(--lf-surface, #111827)', border: `1px solid var(--lf-border, ${theme.line})`, color: 'var(--lf-text, #E5E7EB)' }}>
-              <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', marginBottom: 8, color: 'var(--lf-text-muted, #9CA3AF)' }}>Theme sample</div>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-                <span style={{ border: 0, borderRadius: 6, padding: '6px 14px', background: 'var(--lf-button, #D4A34A)', color: 'var(--lf-button-text, #fff)', fontWeight: 700 }}>Primary action sample</span>
-                <span style={{ border: `1px solid var(--lf-border, ${theme.line})`, borderRadius: 6, padding: '6px 14px', background: '#fff', color: 'var(--lf-primary, #0F1B33)', fontWeight: 700 }}>Secondary action sample</span>
-              </div>
-              <div style={{ padding: 10, borderRadius: 6, background: 'var(--lf-background, #0A0F1A)', border: `1px solid var(--lf-border, ${theme.line})`, fontSize: 12, color: 'var(--lf-text-muted, #9CA3AF)' }}>Card sample with <a href="#" style={{ color: 'var(--lf-link, #D4A34A)', textDecoration: 'none' }}>link</a>, <span style={{ color: 'var(--lf-success, #047857)' }}>success</span>, <span style={{ color: 'var(--lf-warning, #B45309)' }}>warning</span>, and <span style={{ color: 'var(--lf-danger, #B91C1C)' }}>danger</span> text.</div>
-            </div>
-          </Card>
-        </>
+
+            <BrandProfilePreview draftTheme={effectiveTheme} firmName={form.name} logo={form.logo} />
+          </form>
+        </Card>
       )}
 
       {settingsSection === 'reminders' && (

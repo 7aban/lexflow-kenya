@@ -733,6 +733,14 @@ export function StyleTag() { return <style>{`
   label > span { color: #6B7280; font-size: 11px; font-weight: 700; text-transform: uppercase; }
   .lf-app-shell .profile-tooltip span, body .profile-tooltip span { display: block; color: #697386; font-size: 12px; margin-top: 3px; }
   .lf-logo-preview img { width: 42px; height: 42px; border-radius: 8px; object-fit: cover; border: 1px solid #E5E7EB; }
+  @media (max-width: 980px) {
+    #root .lf-brand-profile-grid { grid-template-columns: minmax(0,1fr) !important; }
+    #root .lf-brand-preview-panel { position: static !important; }
+  }
+  @media (max-width: 620px) {
+    #root .lf-brand-preview-shell { grid-template-columns: minmax(0,1fr) !important; }
+    #root .lf-brand-profile-actions > button { flex: 1 1 100%; }
+  }
   section h2 { margin: 0; font-size: 14px; font-weight: 700; color: #101827; }
   section h3 { margin: 0 0 12px; font-size: 13px; font-weight: 700; color: #101827; }
   section p { margin: 4px 0 0; color: #697386; font-size: 12px; }
