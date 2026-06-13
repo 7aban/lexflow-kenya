@@ -141,6 +141,17 @@ describe('R6: Firm Branding/Theme System', () => {
         const result = themeValidation.validateThemeInput({ logo: 'data:image/png;base64,' + 'x'.repeat(5001) });
         expect(result.error).toContain('exceeds 5000 character limit');
       });
+      test('silently drops id key (preset convenience)', () => {
+        const result = themeValidation.validateThemeInput({ id: 'emerald-gold', primaryColor: '#1B4332' });
+        expect(result.error).toBeUndefined();
+        expect(result.value.id).toBeUndefined();
+        expect(result.value.primaryColor).toBe('#1B4332');
+      });
+      test('silently drops theme key', () => {
+        const result = themeValidation.validateThemeInput({ theme: { nested: true }, primaryColor: '#0F1B33' });
+        expect(result.error).toBeUndefined();
+        expect(result.value.theme).toBeUndefined();
+      });
     });
 
     describe('validateThemeAccessibility', () => {
@@ -259,6 +270,14 @@ describe('R6: Firm Branding/Theme System', () => {
           .send({ primaryColor: '#0F1B33' });
         expect(res.statusCode).toBe(403);
       });
+      test('accepts preset payload with id key (frontend convenience)', async () => {
+        const res = await request(app)
+          .post('/api/firm-settings/theme/preview')
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ id: 'lexflow-default', primaryColor: '#0F1B33', accentColor: '#D4A34A', source: 'preset' });
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toHaveProperty('theme');
+      });
     });
 
     describe('PUT /api/firm-settings/theme', () => {
@@ -311,13 +330,17 @@ describe('R6: Firm Branding/Theme System', () => {
           .post('/api/firm-settings/theme/reset')
           .set('Authorization', `Bearer ${adminToken}`);
         expect(res.statusCode).toBe(200);
-        expect(res.body.theme).toBeNull();
-        expect(res.body.message).toBe('Theme reset to default');
+        expect(res.body.theme).not.toBeNull();
+        expect(res.body.theme.primaryColor).toBe('#0F1B33');
+        expect(res.body.theme.accentColor).toBe('#D4A34A');
+        expect(res.body.message).toBe('Firm branding restored to LexFlow default.');
       });
-      test('theme is null after reset', async () => {
+      test('theme is resolved after reset (not null)', async () => {
         await request(app).post('/api/firm-settings/theme/reset').set('Authorization', `Bearer ${adminToken}`);
         const getRes = await request(app).get('/api/firm-settings/theme').set('Authorization', `Bearer ${adminToken}`);
-        expect(getRes.body.theme).toBeNull();
+        expect(getRes.body.theme).not.toBeNull();
+        expect(getRes.body.theme.primaryColor).toBe('#0F1B33');
+        expect(getRes.body.theme.accentColor).toBe('#D4A34A');
       });
       test('requires admin role', async () => {
         const res = await request(app)
@@ -379,11 +402,13 @@ describe('R6: Firm Branding/Theme System', () => {
       expect(res.body.theme).not.toBeNull();
       expect(res.body.theme.primaryColor).toBe('#0F1B33');
     });
-    test('theme is null when not set', async () => {
+    test('theme is resolved when not set (not null)', async () => {
       await request(app).post('/api/firm-settings/theme/reset').set('Authorization', `Bearer ${adminToken}`);
       const res = await request(app).get('/api/firm-settings').set('Authorization', `Bearer ${adminToken}`);
       expect(res.statusCode).toBe(200);
-      expect(res.body.theme).toBeNull();
+      expect(res.body.theme).not.toBeNull();
+      expect(res.body.theme.primaryColor).toBe('#0F1B33');
+      expect(res.body.theme.accentColor).toBe('#D4A34A');
     });
   });
 });

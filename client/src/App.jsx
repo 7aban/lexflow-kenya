@@ -632,7 +632,7 @@ export default function App() {
   };
 
   return (
-    <div className="lf-app-shell" style={{ ...styles.shell, '--lf-primary': firm.primaryColor || theme.navy800, '--lf-accent': firm.accentColor || theme.gold }}>
+    <div className="lf-app-shell" style={{ ...styles.shell, '--lf-primary': firm.primaryColor || theme.navy800, '--lf-accent': firm.accentColor || theme.gold, '--lf-sidebar': firm.primaryColor || theme.navy800, '--lf-sidebar-text': '#fff', '--lf-header-bg': '#fff', '--lf-button': firm.accentColor || theme.gold, '--lf-button-text': '#fff', '--lf-background': '#F5F2EB' }}>
       <StyleTag />
       <aside className="lf-desktop-sidebar" style={styles.sidebar}>
         <div style={styles.brandPanel}>

@@ -1,4 +1,7 @@
 const HEX_COLOR_REGEX = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/;
+// Keys accepted for validation but silently dropped from output (frontend
+// convenience keys that should never be persisted as theme values).
+const DROP_KEYS = new Set(['id', 'theme']);
 const ALLOWED_THEME_KEYS = new Set([
   'primaryColor', 'accentColor', 'backgroundColor', 'surfaceColor',
   'textColor', 'textSecondaryColor', 'sidebarColor', 'sidebarTextColor',
@@ -130,6 +133,7 @@ function validateThemeInput(input) {
   }
   const result = {};
   for (const [key, value] of Object.entries(input)) {
+    if (DROP_KEYS.has(key)) continue;
     if (!ALLOWED_THEME_KEYS.has(key)) {
       return { error: `Unknown theme key: ${key}` };
     }

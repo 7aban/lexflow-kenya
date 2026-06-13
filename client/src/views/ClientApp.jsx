@@ -410,7 +410,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
   }
 
   return (
-    <div className="lf-app-shell" style={{ ...styles.shell, '--lf-primary': firm?.primaryColor || theme.navy800, '--lf-accent': firm?.accentColor || theme.gold }}>
+    <div className="lf-app-shell" style={{ ...styles.shell, '--lf-primary': firm?.primaryColor || theme.navy800, '--lf-accent': firm?.accentColor || theme.gold, '--lf-sidebar': firm?.primaryColor || theme.navy800, '--lf-sidebar-text': '#fff', '--lf-header-bg': '#fff', '--lf-button': firm?.accentColor || theme.gold, '--lf-button-text': '#fff', '--lf-background': '#F5F2EB' }}>
       <StyleTag />
       <style>{clientPortalChromeCss}</style>
       <aside className="lf-desktop-sidebar" style={styles.sidebar}>

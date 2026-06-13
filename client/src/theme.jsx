@@ -742,7 +742,7 @@ export function StyleTag() { return <style>{`
   .lf-nav.is-active::before { content: ''; position: absolute; left: 0; top: 5px; bottom: 5px; width: 3px; background: var(--lf-accent, #D4A34A); border-radius: 0 2px 2px 0; }
   .lf-nav.is-active { color: #fff !important; }
   /* UI-3: topbar + dashboard polish (scoped) */
-  #root .lf-topbar { background: #fff; }
+  #root .lf-topbar { background: var(--lf-header-bg, #fff); }
   #root .lf-topbar-icon-btn:hover { background: #F5F2EB; color: #1A1A18; }
   #root .lf-topbar-icon-btn:focus-visible { outline: 2px solid rgba(26,54,40,.25); outline-offset: 1px; }
   #root .lf-topbar-search:focus-within { border-color: #1A3628; box-shadow: 0 0 0 3px rgba(26,54,40,.09); }
@@ -789,7 +789,7 @@ export function StyleTag() { return <style>{`
 `}</style>; }
 
 export const styles = {
-  shell: { minHeight: '100vh', display: 'grid', gridTemplateColumns: '224px minmax(0,1fr)', background: '#F5F2EB', color: theme.ink, fontFamily: 'Segoe UI, Roboto, -apple-system, BlinkMacSystemFont, sans-serif', fontSize: 13 },
+  shell: { minHeight: '100vh', display: 'grid', gridTemplateColumns: '224px minmax(0,1fr)', background: 'var(--lf-background, #F5F2EB)', color: 'var(--lf-text, #101827)', fontFamily: 'Segoe UI, Roboto, -apple-system, BlinkMacSystemFont, sans-serif', fontSize: 13 },
   sidebar: { position: 'sticky', top: 0, minHeight: '100vh', maxHeight: '100vh', background: 'var(--lf-sidebar, #112219)', color: 'var(--lf-sidebar-text, #fff)', padding: 0, display: 'flex', flexDirection: 'column', overflowY: 'auto', boxShadow: '1px 0 0 rgba(255,255,255,.05)' },
   brandPanel: { display: 'flex', alignItems: 'center', gap: 10, padding: '16px 16px 14px', borderBottom: '1px solid rgba(255,255,255,.08)' },
   logo: { width: 34, height: 34, borderRadius: 8, display: 'grid', placeItems: 'center', background: 'var(--lf-accent, var(--lf-button, #D4A34A))', color: 'var(--lf-button-text, #fff)', fontWeight: 900, fontSize: 15, boxShadow: '0 8px 18px rgba(212,163,74,.20)', overflow: 'hidden', flexShrink: 0 }, logoImage: { width: '100%', height: '100%', objectFit: 'cover' },
@@ -798,7 +798,7 @@ export const styles = {
 
   timerCard: { marginTop: 'auto', marginInline: 12, marginBottom: 10, padding: '11px 13px', borderRadius: 8, background: 'rgba(255,255,255,.04)', border: '1px solid rgba(255,255,255,.08)', display: 'grid', gap: 3 }, timerTop: { color: 'rgba(255,255,255,.7)', fontSize: 11, display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }, liveDot: { width: 7, height: 7, borderRadius: 999, background: '#22C55E', boxShadow: '0 0 0 3px rgba(34,197,94,.13)' },
   userCard: { display: 'grid', gridTemplateColumns: '30px 1fr auto', gap: 10, alignItems: 'center', padding: '12px 16px 16px', borderTop: '1px solid rgba(255,255,255,.08)' }, avatar: { width: 30, height: 30, borderRadius: 999, background: 'var(--lf-accent, var(--lf-button, #D4A34A))', color: 'var(--lf-button-text, #fff)', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 12, flexShrink: 0, overflow: 'hidden' }, avatarImg: { width: '100%', height: '100%', objectFit: 'cover', borderRadius: 999, display: 'block' }, userName: { fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12.5, color: '#fff' }, userRole: { color: 'rgba(255,255,255,.42)', fontSize: 9, textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: 700, marginTop: 2 }, logout: { border: '1px solid rgba(255,255,255,.16)', color: '#fff', background: 'transparent', borderRadius: 6, padding: '5px 8px', cursor: 'pointer', fontSize: 12 },
-  main: { minWidth: 0, display: 'flex', flexDirection: 'column' }, topbar: { display: 'flex', alignItems: 'center', gap: 12, height: 54, padding: '0 28px', background: '#fff', borderBottom: '1px solid #DDD8CE', position: 'sticky', top: 0, zIndex: 100, flexShrink: 0 }, topbarTitle: { display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }, mobileMenuButton: { display: 'none', minWidth: 42, minHeight: 38, border: '1px solid #DDD8CE', borderRadius: 8, background: '#fff', color: '#1A3628', fontWeight: 700, cursor: 'pointer', alignItems: 'center', justifyContent: 'center', padding: '8px 10px', flexShrink: 0 }, eyebrow: { color: theme.goldDark, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0 }, title: { margin: '2px 0 0', fontSize: 20, fontWeight: 700, lineHeight: 1.2 }, subtitle: { margin: '5px 0 0', color: theme.muted, maxWidth: 680 }, topActions: { display: 'flex', gap: 6, alignItems: 'center', marginLeft: 'auto' }, search: { width: 260, border: `1px solid ${theme.line}`, borderRadius: 6, padding: '7px 11px', background: '#fff', fontSize: 13 },
+  main: { minWidth: 0, display: 'flex', flexDirection: 'column' }, topbar: { display: 'flex', alignItems: 'center', gap: 12, height: 54, padding: '0 28px', background: 'var(--lf-header-bg, #FFFFFF)', borderBottom: '1px solid var(--lf-border, #DDD8CE)', position: 'sticky', top: 0, zIndex: 100, flexShrink: 0 }, topbarTitle: { display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }, mobileMenuButton: { display: 'none', minWidth: 42, minHeight: 38, border: '1px solid #DDD8CE', borderRadius: 8, background: '#fff', color: '#1A3628', fontWeight: 700, cursor: 'pointer', alignItems: 'center', justifyContent: 'center', padding: '8px 10px', flexShrink: 0 }, eyebrow: { color: theme.goldDark, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0 }, title: { margin: '2px 0 0', fontSize: 20, fontWeight: 700, lineHeight: 1.2 }, subtitle: { margin: '5px 0 0', color: theme.muted, maxWidth: 680 }, topActions: { display: 'flex', gap: 6, alignItems: 'center', marginLeft: 'auto' }, search: { width: 260, border: `1px solid ${theme.line}`, borderRadius: 6, padding: '7px 11px', background: '#fff', fontSize: 13 },
   topbarSearch: { flex: '1 1 auto', maxWidth: 400, minWidth: 0, position: 'relative', display: 'flex', alignItems: 'center', gap: 9, background: '#F5F2EB', border: '1px solid #DDD8CE', borderRadius: 7, padding: '7px 13px', cursor: 'text', transition: 'border-color .15s ease, box-shadow .15s ease' }, topbarSearchIcon: { color: '#6B7280', flexShrink: 0, display: 'inline-flex' }, topbarSearchInput: { flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: 13, color: theme.ink, minWidth: 0, padding: 0, fontFamily: 'inherit' }, topbarKbd: { fontSize: 10, color: '#6B7280', border: '1px solid #DDD8CE', borderRadius: 4, padding: '1px 5px', fontFamily: 'monospace', whiteSpace: 'nowrap', flexShrink: 0 }, iconButton: { width: 34, height: 34, minWidth: 34, minHeight: 34, border: '1px solid transparent', borderRadius: 7, background: 'transparent', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#6B7280', position: 'relative', padding: 0, flexShrink: 0 }, iconBadgeDot: { position: 'absolute', top: 6, right: 7, width: 7, height: 7, borderRadius: '50%', background: theme.red, border: '1.5px solid #fff', pointerEvents: 'none' },
   pageInner: { padding: '24px 28px 124px', display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0, flex: 1 }, pageHeader: { display: 'grid', gap: 3, marginBottom: 4 }, pageCrumb: { fontSize: 10, color: '#6B7280', textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: 600 }, pageTitle: { margin: 0, fontSize: 24, fontWeight: 600, color: theme.ink, lineHeight: 1.2, letterSpacing: -.2 }, pageSub: { margin: '2px 0 0', fontSize: 13, color: '#6B7280', maxWidth: 720, lineHeight: 1.5 },
   dashBanner: { background: '#1A3628', borderRadius: 10, padding: '18px 22px', display: 'flex', alignItems: 'center', gap: 14, color: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,.06)' }, dashBannerIcon: { width: 42, height: 42, background: 'rgba(197,151,60,.14)', borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#D9AA55', flexShrink: 0, position: 'relative', zIndex: 1 }, dashBannerText: { flex: 1, minWidth: 0, position: 'relative', zIndex: 1 }, dashBannerLabel: { fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.6, color: 'rgba(255,255,255,.45)', marginBottom: 3, fontWeight: 600 }, dashBannerSum: { fontSize: 14, color: 'rgba(255,255,255,.82)', lineHeight: 1.5 }, dashBannerSumStrong: { color: '#fff', fontWeight: 600 }, dashBannerAmount: { fontSize: 27, fontWeight: 700, color: '#C5973C', whiteSpace: 'nowrap', position: 'relative', zIndex: 1, letterSpacing: -.3 },
@@ -869,7 +869,13 @@ const THEME_CSS_MAP = {
   warningColor: '--lf-warning',
   errorColor: '--lf-danger',
   infoColor: '--lf-info',
+  cardColor: '--lf-card',
+  cardBorderColor: '--lf-card-border',
+  headerColor: '--lf-header-bg',
+  headerTextColor: '--lf-header-text',
 };
+
+
 
 export function applyFirmTheme(theme) {
   if (!theme || typeof theme !== 'object') return;
@@ -889,6 +895,7 @@ export async function loadAndApplyFirmTheme() {
     const { api } = await import('./lib/apiClient.js');
     const data = await api('/firm-settings/theme');
     if (data?.theme) applyFirmTheme(data.theme);
+    else clearFirmTheme();
   } catch {
     // Keep default theme if fetch fails
   }

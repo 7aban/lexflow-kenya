@@ -1183,22 +1183,55 @@ function validateLifecycleEventPayload(payload, { partial = false } = {}) {
   return null;
 }
 
+// Resolve a full theme object from stored themeJson, falling back to legacy
+// primaryColor/accentColor. Guarantees every surface has a value.
+function buildResolvedTheme(themeJson, primaryColor, accentColor) {
+  let theme = null;
+  if (themeJson) {
+    try { theme = JSON.parse(themeJson); } catch { theme = null; }
+  }
+  const p = theme?.primaryColor || primaryColor || defaultFirmSettings.primaryColor;
+  const a = theme?.accentColor || accentColor || defaultFirmSettings.accentColor;
+  return {
+    primaryColor: p,
+    accentColor: a,
+    sidebarColor: theme?.sidebarColor || p,
+    sidebarTextColor: theme?.sidebarTextColor || '#E5E7EB',
+    buttonColor: theme?.buttonColor || a,
+    buttonTextColor: theme?.buttonTextColor || '#FFFFFF',
+    backgroundColor: theme?.backgroundColor || '#F5F7FA',
+    surfaceColor: theme?.surfaceColor || '#FFFFFF',
+    textColor: theme?.textColor || '#101827',
+    textSecondaryColor: theme?.textSecondaryColor || '#697386',
+    borderColor: theme?.borderColor || '#E5E7EB',
+    linkColor: theme?.linkColor || a,
+    cardColor: theme?.cardColor || '#FFFFFF',
+    cardBorderColor: theme?.cardBorderColor || '#E5E7EB',
+    headerColor: theme?.headerColor || p,
+    headerTextColor: theme?.headerTextColor || '#FFFFFF',
+    successColor: theme?.successColor || '#047857',
+    warningColor: theme?.warningColor || '#B45309',
+    errorColor: theme?.errorColor || '#B91C1C',
+    infoColor: theme?.infoColor || '#1D4ED8',
+    source: theme?.source || 'default',
+  };
+}
+
 async function getFirmSettings() {
   const settings = await get('SELECT * FROM firm_settings WHERE id=?', ['default']);
   const reminderSettings = await getReminderSettings();
-  let theme = null;
-  if (settings?.themeJson) {
-    try {
-      theme = JSON.parse(settings.themeJson);
-    } catch {
-      theme = null;
-    }
-  }
+  const theme = settings
+    ? buildResolvedTheme(
+        settings.themeJson,
+        settings.primaryColor || defaultFirmSettings.primaryColor,
+        settings.accentColor || defaultFirmSettings.accentColor,
+      )
+    : buildResolvedTheme(null, defaultFirmSettings.primaryColor, defaultFirmSettings.accentColor);
   const moduleSettings = settings ? resolveModuleSettings(settings.moduleSettingsJson) : { ...DEFAULT_MODULE_SETTINGS };
   const { moduleSettingsJson: _msj, ...safeSettings } = settings || {};
   const normalized = { ...defaultFirmSettings, ...safeSettings };
   normalized.defaultInvoiceDueDays = normalizeDefaultInvoiceDueDays(normalized.defaultInvoiceDueDays);
-  return { ...normalized, reminderSettings, theme: theme || null, moduleSettings };
+  return { ...normalized, reminderSettings, theme, moduleSettings };
 }
 
 async function initDb() {
@@ -2033,12 +2066,17 @@ app.put('/api/firm-settings', authenticate, requireAdmin, async (req, res) => {
 
 app.get('/api/firm-settings/theme', authenticate, async (req, res) => {
   try {
-    const settings = await get('SELECT themeJson FROM firm_settings WHERE id=?', ['default']);
-    let theme = null;
-    if (settings && settings.themeJson) {
-      try { theme = JSON.parse(settings.themeJson); } catch { theme = null; }
+    const settings = await get('SELECT themeJson, primaryColor, accentColor FROM firm_settings WHERE id=?', ['default']);
+    if (!settings) {
+      const resolved = buildResolvedTheme(null, defaultFirmSettings.primaryColor, defaultFirmSettings.accentColor);
+      return res.json({ theme: resolved });
     }
-    res.json({ theme });
+    const resolved = buildResolvedTheme(
+      settings.themeJson,
+      settings.primaryColor || defaultFirmSettings.primaryColor,
+      settings.accentColor || defaultFirmSettings.accentColor,
+    );
+    res.json({ theme: resolved });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -2078,11 +2116,13 @@ app.post('/api/firm-settings/theme/reset', authenticate, requireAdmin, async (re
   try {
     const existing = await get('SELECT id FROM firm_settings WHERE id=?', ['default']);
     if (existing) {
-      await run('UPDATE firm_settings SET themeJson=NULL WHERE id=?', ['default']);
+      await run('UPDATE firm_settings SET themeJson=NULL, primaryColor=?, accentColor=? WHERE id=?',
+        [defaultFirmSettings.primaryColor, defaultFirmSettings.accentColor, 'default']);
     }
     await logAudit(req, 'update', 'firm_theme', 'default', 'Reset firm theme to default');
     await recordAuditEvent(req, { action: 'firm_theme_reset', entityType: 'firm_theme', entityId: 'default' }).catch(() => {});
-    res.json({ theme: null, message: 'Theme reset to default' });
+    const resolved = buildResolvedTheme(null, defaultFirmSettings.primaryColor, defaultFirmSettings.accentColor);
+    res.json({ theme: resolved, message: 'Firm branding restored to LexFlow default.' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

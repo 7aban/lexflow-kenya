@@ -4113,7 +4113,7 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
             })()}
           </Card>
 
-          <Card title="Firm Branding / Theme" hint="Choose a preset or adjust colors, then save the workspace theme.">
+          <Card title="Workspace Theme" hint="Choose a preset or adjust colors, then save the workspace theme.">
             <div style={{ ...styles.formGrid, marginBottom: 16 }}>
               <div>
                 <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: theme.muted }}><span>Presets</span></label>
@@ -4128,15 +4128,20 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
               </div>
               <Field label="Primary Color"><input type="color" style={styles.colorInput} value={effectiveTheme.primaryColor || '#0F1B33'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), primaryColor: e.target.value, source: 'manual' })); }} /></Field>
               <Field label="Accent Color"><input type="color" style={styles.colorInput} value={effectiveTheme.accentColor || '#D4A34A'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), accentColor: e.target.value, source: 'manual' })); }} /></Field>
-              <Field label="Background"><input type="color" style={styles.colorInput} value={effectiveTheme.backgroundColor || '#0A0F1A'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), backgroundColor: e.target.value, source: 'manual' })); }} /></Field>
-              <Field label="Surface"><input type="color" style={styles.colorInput} value={effectiveTheme.surfaceColor || '#111827'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), surfaceColor: e.target.value, source: 'manual' })); }} /></Field>
-              <Field label="Text"><input type="color" style={styles.colorInput} value={effectiveTheme.textColor || '#E5E7EB'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), textColor: e.target.value, source: 'manual' })); }} /></Field>
-              <Field label="Text Muted"><input type="color" style={styles.colorInput} value={effectiveTheme.textSecondaryColor || '#9CA3AF'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), textSecondaryColor: e.target.value, source: 'manual' })); }} /></Field>
             </div>
+            <details style={{ marginBottom: 16 }}>
+              <summary style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: theme.muted, cursor: 'pointer', padding: '6px 0', userSelect: 'none' }}>Advanced colour settings</summary>
+              <div style={{ ...styles.formGrid, marginTop: 8 }}>
+                <Field label="Background"><input type="color" style={styles.colorInput} value={effectiveTheme.backgroundColor || '#0A0F1A'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), backgroundColor: e.target.value, source: 'manual' })); }} /></Field>
+                <Field label="Surface"><input type="color" style={styles.colorInput} value={effectiveTheme.surfaceColor || '#111827'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), surfaceColor: e.target.value, source: 'manual' })); }} /></Field>
+                <Field label="Text"><input type="color" style={styles.colorInput} value={effectiveTheme.textColor || '#E5E7EB'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), textColor: e.target.value, source: 'manual' })); }} /></Field>
+                <Field label="Text Muted"><input type="color" style={styles.colorInput} value={effectiveTheme.textSecondaryColor || '#9CA3AF'} onChange={e => { setThemePreview(prev => ({ ...(prev || firmTheme || {}), textSecondaryColor: e.target.value, source: 'manual' })); }} /></Field>
+              </div>
+            </details>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
               <button style={styles.primaryButton} onClick={handleSave} disabled={themeLoading}>{themeLoading ? 'Saving...' : 'Save Theme'}</button>
               <button style={styles.ghostButton} onClick={() => { applyFirmTheme(themePreview || firmTheme || {}); setThemePreview(null); setThemeError(''); }} disabled={!themePreview || themeLoading}>Apply Preview</button>
-              <button style={styles.dangerButton} onClick={handleReset} disabled={themeLoading}>{themeLoading ? 'Resetting...' : 'Reset to Default'}</button>
+              <button style={styles.ghostButton} onClick={handleReset} disabled={themeLoading}>{themeLoading ? 'Resetting...' : 'Restore Defaults'}</button>
             </div>
             {themeError && <div style={{ ...styles.alert, ...(themeError.startsWith('Preview warnings') ? {} : styles.alertDanger), padding: 10, borderRadius: 6 }}>{themeError}</div>}
             <div style={{ marginTop: 12, padding: 14, borderRadius: 8, background: 'var(--lf-surface, #111827)', border: `1px solid var(--lf-border, ${theme.line})`, color: 'var(--lf-text, #E5E7EB)' }}>
