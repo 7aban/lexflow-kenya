@@ -1192,7 +1192,8 @@ function buildResolvedTheme(themeJson, primaryColor, accentColor) {
   }
   const p = theme?.primaryColor || primaryColor || defaultFirmSettings.primaryColor;
   const a = theme?.accentColor || accentColor || defaultFirmSettings.accentColor;
-  return {
+  return themeValidation.resolveReadableTheme({
+    ...(theme || {}),
     primaryColor: p,
     accentColor: a,
     sidebarColor: theme?.sidebarColor || p,
@@ -1214,7 +1215,7 @@ function buildResolvedTheme(themeJson, primaryColor, accentColor) {
     errorColor: theme?.errorColor || '#B91C1C',
     infoColor: theme?.infoColor || '#1D4ED8',
     source: theme?.source || 'default',
-  };
+  });
 }
 
 async function getFirmSettings() {
@@ -2086,7 +2087,8 @@ app.post('/api/firm-settings/theme/preview', authenticate, requireAdmin, async (
     if (validation.error) return res.status(400).json({ error: validation.error });
     const { warnings, blocks } = themeValidation.validateThemeAccessibility(validation.value);
     if (blocks.length > 0) return res.status(400).json({ error: 'Theme blocked', details: blocks });
-    res.json({ theme: validation.value, warnings, blocks });
+    const resolvedTheme = themeValidation.resolveReadableTheme(validation.value);
+    res.json({ theme: resolvedTheme, warnings, blocks });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -2096,7 +2098,8 @@ app.put('/api/firm-settings/theme', authenticate, requireAdmin, async (req, res)
     if (validation.error) return res.status(400).json({ error: validation.error });
     const { warnings, blocks } = themeValidation.validateThemeAccessibility(validation.value);
     if (blocks.length > 0) return res.status(400).json({ error: 'Theme blocked', details: blocks });
-    const themeJson = JSON.stringify(validation.value);
+    const resolvedTheme = themeValidation.resolveReadableTheme(validation.value);
+    const themeJson = JSON.stringify(resolvedTheme);
     const existing = await get('SELECT id FROM firm_settings WHERE id=?', ['default']);
     if (existing) {
       await run('UPDATE firm_settings SET themeJson=? WHERE id=?', [themeJson, 'default']);
@@ -2106,7 +2109,7 @@ app.put('/api/firm-settings/theme', authenticate, requireAdmin, async (req, res)
         ['default', defaultFirmSettings.name, '', defaultFirmSettings.primaryColor, defaultFirmSettings.accentColor, '', defaultFirmSettings.email, defaultFirmSettings.phone, defaultFirmSettings.address, themeJson]);
     }
     await logAudit(req, 'update', 'firm_theme', 'default', 'Updated firm theme');
-    await recordAuditEvent(req, { action: 'firm_theme_updated', entityType: 'firm_theme', entityId: 'default', metadata: { source: validation.value.source || 'manual', warnings } }).catch(() => {});
+    await recordAuditEvent(req, { action: 'firm_theme_updated', entityType: 'firm_theme', entityId: 'default', metadata: { source: resolvedTheme.source || 'manual', warnings } }).catch(() => {});
     const settings = await get('SELECT themeJson FROM firm_settings WHERE id=?', ['default']);
     res.json({ theme: JSON.parse(settings.themeJson), warnings });
   } catch (err) { res.status(500).json({ error: err.message }); }

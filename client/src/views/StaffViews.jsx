@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote, IconMail, IconPaperclip, IconExternalLink, IconLayoutDashboard, IconUsers } from '@tabler/icons-react';
 import { api, applyChecklistTemplate, approveHrLeaveRequest, cancelHrLeaveRequestAdmin, changePassword, clearSession, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, cancelOffboardingCase, completeOffboardingCase, createHrContract, createHrLeaveBalanceAdjustment, createHrStaffProfile, createMatterChecklistItem, createOffboardingCase, deleteChecklistTemplate, deleteClientAvatar, deleteHrDocument, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadHrDocumentContent, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getConnectedAccountAvailability, getHrContracts, getHrDashboard, getHrDocuments, getHrLeaveBalances, getHrLeaveRequests, getHrStaff, getHrStaffProfile, getOffboardingAssignedMatters, getOffboardingCase, getOffboardingCases, getClientSnapshot, getInvoiceDetails, getMatterTimeline, getAppearanceDocuments, linkAppearanceDocument, unlinkAppearanceDocument, getMatterWorkMetadataLinks, getRetainers, getRetainer, createRetainer, updateRetainer, deleteRetainer, generateRetainerDocument, listDocumentTemplates, getMatterFeePlans, getMatterFeePlan, createMatterFeePlan, updateMatterFeePlan, deleteMatterFeePlan, getRetainerLedger, getRetainerLedgerSummary, createRetainerLedgerEntry, voidRetainerLedgerEntry, getClientKyc, getClientKycRecord, createClientKyc, updateClientKyc, deleteClientKyc, getClientAuthorities, getClientAuthorityRecord, createClientAuthority, updateClientAuthority, deleteClientAuthority, getRetainerLifecycleEvents, getRetainerLifecycleEvent, createRetainerLifecycleEvent, updateRetainerLifecycleEvent, deleteRetainerLifecycleEvent, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, rejectHrLeaveRequest, setHrLeaveEntitlement, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrContract, updateHrDocument, updateHrStaffProfile, updateMatterChecklistItem, updateOffboardingCase, updateOffboardingChecklistItem, uploadClientAvatar, uploadHrDocument, uploadUserAvatar } from '../lib/apiClient.js';
-import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme } from '../theme.jsx';
+import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme, resolveReadableTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, safeHttpUrl, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText, invoiceDueDistanceDays } from '../components/ui.jsx';
 import MatterDocuments from '../components/MatterDocuments.jsx';
@@ -52,18 +52,25 @@ const BRAND_THEME_KEYS = [
   'surfaceColor',
   'textColor',
   'textSecondaryColor',
+  'cardTextColor',
+  'cardMutedColor',
   'sidebarColor',
   'sidebarTextColor',
+  'onSidebarColor',
   'buttonColor',
   'buttonTextColor',
+  'onButtonColor',
   'borderColor',
   'linkColor',
+  'onPrimaryColor',
+  'onAccentColor',
   'successColor',
   'warningColor',
   'errorColor',
   'infoColor',
   'headerColor',
   'headerTextColor',
+  'onHeaderColor',
   'footerColor',
   'footerTextColor',
   'cardColor',
@@ -183,10 +190,13 @@ function completeBrandTheme(draft = {}, firm = {}) {
     linkColor: draft.linkColor || accentColor,
     headerColor: draft.headerColor || primaryColor,
   };
-  filled.sidebarTextColor = safePreviewText(filled.sidebarColor, draft.sidebarTextColor || filled.sidebarTextColor);
-  filled.buttonTextColor = safePreviewText(filled.buttonColor, draft.buttonTextColor || filled.buttonTextColor);
-  filled.headerTextColor = safePreviewText(filled.headerColor, draft.headerTextColor || filled.headerTextColor);
-  return filled;
+  const readable = resolveReadableTheme(filled);
+  return {
+    ...readable,
+    sidebarTextColor: readable.onSidebarColor,
+    buttonTextColor: readable.onButtonColor,
+    headerTextColor: readable.onHeaderColor,
+  };
 }
 
 function sanitizedThemePayload(draft = {}) {
@@ -203,6 +213,13 @@ function presetMatchesTheme(preset, draft = {}) {
   return ['primaryColor', 'accentColor', 'sidebarColor', 'buttonColor', 'backgroundColor', 'surfaceColor']
     .filter(key => preset[key])
     .every(key => normalizeHexForCompare(preset[key]) === normalizeHexForCompare(draft[key]));
+}
+
+function matchesLexFlowResetDefault(draft = {}) {
+  return normalizeHexForCompare(draft.primaryColor) === normalizeHexForCompare(LEXFLOW_DEFAULT_THEME.primaryColor)
+    && normalizeHexForCompare(draft.accentColor) === normalizeHexForCompare(LEXFLOW_DEFAULT_THEME.accentColor)
+    && (draft.source === 'default'
+      || normalizeHexForCompare(draft.backgroundColor) === normalizeHexForCompare(LEXFLOW_DEFAULT_THEME.backgroundColor));
 }
 
 // PRODUCT-15I: staff payment-proof queue endpoint (optional status filter; 'All' omits it).
@@ -4159,18 +4176,21 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
   function updateThemeDraft(nextValues) {
     setThemeError('');
     setPreviewPresetId('');
+    const formPatch = {
+      ...(nextValues.primaryColor ? { primaryColor: nextValues.primaryColor } : {}),
+      ...(nextValues.accentColor ? { accentColor: nextValues.accentColor } : {}),
+    };
     if (nextValues.primaryColor || nextValues.accentColor) {
       setForm(formCurrent => ({
         ...formCurrent,
-        ...(nextValues.primaryColor ? { primaryColor: nextValues.primaryColor } : {}),
-        ...(nextValues.accentColor ? { accentColor: nextValues.accentColor } : {}),
+        ...formPatch,
       }));
     }
-    setThemePreview(current => {
-      const base = current || firmTheme || settings.theme || {};
-      const next = { ...base, ...nextValues, source: 'manual' };
-      return next;
-    });
+    const formForTheme = { ...form, ...formPatch };
+    const base = completeBrandTheme(themePreview || firmTheme || settings.theme || {}, formForTheme);
+    const next = completeBrandTheme({ ...base, ...nextValues, source: 'manual' }, formForTheme);
+    setThemePreview(next);
+    applyFirmTheme(next);
   }
 
   function handleWorkspacePreview() {
@@ -4274,7 +4294,8 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
   const clientOptions = Array.isArray(clients) ? clients : [];
   const effectiveTheme = completeBrandTheme(themePreview || firmTheme || settings.theme || {}, form);
   const savedThemeForPreset = completeBrandTheme(firmTheme || settings.theme || {}, settings);
-  const savedPresetId = presets.find(preset => presetMatchesTheme(preset, savedThemeForPreset))?.id || '';
+  const matchedSavedPresetId = presets.find(preset => presetMatchesTheme(preset, savedThemeForPreset))?.id || '';
+  const savedPresetId = matchedSavedPresetId || (matchesLexFlowResetDefault(savedThemeForPreset) ? 'lexflow-default' : '');
   const advancedThemeFields = [
     ['backgroundColor', 'Background'],
     ['surfaceColor', 'Surface'],
@@ -4320,9 +4341,9 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
               );
             })}
           </div>
-          <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: theme.wash, padding: 12, display: 'grid', gap: 3 }}>
-            <strong style={{ color: theme.ink, fontSize: 13 }}>{activeSettingsSection.label}</strong>
-            <span style={{ color: theme.muted, fontSize: 12 }}>{activeSettingsSection.hint}</span>
+          <div style={{ border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 8, background: 'color-mix(in srgb, var(--lf-card, #fff) 88%, var(--lf-background, #F8FAFC))', padding: 12, display: 'grid', gap: 3 }}>
+            <strong style={{ color: 'var(--lf-card-text, #101827)', fontSize: 13 }}>{activeSettingsSection.label}</strong>
+            <span style={{ color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', fontSize: 12 }}>{activeSettingsSection.hint}</span>
           </div>
         </div>
       </Card>
@@ -4377,9 +4398,9 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
         <Card title="Firm Brand Profile" hint="Set the logo, colours, and workspace style LexFlow uses across the staff and client portals.">
           <form onSubmit={handleSaveBrandProfile} className="lf-brand-profile-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(320px,420px)', gap: 18, alignItems: 'start' }}>
             <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
-              <div style={{ display: 'grid', gap: 10, padding: 14, border: `1px solid ${theme.line}`, borderRadius: 8, background: theme.wash }}>
+              <div style={{ display: 'grid', gap: 10, padding: 14, border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 8, background: 'color-mix(in srgb, var(--lf-card, #fff) 88%, var(--lf-background, #F8FAFC))' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                  <div style={{ width: 64, height: 64, borderRadius: 8, background: effectiveTheme.primaryColor, color: safePreviewText(effectiveTheme.primaryColor, '#FFFFFF'), display: 'grid', placeItems: 'center', fontSize: 20, fontWeight: 900, overflow: 'hidden', border: `1px solid ${theme.line}`, flexShrink: 0 }}>
+                  <div style={{ width: 64, height: 64, borderRadius: 8, background: effectiveTheme.primaryColor, color: safePreviewText(effectiveTheme.primaryColor, '#FFFFFF'), display: 'grid', placeItems: 'center', fontSize: 20, fontWeight: 900, overflow: 'hidden', border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', flexShrink: 0 }}>
                     {form.logo ? <img src={form.logo} alt="Firm logo preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : firmInitials(form.name)}
                   </div>
                   <div style={{ flex: '1 1 220px', minWidth: 0 }}>
@@ -4405,7 +4426,7 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
               <div style={{ display: 'grid', gap: 8 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'end', flexWrap: 'wrap' }}>
                   <div>
-                    <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', color: theme.muted, letterSpacing: .8 }}>Presets</div>
+                    <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', letterSpacing: .8 }}>Presets</div>
                     <div style={styles.formHelper}>Choose a starting profile, then save when it looks right.</div>
                   </div>
                   <button type="button" onClick={() => handlePreview(null)} style={styles.tinyButton} disabled={themeLoading || !firmTheme}>Preview saved theme</button>
@@ -4426,9 +4447,10 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
                           display: 'grid',
                           gap: 9,
                           textAlign: 'left',
-                          border: `1px solid ${isPreviewed || isSelected ? theme.gold : theme.line}`,
+                          border: `1px solid ${isPreviewed || isSelected ? 'var(--lf-accent, #D4A34A)' : 'var(--lf-card-border, var(--lf-border, #E5E7EB))'}`,
                           borderRadius: 8,
-                          background: '#fff',
+                          background: 'var(--lf-card, #fff)',
+                          color: 'var(--lf-card-text, #101827)',
                           padding: 12,
                           cursor: 'pointer',
                           boxShadow: isPreviewed ? '0 8px 20px rgba(212,163,74,.20)' : theme.shadow,
@@ -4440,8 +4462,8 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
                           ))}
                         </span>
                         <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
-                          <strong style={{ color: theme.ink, fontSize: 13 }}>{presetLabel(preset.id)}</strong>
-                          <span style={{ fontSize: 11, fontWeight: 800, color: isPreviewed || isSelected ? theme.goldDark : theme.muted }}>{stateLabel}</span>
+                          <strong style={{ color: 'var(--lf-card-text, #101827)', fontSize: 13 }}>{presetLabel(preset.id)}</strong>
+                          <span style={{ fontSize: 11, fontWeight: 800, color: isPreviewed || isSelected ? 'var(--lf-accent, #D4A34A)' : 'var(--lf-card-muted, var(--lf-text-muted, #697386))' }}>{stateLabel}</span>
                         </span>
                       </button>
                     );
@@ -4449,8 +4471,8 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
                 </div>
               </div>
 
-              <details style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: '8px 12px', background: '#fff' }}>
-                <summary style={{ fontSize: 12, fontWeight: 800, color: theme.muted, cursor: 'pointer', padding: '4px 0', userSelect: 'none' }}>Advanced colours</summary>
+              <details style={{ border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 8, padding: '8px 12px', background: 'var(--lf-card, #fff)', color: 'var(--lf-card-text, #101827)' }}>
+                <summary style={{ fontSize: 12, fontWeight: 800, color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', cursor: 'pointer', padding: '4px 0', userSelect: 'none' }}>Advanced colours</summary>
                 <div style={{ ...styles.formGrid, marginTop: 12 }}>
                   {advancedThemeFields.map(([key, label]) => (
                     <Field key={key} label={label}>
@@ -4460,7 +4482,7 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
                 </div>
               </details>
 
-              <div style={{ border: `1px dashed ${theme.line}`, borderRadius: 8, padding: 12, color: theme.muted, fontSize: 12, background: '#fff' }}>
+              <div style={{ border: '1px dashed var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 8, padding: 12, color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', fontSize: 12, background: 'var(--lf-card, #fff)' }}>
                 Smart palette suggestions from logo or letterhead will be added later.
               </div>
 

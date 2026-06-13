@@ -68,10 +68,10 @@ function ReportBars({ rows, valueKey = 'count', formatValue = value => value, to
         return (
           <div key={row.label} style={{ display: 'grid', gap: 5 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline' }}>
-              <span style={{ fontSize: 12.5, fontWeight: 700, color: theme.ink, minWidth: 0, overflowWrap: 'anywhere' }}>{row.label}</span>
-              <span style={{ fontSize: 12, color: theme.muted, whiteSpace: 'nowrap' }}>{formatValue(rawValue, row)}</span>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--lf-card-text, #101827)', minWidth: 0, overflowWrap: 'anywhere' }}>{row.label}</span>
+              <span style={{ fontSize: 12, color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', whiteSpace: 'nowrap' }}>{formatValue(rawValue, row)}</span>
             </div>
-            <div style={{ height: 8, borderRadius: 999, background: '#EEF2F7', overflow: 'hidden' }} aria-hidden="true">
+            <div style={{ height: 8, borderRadius: 999, background: 'color-mix(in srgb, var(--lf-card-border, #E5E7EB) 70%, transparent)', overflow: 'hidden' }} aria-hidden="true">
               <div style={{ width, height: '100%', borderRadius: 999, background: fill }} />
             </div>
           </div>
@@ -224,7 +224,7 @@ export default function Reports({ data = {}, notify }) {
           <Empty title="No report data yet" text="Reports populate once matters, invoices, clients, or deadlines are recorded." />
         ) : (
           <div style={{ display: 'grid', gap: 14 }}>
-            <p style={{ margin: 0, color: theme.muted, maxWidth: 760 }}>
+            <p style={{ margin: 0, color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', maxWidth: 760 }}>
               Use these read-only summaries for partner review. Billed is the total invoice amount, collected is paid invoices, and outstanding is the unpaid balance.
             </p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: 12, minWidth: 0 }}>

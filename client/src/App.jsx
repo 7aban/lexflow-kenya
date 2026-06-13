@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconLayoutDashboard, IconChartLine, IconReportAnalytics, IconUsers, IconUserPlus, IconBriefcase, IconCheckbox, IconCalendarDue, IconFileInvoice, IconMessages, IconUsersGroup, IconSettings, IconListSearch, IconExternalLink, IconChevronDown, IconShield, IconSearch, IconBell, IconRefresh, IconTemplate, IconLink, IconX } from '@tabler/icons-react';
 import { api, API_BASE, AUTH_FAILURE_MESSAGE, clearSession, clearAllLexFlowStorage, fetchAvatarObjectUrl, getNotifications, markNotificationsRead, readSession, saveSession } from './lib/apiClient.js';
 import { globalSearch } from './api.js';
-import { defaultFirmSettings, styles, StyleTag, theme, loadAndApplyFirmTheme } from './theme.jsx';
+import { defaultFirmSettings, styles, StyleTag, theme, loadAndApplyFirmTheme, resolveReadableTheme } from './theme.jsx';
 import { Logo, Skeleton, Toast, Alert } from './components/ui.jsx';
 import LoginPage from './components/LoginPage.jsx';
 import ViewErrorBoundary from './components/ViewErrorBoundary.jsx';
@@ -247,15 +247,31 @@ export default function App() {
   const [isInstalled, setIsInstalled] = useState(false);
   const [installDismissed, setInstallDismissed] = useState(false);
   const [myAvatarUrl, setMyAvatarUrl] = useState(null);
+  const [themeOverride, setThemeOverride] = useState(null);
   const myAvatarUrlRef = useRef(null);
 
   const authenticated = Boolean(session?.token);
   const isAdmin = user?.role === 'admin';
   const canManage = ['admin', 'advocate'].includes(user?.role);
   const firm = data.firmSettings || defaultFirmSettings;
-  const resolvedFirmTheme = firm?.theme && typeof firm.theme === 'object' ? firm.theme : {};
+  const savedFirmTheme = firm?.theme && typeof firm.theme === 'object' ? firm.theme : null;
+  const resolvedFirmTheme = resolveReadableTheme(themeOverride || savedFirmTheme || {
+    primaryColor: firm.primaryColor || theme.navy800,
+    accentColor: firm.accentColor || theme.gold,
+    sidebarColor: firm.primaryColor || theme.navy800,
+    sidebarTextColor: '#FFFFFF',
+    buttonColor: firm.accentColor || theme.gold,
+    buttonTextColor: '#FFFFFF',
+    backgroundColor: '#F5F2EB',
+    surfaceColor: '#FFFFFF',
+    cardColor: '#FFFFFF',
+    headerColor: '#FFFFFF',
+    headerTextColor: theme.ink,
+    borderColor: theme.line,
+  });
   const themedFirm = {
     ...firm,
+    theme: resolvedFirmTheme,
     primaryColor: resolvedFirmTheme.primaryColor || firm.primaryColor || theme.navy800,
     accentColor: resolvedFirmTheme.accentColor || firm.accentColor || theme.gold,
   };
@@ -263,11 +279,16 @@ export default function App() {
     '--lf-primary': themedFirm.primaryColor,
     '--lf-accent': themedFirm.accentColor,
     '--lf-sidebar': resolvedFirmTheme.sidebarColor || themedFirm.primaryColor,
-    '--lf-sidebar-text': resolvedFirmTheme.sidebarTextColor || '#fff',
+    '--lf-sidebar-text': resolvedFirmTheme.sidebarTextColor || resolvedFirmTheme.onSidebarColor || '#fff',
+    '--lf-on-sidebar': resolvedFirmTheme.onSidebarColor || resolvedFirmTheme.sidebarTextColor || '#fff',
     '--lf-header-bg': resolvedFirmTheme.headerColor || '#fff',
-    '--lf-header-text': resolvedFirmTheme.headerTextColor || theme.ink,
+    '--lf-header-text': resolvedFirmTheme.headerTextColor || resolvedFirmTheme.onHeaderColor || theme.ink,
+    '--lf-on-header': resolvedFirmTheme.onHeaderColor || resolvedFirmTheme.headerTextColor || theme.ink,
     '--lf-button': resolvedFirmTheme.buttonColor || themedFirm.accentColor,
-    '--lf-button-text': resolvedFirmTheme.buttonTextColor || '#fff',
+    '--lf-button-text': resolvedFirmTheme.buttonTextColor || resolvedFirmTheme.onButtonColor || '#fff',
+    '--lf-on-button': resolvedFirmTheme.onButtonColor || resolvedFirmTheme.buttonTextColor || '#fff',
+    '--lf-on-primary': resolvedFirmTheme.onPrimaryColor || '#fff',
+    '--lf-on-accent': resolvedFirmTheme.onAccentColor || theme.ink,
     '--lf-background': resolvedFirmTheme.backgroundColor || '#F5F2EB',
     '--lf-surface': resolvedFirmTheme.surfaceColor || '#fff',
     '--lf-text': resolvedFirmTheme.textColor || theme.ink,
@@ -276,6 +297,8 @@ export default function App() {
     '--lf-link': resolvedFirmTheme.linkColor || themedFirm.accentColor,
     '--lf-card': resolvedFirmTheme.cardColor || '#fff',
     '--lf-card-border': resolvedFirmTheme.cardBorderColor || theme.line,
+    '--lf-card-text': resolvedFirmTheme.cardTextColor || resolvedFirmTheme.textColor || theme.ink,
+    '--lf-card-muted': resolvedFirmTheme.cardMutedColor || resolvedFirmTheme.textSecondaryColor || theme.muted,
     '--lf-success': resolvedFirmTheme.successColor || theme.green,
     '--lf-warning': resolvedFirmTheme.warningColor || theme.amber,
     '--lf-danger': resolvedFirmTheme.errorColor || theme.red,
@@ -405,6 +428,14 @@ export default function App() {
   useEffect(() => {
     if (authenticated) loadAndApplyFirmTheme();
   }, [authenticated]);
+
+  useEffect(() => {
+    function handleThemePreview(event) {
+      setThemeOverride(event.detail?.theme || null);
+    }
+    window.addEventListener('lexflow:theme-preview', handleThemePreview);
+    return () => window.removeEventListener('lexflow:theme-preview', handleThemePreview);
+  }, []);
 
   useEffect(() => {
     if (!authenticated || user?.role === 'client') return undefined;
@@ -582,6 +613,7 @@ export default function App() {
     setSession(null);
     setUser(null);
     setData(initialData);
+    setThemeOverride(null);
     clearAllLexFlowStorage();
   }
 
@@ -744,9 +776,9 @@ export default function App() {
             <input ref={searchInputRef} value={search} onChange={event => setSearch(event.target.value)} placeholder="Search matters, clients, documents..." aria-label="Search workspace" style={styles.topbarSearchInput} />
             <span className="lf-topbar-search-kbd" style={styles.topbarKbd} aria-hidden="true">Ctrl K</span>
             {searchOpen && (
-              <div style={{ position: 'absolute', right: 0, left: 0, top: 'calc(100% + 6px)', maxWidth: '100%', zIndex: 2200, background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, boxShadow: theme.shadowLift, padding: 0, maxHeight: 400, overflowY: 'auto', animation: 'lfDropIn .16s ease-out' }}>
+              <div style={{ position: 'absolute', right: 0, left: 0, top: 'calc(100% + 6px)', maxWidth: '100%', zIndex: 2200, background: 'var(--lf-card, #fff)', color: 'var(--lf-card-text, #101827)', border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 10, boxShadow: theme.shadowLift, padding: 0, maxHeight: 400, overflowY: 'auto', animation: 'lfDropIn .16s ease-out' }}>
                 {searchLoading ? (
-                  <div style={{ padding: 14, color: theme.muted, textAlign: 'center' }}>Searching...</div>
+                  <div style={{ padding: 14, color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', textAlign: 'center' }}>Searching...</div>
                 ) : searchResults.length ? (
                   searchResults.map(item => (
                     <button key={item.id} type="button" onClick={() => {
@@ -759,13 +791,13 @@ export default function App() {
                       if (item.type === 'Conversation') navigateToView('Communications', { matterId: item.matterId, clientId: '' });
                       setSearch(item.title || '');
                       setSearchOpen(false);
-                    }} style={{ width: '100%', textAlign: 'left', border: 0, borderTop: `1px solid ${theme.line}`, background: '#fff', padding: '10px 12px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    }} style={{ width: '100%', textAlign: 'left', border: 0, borderTop: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', background: 'var(--lf-card, #fff)', color: 'var(--lf-card-text, #101827)', padding: '10px 12px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 2 }}>
                       <strong style={{ fontSize: 13 }}>{item.type}: {item.title || '-'}</strong>
-                      <span style={{ color: theme.muted, fontSize: 11 }}>{item.subtitle || ''}</span>
+                      <span style={{ color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', fontSize: 11 }}>{item.subtitle || ''}</span>
                     </button>
                   ))
                 ) : (
-                  <div style={{ padding: 14, color: theme.muted, textAlign: 'center' }}>No results found.</div>
+                  <div style={{ padding: 14, color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', textAlign: 'center' }}>No results found.</div>
                 )}
               </div>
             )}
@@ -842,20 +874,20 @@ function NotificationBell({ notifications, open, setOpen, onOpen }) {
         {count > 0 && <span style={styles.iconBadgeDot} aria-hidden="true" />}
       </button>
       {open && (
-        <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 8px)', width: 360, maxWidth: 'calc(100vw - 32px)', zIndex: 2200, background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, boxShadow: theme.shadowLift, padding: 10, animation: 'lfDropIn .16s ease-out' }}>
+        <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 8px)', width: 360, maxWidth: 'calc(100vw - 32px)', zIndex: 2200, background: 'var(--lf-card, #fff)', color: 'var(--lf-card-text, #101827)', border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 10, boxShadow: theme.shadowLift, padding: 10, animation: 'lfDropIn .16s ease-out' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', padding: '4px 4px 10px' }}>
             <strong>Client activity</strong>
             <span style={styles.mutedText}>{count} unread</span>
           </div>
           {count ? notifications.map(item => (
-            <button key={item.id} type="button" onClick={() => onOpen(item)} style={{ width: '100%', textAlign: 'left', border: 0, borderTop: `1px solid ${theme.line}`, background: '#fff', padding: '10px 4px', cursor: 'pointer' }}>
+            <button key={item.id} type="button" onClick={() => onOpen(item)} style={{ width: '100%', textAlign: 'left', border: 0, borderTop: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', background: 'var(--lf-card, #fff)', color: 'var(--lf-card-text, #101827)', padding: '10px 4px', cursor: 'pointer' }}>
               <strong>{item.title || 'Client activity'}</strong>
-              <div style={{ color: theme.muted, fontSize: 12, marginTop: 3 }}>{item.clientName || 'Client'} / {item.matterTitle || item.reference || 'Matter'}</div>
-              <div style={{ color: theme.ink, fontSize: 12, marginTop: 5 }}>{item.body || '-'}</div>
-              <div style={{ color: theme.muted, fontSize: 11, marginTop: 5 }}>{item.createdAt ? new Date(item.createdAt).toLocaleString() : ''}</div>
+              <div style={{ color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', fontSize: 12, marginTop: 3 }}>{item.clientName || 'Client'} / {item.matterTitle || item.reference || 'Matter'}</div>
+              <div style={{ color: 'var(--lf-card-text, #101827)', fontSize: 12, marginTop: 5 }}>{item.body || '-'}</div>
+              <div style={{ color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', fontSize: 11, marginTop: 5 }}>{item.createdAt ? new Date(item.createdAt).toLocaleString() : ''}</div>
             </button>
           )) : (
-            <div style={{ padding: 14, color: theme.muted, textAlign: 'center' }}>No unread client messages or uploads.</div>
+            <div style={{ padding: 14, color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', textAlign: 'center' }}>No unread client messages or uploads.</div>
           )}
         </div>
       )}

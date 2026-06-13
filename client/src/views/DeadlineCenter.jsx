@@ -462,12 +462,12 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
     return list.map(row => [
     <div key={`${row.id}-due`} style={{ display: 'grid', gap: 2 }}>
       <strong>{row.dueDate || '-'}</strong>
-      <span style={{ color: theme.muted, fontSize: 12 }}>{dueLabel(row.dueDate)}</span>
+      <span style={{ color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', fontSize: 12 }}>{dueLabel(row.dueDate)}</span>
     </div>,
     <Badge key={`${row.id}-type`} tone={deadlineTone(row)}>{prettyType(row.type)}</Badge>,
     <div key={`${row.id}-title`} style={{ display: 'grid', gap: 3 }}>
       <strong>{row.title}</strong>
-      {row.notes && <span style={{ color: theme.muted, fontSize: 12 }}>{row.notes}</span>}
+      {row.notes && <span style={{ color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', fontSize: 12 }}>{row.notes}</span>}
     </div>,
     row.matterTitle || row.reference || row.clientName || '-',
     row.owner || '-',
@@ -494,7 +494,7 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
         <Stat label="Open items" value={summary.open} tone="navy" onClick={() => setActiveTab('all')} ariaLabel="Show all items" />
       </div>
 
-      <div style={{ border: `1px solid ${theme.line}`, borderRadius: 10, padding: 16, background: '#fff', boxShadow: theme.shadow, display: 'grid', gap: 12 }}>
+      <div style={{ border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 10, padding: 16, background: 'var(--lf-card, #fff)', color: 'var(--lf-card-text, #101827)', boxShadow: theme.shadow, display: 'grid', gap: 12 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <strong style={{ fontSize: 17 }}>Court Diary</strong>
@@ -508,37 +508,37 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
               {upcomingCourtItems.map((item, index) => {
                 const isToday = item.dueDate === todayIso;
                 return (
-                  <div key={item.id || `${item.dueDate}-${index}`} style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: 14, display: 'grid', gap: 8 }}>
+                  <div key={item.id || `${item.dueDate}-${index}`} style={{ border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 8, padding: 14, display: 'grid', gap: 8, background: 'color-mix(in srgb, var(--lf-card, #fff) 94%, var(--lf-background, #F8FAFC))' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       <Badge tone={isToday ? 'red' : 'blue'}>{isToday ? 'Today' : index === 0 ? 'Next court date' : dueLabel(item.dueDate)}</Badge>
-                      <span style={{ fontSize: 12, color: theme.muted, textAlign: 'right' }}>{item.dueDate}</span>
+                      <span style={{ fontSize: 12, color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', textAlign: 'right' }}>{item.dueDate}</span>
                     </div>
-                    <span style={{ fontSize: 14, fontWeight: 600, color: theme.ink }}>{item.title || 'Court appearance'}</span>
+                    <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--lf-card-text, #101827)' }}>{item.title || 'Court appearance'}</span>
                     {(item.matterTitle || item.clientName) && (
-                      <span style={{ fontSize: 12, color: theme.muted }}>
+                      <span style={{ fontSize: 12, color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))' }}>
                         {item.matterTitle ? `Matter: ${item.matterTitle}${item.clientName ? ` · ${item.clientName}` : ''}` : item.clientName}
                       </span>
                     )}
-                    {item.notes && <span style={{ fontSize: 12, color: theme.muted, fontStyle: 'italic' }}>{item.notes}</span>}
+                    {item.notes && <span style={{ fontSize: 12, color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', fontStyle: 'italic' }}>{item.notes}</span>}
                     {safeHttpUrl(item.meetingLink) && <MeetingLink event={{ ...item, date: item.dueDate }} dashboard />}
                   </div>
                 );
               })}
             </div>
             <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-              <span style={{ fontSize: 13, color: theme.muted }}><strong style={{ color: theme.ink }}>{weekCourtCount}</strong> court date{weekCourtCount !== 1 ? 's' : ''} next 7 days</span>
+              <span style={{ fontSize: 13, color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))' }}><strong style={{ color: 'var(--lf-card-text, #101827)' }}>{weekCourtCount}</strong> court date{weekCourtCount !== 1 ? 's' : ''} next 7 days</span>
               {todayCourtItems.length > 0 && <Badge tone="red">{todayCourtItems.length} today</Badge>}
             </div>
           </>
         ) : (
-          <span style={{ color: theme.muted, fontSize: 13 }}>No court appearances recorded.</span>
+          <span style={{ color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', fontSize: 13 }}>No court appearances recorded.</span>
         )}
       </div>
 
       <Card title="Compliance Guidance" hint="Rule-based prompts for deadlines, statutory filings and risk controls.">
         <div style={{ display: 'grid', gap: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-            <p style={{ margin: 0, color: theme.muted }}>Review filing, service, and limitation reminders when planning deadline work.</p>
+            <p style={{ margin: 0, color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))' }}>Review filing, service, and limitation reminders when planning deadline work.</p>
             <button
               type="button"
               style={styles.ghostButton}
@@ -554,7 +554,7 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
               {loading ? <Skeleton rows={2} /> : (
                 <div className="lf-deadline-guidance-cards" style={styles.statsGrid}>
                   {guidance.map(item => (
-                    <div key={item.title} className="lf-deadline-guidance-card" style={{ padding: 14, border: `1px solid ${theme.line}`, borderRadius: 10, background: '#fff', boxShadow: theme.shadow, transition: 'box-shadow .16s ease, transform .16s ease' }}>
+                    <div key={item.title} className="lf-deadline-guidance-card" style={{ padding: 14, border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 10, background: 'var(--lf-card, #fff)', color: 'var(--lf-card-text, #101827)', boxShadow: theme.shadow, transition: 'box-shadow .16s ease, transform .16s ease' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'start' }}>
                         <strong>{item.title}</strong>
                         <Badge tone={guidanceTone(item.tone)}>{item.tone}</Badge>

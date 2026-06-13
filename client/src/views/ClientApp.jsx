@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconLayoutDashboard, IconBriefcase, IconBell, IconFile, IconInvoice, IconUserCircle, IconCalendarEvent, IconEye, IconEyeOff } from '@tabler/icons-react';
 import { api, changePassword, deleteMyAvatar, downloadWithAuth, fileToDataUrl, getMyAvatar, uploadMyAvatar } from '../lib/apiClient.js';
-import { styles, StyleTag, theme, loadAndApplyFirmTheme } from '../theme.jsx';
+import { styles, StyleTag, theme, loadAndApplyFirmTheme, resolveReadableTheme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Field, kes, Logo, MeetingLink, safeHttpUrl, Skeleton, statusTone, Table, Toast, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText } from '../components/ui.jsx';
 import ClientChatWidget from '../components/ClientChatWidget.jsx';
 import MatterDocuments from '../components/MatterDocuments.jsx';
@@ -264,6 +264,39 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
   const matterInvoices = dashboard.invoices.filter(i => i.matterId === selected?.id);
   const matterEvents = dashboard.appearances.filter(a => a.matterId === selected?.id);
   const firmName = firm?.name || 'LexFlow Kenya';
+  const portalTheme = resolveReadableTheme(firm?.theme || {
+    primaryColor: firm?.primaryColor || theme.navy800,
+    accentColor: firm?.accentColor || theme.gold,
+    sidebarColor: firm?.primaryColor || theme.navy800,
+    buttonColor: firm?.accentColor || theme.gold,
+    headerColor: '#FFFFFF',
+    backgroundColor: '#F5F2EB',
+  });
+  const portalThemeVars = {
+    '--lf-primary': portalTheme.primaryColor,
+    '--lf-accent': portalTheme.accentColor,
+    '--lf-background': portalTheme.backgroundColor,
+    '--lf-surface': portalTheme.surfaceColor || portalTheme.cardColor,
+    '--lf-text': portalTheme.textColor,
+    '--lf-text-muted': portalTheme.textSecondaryColor,
+    '--lf-card': portalTheme.cardColor,
+    '--lf-card-text': portalTheme.cardTextColor,
+    '--lf-card-muted': portalTheme.cardMutedColor,
+    '--lf-card-border': portalTheme.cardBorderColor || portalTheme.borderColor,
+    '--lf-border': portalTheme.borderColor,
+    '--lf-link': portalTheme.linkColor || portalTheme.accentColor,
+    '--lf-sidebar': portalTheme.sidebarColor,
+    '--lf-sidebar-text': portalTheme.onSidebarColor,
+    '--lf-on-sidebar': portalTheme.onSidebarColor,
+    '--lf-header-bg': portalTheme.headerColor,
+    '--lf-header-text': portalTheme.onHeaderColor,
+    '--lf-on-header': portalTheme.onHeaderColor,
+    '--lf-button': portalTheme.buttonColor,
+    '--lf-button-text': portalTheme.onButtonColor,
+    '--lf-on-button': portalTheme.onButtonColor,
+    '--lf-on-primary': portalTheme.onPrimaryColor,
+    '--lf-on-accent': portalTheme.onAccentColor,
+  };
 
   useEffect(() => { load(); loadAndApplyFirmTheme(); }, []);
   useEffect(() => {
@@ -410,7 +443,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
   }
 
   return (
-    <div className="lf-app-shell" style={{ ...styles.shell, '--lf-primary': firm?.primaryColor || theme.navy800, '--lf-accent': firm?.accentColor || theme.gold, '--lf-sidebar': firm?.primaryColor || theme.navy800, '--lf-sidebar-text': '#fff', '--lf-header-bg': '#fff', '--lf-button': firm?.accentColor || theme.gold, '--lf-button-text': '#fff', '--lf-background': '#F5F2EB' }}>
+    <div className="lf-app-shell" style={{ ...styles.shell, ...portalThemeVars }}>
       <StyleTag />
       <style>{clientPortalChromeCss}</style>
       <aside className="lf-desktop-sidebar" style={styles.sidebar}>

@@ -6,6 +6,8 @@ const ALLOWED_THEME_KEYS = new Set([
   'primaryColor', 'accentColor', 'backgroundColor', 'surfaceColor',
   'textColor', 'textSecondaryColor', 'sidebarColor', 'sidebarTextColor',
   'buttonColor', 'buttonTextColor', 'borderColor', 'linkColor',
+  'onPrimaryColor', 'onAccentColor', 'onSidebarColor', 'onHeaderColor',
+  'onButtonColor', 'cardTextColor', 'cardMutedColor',
   'successColor', 'warningColor', 'errorColor', 'infoColor',
   'headerColor', 'headerTextColor', 'footerColor', 'footerTextColor',
   'cardColor', 'cardBorderColor', 'inputBorderColor', 'inputFocusBorderColor',
@@ -112,11 +114,62 @@ function relativeLuminance({ r, g, b }) {
 }
 
 function contrastRatio(hex1, hex2) {
-  const l1 = relativeLuminance(hexToRgb(hex1));
-  const l2 = relativeLuminance(hexToRgb(hex2));
+  const normalized1 = normalizeHexColor(hex1);
+  const normalized2 = normalizeHexColor(hex2);
+  if (!normalized1 || !normalized2) return 0;
+  const l1 = relativeLuminance(hexToRgb(normalized1));
+  const l2 = relativeLuminance(hexToRgb(normalized2));
   const lighter = Math.max(l1, l2);
   const darker = Math.min(l1, l2);
   return (lighter + 0.05) / (darker + 0.05);
+}
+
+function readableTextColor(background, preferred) {
+  const bg = normalizeHexColor(background);
+  const preferredColor = normalizeHexColor(preferred);
+  if (!bg) return preferredColor || '#101827';
+  if (preferredColor && contrastRatio(preferredColor, bg) >= MIN_CONTRAST_RATIO) {
+    return preferredColor;
+  }
+  return contrastRatio('#FFFFFF', bg) >= contrastRatio('#101827', bg) ? '#FFFFFF' : '#101827';
+}
+
+function resolveReadableTheme(input = {}) {
+  const primaryColor = input.primaryColor || '#0F1B33';
+  const accentColor = input.accentColor || '#D4A34A';
+  const backgroundColor = input.backgroundColor || '#F5F7FA';
+  const cardColor = input.cardColor || input.surfaceColor || '#FFFFFF';
+  const headerColor = input.headerColor || primaryColor;
+  const sidebarColor = input.sidebarColor || primaryColor;
+  const buttonColor = input.buttonColor || accentColor;
+  const onSidebarColor = readableTextColor(sidebarColor, input.onSidebarColor || input.sidebarTextColor || '#FFFFFF');
+  const onButtonColor = readableTextColor(buttonColor, input.onButtonColor || input.buttonTextColor || '#FFFFFF');
+  const onHeaderColor = readableTextColor(headerColor, input.onHeaderColor || input.headerTextColor || '#FFFFFF');
+
+  return {
+    ...input,
+    primaryColor,
+    accentColor,
+    backgroundColor,
+    surfaceColor: input.surfaceColor || cardColor,
+    cardColor,
+    headerColor,
+    sidebarColor,
+    buttonColor,
+    textColor: readableTextColor(backgroundColor, input.textColor || '#101827'),
+    textSecondaryColor: readableTextColor(backgroundColor, input.textSecondaryColor || '#697386'),
+    cardTextColor: readableTextColor(cardColor, input.cardTextColor || input.textColor || '#101827'),
+    cardMutedColor: readableTextColor(cardColor, input.cardMutedColor || input.textSecondaryColor || '#697386'),
+    onPrimaryColor: readableTextColor(primaryColor, input.onPrimaryColor || '#FFFFFF'),
+    onAccentColor: readableTextColor(accentColor, input.onAccentColor || '#101827'),
+    onSidebarColor,
+    onHeaderColor,
+    onButtonColor,
+    sidebarTextColor: onSidebarColor,
+    buttonTextColor: onButtonColor,
+    headerTextColor: onHeaderColor,
+    source: input.source || 'default',
+  };
 }
 
 function validateColorValue(value, key) {
@@ -204,6 +257,13 @@ function getDefaultContrastPairs(theme) {
     { fg: 'buttonTextColor', bg: 'buttonColor', label: 'Button Text/Button' },
     { fg: 'sidebarTextColor', bg: 'sidebarColor', label: 'Sidebar Text/Sidebar' },
     { fg: 'headerTextColor', bg: 'headerColor', label: 'Header Text/Header' },
+    { fg: 'cardTextColor', bg: 'cardColor', label: 'Card Text/Card' },
+    { fg: 'cardMutedColor', bg: 'cardColor', label: 'Card Muted Text/Card' },
+    { fg: 'onPrimaryColor', bg: 'primaryColor', label: 'Primary Text/Primary' },
+    { fg: 'onAccentColor', bg: 'accentColor', label: 'Accent Text/Accent' },
+    { fg: 'onSidebarColor', bg: 'sidebarColor', label: 'Sidebar On Color/Sidebar' },
+    { fg: 'onHeaderColor', bg: 'headerColor', label: 'Header On Color/Header' },
+    { fg: 'onButtonColor', bg: 'buttonColor', label: 'Button On Color/Button' },
     { fg: 'footerTextColor', bg: 'footerColor', label: 'Footer Text/Footer' },
     { fg: 'navActiveTextColor', bg: 'navActiveColor', label: 'Nav Active Text/Nav Active' },
     { fg: 'navTextColor', bg: 'navColor', label: 'Nav Text/Nav' },
@@ -237,6 +297,8 @@ module.exports = {
   hexToRgb,
   relativeLuminance,
   contrastRatio,
+  readableTextColor,
+  resolveReadableTheme,
   validateColorValue,
   validateThemeInput,
   checkContrastPairs,

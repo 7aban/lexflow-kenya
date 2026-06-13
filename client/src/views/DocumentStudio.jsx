@@ -47,8 +47,8 @@ function SignatureAssetPreview({ asset }) {
   }, [asset?.id]);
 
   return (
-    <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#FAFAF9', minHeight: 96, display: 'grid', placeItems: 'center', padding: 12, overflow: 'hidden' }}>
-      {url ? <img src={url} alt={`${asset.label || 'Signature asset'} preview`} style={{ maxWidth: '100%', maxHeight: 120, objectFit: 'contain' }} /> : <span style={{ fontSize: 12, color: theme.muted }}>No image selected</span>}
+    <div style={{ border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 8, background: 'color-mix(in srgb, var(--lf-card, #fff) 88%, var(--lf-background, #FAFAF9))', minHeight: 96, display: 'grid', placeItems: 'center', padding: 12, overflow: 'hidden' }}>
+      {url ? <img src={url} alt={`${asset.label || 'Signature asset'} preview`} style={{ maxWidth: '100%', maxHeight: 120, objectFit: 'contain' }} /> : <span style={{ fontSize: 12, color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))' }}>No image selected</span>}
     </div>
   );
 }
@@ -1501,15 +1501,18 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
   const canBundle = selectedBundleDocumentIds.length >= 2 && selectedBundleDocumentIds.length <= 10 && !bundleLoading && !bundleDocsLoading && !!bundleMatterId;
   const canBundleSave = selectedBundleDocumentIds.length >= 2 && selectedBundleDocumentIds.length <= 10 && !bundleSaveLoading && !bundleDocsLoading && !!bundleMatterId;
   const activeBundleOptionCount = [bundlePaginate, bundleIncludeIndex, bundleIncludeCover, bundleIncludeDividers, bundleIncludeBookmarks, bundleIncludeCertificate].filter(Boolean).length;
-  const bundleSectionLabelStyle = { fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', color: theme.muted };
-  const bundleHelperStyle = { border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 };
+  const themedPanelStyle = { border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 8, background: 'var(--lf-card, #fff)', color: 'var(--lf-card-text, #101827)' };
+  const mutedPanelTextStyle = { color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))' };
+  const bundleSectionLabelStyle = { fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', ...mutedPanelTextStyle };
+  const bundleHelperStyle = { border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 6, background: 'color-mix(in srgb, var(--lf-card, #fff) 88%, var(--lf-background, #FAFAF9))', padding: '8px 12px', fontSize: 12, ...mutedPanelTextStyle, lineHeight: 1.5 };
   const session = readSession();
   const currentRole = session?.user?.role || '';
   const currentUserId = session?.user?.id || session?.user?.userId || '';
   const isAdmin = currentRole === 'admin';
   const personalSignatureAssets = signatureAssets.filter(asset => asset.ownerType === 'user' && asset.assetType === 'signature' && (!currentUserId || asset.ownerId === currentUserId));
   const firmStampAssets = signatureAssets.filter(asset => asset.ownerType === 'firm' && asset.assetType === 'stamp');
-  const signaturePanelStyle = { border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 14, display: 'grid', gap: 12, minWidth: 0 };
+  const commandCardStyle = { ...themedPanelStyle, padding: '14px 16px', display: 'grid', gap: 10, alignContent: 'start', minWidth: 0 };
+  const signaturePanelStyle = { ...themedPanelStyle, padding: 14, display: 'grid', gap: 12, minWidth: 0 };
 
   function renderSignatureAssetRows(assets, canManage) {
     if (signatureAssetsLoading) return <Skeleton />;
@@ -1517,13 +1520,13 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     return (
       <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
         {assets.map(asset => (
-          <div key={asset.id} style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: 12, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: 12, alignItems: 'start', minWidth: 0 }}>
+          <div key={asset.id} style={{ ...themedPanelStyle, padding: 12, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: 12, alignItems: 'start', minWidth: 0 }}>
             <SignatureAssetPreview asset={asset} />
             <div style={{ display: 'grid', gap: 8, minWidth: 0 }}>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                <strong style={{ fontSize: 13, color: theme.ink, overflowWrap: 'anywhere' }}>{asset.label}</strong>
+                <strong style={{ fontSize: 13, color: 'var(--lf-card-text, #101827)', overflowWrap: 'anywhere' }}>{asset.label}</strong>
                 {asset.isDefault && <Badge tone="green">Default</Badge>}
-                <span style={{ fontSize: 12, color: theme.muted }}>{asset.mimeType}{asset.size ? ` / ${formatAssetSize(asset.size)}` : ''}</span>
+                <span style={{ fontSize: 12, ...mutedPanelTextStyle }}>{asset.mimeType}{asset.size ? ` / ${formatAssetSize(asset.size)}` : ''}</span>
               </div>
               {canManage ? (
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1548,7 +1551,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                   </button>
                 </div>
               ) : (
-                <span style={{ fontSize: 12, color: theme.muted }}>Managed by firm administrators.</span>
+                <span style={{ fontSize: 12, ...mutedPanelTextStyle }}>Managed by firm administrators.</span>
               )}
             </div>
           </div>
@@ -1561,29 +1564,29 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
       <Card title="What do you want to do?" hint="Choose the existing workspace for the document task.">
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
-          <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: '14px 16px', display: 'grid', gap: 10, alignContent: 'start', minWidth: 0 }}>
-            <strong style={{ fontSize: 14, color: theme.ink }}>Work on matter documents</strong>
-            <span style={{ fontSize: 13, color: theme.muted, lineHeight: 1.5 }}>Upload, organise, request, and manage documents inside a matter.</span>
+          <div style={commandCardStyle}>
+            <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Work on matter documents</strong>
+            <span style={{ fontSize: 13, ...mutedPanelTextStyle, lineHeight: 1.5 }}>Upload, organise, request, and manage documents inside a matter.</span>
             <button type="button" style={{ ...styles.ghostButton, justifySelf: 'start', fontSize: 12, padding: '5px 12px' }} onClick={openMatterDocuments}>Open matter documents</button>
           </div>
-          <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: '14px 16px', display: 'grid', gap: 10, alignContent: 'start', minWidth: 0 }}>
-            <strong style={{ fontSize: 14, color: theme.ink }}>Create a court bundle</strong>
-            <span style={{ fontSize: 13, color: theme.muted, lineHeight: 1.5 }}>Build indexed, paginated court bundles from matter PDFs.</span>
+          <div style={commandCardStyle}>
+            <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Create a court bundle</strong>
+            <span style={{ fontSize: 13, ...mutedPanelTextStyle, lineHeight: 1.5 }}>Build indexed, paginated court bundles from matter PDFs.</span>
             <button type="button" style={{ ...styles.ghostButton, justifySelf: 'start', fontSize: 12, padding: '5px 12px' }} onClick={() => openTools('bundle')}>Open court bundle tool</button>
           </div>
-          <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: '14px 16px', display: 'grid', gap: 10, alignContent: 'start', minWidth: 0 }}>
-            <strong style={{ fontSize: 14, color: theme.ink }}>PDF tools</strong>
-            <span style={{ fontSize: 13, color: theme.muted, lineHeight: 1.5 }}>Merge, split, rotate, extract, delete pages, paginate, and convert images to PDF.</span>
+          <div style={commandCardStyle}>
+            <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>PDF tools</strong>
+            <span style={{ fontSize: 13, ...mutedPanelTextStyle, lineHeight: 1.5 }}>Merge, split, rotate, extract, delete pages, paginate, and convert images to PDF.</span>
             <button type="button" style={{ ...styles.ghostButton, justifySelf: 'start', fontSize: 12, padding: '5px 12px' }} onClick={() => openTools('merge')}>Open PDF tools</button>
           </div>
-          <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: '14px 16px', display: 'grid', gap: 10, alignContent: 'start', minWidth: 0 }}>
-            <strong style={{ fontSize: 14, color: theme.ink }}>Signatures and stamps</strong>
-            <span style={{ fontSize: 13, color: theme.muted, lineHeight: 1.5 }}>Upload reusable signature or stamp images, then place them on matter PDFs.</span>
+          <div style={commandCardStyle}>
+            <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Signatures and stamps</strong>
+            <span style={{ fontSize: 13, ...mutedPanelTextStyle, lineHeight: 1.5 }}>Upload reusable signature or stamp images, then place them on matter PDFs.</span>
             <button type="button" style={{ ...styles.ghostButton, justifySelf: 'start', fontSize: 12, padding: '5px 12px' }} onClick={() => scrollToRef(signatureSectionRef)}>Manage assets</button>
           </div>
-          <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: '14px 16px', display: 'grid', gap: 10, alignContent: 'start', minWidth: 0 }}>
-            <strong style={{ fontSize: 14, color: theme.ink }}>Templates</strong>
-            <span style={{ fontSize: 13, color: theme.muted, lineHeight: 1.5 }}>Use existing document templates and preview them against a selected matter.</span>
+          <div style={commandCardStyle}>
+            <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Templates</strong>
+            <span style={{ fontSize: 13, ...mutedPanelTextStyle, lineHeight: 1.5 }}>Use existing document templates and preview them against a selected matter.</span>
             <button type="button" style={{ ...styles.ghostButton, justifySelf: 'start', fontSize: 12, padding: '5px 12px' }} onClick={() => scrollToRef(templatesSectionRef)}>Open templates</button>
           </div>
         </div>
@@ -1595,8 +1598,8 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
           <div style={signaturePanelStyle}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
-                <strong style={{ fontSize: 14, color: theme.ink }}>Visual signature image</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Personal reusable image asset</span>
+                <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Visual signature image</strong>
+                <span style={{ fontSize: 12, ...mutedPanelTextStyle }}>Personal reusable image asset</span>
               </div>
               <label style={{ ...styles.primaryButton, opacity: signatureAssetBusy === 'upload-signature' ? 0.65 : 1, cursor: signatureAssetBusy === 'upload-signature' ? 'not-allowed' : 'pointer' }}>
                 {signatureAssetBusy === 'upload-signature' ? 'Uploading...' : 'Upload signature image'}
@@ -1609,8 +1612,8 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
           <div style={signaturePanelStyle}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
-                <strong style={{ fontSize: 14, color: theme.ink }}>Firm stamp image</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Firm reusable image asset</span>
+                <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Firm stamp image</strong>
+                <span style={{ fontSize: 12, ...mutedPanelTextStyle }}>Firm reusable image asset</span>
               </div>
               {isAdmin && (
                 <label style={{ ...styles.primaryButton, opacity: signatureAssetBusy === 'upload-stamp' ? 0.65 : 1, cursor: signatureAssetBusy === 'upload-stamp' ? 'not-allowed' : 'pointer' }}>
