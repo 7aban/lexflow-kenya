@@ -222,6 +222,215 @@ function matchesLexFlowResetDefault(draft = {}) {
       || normalizeHexForCompare(draft.backgroundColor) === normalizeHexForCompare(LEXFLOW_DEFAULT_THEME.backgroundColor));
 }
 
+const SMART_PALETTE_ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+const SMART_PALETTE_FAILURE_MESSAGE = 'Could not read enough colour from this image. Try a clearer logo or sample.';
+
+function smartPaletteFileTypeAllowed(file) {
+  const type = (file?.type || '').toLowerCase();
+  if (type) return SMART_PALETTE_ALLOWED_TYPES.includes(type);
+  return /\.(png|jpe?g|webp)$/i.test(file?.name || '');
+}
+
+function clampChannel(value) {
+  return Math.max(0, Math.min(255, Math.round(value)));
+}
+
+function rgbToHexColor({ r, g, b }) {
+  return `#${[r, g, b].map(value => clampChannel(value).toString(16).padStart(2, '0')).join('')}`.toUpperCase();
+}
+
+function rgbFeatures({ r, g, b }) {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+  const lightness = (max + min) / 510;
+  const saturation = max === 0 ? 0 : delta / max;
+  const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+  return { saturation, lightness, brightness, delta };
+}
+
+function smartColorDistance(a, b) {
+  if (!a || !b) return 0;
+  const ar = a.rgb || a;
+  const br = b.rgb || b;
+  return Math.sqrt((ar.r - br.r) ** 2 + (ar.g - br.g) ** 2 + (ar.b - br.b) ** 2);
+}
+
+function isIgnoredPalettePixel(r, g, b, alpha) {
+  if (alpha < 128) return true;
+  const { saturation, brightness, delta } = rgbFeatures({ r, g, b });
+  if (brightness > 246 && saturation < 0.2) return true;
+  if (brightness < 18) return true;
+  if (delta < 8 && (brightness > 232 || brightness < 36)) return true;
+  return false;
+}
+
+function quantizedPaletteKey(r, g, b) {
+  const bucket = value => clampChannel(Math.round(value / 24) * 24);
+  return `${bucket(r)}-${bucket(g)}-${bucket(b)}`;
+}
+
+function dominantPaletteColorsFromImageData(imageData) {
+  const buckets = new Map();
+  const { data } = imageData;
+  let usablePixels = 0;
+  for (let index = 0; index < data.length; index += 4) {
+    const r = data[index];
+    const g = data[index + 1];
+    const b = data[index + 2];
+    const alpha = data[index + 3];
+    if (isIgnoredPalettePixel(r, g, b, alpha)) continue;
+    const key = quantizedPaletteKey(r, g, b);
+    const weight = Math.max(0.3, alpha / 255);
+    const bucket = buckets.get(key) || { count: 0, r: 0, g: 0, b: 0 };
+    bucket.count += weight;
+    bucket.r += r * weight;
+    bucket.g += g * weight;
+    bucket.b += b * weight;
+    buckets.set(key, bucket);
+    usablePixels += 1;
+  }
+
+  if (usablePixels < 18) return [];
+
+  const colors = [...buckets.values()].map(bucket => {
+    const rgb = {
+      r: bucket.r / bucket.count,
+      g: bucket.g / bucket.count,
+      b: bucket.b / bucket.count,
+    };
+    const hex = rgbToHexColor(rgb);
+    const features = rgbFeatures(rgb);
+    return {
+      hex,
+      rgb,
+      count: bucket.count,
+      luminance: previewLuminance(hex),
+      ...features,
+    };
+  }).sort((a, b) => (b.count * (0.75 + b.saturation)) - (a.count * (0.75 + a.saturation)));
+
+  const unique = [];
+  colors.forEach(color => {
+    if (unique.length >= 10) return;
+    if (unique.every(existing => smartColorDistance(existing, color) >= 34)) unique.push(color);
+  });
+  return unique;
+}
+
+function chooseSmartPrimaryColor(colors) {
+  const candidates = colors.filter(color => color.luminance < 0.56);
+  const scored = (candidates.length ? candidates : colors).map(color => ({
+    color,
+    score: color.count * (1.25 - Math.min(color.luminance, 0.9)) * (0.72 + Math.min(color.saturation, 0.9)),
+  }));
+  scored.sort((a, b) => b.score - a.score);
+  return scored[0]?.color || null;
+}
+
+function chooseSmartAccentColor(colors, primary, used = []) {
+  const candidates = colors.filter(color => (
+    color.hex !== primary?.hex
+    && !used.includes(color.hex)
+    && smartColorDistance(color, primary) >= 46
+  ));
+  const scored = (candidates.length ? candidates : colors.filter(color => color.hex !== primary?.hex)).map(color => ({
+    color,
+    score: color.count * (0.85 + color.saturation) * (0.8 + Math.min(previewContrastRatio(color.hex, primary?.hex), 5) / 5),
+  }));
+  scored.sort((a, b) => b.score - a.score);
+  return scored[0]?.color || null;
+}
+
+function smartPaletteTheme(primaryColor, accentColor) {
+  const primaryText = safePreviewText(primaryColor, '#FFFFFF');
+  const accentText = safePreviewText(accentColor, theme.ink);
+  return {
+    source: 'manual',
+    primaryColor,
+    accentColor,
+    sidebarColor: primaryColor,
+    sidebarTextColor: primaryText,
+    onSidebarColor: primaryText,
+    headerColor: primaryColor,
+    headerTextColor: primaryText,
+    onHeaderColor: primaryText,
+    buttonColor: accentColor,
+    buttonTextColor: accentText,
+    onButtonColor: accentText,
+    linkColor: accentColor,
+    onPrimaryColor: primaryText,
+    onAccentColor: accentText,
+  };
+}
+
+function uniqueSmartPaletteSuggestions(suggestions) {
+  const seen = new Set();
+  return suggestions.filter(suggestion => {
+    const key = `${normalizeHexForCompare(suggestion.primaryColor)}-${normalizeHexForCompare(suggestion.accentColor)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 3);
+}
+
+function buildSmartPaletteSuggestions(colors) {
+  const primary = chooseSmartPrimaryColor(colors);
+  if (!primary) return [];
+  const accent = chooseSmartAccentColor(colors, primary);
+  if (!accent) return [];
+  const darkest = [...colors].sort((a, b) => a.luminance - b.luminance)[0] || primary;
+  const vivid = [...colors].sort((a, b) => (b.saturation * b.count) - (a.saturation * a.count))[0] || accent;
+  const highContrastAccent = [...colors]
+    .filter(color => color.hex !== darkest.hex && smartColorDistance(color, darkest) >= 46)
+    .sort((a, b) => previewContrastRatio(b.hex, darkest.hex) - previewContrastRatio(a.hex, darkest.hex))[0] || accent;
+  const formalAccent = chooseSmartAccentColor(colors, darkest, [accent.hex]) || accent;
+
+  return uniqueSmartPaletteSuggestions([
+    { id: 'balanced', label: 'Balanced', primaryColor: primary.hex, accentColor: accent.hex },
+    { id: 'formal', label: 'Formal', primaryColor: darkest.hex, accentColor: formalAccent.hex },
+    { id: 'high-contrast', label: 'High contrast', primaryColor: darkest.hex, accentColor: highContrastAccent.hex || vivid.hex },
+  ]).map(suggestion => ({
+    ...suggestion,
+    id: `${suggestion.id}-${suggestion.primaryColor}-${suggestion.accentColor}`,
+    theme: smartPaletteTheme(suggestion.primaryColor, suggestion.accentColor),
+  }));
+}
+
+function loadSmartPaletteImage(source) {
+  return new Promise((resolve, reject) => {
+    if (!source || typeof source !== 'string') {
+      reject(new Error(SMART_PALETTE_FAILURE_MESSAGE));
+      return;
+    }
+    const image = new Image();
+    image.decoding = 'async';
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error(SMART_PALETTE_FAILURE_MESSAGE));
+    if (!source.startsWith('data:') && !source.startsWith('blob:')) image.crossOrigin = 'anonymous';
+    image.src = source;
+  });
+}
+
+async function extractSmartPaletteSuggestions(source) {
+  const image = await loadSmartPaletteImage(source);
+  const naturalWidth = image.naturalWidth || image.width;
+  const naturalHeight = image.naturalHeight || image.height;
+  if (!naturalWidth || !naturalHeight) throw new Error(SMART_PALETTE_FAILURE_MESSAGE);
+  const maxSide = 112;
+  const scale = Math.min(1, maxSide / Math.max(naturalWidth, naturalHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(naturalHeight * scale));
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  if (!context) throw new Error(SMART_PALETTE_FAILURE_MESSAGE);
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  const colors = dominantPaletteColorsFromImageData(context.getImageData(0, 0, canvas.width, canvas.height));
+  const suggestions = buildSmartPaletteSuggestions(colors);
+  if (!suggestions.length) throw new Error(SMART_PALETTE_FAILURE_MESSAGE);
+  return suggestions;
+}
+
 // PRODUCT-15I: staff payment-proof queue endpoint (optional status filter; 'All' omits it).
 const paymentProofsPath = status => `/payment-proofs${status && status !== 'All' ? `?status=${encodeURIComponent(status)}` : ''}`;
 
@@ -4076,6 +4285,13 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
   const [previewPresetId, setPreviewPresetId] = useState('');
   const [themeError, setThemeError] = useState('');
   const [settingsSection, setSettingsSection] = useState('identity');
+  const [smartSample, setSmartSample] = useState(null);
+  const [smartPaletteBusy, setSmartPaletteBusy] = useState(false);
+  const [smartPaletteMessage, setSmartPaletteMessage] = useState('');
+  const [smartPaletteSource, setSmartPaletteSource] = useState('');
+  const [smartSuggestions, setSmartSuggestions] = useState([]);
+  const [activeSmartSuggestionId, setActiveSmartSuggestionId] = useState('');
+  const smartSampleInputRef = useRef(null);
 
   useEffect(() => setForm({ ...defaultFirmSettings, ...settings }), [settings]);
   useEffect(() => { loadNotices(); }, []);
@@ -4093,6 +4309,9 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
     const file = event.target.files?.[0];
     if (!file) return;
     setForm({ ...form, logo: await fileToDataUrl(file) });
+    setSmartSuggestions([]);
+    setActiveSmartSuggestionId('');
+    setSmartPaletteMessage('');
   }
 
   function chooseNoticeFiles(event) {
@@ -4138,6 +4357,7 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
   }
 
   async function handlePreview(presetId) {
+    setActiveSmartSuggestionId('');
     if (!presetId) {
       const savedTheme = completeBrandTheme(firmTheme || settings.theme || {}, form);
       setThemePreview(savedTheme);
@@ -4176,6 +4396,7 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
   function updateThemeDraft(nextValues) {
     setThemeError('');
     setPreviewPresetId('');
+    setActiveSmartSuggestionId('');
     const formPatch = {
       ...(nextValues.primaryColor ? { primaryColor: nextValues.primaryColor } : {}),
       ...(nextValues.accentColor ? { accentColor: nextValues.accentColor } : {}),
@@ -4191,6 +4412,75 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
     const next = completeBrandTheme({ ...base, ...nextValues, source: 'manual' }, formForTheme);
     setThemePreview(next);
     applyFirmTheme(next);
+  }
+
+  function clearSmartPaletteState() {
+    setSmartSample(null);
+    setSmartSuggestions([]);
+    setSmartPaletteMessage('');
+    setSmartPaletteSource('');
+    setActiveSmartSuggestionId('');
+    if (smartSampleInputRef.current) smartSampleInputRef.current.value = '';
+  }
+
+  async function chooseSmartSample(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!smartPaletteFileTypeAllowed(file)) {
+      setSmartPaletteMessage('Use a PNG, JPEG, or WebP sample image.');
+      event.target.value = '';
+      return;
+    }
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      setSmartSample({ name: file.name || 'Brand sample', dataUrl, type: file.type || '' });
+      setSmartSuggestions([]);
+      setSmartPaletteSource('');
+      setActiveSmartSuggestionId('');
+      setSmartPaletteMessage('Sample ready. Generate suggestions when you are ready.');
+    } catch {
+      setSmartPaletteMessage(SMART_PALETTE_FAILURE_MESSAGE);
+    } finally {
+      event.target.value = '';
+    }
+  }
+
+  async function generateSmartPalette(sourceKind) {
+    const fromLogo = sourceKind === 'logo';
+    const source = fromLogo ? form.logo : smartSample?.dataUrl;
+    if (!source) {
+      setSmartPaletteMessage(fromLogo ? 'Upload a logo first, or use a sample image.' : 'Upload a sample image first.');
+      return;
+    }
+    setSmartPaletteBusy(true);
+    setSmartPaletteMessage('');
+    setSmartPaletteSource(fromLogo ? 'current logo' : (smartSample?.name || 'sample image'));
+    setActiveSmartSuggestionId('');
+    try {
+      const suggestions = await extractSmartPaletteSuggestions(source);
+      setSmartSuggestions(suggestions);
+      setSmartPaletteMessage(`${suggestions.length} palette suggestion${suggestions.length === 1 ? '' : 's'} ready.`);
+    } catch {
+      setSmartSuggestions([]);
+      setSmartPaletteMessage(SMART_PALETTE_FAILURE_MESSAGE);
+    } finally {
+      setSmartPaletteBusy(false);
+    }
+  }
+
+  function applySmartPaletteSuggestion(suggestion) {
+    const nextForm = {
+      ...form,
+      primaryColor: suggestion.primaryColor,
+      accentColor: suggestion.accentColor,
+    };
+    const nextTheme = completeBrandTheme({ ...suggestion.theme, source: 'manual' }, nextForm);
+    setThemeError('');
+    setPreviewPresetId('');
+    setActiveSmartSuggestionId(suggestion.id);
+    setForm(nextForm);
+    setThemePreview(nextTheme);
+    applyFirmTheme(nextTheme);
   }
 
   function handleWorkspacePreview() {
@@ -4213,6 +4503,7 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
       }
       setThemePreview(null);
       setPreviewPresetId('');
+      setActiveSmartSuggestionId('');
       setForm(current => ({ ...current, primaryColor: draft.primaryColor, accentColor: draft.accentColor }));
       applyFirmTheme(completeBrandTheme(savedTheme, { ...form, primaryColor: draft.primaryColor, accentColor: draft.accentColor }));
       await reload();
@@ -4229,6 +4520,7 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
       setFirmTheme(null);
       setThemePreview(null);
       setPreviewPresetId('');
+      clearSmartPaletteState();
       clearFirmTheme();
       if (data?.theme) {
         setFirmTheme(data.theme);
@@ -4296,6 +4588,7 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
   const savedThemeForPreset = completeBrandTheme(firmTheme || settings.theme || {}, settings);
   const matchedSavedPresetId = presets.find(preset => presetMatchesTheme(preset, savedThemeForPreset))?.id || '';
   const savedPresetId = matchedSavedPresetId || (matchesLexFlowResetDefault(savedThemeForPreset) ? 'lexflow-default' : '');
+  const hasCustomThemePreview = Boolean(themePreview) && !previewPresetId;
   const advancedThemeFields = [
     ['backgroundColor', 'Background'],
     ['surfaceColor', 'Surface'],
@@ -4434,8 +4727,9 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 10 }}>
                   {presets.map(preset => {
                     const isPreviewed = previewPresetId === preset.id;
-                    const isSelected = !previewPresetId && savedPresetId === preset.id;
-                    const stateLabel = isPreviewed ? 'Previewing' : isSelected ? 'Saved' : 'Available';
+                    const isSaved = savedPresetId === preset.id;
+                    const isSelected = !hasCustomThemePreview && !previewPresetId && isSaved;
+                    const stateLabel = isPreviewed ? 'Previewing' : isSaved ? 'Saved' : 'Available';
                     return (
                       <button
                         key={preset.id}
@@ -4483,7 +4777,69 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
               </details>
 
               <div style={{ border: '1px dashed var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 8, padding: 12, color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', fontSize: 12, background: 'var(--lf-card, #fff)' }}>
-                Smart palette suggestions from logo or letterhead will be added later.
+                <div style={{ display: 'grid', gap: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: 12, flexWrap: 'wrap' }}>
+                    <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
+                      <strong style={{ color: 'var(--lf-card-text, #101827)', fontSize: 14 }}>Smart palette suggestions</strong>
+                      <span>Use your firm logo or a sample brand image to suggest colours for the workspace.</span>
+                    </div>
+                    {activeSmartSuggestionId ? <span style={{ ...styles.badge, background: 'color-mix(in srgb, var(--lf-accent, #D4A34A) 16%, #fff)', color: 'var(--lf-card-text, #101827)' }}>Previewing custom</span> : null}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <button type="button" style={styles.tinyButton} onClick={() => generateSmartPalette('logo')} disabled={smartPaletteBusy || !form.logo}>
+                      {smartPaletteBusy && smartPaletteSource === 'current logo' ? 'Generating...' : 'Suggest from current logo'}
+                    </button>
+                    <button type="button" style={styles.tinyButton} onClick={() => smartSampleInputRef.current?.click()} disabled={smartPaletteBusy}>Upload sample image</button>
+                    <button type="button" style={smartSample ? styles.primaryButton : styles.tinyButton} onClick={() => generateSmartPalette('sample')} disabled={smartPaletteBusy || !smartSample}>
+                      {smartPaletteBusy && smartPaletteSource !== 'current logo' ? 'Generating...' : 'Generate suggestions'}
+                    </button>
+                    <input ref={smartSampleInputRef} type="file" accept={SMART_PALETTE_ALLOWED_TYPES.join(',')} onChange={chooseSmartSample} style={{ display: 'none' }} />
+                  </div>
+
+                  {!form.logo ? <span>Upload a logo first, or use a sample image.</span> : null}
+
+                  {smartSample ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, padding: 8, border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 8, background: 'color-mix(in srgb, var(--lf-card, #fff) 92%, var(--lf-background, #F8FAFC))' }}>
+                      <img src={smartSample.dataUrl} alt="" style={{ width: 42, height: 42, borderRadius: 6, objectFit: 'cover', border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', flexShrink: 0 }} />
+                      <span style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--lf-card-text, #101827)', fontWeight: 700 }}>{smartSample.name}</span>
+                      <button type="button" style={styles.tinyButton} onClick={clearSmartPaletteState}>Clear</button>
+                    </div>
+                  ) : null}
+
+                  {smartPaletteMessage ? (
+                    <div role="status" style={{ color: smartPaletteMessage === SMART_PALETTE_FAILURE_MESSAGE ? theme.red : 'var(--lf-card-muted, var(--lf-text-muted, #697386))', fontWeight: smartPaletteMessage === SMART_PALETTE_FAILURE_MESSAGE ? 700 : 600 }}>
+                      {smartPaletteMessage}
+                    </div>
+                  ) : null}
+
+                  {smartSuggestions.length ? (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 10 }}>
+                      {smartSuggestions.map(suggestion => {
+                        const active = activeSmartSuggestionId === suggestion.id;
+                        return (
+                          <div key={suggestion.id} style={{ display: 'grid', gap: 10, border: `1px solid ${active ? 'var(--lf-accent, #D4A34A)' : 'var(--lf-card-border, var(--lf-border, #E5E7EB))'}`, borderRadius: 8, background: 'var(--lf-card, #fff)', padding: 12, boxShadow: active ? '0 8px 18px rgba(212,163,74,.18)' : theme.shadow }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                              <span aria-label={`Primary ${suggestion.primaryColor}`} style={{ height: 34, borderRadius: 6, background: suggestion.primaryColor, border: '1px solid rgba(0,0,0,.10)' }} />
+                              <span aria-label={`Accent ${suggestion.accentColor}`} style={{ height: 34, borderRadius: 6, background: suggestion.accentColor, border: '1px solid rgba(0,0,0,.10)' }} />
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                              <strong style={{ color: 'var(--lf-card-text, #101827)', fontSize: 13 }}>{suggestion.label}</strong>
+                              {active ? <span style={{ color: 'var(--lf-accent, #D4A34A)', fontWeight: 800, fontSize: 11 }}>Previewing</span> : null}
+                            </div>
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', fontSize: 11, fontWeight: 700 }}>
+                              <span>{suggestion.primaryColor}</span>
+                              <span>{suggestion.accentColor}</span>
+                            </div>
+                            <button type="button" style={styles.tinyButton} onClick={() => applySmartPaletteSuggestion(suggestion)}>Use this palette</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+
+                  <span>Smart suggestions are a starting point. Review contrast before saving.</span>
+                </div>
               </div>
 
               {themeError && <div style={{ ...styles.alert, ...(themeError.startsWith('Preview warnings') ? {} : styles.alertDanger), padding: 10, borderRadius: 6 }}>{themeError}</div>}
