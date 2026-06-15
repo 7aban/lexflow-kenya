@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconLayoutDashboard, IconBriefcase, IconBell, IconFile, IconInvoice, IconUserCircle, IconCalendarEvent, IconEye, IconEyeOff } from '@tabler/icons-react';
 import { api, changePassword, deleteMyAvatar, downloadWithAuth, fileToDataUrl, getMyAvatar, uploadMyAvatar } from '../lib/apiClient.js';
-import { styles, StyleTag, theme, loadAndApplyFirmTheme, resolveReadableTheme } from '../theme.jsx';
+import { defaultFirmSettings, styles, StyleTag, theme, loadAndApplyFirmTheme, resolveReadableTheme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Field, kes, Logo, MeetingLink, safeHttpUrl, Skeleton, statusTone, Table, Toast, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText } from '../components/ui.jsx';
 import ClientChatWidget from '../components/ClientChatWidget.jsx';
 import MatterDocuments from '../components/MatterDocuments.jsx';
@@ -68,7 +68,7 @@ const clientPortalChromeCss = `
   .lf-client-mobile-actions { display: none; }
   .lf-client-welcome-name {
     display: block;
-    color: var(--lf-accent, #D4A34A);
+    color: var(--lf-accent, #C5973C);
     overflow-wrap: anywhere;
     word-break: normal;
   }
@@ -265,11 +265,11 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
   const matterEvents = dashboard.appearances.filter(a => a.matterId === selected?.id);
   const firmName = firm?.name || 'LexFlow Kenya';
   const portalTheme = resolveReadableTheme(firm?.theme || {
-    primaryColor: firm?.primaryColor || theme.navy800,
-    accentColor: firm?.accentColor || theme.gold,
-    sidebarColor: firm?.primaryColor || theme.navy800,
-    buttonColor: firm?.accentColor || theme.gold,
-    headerColor: '#FFFFFF',
+    primaryColor: firm?.primaryColor || defaultFirmSettings.primaryColor,
+    accentColor: firm?.accentColor || defaultFirmSettings.accentColor,
+    sidebarColor: theme.forestDark,
+    buttonColor: firm?.primaryColor || defaultFirmSettings.primaryColor,
+    headerColor: firm?.primaryColor || defaultFirmSettings.primaryColor,
     backgroundColor: '#F5F2EB',
   });
   const portalThemeVars = {

@@ -25,7 +25,7 @@ describe('R6: Firm Branding/Theme System', () => {
       });
       test('normalizes #RRGGBB to uppercase', () => {
         expect(themeValidation.normalizeHexColor('#aabbcc')).toBe('#AABBCC');
-        expect(themeValidation.normalizeHexColor('#D4A34A')).toBe('#D4A34A');
+        expect(themeValidation.normalizeHexColor('#C5973C')).toBe('#C5973C');
       });
       test('trims whitespace', () => {
         expect(themeValidation.normalizeHexColor('  #ABC  ')).toBe('#AABBCC');
@@ -61,27 +61,27 @@ describe('R6: Firm Branding/Theme System', () => {
 
     describe('validateThemeInput', () => {
       test('accepts valid minimal theme', () => {
-        const result = themeValidation.validateThemeInput({ primaryColor: '#0F1B33', accentColor: '#D4A34A' });
+        const result = themeValidation.validateThemeInput({ primaryColor: '#1A3628', accentColor: '#C5973C' });
         expect(result.error).toBeUndefined();
-        expect(result.value.primaryColor).toBe('#0F1B33');
-        expect(result.value.accentColor).toBe('#D4A34A');
+        expect(result.value.primaryColor).toBe('#1A3628');
+        expect(result.value.accentColor).toBe('#C5973C');
       });
       test('accepts full valid theme', () => {
         const theme = {
           source: 'manual',
-          primaryColor: '#0F1B33',
-          accentColor: '#D4A34A',
+          primaryColor: '#1A3628',
+          accentColor: '#C5973C',
           backgroundColor: '#0A0F1A',
           surfaceColor: '#111827',
           textColor: '#E5E7EB',
           textSecondaryColor: '#9CA3AF',
-          sidebarColor: '#0F1B33',
+          sidebarColor: '#1A3628',
           sidebarTextColor: '#E5E7EB',
-          buttonColor: '#D4A34A',
-          buttonTextColor: '#0F1B33',
+          buttonColor: '#C5973C',
+          buttonTextColor: '#1A3628',
           borderColor: '#1F2937',
-          linkColor: '#D4A34A',
-          headerColor: '#0F1B33',
+          linkColor: '#C5973C',
+          headerColor: '#1A3628',
           headerTextColor: '#E5E7EB',
           footerColor: '#0A0F1A',
           footerTextColor: '#9CA3AF',
@@ -148,7 +148,7 @@ describe('R6: Firm Branding/Theme System', () => {
         expect(result.value.primaryColor).toBe('#1B4332');
       });
       test('silently drops theme key', () => {
-        const result = themeValidation.validateThemeInput({ theme: { nested: true }, primaryColor: '#0F1B33' });
+        const result = themeValidation.validateThemeInput({ theme: { nested: true }, primaryColor: '#1A3628' });
         expect(result.error).toBeUndefined();
         expect(result.value.theme).toBeUndefined();
       });
@@ -196,7 +196,7 @@ describe('R6: Firm Branding/Theme System', () => {
         const presets = themeValidation.getPresets();
         const found = presets.find(p => p.id === 'lexflow-default');
         expect(found).toBeDefined();
-        expect(found.primaryColor).toBe('#0F1B33');
+        expect(found.primaryColor).toBe('#1A3628');
       });
       test('includes emerald-gold preset', () => {
         const presets = themeValidation.getPresets();
@@ -241,7 +241,7 @@ describe('R6: Firm Branding/Theme System', () => {
         const res = await request(app)
           .post('/api/firm-settings/theme/preview')
           .set('Authorization', `Bearer ${adminToken}`)
-          .send({ primaryColor: '#0F1B33', accentColor: '#D4A34A', backgroundColor: '#0A0F1A', textColor: '#E5E7EB' });
+          .send({ primaryColor: '#1A3628', accentColor: '#C5973C', backgroundColor: '#0A0F1A', textColor: '#E5E7EB' });
         expect(res.statusCode).toBe(200);
         expect(res.body).toHaveProperty('theme');
         expect(res.body).toHaveProperty('warnings');
@@ -267,14 +267,14 @@ describe('R6: Firm Branding/Theme System', () => {
         const res = await request(app)
           .post('/api/firm-settings/theme/preview')
           .set('Authorization', `Bearer ${clientToken}`)
-          .send({ primaryColor: '#0F1B33' });
+          .send({ primaryColor: '#1A3628' });
         expect(res.statusCode).toBe(403);
       });
       test('accepts preset payload with id key (frontend convenience)', async () => {
         const res = await request(app)
           .post('/api/firm-settings/theme/preview')
           .set('Authorization', `Bearer ${adminToken}`)
-          .send({ id: 'lexflow-default', primaryColor: '#0F1B33', accentColor: '#D4A34A', source: 'preset' });
+          .send({ id: 'lexflow-default', primaryColor: '#1A3628', accentColor: '#C5973C', source: 'preset' });
         expect(res.statusCode).toBe(200);
         expect(res.body).toHaveProperty('theme');
       });
@@ -301,17 +301,17 @@ describe('R6: Firm Branding/Theme System', () => {
         expect(res.body.theme.primaryColor).toBe('#1B4332');
       });
       test('persisted theme is returned on GET', async () => {
-        const theme = { source: 'manual', primaryColor: '#0F1B33', accentColor: '#D4A34A', backgroundColor: '#0A0F1A', textColor: '#E5E7EB', buttonColor: '#D4A34A', buttonTextColor: '#0F1B33', sidebarColor: '#0F1B33', sidebarTextColor: '#E5E7EB' };
+        const theme = { source: 'manual', primaryColor: '#1A3628', accentColor: '#C5973C', backgroundColor: '#0A0F1A', textColor: '#E5E7EB', buttonColor: '#C5973C', buttonTextColor: '#1A3628', sidebarColor: '#1A3628', sidebarTextColor: '#E5E7EB' };
         await request(app).put('/api/firm-settings/theme').set('Authorization', `Bearer ${adminToken}`).send(theme);
         const getRes = await request(app).get('/api/firm-settings/theme').set('Authorization', `Bearer ${adminToken}`);
         expect(getRes.body.theme).not.toBeNull();
-        expect(getRes.body.theme.primaryColor).toBe('#0F1B33');
+        expect(getRes.body.theme.primaryColor).toBe('#1A3628');
       });
       test('requires admin role', async () => {
         const res = await request(app)
           .put('/api/firm-settings/theme')
           .set('Authorization', `Bearer ${clientToken}`)
-          .send({ primaryColor: '#0F1B33' });
+          .send({ primaryColor: '#1A3628' });
         expect(res.statusCode).toBe(403);
       });
       test('rejects invalid input', async () => {
@@ -325,22 +325,22 @@ describe('R6: Firm Branding/Theme System', () => {
 
     describe('POST /api/firm-settings/theme/reset', () => {
       test('admin can reset theme', async () => {
-        await request(app).put('/api/firm-settings/theme').set('Authorization', `Bearer ${adminToken}`).send({ source: 'manual', primaryColor: '#0F1B33', accentColor: '#D4A34A', backgroundColor: '#0A0F1A', textColor: '#E5E7EB', buttonColor: '#D4A34A', buttonTextColor: '#0F1B33', sidebarColor: '#0F1B33', sidebarTextColor: '#E5E7EB' });
+        await request(app).put('/api/firm-settings/theme').set('Authorization', `Bearer ${adminToken}`).send({ source: 'manual', primaryColor: '#1A3628', accentColor: '#C5973C', backgroundColor: '#0A0F1A', textColor: '#E5E7EB', buttonColor: '#C5973C', buttonTextColor: '#1A3628', sidebarColor: '#1A3628', sidebarTextColor: '#E5E7EB' });
         const res = await request(app)
           .post('/api/firm-settings/theme/reset')
           .set('Authorization', `Bearer ${adminToken}`);
         expect(res.statusCode).toBe(200);
         expect(res.body.theme).not.toBeNull();
-        expect(res.body.theme.primaryColor).toBe('#0F1B33');
-        expect(res.body.theme.accentColor).toBe('#D4A34A');
+        expect(res.body.theme.primaryColor).toBe('#1A3628');
+        expect(res.body.theme.accentColor).toBe('#C5973C');
         expect(res.body.message).toBe('Firm branding restored to LexFlow default.');
       });
       test('theme is resolved after reset (not null)', async () => {
         await request(app).post('/api/firm-settings/theme/reset').set('Authorization', `Bearer ${adminToken}`);
         const getRes = await request(app).get('/api/firm-settings/theme').set('Authorization', `Bearer ${adminToken}`);
         expect(getRes.body.theme).not.toBeNull();
-        expect(getRes.body.theme.primaryColor).toBe('#0F1B33');
-        expect(getRes.body.theme.accentColor).toBe('#D4A34A');
+        expect(getRes.body.theme.primaryColor).toBe('#1A3628');
+        expect(getRes.body.theme.accentColor).toBe('#C5973C');
       });
       test('requires admin role', async () => {
         const res = await request(app)
@@ -372,7 +372,7 @@ describe('R6: Firm Branding/Theme System', () => {
 
     describe('Audit events', () => {
       test('firm_theme_updated event is recorded', async () => {
-        const theme = { source: 'manual', primaryColor: '#0F1B33', accentColor: '#D4A34A', backgroundColor: '#0A0F1A', textColor: '#E5E7EB', buttonColor: '#D4A34A', buttonTextColor: '#0F1B33', sidebarColor: '#0F1B33', sidebarTextColor: '#E5E7EB' };
+        const theme = { source: 'manual', primaryColor: '#1A3628', accentColor: '#C5973C', backgroundColor: '#0A0F1A', textColor: '#E5E7EB', buttonColor: '#C5973C', buttonTextColor: '#1A3628', sidebarColor: '#1A3628', sidebarTextColor: '#E5E7EB' };
         await request(app).put('/api/firm-settings/theme').set('Authorization', `Bearer ${adminToken}`).send(theme);
         const res = await request(app)
           .get('/api/audit-events?action=firm_theme_updated')
@@ -395,20 +395,20 @@ describe('R6: Firm Branding/Theme System', () => {
 
   describe('getFirmSettings includes theme', () => {
     test('theme is included in firm settings', async () => {
-      const theme = { source: 'manual', primaryColor: '#0F1B33', accentColor: '#D4A34A', backgroundColor: '#0A0F1A', textColor: '#E5E7EB', buttonColor: '#D4A34A', buttonTextColor: '#0F1B33', sidebarColor: '#0F1B33', sidebarTextColor: '#E5E7EB' };
+      const theme = { source: 'manual', primaryColor: '#1A3628', accentColor: '#C5973C', backgroundColor: '#0A0F1A', textColor: '#E5E7EB', buttonColor: '#C5973C', buttonTextColor: '#1A3628', sidebarColor: '#1A3628', sidebarTextColor: '#E5E7EB' };
       await request(app).put('/api/firm-settings/theme').set('Authorization', `Bearer ${adminToken}`).send(theme);
       const res = await request(app).get('/api/firm-settings').set('Authorization', `Bearer ${adminToken}`);
       expect(res.statusCode).toBe(200);
       expect(res.body.theme).not.toBeNull();
-      expect(res.body.theme.primaryColor).toBe('#0F1B33');
+      expect(res.body.theme.primaryColor).toBe('#1A3628');
     });
     test('theme is resolved when not set (not null)', async () => {
       await request(app).post('/api/firm-settings/theme/reset').set('Authorization', `Bearer ${adminToken}`);
       const res = await request(app).get('/api/firm-settings').set('Authorization', `Bearer ${adminToken}`);
       expect(res.statusCode).toBe(200);
       expect(res.body.theme).not.toBeNull();
-      expect(res.body.theme.primaryColor).toBe('#0F1B33');
-      expect(res.body.theme.accentColor).toBe('#D4A34A');
+      expect(res.body.theme.primaryColor).toBe('#1A3628');
+      expect(res.body.theme.accentColor).toBe('#C5973C');
     });
   });
 });

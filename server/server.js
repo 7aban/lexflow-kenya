@@ -147,8 +147,8 @@ const defaultFirmSettings = {
   id: 'default',
   name: 'LexFlow Kenya',
   logo: '',
-  primaryColor: '#0F1B33',
-  accentColor: '#D4A34A',
+  primaryColor: '#1A3628',
+  accentColor: '#C5973C',
   websiteURL: '',
   email: 'accounts@lexflow.co.ke',
   phone: '+254 700 123456',
@@ -160,6 +160,9 @@ const defaultFirmSettings = {
   defaultInvoiceDueDays: 30,
   moduleSettings: { ...DEFAULT_MODULE_SETTINGS },
 };
+const LEXFLOW_DEFAULT_THEME = themeValidation.LEXFLOW_DEFAULT_THEME;
+const LEGACY_LEXFLOW_DEFAULT_PRIMARY = '#0F1B33';
+const LEGACY_LEXFLOW_DEFAULT_ACCENT = '#D4A34A';
 
 const ALLOWED_RETAINER_STATUSES = new Set(['not_started', 'draft', 'sent', 'signed', 'declined', 'terminated']);
 const ALLOWED_RETAINER_ENGAGEMENT_TYPES = new Set(['advisory', 'litigation', 'conveyancing', 'corporate', 'employment', 'family', 'criminal', 'other']);
@@ -1190,30 +1193,37 @@ function buildResolvedTheme(themeJson, primaryColor, accentColor) {
   if (themeJson) {
     try { theme = JSON.parse(themeJson); } catch { theme = null; }
   }
-  const p = theme?.primaryColor || primaryColor || defaultFirmSettings.primaryColor;
-  const a = theme?.accentColor || accentColor || defaultFirmSettings.accentColor;
+  const rawPrimary = theme?.primaryColor || primaryColor || defaultFirmSettings.primaryColor;
+  const rawAccent = theme?.accentColor || accentColor || defaultFirmSettings.accentColor;
+  const legacyDefaultBase = !themeJson
+    && String(rawPrimary || '').toUpperCase() === LEGACY_LEXFLOW_DEFAULT_PRIMARY
+    && String(rawAccent || '').toUpperCase() === LEGACY_LEXFLOW_DEFAULT_ACCENT;
+  const p = legacyDefaultBase ? defaultFirmSettings.primaryColor : rawPrimary;
+  const a = legacyDefaultBase ? defaultFirmSettings.accentColor : rawAccent;
+  const isLexFlowDefaultBase = String(p || '').toUpperCase() === LEXFLOW_DEFAULT_THEME.primaryColor
+    && String(a || '').toUpperCase() === LEXFLOW_DEFAULT_THEME.accentColor;
   return themeValidation.resolveReadableTheme({
     ...(theme || {}),
     primaryColor: p,
     accentColor: a,
-    sidebarColor: theme?.sidebarColor || p,
-    sidebarTextColor: theme?.sidebarTextColor || '#E5E7EB',
-    buttonColor: theme?.buttonColor || a,
-    buttonTextColor: theme?.buttonTextColor || '#FFFFFF',
-    backgroundColor: theme?.backgroundColor || '#F5F7FA',
-    surfaceColor: theme?.surfaceColor || '#FFFFFF',
-    textColor: theme?.textColor || '#101827',
-    textSecondaryColor: theme?.textSecondaryColor || '#697386',
-    borderColor: theme?.borderColor || '#E5E7EB',
-    linkColor: theme?.linkColor || a,
-    cardColor: theme?.cardColor || '#FFFFFF',
-    cardBorderColor: theme?.cardBorderColor || '#E5E7EB',
-    headerColor: theme?.headerColor || p,
+    sidebarColor: theme?.sidebarColor || (isLexFlowDefaultBase ? LEXFLOW_DEFAULT_THEME.sidebarColor : p),
+    sidebarTextColor: theme?.sidebarTextColor || LEXFLOW_DEFAULT_THEME.sidebarTextColor,
+    buttonColor: theme?.buttonColor || (isLexFlowDefaultBase ? LEXFLOW_DEFAULT_THEME.buttonColor : p),
+    buttonTextColor: theme?.buttonTextColor || LEXFLOW_DEFAULT_THEME.buttonTextColor,
+    backgroundColor: theme?.backgroundColor || LEXFLOW_DEFAULT_THEME.backgroundColor,
+    surfaceColor: theme?.surfaceColor || LEXFLOW_DEFAULT_THEME.surfaceColor,
+    textColor: theme?.textColor || LEXFLOW_DEFAULT_THEME.textColor,
+    textSecondaryColor: theme?.textSecondaryColor || LEXFLOW_DEFAULT_THEME.textSecondaryColor,
+    borderColor: theme?.borderColor || LEXFLOW_DEFAULT_THEME.borderColor,
+    linkColor: theme?.linkColor || (isLexFlowDefaultBase ? LEXFLOW_DEFAULT_THEME.linkColor : a),
+    cardColor: theme?.cardColor || LEXFLOW_DEFAULT_THEME.cardColor,
+    cardBorderColor: theme?.cardBorderColor || LEXFLOW_DEFAULT_THEME.cardBorderColor,
+    headerColor: theme?.headerColor || (isLexFlowDefaultBase ? LEXFLOW_DEFAULT_THEME.headerColor : p),
     headerTextColor: theme?.headerTextColor || '#FFFFFF',
-    successColor: theme?.successColor || '#047857',
-    warningColor: theme?.warningColor || '#B45309',
-    errorColor: theme?.errorColor || '#B91C1C',
-    infoColor: theme?.infoColor || '#1D4ED8',
+    successColor: theme?.successColor || LEXFLOW_DEFAULT_THEME.successColor,
+    warningColor: theme?.warningColor || LEXFLOW_DEFAULT_THEME.warningColor,
+    errorColor: theme?.errorColor || LEXFLOW_DEFAULT_THEME.errorColor,
+    infoColor: theme?.infoColor || LEXFLOW_DEFAULT_THEME.infoColor,
     source: theme?.source || 'default',
   });
 }
@@ -1231,8 +1241,65 @@ async function getFirmSettings() {
   const moduleSettings = settings ? resolveModuleSettings(settings.moduleSettingsJson) : { ...DEFAULT_MODULE_SETTINGS };
   const { moduleSettingsJson: _msj, ...safeSettings } = settings || {};
   const normalized = { ...defaultFirmSettings, ...safeSettings };
+  if (!settings?.themeJson
+    && String(normalized.primaryColor || '').toUpperCase() === LEGACY_LEXFLOW_DEFAULT_PRIMARY
+    && String(normalized.accentColor || '').toUpperCase() === LEGACY_LEXFLOW_DEFAULT_ACCENT) {
+    normalized.primaryColor = defaultFirmSettings.primaryColor;
+    normalized.accentColor = defaultFirmSettings.accentColor;
+  }
   normalized.defaultInvoiceDueDays = normalizeDefaultInvoiceDueDays(normalized.defaultInvoiceDueDays);
   return { ...normalized, reminderSettings, theme, moduleSettings };
+}
+
+const PUBLIC_THEME_KEYS = [
+  'primaryColor',
+  'accentColor',
+  'backgroundColor',
+  'surfaceColor',
+  'textColor',
+  'textSecondaryColor',
+  'borderColor',
+  'linkColor',
+  'cardColor',
+  'cardBorderColor',
+  'cardTextColor',
+  'cardMutedColor',
+  'sidebarColor',
+  'sidebarTextColor',
+  'headerColor',
+  'headerTextColor',
+  'buttonColor',
+  'buttonTextColor',
+  'onPrimaryColor',
+  'onAccentColor',
+  'onSidebarColor',
+  'onHeaderColor',
+  'onButtonColor',
+  'successColor',
+  'warningColor',
+  'errorColor',
+  'infoColor',
+  'source',
+];
+
+function publicBrandingSettings(settings = {}) {
+  const firmName = settings.name || defaultFirmSettings.name;
+  const theme = {};
+  for (const key of PUBLIC_THEME_KEYS) {
+    if (settings.theme?.[key]) theme[key] = settings.theme[key];
+  }
+  return {
+    name: firmName,
+    firmName,
+    displayName: firmName,
+    appName: firmName,
+    productName: 'LexFlow',
+    poweredBy: 'LexFlow',
+    logo: settings.logo || '',
+    primaryColor: theme.primaryColor || settings.primaryColor || defaultFirmSettings.primaryColor,
+    accentColor: theme.accentColor || settings.accentColor || defaultFirmSettings.accentColor,
+    theme,
+  };
 }
 
 async function initDb() {
@@ -1900,7 +1967,13 @@ app.post('/api/auth/client-login', authLimiter, validate(loginValidation), async
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/firm-settings', async (req, res) => res.json(await getFirmSettings()));
+app.get('/api/public/branding', async (req, res) => {
+  try {
+    res.json(publicBrandingSettings(await getFirmSettings()));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/firm-settings', authenticate, async (req, res) => res.json(await getFirmSettings()));
 app.get('/api/notices', authenticate, async (req, res) => {
   const params = [];
   let where = '';

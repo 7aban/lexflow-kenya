@@ -97,26 +97,26 @@ const BRAND_THEME_KEYS = [
 ];
 
 const LEXFLOW_DEFAULT_THEME = {
-  primaryColor: '#0F1B33',
-  accentColor: '#D4A34A',
-  sidebarColor: '#0F1B33',
-  sidebarTextColor: '#E5E7EB',
-  buttonColor: '#D4A34A',
+  primaryColor: '#1A3628',
+  accentColor: '#C5973C',
+  sidebarColor: '#112219',
+  sidebarTextColor: '#FFFFFF',
+  buttonColor: '#1A3628',
   buttonTextColor: '#FFFFFF',
-  backgroundColor: '#F5F7FA',
+  backgroundColor: '#F5F2EB',
   surfaceColor: '#FFFFFF',
-  textColor: '#101827',
-  textSecondaryColor: '#697386',
-  borderColor: '#E5E7EB',
-  linkColor: '#D4A34A',
+  textColor: '#1A1A18',
+  textSecondaryColor: '#6B6B66',
+  borderColor: '#DDD8CE',
+  linkColor: '#1A3628',
   cardColor: '#FFFFFF',
-  cardBorderColor: '#E5E7EB',
-  headerColor: '#0F1B33',
+  cardBorderColor: '#DDD8CE',
+  headerColor: '#1A3628',
   headerTextColor: '#FFFFFF',
-  successColor: '#047857',
-  warningColor: '#B45309',
-  errorColor: '#B91C1C',
-  infoColor: '#1D4ED8',
+  successColor: '#1A5C36',
+  warningColor: '#B07820',
+  errorColor: '#8B2020',
+  infoColor: '#2C5F8A',
   source: 'default',
 };
 
@@ -180,15 +180,17 @@ function safePreviewText(background, preferred) {
 function completeBrandTheme(draft = {}, firm = {}) {
   const primaryColor = draft.primaryColor || firm.primaryColor || LEXFLOW_DEFAULT_THEME.primaryColor;
   const accentColor = draft.accentColor || firm.accentColor || LEXFLOW_DEFAULT_THEME.accentColor;
+  const isLexFlowDefaultBase = normalizeHexForCompare(primaryColor) === normalizeHexForCompare(LEXFLOW_DEFAULT_THEME.primaryColor)
+    && normalizeHexForCompare(accentColor) === normalizeHexForCompare(LEXFLOW_DEFAULT_THEME.accentColor);
   const filled = {
     ...LEXFLOW_DEFAULT_THEME,
     ...draft,
     primaryColor,
     accentColor,
-    sidebarColor: draft.sidebarColor || primaryColor,
-    buttonColor: draft.buttonColor || accentColor,
-    linkColor: draft.linkColor || accentColor,
-    headerColor: draft.headerColor || primaryColor,
+    sidebarColor: draft.sidebarColor || (isLexFlowDefaultBase ? LEXFLOW_DEFAULT_THEME.sidebarColor : primaryColor),
+    buttonColor: draft.buttonColor || primaryColor,
+    linkColor: draft.linkColor || (isLexFlowDefaultBase ? LEXFLOW_DEFAULT_THEME.linkColor : accentColor),
+    headerColor: draft.headerColor || (isLexFlowDefaultBase ? LEXFLOW_DEFAULT_THEME.headerColor : primaryColor),
   };
   const readable = resolveReadableTheme(filled);
   return {
@@ -223,12 +225,31 @@ function matchesLexFlowResetDefault(draft = {}) {
 }
 
 const SMART_PALETTE_ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+const IMAGE_UPLOAD_ACCEPT = `${SMART_PALETTE_ALLOWED_TYPES.join(',')},.png,.jpg,.jpeg,.webp`;
 const SMART_PALETTE_FAILURE_MESSAGE = 'Could not read enough colour from this image. Try a clearer logo or sample.';
+const SMART_PALETTE_NEUTRAL_MESSAGE = 'This image is mostly neutral text or paper. Upload a clearer logo image or screenshot/export with visible brand colour.';
+const UNSUPPORTED_LETTERHEAD_FILE_MESSAGE = 'For now, upload a logo image or a screenshot/exported image of the letterhead. DOCX/PDF extraction will be added later.';
 
 function smartPaletteFileTypeAllowed(file) {
   const type = (file?.type || '').toLowerCase();
   if (type) return SMART_PALETTE_ALLOWED_TYPES.includes(type);
   return /\.(png|jpe?g|webp)$/i.test(file?.name || '');
+}
+
+function isUnsupportedLetterheadFile(file) {
+  const type = (file?.type || '').toLowerCase();
+  const name = (file?.name || '').toLowerCase();
+  return type === 'application/pdf'
+    || type.includes('wordprocessingml')
+    || type === 'application/msword'
+    || /\.(pdf|docx?|dotx?)$/i.test(name);
+}
+
+function imageUploadError(file) {
+  if (!file) return 'Choose an image file first.';
+  if (isUnsupportedLetterheadFile(file)) return UNSUPPORTED_LETTERHEAD_FILE_MESSAGE;
+  if (!smartPaletteFileTypeAllowed(file)) return 'Use a PNG, JPEG, or WebP image.';
+  return '';
 }
 
 function clampChannel(value) {
@@ -246,7 +267,15 @@ function rgbFeatures({ r, g, b }) {
   const lightness = (max + min) / 510;
   const saturation = max === 0 ? 0 : delta / max;
   const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-  return { saturation, lightness, brightness, delta };
+  let hue = 0;
+  if (delta > 0) {
+    if (max === r) hue = ((g - b) / delta) % 6;
+    else if (max === g) hue = (b - r) / delta + 2;
+    else hue = (r - g) / delta + 4;
+    hue = Math.round(hue * 60);
+    if (hue < 0) hue += 360;
+  }
+  return { saturation, lightness, brightness, delta, hue };
 }
 
 function smartColorDistance(a, b) {
@@ -259,14 +288,29 @@ function smartColorDistance(a, b) {
 function isIgnoredPalettePixel(r, g, b, alpha) {
   if (alpha < 128) return true;
   const { saturation, brightness, delta } = rgbFeatures({ r, g, b });
-  if (brightness > 246 && saturation < 0.2) return true;
-  if (brightness < 18) return true;
-  if (delta < 8 && (brightness > 232 || brightness < 36)) return true;
+  if (brightness > 246 && saturation < 0.22) return true;
+  if (delta < 7 && brightness > 232) return true;
   return false;
 }
 
+function isNeutralPaletteColor(features) {
+  if (features.brightness > 235 && features.saturation < 0.28) return true;
+  if (features.brightness < 42 && features.saturation < 0.38) return true;
+  if (features.delta < 24) return true;
+  return features.saturation < 0.18;
+}
+
+function brandHueBonus(features) {
+  const hue = features.hue;
+  const isBlue = hue >= 185 && hue <= 255;
+  const isGreen = hue >= 80 && hue <= 170;
+  const isGold = hue >= 32 && hue <= 68;
+  const isRed = hue <= 18 || hue >= 340;
+  return isBlue || isGreen || isGold || isRed ? 0.45 : 0;
+}
+
 function quantizedPaletteKey(r, g, b) {
-  const bucket = value => clampChannel(Math.round(value / 24) * 24);
+  const bucket = value => clampChannel(Math.round(value / 20) * 20);
   return `${bucket(r)}-${bucket(g)}-${bucket(b)}`;
 }
 
@@ -280,13 +324,22 @@ function dominantPaletteColorsFromImageData(imageData) {
     const b = data[index + 2];
     const alpha = data[index + 3];
     if (isIgnoredPalettePixel(r, g, b, alpha)) continue;
+    const features = rgbFeatures({ r, g, b });
+    const neutral = isNeutralPaletteColor(features);
     const key = quantizedPaletteKey(r, g, b);
-    const weight = Math.max(0.3, alpha / 255);
-    const bucket = buckets.get(key) || { count: 0, r: 0, g: 0, b: 0 };
+    const alphaWeight = Math.max(0.25, alpha / 255);
+    const colorWeight = neutral
+      ? 0.12
+      : 0.85 + (features.saturation ** 1.45) * 2.8 + brandHueBonus(features);
+    const weight = alphaWeight * colorWeight;
+    const bucket = buckets.get(key) || { count: 0, rawCount: 0, r: 0, g: 0, b: 0, neutralWeight: 0, brandWeight: 0 };
     bucket.count += weight;
+    bucket.rawCount += alphaWeight;
     bucket.r += r * weight;
     bucket.g += g * weight;
     bucket.b += b * weight;
+    if (neutral) bucket.neutralWeight += weight;
+    else bucket.brandWeight += weight;
     buckets.set(key, bucket);
     usablePixels += 1;
   }
@@ -301,14 +354,22 @@ function dominantPaletteColorsFromImageData(imageData) {
     };
     const hex = rgbToHexColor(rgb);
     const features = rgbFeatures(rgb);
+    const neutral = bucket.neutralWeight >= bucket.brandWeight;
     return {
       hex,
       rgb,
       count: bucket.count,
+      rawCount: bucket.rawCount,
+      neutral,
+      brandScore: bucket.brandWeight,
       luminance: previewLuminance(hex),
       ...features,
     };
-  }).sort((a, b) => (b.count * (0.75 + b.saturation)) - (a.count * (0.75 + a.saturation)));
+  }).sort((a, b) => {
+    const aScore = a.neutral ? a.count * 0.18 : a.brandScore * (1 + a.saturation + brandHueBonus(a));
+    const bScore = b.neutral ? b.count * 0.18 : b.brandScore * (1 + b.saturation + brandHueBonus(b));
+    return bScore - aScore;
+  });
 
   const unique = [];
   colors.forEach(color => {
@@ -319,27 +380,58 @@ function dominantPaletteColorsFromImageData(imageData) {
 }
 
 function chooseSmartPrimaryColor(colors) {
-  const candidates = colors.filter(color => color.luminance < 0.56);
-  const scored = (candidates.length ? candidates : colors).map(color => ({
+  const brandColors = colors.filter(color => !color.neutral && color.saturation >= 0.18 && color.brightness >= 35 && color.brightness <= 236);
+  const candidates = brandColors.filter(color => color.luminance < 0.64);
+  const primaryPool = candidates.length ? candidates : brandColors;
+  if (!primaryPool.length) return null;
+  const scored = primaryPool.map(color => ({
     color,
-    score: color.count * (1.25 - Math.min(color.luminance, 0.9)) * (0.72 + Math.min(color.saturation, 0.9)),
+    score: (color.brandScore || color.count)
+      * (1.28 - Math.min(color.luminance, 0.9))
+      * (0.8 + Math.min(color.saturation, 0.95))
+      * (1 + brandHueBonus(color)),
   }));
   scored.sort((a, b) => b.score - a.score);
   return scored[0]?.color || null;
 }
 
 function chooseSmartAccentColor(colors, primary, used = []) {
-  const candidates = colors.filter(color => (
+  const brandColors = colors.filter(color => !color.neutral && color.saturation >= 0.16);
+  const candidates = brandColors.filter(color => (
     color.hex !== primary?.hex
     && !used.includes(color.hex)
     && smartColorDistance(color, primary) >= 46
   ));
-  const scored = (candidates.length ? candidates : colors.filter(color => color.hex !== primary?.hex)).map(color => ({
+  const scored = candidates.map(color => ({
     color,
-    score: color.count * (0.85 + color.saturation) * (0.8 + Math.min(previewContrastRatio(color.hex, primary?.hex), 5) / 5),
+    score: (color.brandScore || color.count)
+      * (0.9 + color.saturation)
+      * (0.8 + Math.min(previewContrastRatio(color.hex, primary?.hex), 5) / 5)
+      * (1 + brandHueBonus(color)),
   }));
   scored.sort((a, b) => b.score - a.score);
   return scored[0]?.color || null;
+}
+
+function colorObjectFromHex(hex) {
+  const rgb = hexToPreviewRgb(hex);
+  if (!rgb) return null;
+  return {
+    hex,
+    rgb,
+    count: 1,
+    rawCount: 1,
+    neutral: false,
+    brandScore: 1,
+    luminance: previewLuminance(hex),
+    ...rgbFeatures(rgb),
+  };
+}
+
+function fallbackSmartAccent(primary) {
+  const goldAccent = colorObjectFromHex(LEXFLOW_DEFAULT_THEME.accentColor);
+  if (goldAccent && smartColorDistance(goldAccent, primary) >= 46) return goldAccent;
+  return colorObjectFromHex(LEXFLOW_DEFAULT_THEME.primaryColor);
 }
 
 function smartPaletteTheme(primaryColor, accentColor) {
@@ -355,9 +447,9 @@ function smartPaletteTheme(primaryColor, accentColor) {
     headerColor: primaryColor,
     headerTextColor: primaryText,
     onHeaderColor: primaryText,
-    buttonColor: accentColor,
-    buttonTextColor: accentText,
-    onButtonColor: accentText,
+    buttonColor: primaryColor,
+    buttonTextColor: primaryText,
+    onButtonColor: primaryText,
     linkColor: accentColor,
     onPrimaryColor: primaryText,
     onAccentColor: accentText,
@@ -377,19 +469,20 @@ function uniqueSmartPaletteSuggestions(suggestions) {
 function buildSmartPaletteSuggestions(colors) {
   const primary = chooseSmartPrimaryColor(colors);
   if (!primary) return [];
-  const accent = chooseSmartAccentColor(colors, primary);
+  const accent = chooseSmartAccentColor(colors, primary) || fallbackSmartAccent(primary);
   if (!accent) return [];
-  const darkest = [...colors].sort((a, b) => a.luminance - b.luminance)[0] || primary;
-  const vivid = [...colors].sort((a, b) => (b.saturation * b.count) - (a.saturation * a.count))[0] || accent;
-  const highContrastAccent = [...colors]
-    .filter(color => color.hex !== darkest.hex && smartColorDistance(color, darkest) >= 46)
-    .sort((a, b) => previewContrastRatio(b.hex, darkest.hex) - previewContrastRatio(a.hex, darkest.hex))[0] || accent;
-  const formalAccent = chooseSmartAccentColor(colors, darkest, [accent.hex]) || accent;
+  const brandColors = colors.filter(color => !color.neutral && color.hex !== primary.hex);
+  const accentPool = brandColors.length ? brandColors : [accent];
+  const vivid = [...accentPool].sort((a, b) => ((b.brandScore || b.count) * b.saturation) - ((a.brandScore || a.count) * a.saturation))[0] || accent;
+  const highContrastAccent = [...accentPool]
+    .filter(color => color.hex !== primary.hex && smartColorDistance(color, primary) >= 46)
+    .sort((a, b) => previewContrastRatio(b.hex, primary.hex) - previewContrastRatio(a.hex, primary.hex))[0] || accent;
+  const formalAccent = chooseSmartAccentColor(colors, primary, [accent.hex]) || fallbackSmartAccent(primary) || accent;
 
   return uniqueSmartPaletteSuggestions([
     { id: 'balanced', label: 'Balanced', primaryColor: primary.hex, accentColor: accent.hex },
-    { id: 'formal', label: 'Formal', primaryColor: darkest.hex, accentColor: formalAccent.hex },
-    { id: 'high-contrast', label: 'High contrast', primaryColor: darkest.hex, accentColor: highContrastAccent.hex || vivid.hex },
+    { id: 'formal', label: 'Formal', primaryColor: primary.hex, accentColor: formalAccent.hex },
+    { id: 'high-contrast', label: 'High contrast', primaryColor: primary.hex, accentColor: highContrastAccent.hex || vivid.hex },
   ]).map(suggestion => ({
     ...suggestion,
     id: `${suggestion.id}-${suggestion.primaryColor}-${suggestion.accentColor}`,
@@ -426,6 +519,7 @@ async function extractSmartPaletteSuggestions(source) {
   if (!context) throw new Error(SMART_PALETTE_FAILURE_MESSAGE);
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
   const colors = dominantPaletteColorsFromImageData(context.getImageData(0, 0, canvas.width, canvas.height));
+  if (colors.length && colors.every(color => color.neutral)) throw new Error(SMART_PALETTE_NEUTRAL_MESSAGE);
   const suggestions = buildSmartPaletteSuggestions(colors);
   if (!suggestions.length) throw new Error(SMART_PALETTE_FAILURE_MESSAGE);
   return suggestions;
@@ -1763,7 +1857,7 @@ function ClientAvatar({ clientId, hasAvatar, fullName, size = 28 }) {
   }, [clientId, hasAvatar]);
   const initial = (fullName || 'C').slice(0, 1).toUpperCase();
   return (
-    <div style={{ width: size, height: size, borderRadius: 999, background: 'var(--lf-accent, #D4A34A)', color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: Math.round(size * 0.43), overflow: 'hidden', flexShrink: 0 }}>
+    <div style={{ width: size, height: size, borderRadius: 999, background: 'var(--lf-accent, #C5973C)', color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: Math.round(size * 0.43), overflow: 'hidden', flexShrink: 0 }}>
       {src
         ? <img src={src} alt={fullName || ''} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} onError={() => setSrc(null)} />
         : initial}
@@ -4198,7 +4292,7 @@ function BrandProfilePreview({ draftTheme, firmName, logo }) {
   const button = draftTheme.buttonColor || accent;
   const buttonText = safePreviewText(button, draftTheme.buttonTextColor);
   const accentText = safePreviewText(accent, draftTheme.buttonTextColor);
-  const background = draftTheme.backgroundColor || '#F5F7FA';
+  const background = draftTheme.backgroundColor || '#F5F2EB';
   const surface = draftTheme.surfaceColor || '#FFFFFF';
   const card = draftTheme.cardColor || surface;
   const border = draftTheme.borderColor || draftTheme.cardBorderColor || theme.line;
@@ -4208,7 +4302,7 @@ function BrandProfilePreview({ draftTheme, firmName, logo }) {
 
   return (
     <aside className="lf-brand-preview-panel" style={{ position: 'sticky', top: 74, alignSelf: 'start', minWidth: 0 }}>
-      <div style={{ border: `1px solid ${border}`, borderRadius: 8, overflow: 'hidden', background, boxShadow: '0 14px 34px rgba(15,27,51,.10)' }}>
+      <div style={{ border: `1px solid ${border}`, borderRadius: 8, overflow: 'hidden', background, boxShadow: '0 14px 34px rgba(17,34,25,.10)' }}>
         <div className="lf-brand-preview-shell" style={{ display: 'grid', gridTemplateColumns: '112px minmax(0,1fr)', minHeight: 440 }}>
           <div style={{ background: sidebar, color: sidebarText, padding: 14, display: 'grid', alignContent: 'start', gap: 14 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
@@ -4291,9 +4385,23 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
   const [smartPaletteSource, setSmartPaletteSource] = useState('');
   const [smartSuggestions, setSmartSuggestions] = useState([]);
   const [activeSmartSuggestionId, setActiveSmartSuggestionId] = useState('');
+  const [logoFileName, setLogoFileName] = useState(settings?.logo ? 'Saved firm logo' : '');
+  const [logoUploadMessage, setLogoUploadMessage] = useState(settings?.logo ? 'Saved logo loaded.' : '');
+  const [logoUploadError, setLogoUploadError] = useState('');
+  const [logoDragActive, setLogoDragActive] = useState(false);
+  const [smartSampleDragActive, setSmartSampleDragActive] = useState(false);
+  const formRef = useRef(form);
+  const logoInputRef = useRef(null);
   const smartSampleInputRef = useRef(null);
 
-  useEffect(() => setForm({ ...defaultFirmSettings, ...settings }), [settings]);
+  useEffect(() => { formRef.current = form; }, [form]);
+
+  useEffect(() => {
+    setForm({ ...defaultFirmSettings, ...settings });
+    setLogoFileName(settings?.logo ? 'Saved firm logo' : '');
+    setLogoUploadMessage(settings?.logo ? 'Saved logo loaded.' : '');
+    setLogoUploadError('');
+  }, [settings]);
   useEffect(() => { loadNotices(); }, []);
 
   async function loadNotices() {
@@ -4305,13 +4413,48 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
     setForm(current => ({ ...current, reminderSettings: { ...(current.reminderSettings || {}), [key]: value } }));
   }
 
+  async function handleLogoFile(file) {
+    const validationMessage = imageUploadError(file);
+    if (validationMessage) {
+      setLogoUploadError(validationMessage);
+      setLogoUploadMessage('');
+      return;
+    }
+    setLogoUploadError('');
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      setForm(current => ({ ...current, logo: dataUrl }));
+      setLogoFileName(file.name || 'Logo image');
+      setLogoUploadMessage('Logo ready to save.');
+      setSmartPaletteMessage('');
+    } catch {
+      setLogoUploadError('Could not read this logo image. Try another PNG, JPEG, or WebP file.');
+      setLogoUploadMessage('');
+      return;
+    }
+    setSmartSuggestions([]);
+    setActiveSmartSuggestionId('');
+  }
+
   async function chooseLogo(event) {
     const file = event.target.files?.[0];
     if (!file) return;
-    setForm({ ...form, logo: await fileToDataUrl(file) });
-    setSmartSuggestions([]);
-    setActiveSmartSuggestionId('');
-    setSmartPaletteMessage('');
+    await handleLogoFile(file);
+    event.target.value = '';
+  }
+
+  function handleLogoDrop(event) {
+    event.preventDefault();
+    setLogoDragActive(false);
+    const file = event.dataTransfer?.files?.[0];
+    handleLogoFile(file);
+  }
+
+  function removeLogo() {
+    setForm(current => ({ ...current, logo: '' }));
+    setLogoFileName('');
+    setLogoUploadError('');
+    setLogoUploadMessage('Logo removed. Save to persist this change.');
   }
 
   function chooseNoticeFiles(event) {
@@ -4423,12 +4566,10 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
     if (smartSampleInputRef.current) smartSampleInputRef.current.value = '';
   }
 
-  async function chooseSmartSample(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (!smartPaletteFileTypeAllowed(file)) {
-      setSmartPaletteMessage('Use a PNG, JPEG, or WebP sample image.');
-      event.target.value = '';
+  async function handleSmartSampleFile(file) {
+    const validationMessage = imageUploadError(file);
+    if (validationMessage) {
+      setSmartPaletteMessage(validationMessage);
       return;
     }
     try {
@@ -4440,9 +4581,21 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
       setSmartPaletteMessage('Sample ready. Generate suggestions when you are ready.');
     } catch {
       setSmartPaletteMessage(SMART_PALETTE_FAILURE_MESSAGE);
-    } finally {
-      event.target.value = '';
     }
+  }
+
+  async function chooseSmartSample(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    await handleSmartSampleFile(file);
+    event.target.value = '';
+  }
+
+  function handleSmartSampleDrop(event) {
+    event.preventDefault();
+    setSmartSampleDragActive(false);
+    const file = event.dataTransfer?.files?.[0];
+    handleSmartSampleFile(file);
   }
 
   async function generateSmartPalette(sourceKind) {
@@ -4460,9 +4613,9 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
       const suggestions = await extractSmartPaletteSuggestions(source);
       setSmartSuggestions(suggestions);
       setSmartPaletteMessage(`${suggestions.length} palette suggestion${suggestions.length === 1 ? '' : 's'} ready.`);
-    } catch {
+    } catch (err) {
       setSmartSuggestions([]);
-      setSmartPaletteMessage(SMART_PALETTE_FAILURE_MESSAGE);
+      setSmartPaletteMessage(err?.message || SMART_PALETTE_FAILURE_MESSAGE);
     } finally {
       setSmartPaletteBusy(false);
     }
@@ -4470,7 +4623,7 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
 
   function applySmartPaletteSuggestion(suggestion) {
     const nextForm = {
-      ...form,
+      ...formRef.current,
       primaryColor: suggestion.primaryColor,
       accentColor: suggestion.accentColor,
     };
@@ -4505,6 +4658,9 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
       setPreviewPresetId('');
       setActiveSmartSuggestionId('');
       setForm(current => ({ ...current, primaryColor: draft.primaryColor, accentColor: draft.accentColor }));
+      setLogoUploadError('');
+      setLogoUploadMessage(form.logo ? 'Logo saved.' : '');
+      if (form.logo && !logoFileName) setLogoFileName('Saved firm logo');
       applyFirmTheme(completeBrandTheme(savedTheme, { ...form, primaryColor: draft.primaryColor, accentColor: draft.accentColor }));
       await reload();
       notify({ type: 'success', message: 'Brand profile saved.' });
@@ -4613,6 +4769,33 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
     { id: 'modules', label: 'Practice Modules', hint: 'Enable optional practice modules for this firm.' },
   ];
   const activeSettingsSection = settingsSections.find(section => section.id === settingsSection) || settingsSections[0];
+  const brandSectionStyle = {
+    display: 'grid',
+    gap: 12,
+    padding: 14,
+    border: '1px solid var(--lf-card-border, var(--lf-border, #DDD8CE))',
+    borderRadius: 8,
+    background: 'var(--lf-card, #fff)',
+    color: 'var(--lf-card-text, #1A1A18)',
+  };
+  const brandSectionTitleStyle = { margin: 0, color: 'var(--lf-primary, #1A3628)', fontSize: 15, fontWeight: 800 };
+  const brandSectionHintStyle = { margin: 0, color: 'var(--lf-card-muted, var(--lf-text-muted, #6B6B66))', fontSize: 12, lineHeight: 1.5 };
+  const brandDropZoneStyle = active => ({
+    display: 'grid',
+    gridTemplateColumns: '64px minmax(0,1fr)',
+    gap: 12,
+    alignItems: 'center',
+    minHeight: 92,
+    padding: 12,
+    border: `1px dashed ${active ? 'var(--lf-accent, #C5973C)' : 'var(--lf-card-border, var(--lf-border, #DDD8CE))'}`,
+    borderRadius: 8,
+    background: active ? 'color-mix(in srgb, var(--lf-accent, #C5973C) 12%, var(--lf-card, #fff))' : 'color-mix(in srgb, var(--lf-card, #fff) 88%, var(--lf-background, #F5F2EB))',
+    cursor: 'pointer',
+  });
+  const smartPaletteIsError = smartPaletteMessage === SMART_PALETTE_FAILURE_MESSAGE
+    || smartPaletteMessage === SMART_PALETTE_NEUTRAL_MESSAGE
+    || smartPaletteMessage === UNSUPPORTED_LETTERHEAD_FILE_MESSAGE
+    || smartPaletteMessage.startsWith('Use a');
 
   return (
     <div style={styles.pageStack}>
@@ -4634,9 +4817,9 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
               );
             })}
           </div>
-          <div style={{ border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 8, background: 'color-mix(in srgb, var(--lf-card, #fff) 88%, var(--lf-background, #F8FAFC))', padding: 12, display: 'grid', gap: 3 }}>
-            <strong style={{ color: 'var(--lf-card-text, #101827)', fontSize: 13 }}>{activeSettingsSection.label}</strong>
-            <span style={{ color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', fontSize: 12 }}>{activeSettingsSection.hint}</span>
+          <div style={{ border: '1px solid var(--lf-card-border, var(--lf-border, #DDD8CE))', borderRadius: 8, background: 'color-mix(in srgb, var(--lf-card, #fff) 88%, var(--lf-background, #F5F2EB))', padding: 12, display: 'grid', gap: 3 }}>
+            <strong style={{ color: 'var(--lf-card-text, #1A1A18)', fontSize: 13 }}>{activeSettingsSection.label}</strong>
+            <span style={{ color: 'var(--lf-card-muted, var(--lf-text-muted, #6B6B66))', fontSize: 12 }}>{activeSettingsSection.hint}</span>
           </div>
         </div>
       </Card>
@@ -4688,42 +4871,59 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
       )}
 
       {settingsSection === 'branding' && (
-        <Card title="Firm Brand Profile" hint="Set the logo, colours, and workspace style LexFlow uses across the staff and client portals.">
+        <Card title="Firm Brand Profile" hint="Set the logo, colours, and workspace style LexFlow uses across staff and client portals.">
           <form onSubmit={handleSaveBrandProfile} className="lf-brand-profile-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(320px,420px)', gap: 18, alignItems: 'start' }}>
             <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
-              <div style={{ display: 'grid', gap: 10, padding: 14, border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 8, background: 'color-mix(in srgb, var(--lf-card, #fff) 88%, var(--lf-background, #F8FAFC))' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                  <div style={{ width: 64, height: 64, borderRadius: 8, background: effectiveTheme.primaryColor, color: safePreviewText(effectiveTheme.primaryColor, '#FFFFFF'), display: 'grid', placeItems: 'center', fontSize: 20, fontWeight: 900, overflow: 'hidden', border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', flexShrink: 0 }}>
-                    {form.logo ? <img src={form.logo} alt="Firm logo preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : firmInitials(form.name)}
-                  </div>
-                  <div style={{ flex: '1 1 220px', minWidth: 0 }}>
-                    <Field label="Firm logo">
-                      <input type="file" accept="image/*" style={styles.input} onChange={chooseLogo} />
-                    </Field>
-                  </div>
-                  {form.logo ? <button type="button" style={styles.tinyButton} onClick={() => setForm({ ...form, logo: '' })}>Clear logo</button> : null}
+              <section style={brandSectionStyle}>
+                <div style={{ display: 'grid', gap: 4 }}>
+                  <h3 style={brandSectionTitleStyle}>Firm identity</h3>
+                  <p style={brandSectionHintStyle}>Firm logo upload stores the actual logo. Use PNG, JPEG, or WebP.</p>
                 </div>
-              </div>
+                <input id="firm-logo-upload" ref={logoInputRef} type="file" accept={IMAGE_UPLOAD_ACCEPT} onChange={chooseLogo} style={{ display: 'none' }} />
+                <label
+                  htmlFor="firm-logo-upload"
+                  onDragEnter={event => { event.preventDefault(); setLogoDragActive(true); }}
+                  onDragOver={event => { event.preventDefault(); setLogoDragActive(true); }}
+                  onDragLeave={() => setLogoDragActive(false)}
+                  onDrop={handleLogoDrop}
+                  style={brandDropZoneStyle(logoDragActive)}
+                >
+                  <span style={{ width: 64, height: 64, borderRadius: 8, background: effectiveTheme.primaryColor, color: safePreviewText(effectiveTheme.primaryColor, '#FFFFFF'), display: 'grid', placeItems: 'center', fontSize: 20, fontWeight: 900, overflow: 'hidden', border: '1px solid var(--lf-card-border, var(--lf-border, #DDD8CE))', flexShrink: 0 }}>
+                    {form.logo ? <img src={form.logo} alt="Firm logo preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : firmInitials(form.name)}
+                  </span>
+                  <span style={{ display: 'grid', gap: 4, minWidth: 0 }}>
+                    <strong style={{ color: 'var(--lf-card-text, #1A1A18)', fontSize: 13 }}>{logoFileName || 'Choose or drop a logo image'}</strong>
+                    <span style={styles.formHelper}>{logoUploadMessage || 'Logo ready state appears here before saving.'}</span>
+                    <span style={{ ...styles.tinyButton, justifySelf: 'start' }}>Choose image</span>
+                  </span>
+                </label>
+                {logoUploadError ? <div role="alert" style={{ color: theme.red, fontWeight: 700, fontSize: 12 }}>{logoUploadError}</div> : null}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {form.logo ? <button type="button" style={styles.dangerTinyButton} onClick={removeLogo}>Remove logo</button> : null}
+                  <span style={styles.formHelper}>Resetting colours keeps the saved logo unless you remove it here and save.</span>
+                </div>
+              </section>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 12 }}>
-                <Field label="Primary colour">
-                  <input type="color" style={styles.colorInput} value={effectiveTheme.primaryColor} onChange={e => updateThemeDraft({ primaryColor: e.target.value, sidebarColor: e.target.value, headerColor: e.target.value })} />
-                  <span style={styles.formHelper}>{effectiveTheme.primaryColor}</span>
-                </Field>
-                <Field label="Accent colour">
-                  <input type="color" style={styles.colorInput} value={effectiveTheme.accentColor} onChange={e => updateThemeDraft({ accentColor: e.target.value, buttonColor: e.target.value, linkColor: e.target.value })} />
-                  <span style={styles.formHelper}>{effectiveTheme.accentColor}</span>
-                </Field>
-              </div>
-
-              <div style={{ display: 'grid', gap: 8 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'end', flexWrap: 'wrap' }}>
-                  <div>
-                    <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', letterSpacing: .8 }}>Presets</div>
-                    <div style={styles.formHelper}>Choose a starting profile, then save when it looks right.</div>
+              <section style={brandSectionStyle}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'start', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'grid', gap: 4 }}>
+                    <h3 style={brandSectionTitleStyle}>Brand colours</h3>
+                    <p style={brandSectionHintStyle}>LexFlow Default is the forest, gold, and cream reference theme.</p>
                   </div>
                   <button type="button" onClick={() => handlePreview(null)} style={styles.tinyButton} disabled={themeLoading || !firmTheme}>Preview saved theme</button>
                 </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 12 }}>
+                  <Field label="Primary colour">
+                    <input type="color" style={styles.colorInput} value={effectiveTheme.primaryColor} onChange={e => updateThemeDraft({ primaryColor: e.target.value, sidebarColor: e.target.value, headerColor: e.target.value, buttonColor: e.target.value })} />
+                    <span style={styles.formHelper}>{effectiveTheme.primaryColor}</span>
+                  </Field>
+                  <Field label="Accent colour">
+                    <input type="color" style={styles.colorInput} value={effectiveTheme.accentColor} onChange={e => updateThemeDraft({ accentColor: e.target.value, linkColor: e.target.value })} />
+                    <span style={styles.formHelper}>{effectiveTheme.accentColor}</span>
+                  </Field>
+                </div>
+
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 10 }}>
                   {presets.map(preset => {
                     const isPreviewed = previewPresetId === preset.id;
@@ -4741,13 +4941,13 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
                           display: 'grid',
                           gap: 9,
                           textAlign: 'left',
-                          border: `1px solid ${isPreviewed || isSelected ? 'var(--lf-accent, #D4A34A)' : 'var(--lf-card-border, var(--lf-border, #E5E7EB))'}`,
+                          border: `1px solid ${isPreviewed || isSelected ? 'var(--lf-accent, #C5973C)' : 'var(--lf-card-border, var(--lf-border, #DDD8CE))'}`,
                           borderRadius: 8,
                           background: 'var(--lf-card, #fff)',
-                          color: 'var(--lf-card-text, #101827)',
+                          color: 'var(--lf-card-text, #1A1A18)',
                           padding: 12,
                           cursor: 'pointer',
-                          boxShadow: isPreviewed ? '0 8px 20px rgba(212,163,74,.20)' : theme.shadow,
+                          boxShadow: isPreviewed ? '0 8px 20px rgba(197,151,60,.20)' : theme.shadow,
                         }}
                       >
                         <span style={{ display: 'flex', gap: 6 }}>
@@ -4756,59 +4956,61 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
                           ))}
                         </span>
                         <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
-                          <strong style={{ color: 'var(--lf-card-text, #101827)', fontSize: 13 }}>{presetLabel(preset.id)}</strong>
-                          <span style={{ fontSize: 11, fontWeight: 800, color: isPreviewed || isSelected ? 'var(--lf-accent, #D4A34A)' : 'var(--lf-card-muted, var(--lf-text-muted, #697386))' }}>{stateLabel}</span>
+                          <strong style={{ color: 'var(--lf-card-text, #1A1A18)', fontSize: 13 }}>{presetLabel(preset.id)}</strong>
+                          <span style={{ fontSize: 11, fontWeight: 800, color: isPreviewed || isSelected ? 'var(--lf-accent, #C5973C)' : 'var(--lf-card-muted, var(--lf-text-muted, #6B6B66))' }}>{stateLabel}</span>
                         </span>
                       </button>
                     );
                   })}
                 </div>
-              </div>
+              </section>
 
-              <details style={{ border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 8, padding: '8px 12px', background: 'var(--lf-card, #fff)', color: 'var(--lf-card-text, #101827)' }}>
-                <summary style={{ fontSize: 12, fontWeight: 800, color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', cursor: 'pointer', padding: '4px 0', userSelect: 'none' }}>Advanced colours</summary>
-                <div style={{ ...styles.formGrid, marginTop: 12 }}>
-                  {advancedThemeFields.map(([key, label]) => (
-                    <Field key={key} label={label}>
-                      <input type="color" style={styles.colorInput} value={effectiveTheme[key] || LEXFLOW_DEFAULT_THEME[key] || '#FFFFFF'} onChange={e => updateThemeDraft({ [key]: e.target.value })} />
-                    </Field>
-                  ))}
-                </div>
-              </details>
-
-              <div style={{ border: '1px dashed var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 8, padding: 12, color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', fontSize: 12, background: 'var(--lf-card, #fff)' }}>
+              <section style={brandSectionStyle}>
                 <div style={{ display: 'grid', gap: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: 12, flexWrap: 'wrap' }}>
                     <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
-                      <strong style={{ color: 'var(--lf-card-text, #101827)', fontSize: 14 }}>Smart palette suggestions</strong>
-                      <span>Use your firm logo or a sample brand image to suggest colours for the workspace.</span>
+                      <h3 style={brandSectionTitleStyle}>Smart palette suggestions</h3>
+                      <p style={brandSectionHintStyle}>Smart sample upload is for extracting colours from a logo or image. For now, upload an image/screenshot/export of a letterhead, not DOCX/PDF. DOCX/PDF letterhead extraction and logo cropping will be a later phase.</p>
                     </div>
-                    {activeSmartSuggestionId ? <span style={{ ...styles.badge, background: 'color-mix(in srgb, var(--lf-accent, #D4A34A) 16%, #fff)', color: 'var(--lf-card-text, #101827)' }}>Previewing custom</span> : null}
+                    {activeSmartSuggestionId ? <span style={{ ...styles.badge, background: 'color-mix(in srgb, var(--lf-accent, #C5973C) 16%, #fff)', color: 'var(--lf-card-text, #1A1A18)' }}>Previewing custom</span> : null}
                   </div>
 
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                     <button type="button" style={styles.tinyButton} onClick={() => generateSmartPalette('logo')} disabled={smartPaletteBusy || !form.logo}>
                       {smartPaletteBusy && smartPaletteSource === 'current logo' ? 'Generating...' : 'Suggest from current logo'}
                     </button>
-                    <button type="button" style={styles.tinyButton} onClick={() => smartSampleInputRef.current?.click()} disabled={smartPaletteBusy}>Upload sample image</button>
                     <button type="button" style={smartSample ? styles.primaryButton : styles.tinyButton} onClick={() => generateSmartPalette('sample')} disabled={smartPaletteBusy || !smartSample}>
                       {smartPaletteBusy && smartPaletteSource !== 'current logo' ? 'Generating...' : 'Generate suggestions'}
                     </button>
-                    <input ref={smartSampleInputRef} type="file" accept={SMART_PALETTE_ALLOWED_TYPES.join(',')} onChange={chooseSmartSample} style={{ display: 'none' }} />
                   </div>
 
-                  {!form.logo ? <span>Upload a logo first, or use a sample image.</span> : null}
-
+                  <input id="smart-sample-upload" ref={smartSampleInputRef} type="file" accept={IMAGE_UPLOAD_ACCEPT} onChange={chooseSmartSample} style={{ display: 'none' }} />
+                  <label
+                    htmlFor="smart-sample-upload"
+                    onDragEnter={event => { event.preventDefault(); setSmartSampleDragActive(true); }}
+                    onDragOver={event => { event.preventDefault(); setSmartSampleDragActive(true); }}
+                    onDragLeave={() => setSmartSampleDragActive(false)}
+                    onDrop={handleSmartSampleDrop}
+                    style={brandDropZoneStyle(smartSampleDragActive)}
+                  >
+                    <span style={{ width: 64, height: 64, borderRadius: 8, background: 'color-mix(in srgb, var(--lf-accent, #C5973C) 16%, #fff)', color: 'var(--lf-primary, #1A3628)', display: 'grid', placeItems: 'center', overflow: 'hidden', border: '1px solid var(--lf-card-border, var(--lf-border, #DDD8CE))', flexShrink: 0 }}>
+                      {smartSample ? <img src={smartSample.dataUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <IconUpload size={22} />}
+                    </span>
+                    <span style={{ display: 'grid', gap: 4, minWidth: 0 }}>
+                      <strong style={{ color: 'var(--lf-card-text, #1A1A18)', fontSize: 13 }}>{smartSample?.name || 'Choose or drop a logo/sample image'}</strong>
+                      <span style={styles.formHelper}>{form.logo ? 'Use the saved logo or upload a separate sample.' : 'Upload a logo first, or use a sample image.'}</span>
+                      <span style={{ ...styles.tinyButton, justifySelf: 'start' }}>Upload sample image</span>
+                    </span>
+                  </label>
                   {smartSample ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, padding: 8, border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 8, background: 'color-mix(in srgb, var(--lf-card, #fff) 92%, var(--lf-background, #F8FAFC))' }}>
-                      <img src={smartSample.dataUrl} alt="" style={{ width: 42, height: 42, borderRadius: 6, objectFit: 'cover', border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', flexShrink: 0 }} />
-                      <span style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--lf-card-text, #101827)', fontWeight: 700 }}>{smartSample.name}</span>
-                      <button type="button" style={styles.tinyButton} onClick={clearSmartPaletteState}>Clear</button>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <button type="button" style={styles.tinyButton} onClick={clearSmartPaletteState}>Clear sample</button>
+                      <span style={styles.formHelper}>Sample ready. Generate suggestions when you are ready.</span>
                     </div>
                   ) : null}
 
                   {smartPaletteMessage ? (
-                    <div role="status" style={{ color: smartPaletteMessage === SMART_PALETTE_FAILURE_MESSAGE ? theme.red : 'var(--lf-card-muted, var(--lf-text-muted, #697386))', fontWeight: smartPaletteMessage === SMART_PALETTE_FAILURE_MESSAGE ? 700 : 600 }}>
+                    <div role="status" style={{ color: smartPaletteIsError ? theme.red : 'var(--lf-card-muted, var(--lf-text-muted, #6B6B66))', fontWeight: smartPaletteIsError ? 700 : 600 }}>
                       {smartPaletteMessage}
                     </div>
                   ) : null}
@@ -4818,16 +5020,16 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
                       {smartSuggestions.map(suggestion => {
                         const active = activeSmartSuggestionId === suggestion.id;
                         return (
-                          <div key={suggestion.id} style={{ display: 'grid', gap: 10, border: `1px solid ${active ? 'var(--lf-accent, #D4A34A)' : 'var(--lf-card-border, var(--lf-border, #E5E7EB))'}`, borderRadius: 8, background: 'var(--lf-card, #fff)', padding: 12, boxShadow: active ? '0 8px 18px rgba(212,163,74,.18)' : theme.shadow }}>
+                          <div key={suggestion.id} style={{ display: 'grid', gap: 10, border: `1px solid ${active ? 'var(--lf-accent, #C5973C)' : 'var(--lf-card-border, var(--lf-border, #DDD8CE))'}`, borderRadius: 8, background: 'var(--lf-card, #fff)', padding: 12, boxShadow: active ? '0 8px 18px rgba(197,151,60,.18)' : theme.shadow }}>
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                               <span aria-label={`Primary ${suggestion.primaryColor}`} style={{ height: 34, borderRadius: 6, background: suggestion.primaryColor, border: '1px solid rgba(0,0,0,.10)' }} />
                               <span aria-label={`Accent ${suggestion.accentColor}`} style={{ height: 34, borderRadius: 6, background: suggestion.accentColor, border: '1px solid rgba(0,0,0,.10)' }} />
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
-                              <strong style={{ color: 'var(--lf-card-text, #101827)', fontSize: 13 }}>{suggestion.label}</strong>
-                              {active ? <span style={{ color: 'var(--lf-accent, #D4A34A)', fontWeight: 800, fontSize: 11 }}>Previewing</span> : null}
+                              <strong style={{ color: 'var(--lf-card-text, #1A1A18)', fontSize: 13 }}>{suggestion.label}</strong>
+                              {active ? <span style={{ color: 'var(--lf-accent, #C5973C)', fontWeight: 800, fontSize: 11 }}>Previewing</span> : null}
                             </div>
-                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', fontSize: 11, fontWeight: 700 }}>
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', color: 'var(--lf-card-muted, var(--lf-text-muted, #6B6B66))', fontSize: 11, fontWeight: 700 }}>
                               <span>{suggestion.primaryColor}</span>
                               <span>{suggestion.accentColor}</span>
                             </div>
@@ -4840,7 +5042,18 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
 
                   <span>Smart suggestions are a starting point. Review contrast before saving.</span>
                 </div>
-              </div>
+              </section>
+
+              <details style={{ ...brandSectionStyle, padding: '10px 14px' }}>
+                <summary style={{ fontSize: 12, fontWeight: 800, color: 'var(--lf-primary, #1A3628)', cursor: 'pointer', padding: '4px 0', userSelect: 'none' }}>Advanced colours</summary>
+                <div style={{ ...styles.formGrid, marginTop: 12 }}>
+                  {advancedThemeFields.map(([key, label]) => (
+                    <Field key={key} label={label}>
+                      <input type="color" style={styles.colorInput} value={effectiveTheme[key] || LEXFLOW_DEFAULT_THEME[key] || '#FFFFFF'} onChange={e => updateThemeDraft({ [key]: e.target.value })} />
+                    </Field>
+                  ))}
+                </div>
+              </details>
 
               {themeError && <div style={{ ...styles.alert, ...(themeError.startsWith('Preview warnings') ? {} : styles.alertDanger), padding: 10, borderRadius: 6 }}>{themeError}</div>}
 
@@ -4851,7 +5064,13 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
               </div>
             </div>
 
-            <BrandProfilePreview draftTheme={effectiveTheme} firmName={form.name} logo={form.logo} />
+            <div style={{ display: 'grid', gap: 10, minWidth: 0 }}>
+              <section style={{ ...brandSectionStyle, padding: 12 }}>
+                <h3 style={brandSectionTitleStyle}>Live preview</h3>
+                <p style={brandSectionHintStyle}>Preview follows the draft before you save.</p>
+              </section>
+              <BrandProfilePreview draftTheme={effectiveTheme} firmName={form.name} logo={form.logo} />
+            </div>
           </form>
         </Card>
       )}
@@ -4991,7 +5210,7 @@ function UserAvatar({ userId, hasAvatar, fullName, size = 28 }) {
   }, [userId, hasAvatar]);
   const initial = (fullName || '?').slice(0, 1).toUpperCase();
   return (
-    <div style={{ width: size, height: size, borderRadius: 999, background: 'var(--lf-accent, #D4A34A)', color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: Math.round(size * 0.43), overflow: 'hidden', flexShrink: 0 }}>
+    <div style={{ width: size, height: size, borderRadius: 999, background: 'var(--lf-accent, #C5973C)', color: '#fff', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: Math.round(size * 0.43), overflow: 'hidden', flexShrink: 0 }}>
       {src
         ? <img src={src} alt={fullName || ''} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} onError={() => setSrc(null)} />
         : initial}
@@ -6942,7 +7161,7 @@ function MatterNextStepPanel({ detail, onSectionNav }) {
   const sectionMap = { 'matter-section-tasks': 'tasks', 'matter-section-court': 'court-diary', 'matter-section-documents': 'documents', 'matter-section-time': 'billing' };
   if (!step) return null;
   return (
-    <section aria-label="Next step" style={{ border: `1px solid ${theme.line}`, borderLeft: `4px solid ${theme.gold || '#D4A34A'}`, borderRadius: 10, padding: 14, background: '#fff', display: 'grid', gap: 8 }}>
+    <section aria-label="Next step" style={{ border: `1px solid ${theme.line}`, borderLeft: `4px solid ${theme.gold || '#C5973C'}`, borderRadius: 10, padding: 14, background: '#fff', display: 'grid', gap: 8 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <div style={{ display: 'grid', gap: 2 }}>
           <strong style={{ fontSize: 13 }}>Next step</strong>

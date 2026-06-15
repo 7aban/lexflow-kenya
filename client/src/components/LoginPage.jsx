@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { IconScale, IconLock, IconShieldCheck, IconServer, IconEye, IconEyeOff } from '@tabler/icons-react';
 import { API_BASE } from '../lib/apiClient.js';
-import { styles, StyleTag, theme } from '../theme.jsx';
+import { defaultFirmSettings, resolveReadableTheme, styles, StyleTag, theme } from '../theme.jsx';
 import { Alert } from './ui.jsx';
 
 function GoogleLogo() {
@@ -65,7 +65,7 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
   useEffect(() => { setPassword(''); }, []);
   const [oauthBusy, setOauthBusy] = useState(false);
   const [oauthEnabled, setOauthEnabled] = useState(false);
-  const firmName = firm?.name || 'LexFlow Kenya';
+  const firmName = firm?.displayName || firm?.firmName || firm?.appName || firm?.name || defaultFirmSettings.name;
   const isDev = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV;
 
   useEffect(() => {
@@ -128,12 +128,43 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
     ? { title: 'Client Portal', hint: 'Access your case files, notices, invoices and shared documents.', placeholder: 'client@example.com', button: 'Enter client portal' }
     : { title: 'Welcome back', hint: 'Enter your advocate credentials to manage the firm workspace.', placeholder: 'advocate@yourfirm.co.ke', button: 'Sign in securely' };
 
-  const primaryColor = '#112219';
-  const accentColor = firm?.accentColor || theme.gold;
+  const resolvedLoginTheme = resolveReadableTheme(firm?.theme || {
+    primaryColor: firm?.primaryColor || defaultFirmSettings.primaryColor,
+    accentColor: firm?.accentColor || defaultFirmSettings.accentColor,
+    sidebarColor: theme.forestDark,
+    sidebarTextColor: '#FFFFFF',
+    buttonColor: firm?.primaryColor || defaultFirmSettings.primaryColor,
+    buttonTextColor: '#FFFFFF',
+    backgroundColor: theme.cream,
+    surfaceColor: '#FFFFFF',
+    cardColor: '#FFFFFF',
+    headerColor: firm?.primaryColor || defaultFirmSettings.primaryColor,
+    headerTextColor: '#FFFFFF',
+    borderColor: theme.line,
+    linkColor: firm?.accentColor || defaultFirmSettings.accentColor,
+  });
+  const primaryColor = resolvedLoginTheme.primaryColor || defaultFirmSettings.primaryColor;
+  const accentColor = resolvedLoginTheme.accentColor || defaultFirmSettings.accentColor;
+  const loginThemeVars = {
+    '--lf-primary': primaryColor,
+    '--lf-accent': accentColor,
+    '--lf-background': resolvedLoginTheme.backgroundColor || theme.cream,
+    '--lf-surface': resolvedLoginTheme.surfaceColor || '#FFFFFF',
+    '--lf-card': resolvedLoginTheme.cardColor || '#FFFFFF',
+    '--lf-card-border': resolvedLoginTheme.cardBorderColor || resolvedLoginTheme.borderColor || theme.line,
+    '--lf-card-text': resolvedLoginTheme.cardTextColor || resolvedLoginTheme.textColor || theme.ink,
+    '--lf-card-muted': resolvedLoginTheme.cardMutedColor || resolvedLoginTheme.textSecondaryColor || theme.muted,
+    '--lf-border': resolvedLoginTheme.borderColor || theme.line,
+    '--lf-link': resolvedLoginTheme.linkColor || accentColor,
+    '--lf-on-primary': resolvedLoginTheme.onPrimaryColor || '#FFFFFF',
+    '--lf-on-accent': resolvedLoginTheme.onAccentColor || theme.ink,
+    '--lf-button': resolvedLoginTheme.buttonColor || primaryColor,
+    '--lf-button-text': resolvedLoginTheme.buttonTextColor || resolvedLoginTheme.onButtonColor || '#FFFFFF',
+  };
   const staffAuxHidden = mode !== 'staff';
 
   return (
-    <div className="lf-login-root" style={{ '--lf-primary': primaryColor, '--lf-accent': accentColor }}>
+    <div className="lf-login-root" style={loginThemeVars}>
       <StyleTag />
       <div className="lf-login-split" style={styles.loginSplit}>
         <div className="lf-login-brand" style={styles.loginBrand}>
@@ -143,7 +174,7 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
             </div>
             <div>
               <h1 style={styles.loginBrandName}>{firmName}</h1>
-              <div style={styles.loginBrandType}>Practice suite · LexFlow</div>
+              <div style={styles.loginBrandType}>Powered by LexFlow</div>
               <div style={styles.loginBrandRule} />
               <p style={styles.loginBrandTagline}>
                 A secure workspace for managing client matters, court appearances, billing and the complete legal lifecycle of every file at the firm.
@@ -173,7 +204,7 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
                 <button type="button" role="tab" aria-selected={mode === 'client'} onClick={() => setMode('client')} className="lf-login-portal-tab" style={{ ...styles.portalTab, ...(mode === 'client' ? styles.portalTabActive : {}) }}>Client Portal</button>
               </div>
               <h2 style={styles.loginCardTitle}>{modeCopy.title}</h2>
-              <p style={{ margin: 0, color: '#7A715F', fontSize: 13, lineHeight: 1.5 }}>{modeCopy.hint}</p>
+              <p style={{ margin: 0, color: 'var(--lf-card-muted, #6B6B66)', fontSize: 13, lineHeight: 1.5 }}>{modeCopy.hint}</p>
             </div>
             {error && <Alert tone="danger">{error}</Alert>}
             {oauthBusy && <Alert tone="info">Redirecting to provider...</Alert>}
@@ -199,7 +230,7 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
               <LoginField label="Password">
                 <div style={{ position: 'relative' }}>
                   <input className="lf-login-input" style={{ ...styles.loginInput, paddingRight: 40 }} type={showPassword ? 'text' : 'password'} value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" placeholder={mode === 'client' ? 'Portal password' : 'Workspace password'} />
-                  <button type="button" tabIndex={-1} aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword(s => !s)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', border: 0, background: 'none', cursor: 'pointer', padding: 4, color: '#6B7280', display: 'flex', alignItems: 'center' }}>
+                  <button type="button" tabIndex={-1} aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword(s => !s)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', border: 0, background: 'none', cursor: 'pointer', padding: 4, color: 'var(--lf-card-muted, #6B6B66)', display: 'flex', alignItems: 'center' }}>
                     {showPassword ? <IconEyeOff size={18} /> : <IconEye size={18} />}
                   </button>
                 </div>
@@ -220,9 +251,9 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
                 <OAuthButton provider="microsoft" onClick={() => oauthEnabled && handleOAuth('microsoft')} disabled={!oauthEnabled || oauthBusy} />
               </div>
               {oauthEnabled ? (
-                <div style={{ fontSize: 11, color: theme.muted, textAlign: 'center', marginTop: 8 }}>For authorised firm users only.</div>
+                <div style={{ fontSize: 11, color: 'var(--lf-card-muted, #6B6B66)', textAlign: 'center', marginTop: 8 }}>For authorised firm users only.</div>
               ) : (
-                <div style={{ fontSize: 11, color: theme.muted, textAlign: 'center', marginTop: 8, lineHeight: 1.5 }}>OAuth is not configured for this local pilot. Use email and password.</div>
+                <div style={{ fontSize: 11, color: 'var(--lf-card-muted, #6B6B66)', textAlign: 'center', marginTop: 8, lineHeight: 1.5 }}>OAuth is not configured for this local pilot. Use email and password.</div>
               )}
               {isDev && <div style={styles.loginDemoHint}>Use the seeded demo credentials from the project README / seed output.</div>}
             </div>

@@ -256,23 +256,23 @@ export default function App() {
   const firm = data.firmSettings || defaultFirmSettings;
   const savedFirmTheme = firm?.theme && typeof firm.theme === 'object' ? firm.theme : null;
   const resolvedFirmTheme = resolveReadableTheme(themeOverride || savedFirmTheme || {
-    primaryColor: firm.primaryColor || theme.navy800,
-    accentColor: firm.accentColor || theme.gold,
-    sidebarColor: firm.primaryColor || theme.navy800,
+    primaryColor: firm.primaryColor || defaultFirmSettings.primaryColor,
+    accentColor: firm.accentColor || defaultFirmSettings.accentColor,
+    sidebarColor: theme.forestDark,
     sidebarTextColor: '#FFFFFF',
-    buttonColor: firm.accentColor || theme.gold,
+    buttonColor: firm.primaryColor || defaultFirmSettings.primaryColor,
     buttonTextColor: '#FFFFFF',
     backgroundColor: '#F5F2EB',
     surfaceColor: '#FFFFFF',
     cardColor: '#FFFFFF',
-    headerColor: '#FFFFFF',
-    headerTextColor: theme.ink,
+    headerColor: firm.primaryColor || defaultFirmSettings.primaryColor,
+    headerTextColor: '#FFFFFF',
     borderColor: theme.line,
   });
   const themedFirm = {
     ...firm,
     theme: resolvedFirmTheme,
-    primaryColor: resolvedFirmTheme.primaryColor || firm.primaryColor || theme.navy800,
+    primaryColor: resolvedFirmTheme.primaryColor || firm.primaryColor || defaultFirmSettings.primaryColor,
     accentColor: resolvedFirmTheme.accentColor || firm.accentColor || theme.gold,
   };
   const shellThemeVars = {
@@ -342,7 +342,7 @@ export default function App() {
   useEffect(() => {
     async function loadPublicFirmSettings() {
       try {
-        const response = await fetch(`${API_BASE}/firm-settings`);
+        const response = await fetch(`${API_BASE}/public/branding`);
         if (!response.ok) return;
         const firmSettings = await response.json();
         setData(current => ({ ...current, firmSettings }));

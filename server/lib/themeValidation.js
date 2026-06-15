@@ -23,27 +23,36 @@ const MAX_THEME_JSON_LENGTH = 2000;
 const MIN_CONTRAST_RATIO = 3.0;
 const WCAG_AA_CONTRAST_RATIO = 4.5;
 
+const LEXFLOW_DEFAULT_THEME = Object.freeze({
+  source: 'default',
+  primaryColor: '#1A3628',
+  accentColor: '#C5973C',
+  backgroundColor: '#F5F2EB',
+  surfaceColor: '#FFFFFF',
+  textColor: '#1A1A18',
+  textSecondaryColor: '#6B6B66',
+  sidebarColor: '#112219',
+  sidebarTextColor: '#FFFFFF',
+  buttonColor: '#1A3628',
+  buttonTextColor: '#FFFFFF',
+  borderColor: '#DDD8CE',
+  linkColor: '#1A3628',
+  headerColor: '#1A3628',
+  headerTextColor: '#FFFFFF',
+  footerColor: '#112219',
+  footerTextColor: '#FFFFFF',
+  cardColor: '#FFFFFF',
+  cardBorderColor: '#DDD8CE',
+  successColor: '#1A5C36',
+  warningColor: '#B07820',
+  errorColor: '#8B2020',
+  infoColor: '#2C5F8A',
+});
+
 const PRESETS = Object.freeze({
   'lexflow-default': {
+    ...LEXFLOW_DEFAULT_THEME,
     source: 'preset',
-    primaryColor: '#0F1B33',
-    accentColor: '#D4A34A',
-    backgroundColor: '#0A0F1A',
-    surfaceColor: '#111827',
-    textColor: '#E5E7EB',
-    textSecondaryColor: '#9CA3AF',
-    sidebarColor: '#0F1B33',
-    sidebarTextColor: '#E5E7EB',
-    buttonColor: '#D4A34A',
-    buttonTextColor: '#0F1B33',
-    borderColor: '#1F2937',
-    linkColor: '#D4A34A',
-    headerColor: '#0F1B33',
-    headerTextColor: '#E5E7EB',
-    footerColor: '#0A0F1A',
-    footerTextColor: '#9CA3AF',
-    cardColor: '#111827',
-    cardBorderColor: '#1F2937',
   },
   'emerald-gold': {
     source: 'preset',
@@ -127,21 +136,24 @@ function contrastRatio(hex1, hex2) {
 function readableTextColor(background, preferred) {
   const bg = normalizeHexColor(background);
   const preferredColor = normalizeHexColor(preferred);
-  if (!bg) return preferredColor || '#101827';
+  if (!bg) return preferredColor || LEXFLOW_DEFAULT_THEME.textColor;
   if (preferredColor && contrastRatio(preferredColor, bg) >= MIN_CONTRAST_RATIO) {
     return preferredColor;
   }
-  return contrastRatio('#FFFFFF', bg) >= contrastRatio('#101827', bg) ? '#FFFFFF' : '#101827';
+  return contrastRatio('#FFFFFF', bg) >= contrastRatio(LEXFLOW_DEFAULT_THEME.textColor, bg) ? '#FFFFFF' : LEXFLOW_DEFAULT_THEME.textColor;
 }
 
 function resolveReadableTheme(input = {}) {
-  const primaryColor = input.primaryColor || '#0F1B33';
-  const accentColor = input.accentColor || '#D4A34A';
-  const backgroundColor = input.backgroundColor || '#F5F7FA';
-  const cardColor = input.cardColor || input.surfaceColor || '#FFFFFF';
-  const headerColor = input.headerColor || primaryColor;
-  const sidebarColor = input.sidebarColor || primaryColor;
-  const buttonColor = input.buttonColor || accentColor;
+  const primaryColor = input.primaryColor || LEXFLOW_DEFAULT_THEME.primaryColor;
+  const accentColor = input.accentColor || LEXFLOW_DEFAULT_THEME.accentColor;
+  const defaultPrimary = normalizeHexColor(primaryColor) === LEXFLOW_DEFAULT_THEME.primaryColor;
+  const defaultAccent = normalizeHexColor(accentColor) === LEXFLOW_DEFAULT_THEME.accentColor;
+  const isLexFlowDefaultBase = defaultPrimary && defaultAccent;
+  const backgroundColor = input.backgroundColor || LEXFLOW_DEFAULT_THEME.backgroundColor;
+  const cardColor = input.cardColor || input.surfaceColor || LEXFLOW_DEFAULT_THEME.cardColor;
+  const headerColor = input.headerColor || (isLexFlowDefaultBase ? LEXFLOW_DEFAULT_THEME.headerColor : primaryColor);
+  const sidebarColor = input.sidebarColor || (isLexFlowDefaultBase ? LEXFLOW_DEFAULT_THEME.sidebarColor : primaryColor);
+  const buttonColor = input.buttonColor || primaryColor;
   const onSidebarColor = readableTextColor(sidebarColor, input.onSidebarColor || input.sidebarTextColor || '#FFFFFF');
   const onButtonColor = readableTextColor(buttonColor, input.onButtonColor || input.buttonTextColor || '#FFFFFF');
   const onHeaderColor = readableTextColor(headerColor, input.onHeaderColor || input.headerTextColor || '#FFFFFF');
@@ -156,12 +168,12 @@ function resolveReadableTheme(input = {}) {
     headerColor,
     sidebarColor,
     buttonColor,
-    textColor: readableTextColor(backgroundColor, input.textColor || '#101827'),
-    textSecondaryColor: readableTextColor(backgroundColor, input.textSecondaryColor || '#697386'),
-    cardTextColor: readableTextColor(cardColor, input.cardTextColor || input.textColor || '#101827'),
-    cardMutedColor: readableTextColor(cardColor, input.cardMutedColor || input.textSecondaryColor || '#697386'),
+    textColor: readableTextColor(backgroundColor, input.textColor || LEXFLOW_DEFAULT_THEME.textColor),
+    textSecondaryColor: readableTextColor(backgroundColor, input.textSecondaryColor || LEXFLOW_DEFAULT_THEME.textSecondaryColor),
+    cardTextColor: readableTextColor(cardColor, input.cardTextColor || input.textColor || LEXFLOW_DEFAULT_THEME.textColor),
+    cardMutedColor: readableTextColor(cardColor, input.cardMutedColor || input.textSecondaryColor || LEXFLOW_DEFAULT_THEME.textSecondaryColor),
     onPrimaryColor: readableTextColor(primaryColor, input.onPrimaryColor || '#FFFFFF'),
-    onAccentColor: readableTextColor(accentColor, input.onAccentColor || '#101827'),
+    onAccentColor: readableTextColor(accentColor, input.onAccentColor || LEXFLOW_DEFAULT_THEME.textColor),
     onSidebarColor,
     onHeaderColor,
     onButtonColor,
@@ -289,6 +301,7 @@ function getThemeById(id) {
 module.exports = {
   ALLOWED_THEME_KEYS,
   SOURCE_ENUM,
+  LEXFLOW_DEFAULT_THEME,
   MAX_THEME_JSON_LENGTH,
   MIN_CONTRAST_RATIO,
   WCAG_AA_CONTRAST_RATIO,
