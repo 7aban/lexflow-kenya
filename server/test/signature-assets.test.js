@@ -7,6 +7,7 @@ const { app, dbReady } = require('../server.js');
 
 const TINY_PNG_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 const TINY_PNG_BASE64 = TINY_PNG_DATA_URI.split(',')[1];
+const PDF_SIGNATURE_IMAGE_MESSAGE = 'For PDF signing, upload a PNG or JPEG signature/stamp image. WebP cannot be embedded in signed PDFs yet.';
 
 function auth(token) {
   return { Authorization: `Bearer ${token}` };
@@ -147,7 +148,7 @@ describe('PRODUCT-23B signature and stamp asset storage', () => {
       mimeType: 'image/gif',
     });
     expect(res.statusCode).toBe(400);
-    expect(res.body.error).toMatch(/jpeg|png|webp/i);
+    expect(res.body.error).toMatch(/jpeg|png/i);
   });
 
   test('4. SVG is rejected', async () => {
@@ -156,7 +157,7 @@ describe('PRODUCT-23B signature and stamp asset storage', () => {
       mimeType: 'image/svg+xml',
     });
     expect(res.statusCode).toBe(400);
-    expect(res.body.error).toMatch(/jpeg|png|webp/i);
+    expect(res.body.error).toMatch(/jpeg|png/i);
   });
 
   test('5. client cannot access signature assets', async () => {
@@ -249,5 +250,15 @@ describe('PRODUCT-23B signature and stamp asset storage', () => {
     expectNoImageData(createEvent.metadata_json || '');
     expectNoImageData(defaultEvent.metadata_json || '');
     expectNoImageData(deleteEvent.metadata_json || '');
+  });
+
+  test('10. WebP signature uploads are rejected for PDF signing', async () => {
+    const res = await postAsset(advocateToken, {
+      label: 'PRODUCT-23B webp blocked',
+      mimeType: 'image/webp',
+      data: `data:image/webp;base64,${TINY_PNG_BASE64}`,
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe(PDF_SIGNATURE_IMAGE_MESSAGE);
   });
 });

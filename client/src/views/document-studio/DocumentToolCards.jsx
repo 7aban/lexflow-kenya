@@ -45,7 +45,7 @@ const documentToolCards = [
   {
     id: 'stamp',
     title: 'Sign / stamp PDF',
-    description: 'Place a stored signature or stamp image onto a PDF page.',
+    description: 'Place a saved visual signature or firm stamp on a matter PDF, then download or save a signed copy.',
   },
   {
     id: 'tenth-lining',

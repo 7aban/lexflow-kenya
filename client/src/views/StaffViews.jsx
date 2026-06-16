@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote, IconMail, IconPaperclip, IconExternalLink, IconLayoutDashboard, IconUsers } from '@tabler/icons-react';
+import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote, IconMail, IconPaperclip, IconExternalLink, IconLayoutDashboard, IconUsers, IconSignature } from '@tabler/icons-react';
 import { api, applyChecklistTemplate, approveHrLeaveRequest, cancelHrLeaveRequestAdmin, changePassword, clearSession, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, cancelOffboardingCase, completeOffboardingCase, createHrContract, createHrLeaveBalanceAdjustment, createHrStaffProfile, createMatterChecklistItem, createOffboardingCase, deleteChecklistTemplate, deleteClientAvatar, deleteHrDocument, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadHrDocumentContent, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getConnectedAccountAvailability, getHrContracts, getHrDashboard, getHrDocuments, getHrLeaveBalances, getHrLeaveRequests, getHrStaff, getHrStaffProfile, getOffboardingAssignedMatters, getOffboardingCase, getOffboardingCases, getClientSnapshot, getInvoiceDetails, getMatterTimeline, getAppearanceDocuments, linkAppearanceDocument, unlinkAppearanceDocument, getMatterWorkMetadataLinks, getRetainers, getRetainer, createRetainer, updateRetainer, deleteRetainer, generateRetainerDocument, listDocumentTemplates, getMatterFeePlans, getMatterFeePlan, createMatterFeePlan, updateMatterFeePlan, deleteMatterFeePlan, getRetainerLedger, getRetainerLedgerSummary, createRetainerLedgerEntry, voidRetainerLedgerEntry, getClientKyc, getClientKycRecord, createClientKyc, updateClientKyc, deleteClientKyc, getClientAuthorities, getClientAuthorityRecord, createClientAuthority, updateClientAuthority, deleteClientAuthority, getRetainerLifecycleEvents, getRetainerLifecycleEvent, createRetainerLifecycleEvent, updateRetainerLifecycleEvent, deleteRetainerLifecycleEvent, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, rejectHrLeaveRequest, setHrLeaveEntitlement, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrContract, updateHrDocument, updateHrStaffProfile, updateMatterChecklistItem, updateOffboardingCase, updateOffboardingChecklistItem, uploadClientAvatar, uploadHrDocument, uploadUserAvatar } from '../lib/apiClient.js';
 import { appendBrandingModeToPath, defaultFirmSettings, defaultOutputBrandingMode, hasFirmLetterhead, letterheadPdfOutputWarning, outputBrandingModes, styles, theme, applyFirmTheme, clearFirmTheme, resolveReadableTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
@@ -11,6 +11,20 @@ const BILLABLE_TIME_GUIDANCE = 'Billable time may be included in hourly invoices
 const AVATAR_ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp'];
 const AVATAR_MAX_BYTES = 512 * 1024;
 const MATTER_COCKPIT_SECTION_IDS = ['overview', 'tasks', 'court-diary', 'documents', 'billing', 'timeline', 'client-portal', 'notes'];
+const DOCUMENT_STUDIO_SIGNATURE_TARGET_KEY = 'lexflow.documentStudio.signatureTarget';
+
+function staffDocumentLabel(doc = {}) {
+  return doc.displayName || doc.friendlyName || doc.name || 'Document';
+}
+
+function isPdfMatterDocument(doc = {}) {
+  return String(doc.mimeType || '').toLowerCase() === 'application/pdf';
+}
+
+function signedPdfFilename(doc = {}) {
+  const base = staffDocumentLabel(doc).replace(/\.pdf$/i, '').trim() || 'signed-document';
+  return `${base}-signed.pdf`;
+}
 
 function listFromResponse(response, key) {
   if (Array.isArray(response)) return response;
@@ -2629,6 +2643,10 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
     { id: 'notes', label: 'Notes / Preparation', icon: IconNote, hint: 'Case notes, hearing briefs, and preparation materials.', badge: detail ? `${(detail.notes || []).length} notes` : '' },
   ], [detail]);
   const activeCockpitSection = cockpitSections.find(s => s.id === cockpitSection) || cockpitSections[0];
+  const matterPdfDocuments = useMemo(
+    () => (Array.isArray(detail?.documents) ? detail.documents : []).filter(isPdfMatterDocument),
+    [detail?.documents],
+  );
 
   useEffect(() => { if (selected?.id) { setSelectedId(selected.id); loadDetail(selected.id); } else { setDetail(null); setSuggestions([]); } }, [selected?.id]);
   useEffect(() => { if (detail && isAdmin) getUsers(true).then(users => { setAdvocates((users || []).filter(u => u.role === 'advocate' && u.isActive)); setReassignTo(detail.assignedTo || ''); }).catch(() => {}); }, [detail?.id]);
@@ -2784,6 +2802,23 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
   function selectCockpitSection(section) {
     setCockpitSection(section);
     onMatterSectionChange?.(detail?.id || selectedId || selected?.id, section);
+  }
+  function openSignatureFlowForDocument(doc) {
+    if (!detail?.id || !doc?.id) return;
+    try {
+      window.localStorage?.setItem(DOCUMENT_STUDIO_SIGNATURE_TARGET_KEY, JSON.stringify({
+        tool: 'stamp',
+        matterId: detail.id,
+        documentId: doc.id,
+        filename: signedPdfFilename(doc),
+        source: 'matter-documents',
+        ts: Date.now(),
+      }));
+    } catch {
+      // If browser storage is unavailable, the user still lands in Document Studio.
+    }
+    notify?.({ type: 'info', message: 'Opening Document Studio to sign this PDF.' });
+    onNavigate?.('Document Studio');
   }
   async function archiveMatter() { if (!detail) return; try { await api(`/matters/${detail.id}/status`, { method: 'PATCH', body: { stage: 'Closed' } }); notify({ type: 'success', message: 'Matter archived.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteMatterRecord() { if (!detail) return; try { const id = detail.id; await api(`/matters/${id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Matter deleted.' }); setDetail(null); setSelectedId(''); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
@@ -3074,7 +3109,43 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
 
               {cockpitSection === 'documents' && (
                 <>
-                  <div id="matter-section-documents" style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Documents"><MatterDocuments matterId={detail.id} canManage={canManage} notify={notify} /></Sub></div>
+                  <div id="matter-section-documents" style={{ minWidth: 0, maxWidth: '100%' }}>
+                    <Sub title="Documents">
+                      {canManage && (
+                        <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#FAFAF9', padding: 12, display: 'grid', gap: 10, marginBottom: 12, minWidth: 0 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
+                            <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                              <strong style={{ fontSize: 13, color: theme.ink }}>Sign a PDF</strong>
+                              <span style={{ fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>Choose a matter PDF and place a visual signature or firm stamp. The original file stays unchanged.</span>
+                            </div>
+                            <Badge tone="blue">{matterPdfDocuments.length} PDF{matterPdfDocuments.length === 1 ? '' : 's'}</Badge>
+                          </div>
+                          {matterPdfDocuments.length ? (
+                            <div style={{ display: 'grid', gap: 8, minWidth: 0 }}>
+                              {matterPdfDocuments.map(doc => (
+                                <div key={`sign-${doc.id}`} style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: '9px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', minWidth: 0 }}>
+                                  <div style={{ display: 'grid', gap: 2, minWidth: 0, flex: '1 1 220px' }}>
+                                    <strong style={{ fontSize: 13, color: theme.ink, overflowWrap: 'anywhere' }}>{staffDocumentLabel(doc)}</strong>
+                                    <span style={{ fontSize: 11, color: theme.muted }}>{doc.clientVisible ? 'Client-visible' : 'Staff-only'}{doc.date ? ` / ${doc.date}` : ''}</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => openSignatureFlowForDocument(doc)}
+                                    style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}
+                                  >
+                                    <IconSignature size={14} stroke={1.75} /> Sign this document
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: 12, color: theme.muted }}>Upload a PDF below to sign or stamp it.</span>
+                          )}
+                        </div>
+                      )}
+                      <MatterDocuments matterId={detail.id} canManage={canManage} notify={notify} />
+                    </Sub>
+                  </div>
                   <div id="matter-section-document-requests" style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Document requests"><DocumentRequestsPanel matterId={detail.id} canManage={canManage} notify={notify} downloadWithAuth={downloadWithAuth} /></Sub></div>
                 </>
               )}

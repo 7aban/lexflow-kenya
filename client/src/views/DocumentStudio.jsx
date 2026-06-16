@@ -11,13 +11,20 @@ function matterLabel(matter = {}) {
   return matter.reference && matter.title ? `${matter.title} (${matter.reference})` : base;
 }
 
-const SIGNATURE_ASSET_ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp'];
+const SIGNATURE_ASSET_ALLOWED_MIME = ['image/jpeg', 'image/png'];
+const STAMP_PDF_ASSET_ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/jpg']);
 const SIGNATURE_ASSET_MAX_BYTES = 512 * 1024;
+const PDF_SIGNATURE_IMAGE_MESSAGE = 'For PDF signing, upload a PNG or JPEG signature/stamp image. WebP cannot be embedded in signed PDFs yet.';
+const DOCUMENT_STUDIO_SIGNATURE_TARGET_KEY = 'lexflow.documentStudio.signatureTarget';
 
 function formatAssetSize(size) {
   const bytes = Number(size || 0);
   if (!bytes) return '';
   return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+function canEmbedSignatureAssetInPdf(asset = {}) {
+  return STAMP_PDF_ASSET_ALLOWED_MIME.has(String(asset.mimeType || '').toLowerCase());
 }
 
 function SignatureAssetPreview({ asset }) {
@@ -261,6 +268,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
   const signatureSectionRef = useRef(null);
   const templatesSectionRef = useRef(null);
   const toolsSectionRef = useRef(null);
+  const pendingStampTargetRef = useRef(null);
 
   useEffect(() => {
     load();
@@ -272,6 +280,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
       if (settings && typeof settings.name === 'string') setFirmName(settings.name);
       if (settings) setFirmSettings({ ...defaultFirmSettings, ...settings });
     }).catch(() => {});
+    consumeSignatureTarget();
   }, []);
 
   useEffect(() => {
@@ -500,8 +509,12 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
+    if (file.type === 'image/webp') {
+      notify?.({ type: 'danger', message: PDF_SIGNATURE_IMAGE_MESSAGE });
+      return;
+    }
     if (!SIGNATURE_ASSET_ALLOWED_MIME.includes(file.type)) {
-      notify?.({ type: 'danger', message: 'Only PNG, JPEG, and WebP images are supported.' });
+      notify?.({ type: 'danger', message: 'Only PNG and JPEG images are supported for PDF signing.' });
       return;
     }
     if (file.size > SIGNATURE_ASSET_MAX_BYTES) {
@@ -607,6 +620,33 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     } else {
       onNavigate?.('Matters');
     }
+  }
+
+  function consumeSignatureTarget() {
+    let target = null;
+    try {
+      const raw = window.localStorage?.getItem(DOCUMENT_STUDIO_SIGNATURE_TARGET_KEY);
+      if (raw) {
+        target = JSON.parse(raw);
+        window.localStorage?.removeItem(DOCUMENT_STUDIO_SIGNATURE_TARGET_KEY);
+      }
+    } catch {
+      target = null;
+    }
+    if (!target || target.tool !== 'stamp') return;
+    pendingStampTargetRef.current = {
+      matterId: String(target.matterId || ''),
+      documentId: String(target.documentId || ''),
+    };
+    setToolsOpen(true);
+    setSelectedTool('stamp');
+    if (target.matterId) setStampMatterId(String(target.matterId));
+    if (target.filename) setStampFilename(String(target.filename).slice(0, 180));
+    setStampError(null);
+    setStampSuccess('');
+    setStampSaveError(null);
+    setStampSaveSuccess('');
+    setTimeout(() => stampPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
   }
 
   async function runPreview() {
@@ -1241,7 +1281,17 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setStampDocumentId('');
     try {
       const docs = await getMatterDocuments(matterId);
-      setStampDocuments((Array.isArray(docs) ? docs : []).filter(doc => doc.mimeType === 'application/pdf'));
+      const pdfDocs = (Array.isArray(docs) ? docs : []).filter(doc => doc.mimeType === 'application/pdf');
+      setStampDocuments(pdfDocs);
+      const pending = pendingStampTargetRef.current;
+      if (pending?.matterId === matterId && pending.documentId) {
+        if (pdfDocs.some(doc => doc.id === pending.documentId)) {
+          setStampDocumentId(pending.documentId);
+        } else {
+          setStampError('The selected matter loaded, but that PDF could not be found. Choose a PDF document below.');
+        }
+        pendingStampTargetRef.current = null;
+      }
     } catch (err) {
       setStampDocuments([]);
       setStampDocsError(err.message || 'Could not load matter documents.');
@@ -1261,6 +1311,10 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     }
     if (!stampAssetId) {
       setStampError('Select a signature or stamp asset.');
+      return;
+    }
+    if (selectedStampAssetBlocked) {
+      setStampError(PDF_SIGNATURE_IMAGE_MESSAGE);
       return;
     }
     setStampLoading(true);
@@ -1290,6 +1344,10 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     }
     if (!stampMatterId) {
       setStampSaveError('Select a matter first.');
+      return;
+    }
+    if (selectedStampAssetBlocked) {
+      setStampSaveError(PDF_SIGNATURE_IMAGE_MESSAGE);
       return;
     }
     setStampSaveLoading(true);
@@ -1522,12 +1580,17 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
   const isAdmin = currentRole === 'admin';
   const personalSignatureAssets = signatureAssets.filter(asset => asset.ownerType === 'user' && asset.assetType === 'signature' && (!currentUserId || asset.ownerId === currentUserId));
   const firmStampAssets = signatureAssets.filter(asset => asset.ownerType === 'firm' && asset.assetType === 'stamp');
+  const selectedStampAsset = signatureAssets.find(asset => asset.id === stampAssetId);
+  const selectedStampAssetBlocked = Boolean(selectedStampAsset && !canEmbedSignatureAssetInPdf(selectedStampAsset));
+  const selectedStampAssetMessage = selectedStampAssetBlocked ? PDF_SIGNATURE_IMAGE_MESSAGE : '';
+  const canStampDownload = !!stampDocumentId && !!stampAssetId && !selectedStampAssetBlocked && !stampLoading;
+  const canStampSave = !!stampDocumentId && !!stampAssetId && !!stampMatterId && !selectedStampAssetBlocked && !stampSaveLoading;
   const commandCardStyle = { ...themedPanelStyle, padding: '14px 16px', display: 'grid', gap: 10, alignContent: 'start', minWidth: 0 };
   const signaturePanelStyle = { ...themedPanelStyle, padding: 14, display: 'grid', gap: 12, minWidth: 0 };
 
   function renderSignatureAssetRows(assets, canManage) {
     if (signatureAssetsLoading) return <Skeleton />;
-    if (!assets.length) return <Empty title="No image stored" text="Upload a PNG, JPEG, or WebP image." />;
+    if (!assets.length) return <Empty title="No image stored" text="Upload a PNG or JPEG image for PDF signing." />;
     return (
       <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
         {assets.map(asset => (
@@ -1537,8 +1600,12 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 <strong style={{ fontSize: 13, color: 'var(--lf-card-text, #101827)', overflowWrap: 'anywhere' }}>{asset.label}</strong>
                 {asset.isDefault && <Badge tone="green">Default</Badge>}
+                {!canEmbedSignatureAssetInPdf(asset) && <Badge tone="amber">Not for PDF signing</Badge>}
                 <span style={{ fontSize: 12, ...mutedPanelTextStyle }}>{asset.mimeType}{asset.size ? ` / ${formatAssetSize(asset.size)}` : ''}</span>
               </div>
+              {!canEmbedSignatureAssetInPdf(asset) && (
+                <span style={{ fontSize: 12, color: theme.amber, lineHeight: 1.5 }}>{PDF_SIGNATURE_IMAGE_MESSAGE}</span>
+              )}
               {canManage ? (
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                   <input
@@ -1593,7 +1660,10 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
           <div style={commandCardStyle}>
             <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Signatures and stamps</strong>
             <span style={{ fontSize: 13, ...mutedPanelTextStyle, lineHeight: 1.5 }}>Upload reusable signature or stamp images, then place them on matter PDFs.</span>
-            <button type="button" style={{ ...styles.ghostButton, justifySelf: 'start', fontSize: 12, padding: '5px 12px' }} onClick={() => scrollToRef(signatureSectionRef)}>Manage assets</button>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" style={{ ...styles.primaryButton, justifySelf: 'start', fontSize: 12, padding: '5px 12px' }} onClick={() => openTools('stamp')}>Sign a PDF</button>
+              <button type="button" style={{ ...styles.ghostButton, justifySelf: 'start', fontSize: 12, padding: '5px 12px' }} onClick={() => scrollToRef(signatureSectionRef)}>Manage assets</button>
+            </div>
           </div>
           <div style={commandCardStyle}>
             <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Templates</strong>
@@ -1604,17 +1674,17 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
       </Card>
 
       <div ref={signatureSectionRef} style={{ minWidth: 0 }}>
-      <Card title="Signatures & stamps" hint="This stores an image for later placement on documents. It is not a certified electronic signature.">
+      <Card title="Signatures & stamps" hint="This stores a PNG/JPEG image for visual placement on PDFs. It is not a certified electronic signature.">
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))', gap: 14, minWidth: 0 }}>
           <div style={signaturePanelStyle}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                 <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Visual signature image</strong>
-                <span style={{ fontSize: 12, ...mutedPanelTextStyle }}>Personal reusable image asset</span>
+                <span style={{ fontSize: 12, ...mutedPanelTextStyle }}>Personal reusable PNG/JPEG image asset</span>
               </div>
               <label style={{ ...styles.primaryButton, opacity: signatureAssetBusy === 'upload-signature' ? 0.65 : 1, cursor: signatureAssetBusy === 'upload-signature' ? 'not-allowed' : 'pointer' }}>
                 {signatureAssetBusy === 'upload-signature' ? 'Uploading...' : 'Upload signature image'}
-                <input type="file" accept="image/png,image/jpeg,image/webp" style={{ display: 'none' }} disabled={Boolean(signatureAssetBusy)} onChange={event => uploadSignatureAsset('signature', event)} />
+                <input type="file" accept="image/png,image/jpeg" style={{ display: 'none' }} disabled={Boolean(signatureAssetBusy)} onChange={event => uploadSignatureAsset('signature', event)} />
               </label>
             </div>
             {renderSignatureAssetRows(personalSignatureAssets, true)}
@@ -1624,12 +1694,12 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                 <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Firm stamp image</strong>
-                <span style={{ fontSize: 12, ...mutedPanelTextStyle }}>Firm reusable image asset</span>
+                <span style={{ fontSize: 12, ...mutedPanelTextStyle }}>Firm reusable PNG/JPEG image asset</span>
               </div>
               {isAdmin && (
                 <label style={{ ...styles.primaryButton, opacity: signatureAssetBusy === 'upload-stamp' ? 0.65 : 1, cursor: signatureAssetBusy === 'upload-stamp' ? 'not-allowed' : 'pointer' }}>
                   {signatureAssetBusy === 'upload-stamp' ? 'Uploading...' : 'Upload stamp image'}
-                  <input type="file" accept="image/png,image/jpeg,image/webp" style={{ display: 'none' }} disabled={Boolean(signatureAssetBusy)} onChange={event => uploadSignatureAsset('stamp', event)} />
+                  <input type="file" accept="image/png,image/jpeg" style={{ display: 'none' }} disabled={Boolean(signatureAssetBusy)} onChange={event => uploadSignatureAsset('stamp', event)} />
                 </label>
               )}
             </div>
@@ -2904,13 +2974,15 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                 <strong style={{ fontSize: 14, color: theme.ink }}>Sign / stamp PDF</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Place a stored signature or stamp image onto a PDF page</span>
+                <span style={{ fontSize: 12, color: theme.muted }}>Place a visual signature or firm stamp on a matter PDF</span>
               </div>
               <Badge tone="green">Available</Badge>
             </div>
 
             <div style={{ border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
-              This places a stored signature/stamp image onto a PDF. It is not a certified electronic signature.
+              Place a visual signature or stamp image on a PDF. This does not create a certified electronic signature.
+              <br />
+              Choose a saved signature or firm stamp, select the PDF page, click where it should appear, then download or save a signed copy.
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, alignItems: 'end', minWidth: 0 }}>
@@ -2958,8 +3030,8 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                 >
                   <option value="">{signatureAssets.length === 0 ? 'No assets available' : '— Select an asset —'}</option>
                   {signatureAssets.map(asset => (
-                    <option key={asset.id} value={asset.id}>
-                      {asset.label || asset.id} ({asset.assetType === 'stamp' ? 'stamp' : 'signature'})
+                    <option key={asset.id} value={asset.id} disabled={!canEmbedSignatureAssetInPdf(asset)}>
+                      {asset.label || asset.id} ({asset.assetType === 'stamp' ? 'stamp' : 'signature'}){canEmbedSignatureAssetInPdf(asset) ? '' : ' - PNG/JPEG required'}
                     </option>
                   ))}
                 </select>
@@ -2992,6 +3064,10 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                 onPageChange={page => { setStampPageNumber(page); setStampError(null); setStampSuccess(''); setStampSaveError(null); setStampSaveSuccess(''); }}
               />
 
+              {selectedStampAssetMessage && (
+                <Alert tone="warning">{selectedStampAssetMessage}</Alert>
+              )}
+
               <label style={{ ...styles.field, minWidth: 0 }}>
                 <span style={{ fontSize: 12, color: theme.muted }}>Output filename</span>
                 <input
@@ -3005,9 +3081,9 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
 
               <button
                 type="button"
-                style={{ ...styles.primaryButton, minHeight: 36, opacity: stampDocumentId && stampAssetId && !stampLoading ? 1 : 0.65, cursor: stampDocumentId && stampAssetId && !stampLoading ? 'pointer' : 'not-allowed' }}
+                style={{ ...styles.primaryButton, minHeight: 36, opacity: canStampDownload ? 1 : 0.65, cursor: canStampDownload ? 'pointer' : 'not-allowed' }}
                 onClick={runStampPdf}
-                disabled={!stampDocumentId || !stampAssetId || stampLoading}
+                disabled={!canStampDownload}
               >
                 {stampLoading ? 'Stamping...' : 'Stamp and Download'}
               </button>
@@ -3015,9 +3091,9 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
               {stampMatterId && (
                 <button
                   type="button"
-                  style={{ ...styles.ghostButton, minHeight: 36, opacity: stampDocumentId && stampAssetId && !stampSaveLoading && stampMatterId ? 1 : 0.65, cursor: stampDocumentId && stampAssetId && !stampSaveLoading && stampMatterId ? 'pointer' : 'not-allowed' }}
+                  style={{ ...styles.ghostButton, minHeight: 36, opacity: canStampSave ? 1 : 0.65, cursor: canStampSave ? 'pointer' : 'not-allowed' }}
                   onClick={runStampSave}
-                  disabled={!stampDocumentId || !stampAssetId || !stampMatterId || stampSaveLoading}
+                  disabled={!canStampSave}
                 >
                   {stampSaveLoading ? 'Saving...' : 'Save to matter documents'}
                 </button>

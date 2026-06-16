@@ -27,11 +27,13 @@ export default function PdfStampCanvas({
   onXChange,
   onYChange,
   onWidthChange,
+  disabled = false,
 }) {
   const wrapperRef = useRef(null);
   const canvasRef = useRef(null);
   const pdfDocRef = useRef(null);
   const renderTaskRef = useRef(null);
+  const dragRef = useRef(null);
 
   const [numPages, setNumPages] = useState(0);
   const [pageWidthPt, setPageWidthPt] = useState(0);
@@ -40,6 +42,7 @@ export default function PdfStampCanvas({
   const [assetAspect, setAssetAspect] = useState(null); // naturalHeight / naturalWidth
   const [status, setStatus] = useState('loading'); // loading | ready | error
   const [errorMessage, setErrorMessage] = useState('');
+  const [isDragging, setIsDragging] = useState(false);
 
   // Track the asset's natural aspect ratio so the preview height matches the
   // server's computeStampedHeight (height = width * naturalHeight / naturalWidth).
@@ -170,25 +173,65 @@ export default function PdfStampCanvas({
 
   const heightPt = stampWidth * (assetAspect || 1);
 
-  function handleCanvasClick(event) {
-    if (status !== 'ready' || !pageWidthPt || !pageHeightPt) return;
-    const rect = event.currentTarget.getBoundingClientRect();
+  function placeFromPointer(clientX, clientY, offsetXPt = 0, offsetTopPt = 0) {
+    if (status !== 'ready' || disabled || !pageWidthPt || !pageHeightPt) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
     const S = rect.width / pageWidthPt; // CSS px per PDF point
     if (!Number.isFinite(S) || S <= 0) return;
 
-    const cx = event.clientX - rect.left;
-    const cy = event.clientY - rect.top;
+    const cx = clientX - rect.left;
+    const cy = clientY - rect.top;
 
     // Click marks the top-left of the stamp. PDF origin is bottom-left, so flip Y
     // and subtract the stamp height to convert the top edge into a bottom edge.
-    let pdfX = cx / S;
-    let pdfY = pageHeightPt - (cy / S) - heightPt;
+    let pdfX = (cx / S) - offsetXPt;
+    let pdfY = pageHeightPt - ((cy / S) - offsetTopPt) - heightPt;
 
     pdfX = clamp(pdfX, 0, Math.max(0, pageWidthPt - stampWidth));
     pdfY = clamp(pdfY, 0, Math.max(0, pageHeightPt - heightPt));
 
     onXChange?.({ target: { value: round1(pdfX) } });
     onYChange?.({ target: { value: round1(pdfY) } });
+  }
+
+  function handleCanvasClick(event) {
+    if (disabled || isDragging) return;
+    placeFromPointer(event.clientX, event.clientY);
+  }
+
+  function handleOverlayPointerDown(event) {
+    if (disabled || status !== 'ready' || !pageWidthPt || !pageHeightPt) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const S = rect.width / pageWidthPt;
+    if (!Number.isFinite(S) || S <= 0) return;
+    dragRef.current = {
+      offsetXPt: (event.clientX - rect.left - overlayLeft) / S,
+      offsetTopPt: (event.clientY - rect.top - overlayTop) / S,
+    };
+    setIsDragging(true);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
+  function handleOverlayPointerMove(event) {
+    if (!dragRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    placeFromPointer(event.clientX, event.clientY, dragRef.current.offsetXPt, dragRef.current.offsetTopPt);
+  }
+
+  function endOverlayDrag(event) {
+    if (!dragRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragRef.current = null;
+    setIsDragging(false);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
   }
 
   function goToPage(next) {
@@ -208,7 +251,7 @@ export default function PdfStampCanvas({
     <div style={{ display: 'grid', gap: 10, minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 12, color: theme.muted }}>
-          Click the preview to place the top-left corner of the signature/stamp.
+          Click the preview to place the signature/stamp. Drag the marker to move it.
         </span>
         {numPages > 1 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -256,10 +299,14 @@ export default function PdfStampCanvas({
             <canvas
               ref={canvasRef}
               onClick={handleCanvasClick}
-              style={{ display: 'block', cursor: 'crosshair', maxWidth: '100%', border: `1px solid ${theme.line}`, background: '#fff' }}
+              style={{ display: 'block', cursor: disabled ? 'not-allowed' : 'crosshair', maxWidth: '100%', border: `1px solid ${theme.line}`, background: '#fff' }}
             />
             {showOverlay && (
               <div
+                onPointerDown={handleOverlayPointerDown}
+                onPointerMove={handleOverlayPointerMove}
+                onPointerUp={endOverlayDrag}
+                onPointerCancel={endOverlayDrag}
                 style={{
                   position: 'absolute',
                   left: overlayLeft,
@@ -268,8 +315,10 @@ export default function PdfStampCanvas({
                   height: overlayHeight,
                   border: `1px solid ${theme.blue}`,
                   background: selectedAssetUrl ? 'transparent' : 'rgba(29,78,216,0.12)',
-                  pointerEvents: 'none',
+                  pointerEvents: disabled ? 'none' : 'auto',
                   boxSizing: 'border-box',
+                  cursor: disabled ? 'not-allowed' : isDragging ? 'grabbing' : 'grab',
+                  touchAction: 'none',
                 }}
               >
                 {selectedAssetUrl && (

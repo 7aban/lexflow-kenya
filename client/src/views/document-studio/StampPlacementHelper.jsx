@@ -26,6 +26,7 @@ export default function StampPlacementHelper({
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   function applyPreset(p) {
+    if (disabled) return;
     const event = (val) => ({ target: { value: val } });
     onXChange(event(p.x));
     onYChange(event(p.y));
@@ -39,9 +40,9 @@ export default function StampPlacementHelper({
     <div style={{ display: 'grid', gap: 12, minWidth: 0, gridColumn: '1 / -1' }}>
       {pdfData && (
         <div style={{ display: 'grid', gap: 8, minWidth: 0 }}>
-          <span style={{ fontSize: 12, color: theme.muted, fontWeight: 700 }}>Click to place</span>
+          <span style={{ fontSize: 12, color: theme.muted, fontWeight: 700 }}>Click or drag to place</span>
           <div style={{ fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
-            Click the PDF preview to place the top-left corner of the signature/stamp. Advanced coordinates remain editable below.
+            Click the PDF preview to place the signature/stamp. Drag the preview marker to move it; advanced coordinates remain editable below.
           </div>
           <PdfStampCanvas
             pdfData={pdfData}
@@ -54,6 +55,7 @@ export default function StampPlacementHelper({
             onXChange={onXChange}
             onYChange={onYChange}
             onWidthChange={onWidthChange}
+            disabled={disabled}
           />
         </div>
       )}
@@ -70,7 +72,8 @@ export default function StampPlacementHelper({
               key={p.label}
               type="button"
               onClick={() => applyPreset(p)}
-              style={{ ...styles.tinyButton, fontSize: 11, padding: '4px 10px' }}
+              disabled={disabled}
+              style={{ ...styles.tinyButton, fontSize: 11, padding: '4px 10px', opacity: disabled ? 0.6 : 1, cursor: disabled ? 'not-allowed' : 'pointer' }}
             >
               {p.label}
             </button>

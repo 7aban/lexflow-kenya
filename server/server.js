@@ -4962,6 +4962,8 @@ app.delete('/api/auth/oauth/accounts/:provider', requireStaff, async (req, res) 
 const AVATAR_MAX_BYTES = 512 * 1024;
 const AVATAR_UPLOAD_BODY_LIMIT = '768kb';
 const AVATAR_ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const PDF_SIGNATURE_IMAGE_MESSAGE = 'For PDF signing, upload a PNG or JPEG signature/stamp image. WebP cannot be embedded in signed PDFs yet.';
+const SIGNATURE_ASSET_UPLOAD_ALLOWED_MIME = new Set(['image/jpeg', 'image/png']);
 const avatarUploadBody = express.raw({
   type: req => {
     const contentType = String(req.headers['content-type'] || '').toLowerCase();
@@ -5276,7 +5278,8 @@ async function normalizeSignatureAssetCreate(req) {
   }
 
   const mimeType = String(req.body?.mimeType || '').split(';')[0].trim().toLowerCase();
-  if (!mimeType || !AVATAR_ALLOWED_MIME.has(mimeType)) return { status: 400, error: 'Only image/jpeg, image/png, and image/webp are supported' };
+  if (mimeType === 'image/webp') return { status: 400, error: PDF_SIGNATURE_IMAGE_MESSAGE };
+  if (!mimeType || !SIGNATURE_ASSET_UPLOAD_ALLOWED_MIME.has(mimeType)) return { status: 400, error: 'Only image/jpeg and image/png are supported for signature/stamp assets' };
   if (!req.body?.data) return { status: 400, error: 'data is required' };
   let buffer;
   try {
@@ -10236,7 +10239,7 @@ async function loadStampAsset(assetId) {
   const asset = await get('SELECT * FROM signature_assets WHERE id=? AND deletedAt IS NULL', [assetId]);
   if (!asset) return { error: 'Signature asset not found', status: 404 };
   const mime = String(asset.mimeType || '').toLowerCase();
-  if (!STAMP_PDF_ALLOWED_ASSET_MIME.has(mime)) return { status: 400, error: 'Only PNG and JPEG signature/stamp images are supported for PDF placement' };
+  if (!STAMP_PDF_ALLOWED_ASSET_MIME.has(mime)) return { status: 400, error: PDF_SIGNATURE_IMAGE_MESSAGE };
   return { asset, mime };
 }
 
