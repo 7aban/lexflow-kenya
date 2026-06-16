@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote, IconMail, IconPaperclip, IconExternalLink, IconLayoutDashboard, IconUsers } from '@tabler/icons-react';
 import { api, applyChecklistTemplate, approveHrLeaveRequest, cancelHrLeaveRequestAdmin, changePassword, clearSession, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, cancelOffboardingCase, completeOffboardingCase, createHrContract, createHrLeaveBalanceAdjustment, createHrStaffProfile, createMatterChecklistItem, createOffboardingCase, deleteChecklistTemplate, deleteClientAvatar, deleteHrDocument, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadHrDocumentContent, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getConnectedAccountAvailability, getHrContracts, getHrDashboard, getHrDocuments, getHrLeaveBalances, getHrLeaveRequests, getHrStaff, getHrStaffProfile, getOffboardingAssignedMatters, getOffboardingCase, getOffboardingCases, getClientSnapshot, getInvoiceDetails, getMatterTimeline, getAppearanceDocuments, linkAppearanceDocument, unlinkAppearanceDocument, getMatterWorkMetadataLinks, getRetainers, getRetainer, createRetainer, updateRetainer, deleteRetainer, generateRetainerDocument, listDocumentTemplates, getMatterFeePlans, getMatterFeePlan, createMatterFeePlan, updateMatterFeePlan, deleteMatterFeePlan, getRetainerLedger, getRetainerLedgerSummary, createRetainerLedgerEntry, voidRetainerLedgerEntry, getClientKyc, getClientKycRecord, createClientKyc, updateClientKyc, deleteClientKyc, getClientAuthorities, getClientAuthorityRecord, createClientAuthority, updateClientAuthority, deleteClientAuthority, getRetainerLifecycleEvents, getRetainerLifecycleEvent, createRetainerLifecycleEvent, updateRetainerLifecycleEvent, deleteRetainerLifecycleEvent, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, rejectHrLeaveRequest, setHrLeaveEntitlement, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrContract, updateHrDocument, updateHrStaffProfile, updateMatterChecklistItem, updateOffboardingCase, updateOffboardingChecklistItem, uploadClientAvatar, uploadHrDocument, uploadUserAvatar } from '../lib/apiClient.js';
-import { appendBrandingModeToPath, defaultFirmSettings, defaultOutputBrandingMode, hasFirmLetterhead, outputBrandingModes, styles, theme, applyFirmTheme, clearFirmTheme, resolveReadableTheme } from '../theme.jsx';
+import { appendBrandingModeToPath, defaultFirmSettings, defaultOutputBrandingMode, hasFirmLetterhead, letterheadPdfOutputWarning, outputBrandingModes, styles, theme, applyFirmTheme, clearFirmTheme, resolveReadableTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, safeHttpUrl, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText, invoiceDueDistanceDays } from '../components/ui.jsx';
 import MatterDocuments from '../components/MatterDocuments.jsx';
@@ -4307,7 +4307,8 @@ function PaymentProofQueue({ proofs, proofFilter, setProofFilter, pendingProofCo
 
 async function downloadWithNotify(path, filename, notify) {
   try {
-    await downloadWithAuth(path, filename);
+    const blob = await downloadWithAuth(path, filename);
+    if (blob?.lexflowBrandingWarning) notify?.({ type: 'warning', message: blob.lexflowBrandingWarning });
   } catch (err) {
     notify?.({ type: 'danger', message: err.message });
   }
@@ -4323,6 +4324,7 @@ function DownloadButton({ label, path, filename, notify, ariaLabel }) {
 
 function OutputBrandingSelector({ value, onChange, firmSettings, disabled = false, compact = false, id = 'output-branding-mode' }) {
   const hasLetterhead = hasFirmLetterhead(firmSettings);
+  const letterheadWarning = value === 'letterhead' ? letterheadPdfOutputWarning(firmSettings) : '';
   return (
     <div style={{ display: 'grid', gap: 4, minWidth: compact ? 180 : 240 }}>
       <label htmlFor={id} style={{ fontSize: 12, color: theme.muted, fontWeight: 700 }}>Output branding</label>
@@ -4338,7 +4340,7 @@ function OutputBrandingSelector({ value, onChange, firmSettings, disabled = fals
         ))}
       </select>
       <span style={styles.formHelper}>Choose whether this output should use the firm letterhead, simple firm branding, or no firm branding.</span>
-      {!hasLetterhead && value === 'letterhead' ? <span style={{ color: theme.amber, fontSize: 12, fontWeight: 700 }}>Upload a firm letterhead first, or use simple branding.</span> : null}
+      {letterheadWarning ? <span style={{ color: theme.amber, fontSize: 12, fontWeight: 700 }}>{letterheadWarning}</span> : null}
     </div>
   );
 }

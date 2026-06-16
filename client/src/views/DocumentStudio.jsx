@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { API_BASE, api, fileToDataUrl, fetchDocumentArrayBuffer, getMatterDocuments, listChecklistTemplates, listDocumentTemplates, mergePdfDocuments, readSession, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf, splitPdfPages, saveSplitPdf, imagesToPdf, saveImagesToPdf, deletePdfPages, saveDeletedPdf, numberPdfPages, saveNumberedPdf, createCourtBundle, saveCourtBundle, stampPdf, saveStampedPdf, tenthLinePdf, saveTenthLinedPdf } from '../lib/apiClient.js';
-import { defaultFirmSettings, hasFirmLetterhead, outputBrandingModes, styles, theme } from '../theme.jsx';
+import { defaultFirmSettings, hasFirmLetterhead, letterheadPdfOutputWarning, outputBrandingModes, styles, theme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Skeleton } from '../components/ui.jsx';
 import DocumentToolCards from './document-studio/DocumentToolCards.jsx';
 import TemplatePreviewPanel from './document-studio/TemplatePreviewPanel.jsx';
@@ -1164,9 +1164,10 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     }
     setBundleLoading(true);
     try {
-      await createCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined, bundleIncludeCover, bundleIncludeCover ? bundleCover : undefined, bundleIncludeDividers, bundleIncludeDividers ? bundleDividerLabels : undefined, bundleIncludeBookmarks, bundleIncludeCertificate, bundleBrandingMode);
+      const blob = await createCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined, bundleIncludeCover, bundleIncludeCover ? bundleCover : undefined, bundleIncludeDividers, bundleIncludeDividers ? bundleDividerLabels : undefined, bundleIncludeBookmarks, bundleIncludeCertificate, bundleBrandingMode);
       setBundleSuccess('Court bundle downloaded.');
       notify?.({ type: 'success', message: 'Court bundle downloaded.' });
+      if (blob?.lexflowBrandingWarning) notify?.({ type: 'warning', message: blob.lexflowBrandingWarning });
     } catch (err) {
       const message = err.message || 'Could not create court bundle.';
       setBundleError(message);
@@ -1510,6 +1511,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
   const canBundle = selectedBundleDocumentIds.length >= 2 && selectedBundleDocumentIds.length <= 10 && !bundleLoading && !bundleDocsLoading && !!bundleMatterId;
   const canBundleSave = selectedBundleDocumentIds.length >= 2 && selectedBundleDocumentIds.length <= 10 && !bundleSaveLoading && !bundleDocsLoading && !!bundleMatterId;
   const activeBundleOptionCount = [bundlePaginate, bundleIncludeIndex, bundleIncludeCover, bundleIncludeDividers, bundleIncludeBookmarks, bundleIncludeCertificate].filter(Boolean).length;
+  const bundleLetterheadWarning = bundleBrandingMode === 'letterhead' ? letterheadPdfOutputWarning(firmSettings) : '';
   const themedPanelStyle = { border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 8, background: 'var(--lf-card, #fff)', color: 'var(--lf-card-text, #101827)' };
   const mutedPanelTextStyle = { color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))' };
   const bundleSectionLabelStyle = { fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', ...mutedPanelTextStyle };
@@ -2670,6 +2672,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                 ))}
               </select>
               <span style={{ fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>Choose whether this output should use the firm letterhead, simple firm branding, or no firm branding. For court bundles, branding is applied only to the optional generated cover page.</span>
+              {bundleLetterheadWarning ? <span style={{ fontSize: 12, color: theme.amber, fontWeight: 700, lineHeight: 1.5 }}>{bundleLetterheadWarning}</span> : null}
             </label>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, minWidth: 0 }}>

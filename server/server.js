@@ -2144,6 +2144,8 @@ function drawFirmBillingBlock(doc, firm, x, startY, width) {
 }
 
 const OUTPUT_BRANDING_MODES = new Set(['letterhead', 'simple', 'plain']);
+const LETTERHEAD_PDF_NO_LETTERHEAD_WARNING = 'No firm letterhead is saved. Simple firm branding was used for this PDF.';
+const LETTERHEAD_PDF_WEBP_WARNING = 'WebP letterhead is saved for preview, but PDF output supports PNG/JPEG. Simple firm branding was used.';
 
 function requestedOutputBrandingMode(req, fallback = 'simple') {
   const raw = req?.query?.brandingMode ?? req?.body?.brandingMode ?? req?.query?.branding ?? req?.body?.branding;
@@ -2151,6 +2153,22 @@ function requestedOutputBrandingMode(req, fallback = 'simple') {
   const mode = String(raw).trim();
   if (!OUTPUT_BRANDING_MODES.has(mode)) return { error: 'brandingMode must be one of: letterhead, simple, plain' };
   return { mode };
+}
+
+function firmLetterheadDataUri(firm) {
+  return firm?.letterhead || firm?.theme?.letterhead || '';
+}
+
+function outputBrandingWarning(firm, mode) {
+  if (mode !== 'letterhead') return '';
+  const image = dataUriImageBuffer(firmLetterheadDataUri(firm));
+  if (!image) return LETTERHEAD_PDF_NO_LETTERHEAD_WARNING;
+  if (image.mimeType === 'image/webp') return LETTERHEAD_PDF_WEBP_WARNING;
+  return '';
+}
+
+function setOutputBrandingWarningHeader(res, warning) {
+  if (warning) res.setHeader('X-LexFlow-Branding-Warning', warning);
 }
 
 function brandPrimary(firm) {
@@ -11653,6 +11671,7 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
     if (brandingRequest.error) return res.status(400).json({ error: brandingRequest.error });
     const coverBrandingMode = includeCover ? brandingRequest.mode : 'plain';
     const coverFirm = includeCover && coverBrandingMode !== 'plain' ? await getFirmSettings() : null;
+    const coverBrandingWarning = includeCover ? outputBrandingWarning(coverFirm, coverBrandingMode) : '';
 
     const outputFilename = cleanPdfDownloadName(rawFilename || 'court-bundle.pdf');
     const sourceDocs = [];
@@ -11811,6 +11830,7 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
     metadata.includeCover = includeCover;
     metadata.coverFieldCount = includeCover ? coverFieldCount : 0;
     if (includeCover) metadata.brandingMode = coverBrandingMode;
+    if (coverBrandingWarning) metadata.brandingWarning = coverBrandingWarning;
     metadata.includeDividers = includeDividers;
     metadata.dividerCount = includeDividers ? sourceDocs.length : 0;
     metadata.includeBookmarks = includeBookmarks;
@@ -11829,6 +11849,7 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${outputFilename}"`);
     res.setHeader('Cache-Control', 'no-store');
+    setOutputBrandingWarningHeader(res, coverBrandingWarning);
     res.send(outputBuffer);
   } catch {
     res.status(500).json({ error: 'Unable to create court bundle' });
@@ -11879,6 +11900,7 @@ app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async 
     if (brandingRequest.error) return res.status(400).json({ error: brandingRequest.error });
     const coverBrandingMode = includeCover ? brandingRequest.mode : 'plain';
     const coverFirm = includeCover && coverBrandingMode !== 'plain' ? await getFirmSettings() : null;
+    const coverBrandingWarning = includeCover ? outputBrandingWarning(coverFirm, coverBrandingMode) : '';
 
     const outputFilename = cleanPdfDownloadName(rawFilename || 'court-bundle.pdf');
     const sourceDocs = [];
@@ -12063,6 +12085,7 @@ app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async 
     metadata.includeCover = includeCover;
     metadata.coverFieldCount = includeCover ? coverFieldCount : 0;
     if (includeCover) metadata.brandingMode = coverBrandingMode;
+    if (coverBrandingWarning) metadata.brandingWarning = coverBrandingWarning;
     metadata.includeDividers = includeDividers;
     metadata.dividerCount = includeDividers ? sourceDocs.length : 0;
     metadata.includeBookmarks = includeBookmarks;
@@ -12570,12 +12593,14 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
     },
   }).catch(() => {});
   const firm = await getFirmSettings();
+  const brandingWarning = outputBrandingWarning(firm, brandingRequest.mode);
   const subtotal = Number(invoice.amount || 0);
   const vat = subtotal * 0.16;
   const total = subtotal + vat;
   const doc = new PDFDocument({ size: 'A4', margin: 48 });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${invoice.number || invoice.id}.pdf"`);
+  setOutputBrandingWarningHeader(res, brandingWarning);
   doc.pipe(res);
   const branding = drawPdfKitOutputHeader(doc, firm, brandingRequest.mode, 'INVOICE', { titleX: 400 });
   const baseY = branding.startY;
@@ -12632,9 +12657,11 @@ app.get('/api/invoices/:invoiceId/payments/:paymentId/receipt.pdf', async (req, 
     },
   }).catch(() => {});
   const firm = await getFirmSettings();
+  const brandingWarning = outputBrandingWarning(firm, brandingRequest.mode);
   const doc = new PDFDocument({ size: 'A4', margin: 48 });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${payment.receiptNumber}.pdf"`);
+  setOutputBrandingWarningHeader(res, brandingWarning);
   doc.pipe(res);
   const branding = drawPdfKitOutputHeader(doc, firm, brandingRequest.mode, 'PAYMENT RECEIPT', { titleX: 320 });
   const baseY = branding.startY;

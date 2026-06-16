@@ -43,6 +43,21 @@ export function hasFirmLetterhead(firm = {}) {
   return Boolean(firm?.letterhead || firm?.theme?.letterhead);
 }
 
+export function firmLetterheadMimeType(firm = {}) {
+  const letterhead = firm?.letterhead || firm?.theme?.letterhead || '';
+  const match = /^data:image\/(png|jpe?g|webp);base64,/i.exec(String(letterhead));
+  if (!match) return '';
+  return match[1].toLowerCase() === 'jpg' ? 'jpeg' : match[1].toLowerCase();
+}
+
+export function letterheadPdfOutputWarning(firm = {}) {
+  if (!hasFirmLetterhead(firm)) return 'Upload a firm letterhead first, or use simple branding.';
+  if (firmLetterheadMimeType(firm) === 'webp') {
+    return 'PDF output can embed PNG/JPEG letterheads. This saved WebP will still preview, but PDF downloads will use simple firm branding until you upload PNG/JPEG.';
+  }
+  return '';
+}
+
 export function defaultOutputBrandingMode(firm = {}, fallback = 'simple') {
   if (fallback === 'plain') return 'plain';
   return hasFirmLetterhead(firm) ? 'letterhead' : 'simple';

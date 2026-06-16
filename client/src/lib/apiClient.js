@@ -177,6 +177,12 @@ function filenameFromDisposition(disposition, fallbackFilename) {
   }
 }
 
+function attachDownloadWarnings(blob, response) {
+  const warning = response.headers.get('X-LexFlow-Branding-Warning') || '';
+  if (warning) blob.lexflowBrandingWarning = warning;
+  return blob;
+}
+
 export async function downloadWithAuth(path, fallbackFilename = 'download') {
   const session = readSession();
   if (!session?.token) throw new AuthExpiredError();
@@ -208,7 +214,7 @@ export async function downloadWithAuth(path, fallbackFilename = 'download') {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 0);
-  return blob;
+  return attachDownloadWarnings(blob, response);
 }
 
 export async function postDownloadWithAuth(path, body = {}, fallbackFilename = 'download') {
@@ -245,7 +251,7 @@ export async function postDownloadWithAuth(path, body = {}, fallbackFilename = '
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 0);
-  return blob;
+  return attachDownloadWarnings(blob, response);
 }
 
 // PRODUCT-27C: fetch a document's raw bytes (no browser download) so PDF.js can

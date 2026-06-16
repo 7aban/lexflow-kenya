@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconLayoutDashboard, IconBriefcase, IconBell, IconFile, IconInvoice, IconUserCircle, IconCalendarEvent, IconEye, IconEyeOff } from '@tabler/icons-react';
 import { api, changePassword, deleteMyAvatar, downloadWithAuth, fileToDataUrl, getMyAvatar, uploadMyAvatar } from '../lib/apiClient.js';
-import { appendBrandingModeToPath, defaultFirmSettings, defaultOutputBrandingMode, hasFirmLetterhead, outputBrandingModes, styles, StyleTag, theme, loadAndApplyFirmTheme, resolveReadableTheme } from '../theme.jsx';
+import { appendBrandingModeToPath, defaultFirmSettings, defaultOutputBrandingMode, hasFirmLetterhead, letterheadPdfOutputWarning, outputBrandingModes, styles, StyleTag, theme, loadAndApplyFirmTheme, resolveReadableTheme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Field, kes, Logo, MeetingLink, safeHttpUrl, Skeleton, statusTone, Table, Toast, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText } from '../components/ui.jsx';
 import ClientChatWidget from '../components/ClientChatWidget.jsx';
 import MatterDocuments from '../components/MatterDocuments.jsx';
@@ -1387,7 +1387,8 @@ function Documents({ documents, matters, notify }) {
 
 async function downloadWithNotify(path, filename, notify) {
   try {
-    await downloadWithAuth(path, filename);
+    const blob = await downloadWithAuth(path, filename);
+    if (blob?.lexflowBrandingWarning) notify?.({ type: 'warning', message: blob.lexflowBrandingWarning });
   } catch (err) {
     notify?.({ type: 'danger', message: err.message });
   }
@@ -1403,6 +1404,7 @@ function DownloadButton({ label, path, filename, notify, ariaLabel }) {
 
 function OutputBrandingSelector({ value, onChange, firm, id }) {
   const hasLetterhead = hasFirmLetterhead(firm);
+  const letterheadWarning = value === 'letterhead' ? letterheadPdfOutputWarning(firm) : '';
   return (
     <div style={{ display: 'grid', gap: 4, marginBottom: 10 }}>
       <label htmlFor={id} style={{ fontSize: 12, fontWeight: 700, color: '#6B7280' }}>Output branding</label>
@@ -1412,6 +1414,7 @@ function OutputBrandingSelector({ value, onChange, firm, id }) {
         ))}
       </select>
       <span style={{ fontSize: 12, color: '#6B7280' }}>Choose whether this output should use the firm letterhead, simple firm branding, or no firm branding.</span>
+      {letterheadWarning ? <span style={{ fontSize: 12, color: theme.amber, fontWeight: 700 }}>{letterheadWarning}</span> : null}
     </div>
   );
 }
