@@ -311,6 +311,12 @@ function queryPath(path, params = {}) {
   return `${path}${suffix}`;
 }
 
+function withBrandingMode(path, brandingMode) {
+  if (!brandingMode) return path;
+  const separator = path.includes('?') ? '&' : '?';
+  return `${path}${separator}brandingMode=${encodeURIComponent(brandingMode)}`;
+}
+
 export const getDeadlines = (params = {}) => api(queryPath('/deadlines', params));
 export const createDeadline = data => api('/deadlines', { method: 'POST', body: data });
 export const updateDeadline = (id, data) => api(`/deadlines/${id}`, { method: 'PATCH', body: data });
@@ -367,9 +373,9 @@ export const uploadPaymentProof = data => api('/payment-proofs', { method: 'POST
 export const getInvoiceDetails = invoiceId => api(`/invoices/${invoiceId}`);
 export const listInvoicePayments = invoiceId => api(`/invoices/${invoiceId}/payments`);
 export const recordInvoicePayment = (invoiceId, payload) => api(`/invoices/${invoiceId}/payments`, { method: 'POST', body: payload });
-export const paymentReceiptUrl = (invoiceId, paymentId) => `/api/invoices/${invoiceId}/payments/${paymentId}/receipt.pdf`;
-export const downloadPaymentReceipt = (invoiceId, paymentId, receiptNumber) =>
-  downloadWithAuth(paymentReceiptUrl(invoiceId, paymentId), `${receiptNumber || paymentId}.pdf`);
+export const paymentReceiptUrl = (invoiceId, paymentId, brandingMode) => withBrandingMode(`/api/invoices/${invoiceId}/payments/${paymentId}/receipt.pdf`, brandingMode);
+export const downloadPaymentReceipt = (invoiceId, paymentId, receiptNumber, brandingMode) =>
+  downloadWithAuth(paymentReceiptUrl(invoiceId, paymentId, brandingMode), `${receiptNumber || paymentId}.pdf`);
 export const getInvitations = () => api('/invitations');
 export const createInvitation = data => api('/invitations', { method: 'POST', body: data });
 export const verifyInvitation = token => api(`/invitations/${token}`);
@@ -454,12 +460,12 @@ export const saveNumberedPdf = (documentId, startNumber, position, filename, mat
     method: 'POST',
     body: { matterId, documentId, startNumber, position, filename, clientVisible: false },
   });
-export const createCourtBundle = (matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, includeCover, cover, includeDividers, dividerLabels, includeBookmarks, includeCertificate) =>
-  postDownloadWithAuth('/document-tools/court-bundle', { matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, ...(includeCover ? { includeCover: true, cover } : {}), ...(includeDividers ? { includeDividers: true, dividerLabels: dividerLabels || {} } : {}), ...(includeBookmarks ? { includeBookmarks: true } : {}), ...(includeCertificate ? { includeCertificate: true } : {}) }, filename || 'court-bundle.pdf');
-export const saveCourtBundle = (matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, includeCover, cover, includeDividers, dividerLabels, includeBookmarks, includeCertificate) =>
+export const createCourtBundle = (matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, includeCover, cover, includeDividers, dividerLabels, includeBookmarks, includeCertificate, brandingMode) =>
+  postDownloadWithAuth('/document-tools/court-bundle', { matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, brandingMode, ...(includeCover ? { includeCover: true, cover } : {}), ...(includeDividers ? { includeDividers: true, dividerLabels: dividerLabels || {} } : {}), ...(includeBookmarks ? { includeBookmarks: true } : {}), ...(includeCertificate ? { includeCertificate: true } : {}) }, filename || 'court-bundle.pdf');
+export const saveCourtBundle = (matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, includeCover, cover, includeDividers, dividerLabels, includeBookmarks, includeCertificate, brandingMode) =>
   api('/document-tools/court-bundle/save', {
     method: 'POST',
-    body: { matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, ...(includeCover ? { includeCover: true, cover } : {}), ...(includeDividers ? { includeDividers: true, dividerLabels: dividerLabels || {} } : {}), ...(includeBookmarks ? { includeBookmarks: true } : {}), ...(includeCertificate ? { includeCertificate: true } : {}) },
+    body: { matterId, documentIds, filename, paginate, startNumber, position, includeIndex, documentLabels, brandingMode, ...(includeCover ? { includeCover: true, cover } : {}), ...(includeDividers ? { includeDividers: true, dividerLabels: dividerLabels || {} } : {}), ...(includeBookmarks ? { includeBookmarks: true } : {}), ...(includeCertificate ? { includeCertificate: true } : {}) },
   });
 export const stampPdf = (documentId, assetId, pageNumber, x, y, width, filename) =>
   postDownloadWithAuth('/document-tools/stamp-pdf', { documentId, assetId, pageNumber, x, y, width, filename }, filename || 'stamped-document.pdf');

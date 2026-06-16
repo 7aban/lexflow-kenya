@@ -111,9 +111,15 @@ export const generateInvoice = (matterId, dueDate) => req('POST', '/api/invoices
 export const getInvoice = id => req('GET', `/api/invoices/${id}`);
 export const updateInvoiceStatus = (id, status) => req('PATCH', `/api/invoices/${id}/status`, { status });
 export const deleteInvoice = id => req('DELETE', `/api/invoices/${id}`);
-export const getInvoicePdf = async id => {
+const withBrandingMode = (path, brandingMode) => {
+  if (!brandingMode) return path;
+  const separator = path.includes('?') ? '&' : '?';
+  return `${path}${separator}brandingMode=${encodeURIComponent(brandingMode)}`;
+};
+
+export const getInvoicePdf = async (id, brandingMode) => {
   const token = getStoredToken();
-  const res = await fetch(`${BASE}/api/invoices/${id}/pdf`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  const res = await fetch(`${BASE}${withBrandingMode(`/api/invoices/${id}/pdf`, brandingMode)}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
   if (res.status === 401) {
     clearAuthStorage();
     notifyAuthFailure();
@@ -125,8 +131,8 @@ export const getInvoicePdf = async id => {
   }
   return res.blob();
 };
-export const downloadInvoicePdf = async (id, filename = 'invoice.pdf') => {
-  const blob = await getInvoicePdf(id);
+export const downloadInvoicePdf = async (id, filename = 'invoice.pdf', brandingMode) => {
+  const blob = await getInvoicePdf(id, brandingMode);
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

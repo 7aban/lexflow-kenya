@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote, IconMail, IconPaperclip, IconExternalLink, IconLayoutDashboard, IconUsers } from '@tabler/icons-react';
 import { api, applyChecklistTemplate, approveHrLeaveRequest, cancelHrLeaveRequestAdmin, changePassword, clearSession, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, cancelOffboardingCase, completeOffboardingCase, createHrContract, createHrLeaveBalanceAdjustment, createHrStaffProfile, createMatterChecklistItem, createOffboardingCase, deleteChecklistTemplate, deleteClientAvatar, deleteHrDocument, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadHrDocumentContent, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getConnectedAccountAvailability, getHrContracts, getHrDashboard, getHrDocuments, getHrLeaveBalances, getHrLeaveRequests, getHrStaff, getHrStaffProfile, getOffboardingAssignedMatters, getOffboardingCase, getOffboardingCases, getClientSnapshot, getInvoiceDetails, getMatterTimeline, getAppearanceDocuments, linkAppearanceDocument, unlinkAppearanceDocument, getMatterWorkMetadataLinks, getRetainers, getRetainer, createRetainer, updateRetainer, deleteRetainer, generateRetainerDocument, listDocumentTemplates, getMatterFeePlans, getMatterFeePlan, createMatterFeePlan, updateMatterFeePlan, deleteMatterFeePlan, getRetainerLedger, getRetainerLedgerSummary, createRetainerLedgerEntry, voidRetainerLedgerEntry, getClientKyc, getClientKycRecord, createClientKyc, updateClientKyc, deleteClientKyc, getClientAuthorities, getClientAuthorityRecord, createClientAuthority, updateClientAuthority, deleteClientAuthority, getRetainerLifecycleEvents, getRetainerLifecycleEvent, createRetainerLifecycleEvent, updateRetainerLifecycleEvent, deleteRetainerLifecycleEvent, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, rejectHrLeaveRequest, setHrLeaveEntitlement, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrContract, updateHrDocument, updateHrStaffProfile, updateMatterChecklistItem, updateOffboardingCase, updateOffboardingChecklistItem, uploadClientAvatar, uploadHrDocument, uploadUserAvatar } from '../lib/apiClient.js';
-import { defaultFirmSettings, styles, theme, applyFirmTheme, clearFirmTheme, resolveReadableTheme } from '../theme.jsx';
+import { appendBrandingModeToPath, defaultFirmSettings, defaultOutputBrandingMode, hasFirmLetterhead, outputBrandingModes, styles, theme, applyFirmTheme, clearFirmTheme, resolveReadableTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, safeHttpUrl, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText, invoiceDueDistanceDays } from '../components/ui.jsx';
 import MatterDocuments from '../components/MatterDocuments.jsx';
@@ -228,7 +228,7 @@ const SMART_PALETTE_ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const IMAGE_UPLOAD_ACCEPT = `${SMART_PALETTE_ALLOWED_TYPES.join(',')},.png,.jpg,.jpeg,.webp`;
 const SMART_PALETTE_FAILURE_MESSAGE = 'Could not read enough colour from this image. Try a clearer logo or sample.';
 const SMART_PALETTE_NEUTRAL_MESSAGE = 'This image is mostly neutral text or paper. Upload a clearer logo image or screenshot/export with visible brand colour.';
-const UNSUPPORTED_LETTERHEAD_FILE_MESSAGE = 'For now, upload a logo image or a screenshot/exported image of the letterhead. DOCX/PDF extraction will be added later.';
+const UNSUPPORTED_LETTERHEAD_FILE_MESSAGE = 'For now, upload a letterhead image or screenshot/exported image of the letterhead. DOCX/PDF letterhead extraction will be added later.';
 
 function smartPaletteFileTypeAllowed(file) {
   const type = (file?.type || '').toLowerCase();
@@ -2588,6 +2588,8 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
   const [eventForm, setEventForm] = useState(emptyEventForm);
   const [note, setNote] = useState('');
   const [invoiceDueDateOverride, setInvoiceDueDateOverride] = useState('');
+  const [matterInvoiceBrandingMode, setMatterInvoiceBrandingMode] = useState(defaultOutputBrandingMode(data.firmSettings || defaultFirmSettings));
+  const [matterInvoiceBrandingTouched, setMatterInvoiceBrandingTouched] = useState(false);
   const [taskTimer, setTaskTimer] = useState(null);
   const [advocates, setAdvocates] = useState([]);
   const [reassignTo, setReassignTo] = useState('');
@@ -2645,6 +2647,15 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
     setSelectedId(focus.matterId);
     setCockpitSection(MATTER_COCKPIT_SECTION_IDS.includes(focus.section) ? focus.section : 'overview');
   }, [focus?.matterId, focus?.section, focus?.ts, data.matters]);
+  useEffect(() => {
+    const settings = data.firmSettings || defaultFirmSettings;
+    const hasLetterhead = hasFirmLetterhead(settings);
+    if (!matterInvoiceBrandingTouched) {
+      setMatterInvoiceBrandingMode(defaultOutputBrandingMode(settings));
+    } else if (!hasLetterhead && matterInvoiceBrandingMode === 'letterhead') {
+      setMatterInvoiceBrandingMode('simple');
+    }
+  }, [data.firmSettings?.letterhead, data.firmSettings?.theme?.letterhead, matterInvoiceBrandingTouched, matterInvoiceBrandingMode]);
   // LOCAL-PILOT-FIX-14 / FIX-21: external entry points can focus a matter
   // cockpit section. Timekeeper still scrolls to the time form inside Tasks.
   useEffect(() => {
@@ -3084,7 +3095,16 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
                           <button type="button" style={styles.primaryButton} onClick={generateInvoice}>Generate invoice</button>
                         </div>
                       )}
-                      <div className="lf-invoice-cards"><Table columns={['Invoice', 'Amount', 'Paid', 'Balance', 'Status', 'PDF', 'Actions']} rows={(detail.invoices || []).map(i => [i.number || i.id, kes(i.amount), kes(i.amountPaid), kes(i.balance), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <DownloadButton key={`${i.id}-pdf`} label="PDF" path={`/api/invoices/${i.id}/pdf`} filename={`${i.number || i.id}.pdf`} notify={notify} />, canManage && i.status !== 'Paid' ? <ActionGroup key={`${i.id}-actions`} actions={[['Delete', () => setConfirm({ title: 'Delete invoice?', message: 'Delete this invoice?', onConfirm: () => deleteInvoiceRecord(i) })]]} /> : '-'])} empty="No invoices yet." /></div>
+                      <div style={{ marginBottom: 12 }}>
+                        <OutputBrandingSelector
+                          id="matter-invoice-output-branding-mode"
+                          value={matterInvoiceBrandingMode}
+                          onChange={mode => { setMatterInvoiceBrandingTouched(true); setMatterInvoiceBrandingMode(mode); }}
+                          firmSettings={data.firmSettings || defaultFirmSettings}
+                          compact
+                        />
+                      </div>
+                      <div className="lf-invoice-cards"><Table columns={['Invoice', 'Amount', 'Paid', 'Balance', 'Status', 'PDF', 'Actions']} rows={(detail.invoices || []).map(i => [i.number || i.id, kes(i.amount), kes(i.amountPaid), kes(i.balance), <Badge key={i.id} tone={statusTone(i.status)}>{i.status}</Badge>, <DownloadButton key={`${i.id}-pdf`} label="PDF" path={appendBrandingModeToPath(`/api/invoices/${i.id}/pdf`, matterInvoiceBrandingMode)} filename={`${i.number || i.id}.pdf`} notify={notify} />, canManage && i.status !== 'Paid' ? <ActionGroup key={`${i.id}-actions`} actions={[['Delete', () => setConfirm({ title: 'Delete invoice?', message: 'Delete this invoice?', onConfirm: () => deleteInvoiceRecord(i) })]]} /> : '-'])} empty="No invoices yet." /></div>
                     </Sub>
                   </div>
                 </>
@@ -3236,6 +3256,8 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
   const [paymentForm, setPaymentForm] = useState({ amount: '', method: 'Bank Transfer', reference: '', date: new Date().toISOString().slice(0, 10), note: '', proofId: '' });
   const [voidDraft, setVoidDraft] = useState(null);
   const [firmSettings, setFirmSettings] = useState({ ...defaultFirmSettings, ...(providedFirmSettings || {}) });
+  const [invoiceBrandingMode, setInvoiceBrandingMode] = useState(defaultOutputBrandingMode({ ...defaultFirmSettings, ...(providedFirmSettings || {}) }));
+  const [invoiceBrandingTouched, setInvoiceBrandingTouched] = useState(false);
   const [proofs, setProofs] = useState([]);
   const [proofFilter, setProofFilter] = useState('Pending');
   const [pendingProofCount, setPendingProofCount] = useState(0);
@@ -3271,6 +3293,15 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
       .catch(() => {});
     return () => { active = false; };
   }, [providedFirmSettings]);
+
+  useEffect(() => {
+    const hasLetterhead = hasFirmLetterhead(firmSettings);
+    if (!invoiceBrandingTouched) {
+      setInvoiceBrandingMode(defaultOutputBrandingMode(firmSettings));
+    } else if (!hasLetterhead && invoiceBrandingMode === 'letterhead') {
+      setInvoiceBrandingMode('simple');
+    }
+  }, [firmSettings.letterhead, firmSettings.theme?.letterhead, invoiceBrandingTouched, invoiceBrandingMode]);
 
   useEffect(() => {
     if (!selectedInvoiceId) {
@@ -3634,7 +3665,7 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
       );
     }
     return payment.receiptNumber
-      ? <DownloadButton label="Download" ariaLabel={`Download receipt ${payment.receiptNumber}`} path={`/api/invoices/${selectedInvoice.id}/payments/${payment.id}/receipt.pdf`} filename={`${payment.receiptNumber}.pdf`} notify={notify} />
+      ? <DownloadButton label="Download" ariaLabel={`Download receipt ${payment.receiptNumber}`} path={appendBrandingModeToPath(`/api/invoices/${selectedInvoice.id}/payments/${payment.id}/receipt.pdf`, invoiceBrandingMode)} filename={`${payment.receiptNumber}.pdf`} notify={notify} />
       : '-';
   }
 
@@ -3771,7 +3802,7 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
           Preview only — does not change the saved invoice.
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <DownloadButton label="Download PDF" path={`/api/invoices/${selectedInvoice.id}/pdf`} filename={`${selectedInvoice.number || selectedInvoice.id}.pdf`} notify={notify} />
+          <DownloadButton label="Download PDF" path={appendBrandingModeToPath(`/api/invoices/${selectedInvoice.id}/pdf`, invoiceBrandingMode)} filename={`${selectedInvoice.number || selectedInvoice.id}.pdf`} notify={notify} />
         </div>
       </div>
     );
@@ -4017,6 +4048,14 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
     <InvoicePreviewCard />
     <div id="invoice-register">
       <Card title="Invoice register" hint="Receivables">
+        <div style={{ display: 'grid', gap: 10, marginBottom: 10 }}>
+          <OutputBrandingSelector
+            id="invoice-output-branding-mode"
+            value={invoiceBrandingMode}
+            onChange={mode => { setInvoiceBrandingTouched(true); setInvoiceBrandingMode(mode); }}
+            firmSettings={firmSettings}
+          />
+        </div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           <label htmlFor="invoice-register-filter" style={{ fontSize: 12, color: '#697386' }}>Filter</label>
           <select id="invoice-register-filter" style={styles.tableSelect} value={registerFilter} onChange={e => setRegisterFilter(e.target.value)}>
@@ -4039,7 +4078,7 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
               kes(i.amountPaid),
               kes(i.balance),
               renderInvoiceStatus(i),
-              <DownloadButton key={`${i.id}-pdf`} label="Download" ariaLabel={`Download invoice ${invoiceLabel(i)} PDF`} path={`/api/invoices/${i.id}/pdf`} filename={`${invoiceLabel(i)}.pdf`} notify={notify} />,
+              <DownloadButton key={`${i.id}-pdf`} label="Download" ariaLabel={`Download invoice ${invoiceLabel(i)} PDF`} path={appendBrandingModeToPath(`/api/invoices/${i.id}/pdf`, invoiceBrandingMode)} filename={`${invoiceLabel(i)}.pdf`} notify={notify} />,
               <ActionGroup key={`${i.id}-actions`} actions={invoiceActions(i)} />
             ])}
             empty={invoices.length === 0 ? 'No invoices yet.' : 'No invoices match this filter.'}
@@ -4282,6 +4321,28 @@ function DownloadButton({ label, path, filename, notify, ariaLabel }) {
   );
 }
 
+function OutputBrandingSelector({ value, onChange, firmSettings, disabled = false, compact = false, id = 'output-branding-mode' }) {
+  const hasLetterhead = hasFirmLetterhead(firmSettings);
+  return (
+    <div style={{ display: 'grid', gap: 4, minWidth: compact ? 180 : 240 }}>
+      <label htmlFor={id} style={{ fontSize: 12, color: theme.muted, fontWeight: 700 }}>Output branding</label>
+      <select
+        id={id}
+        style={styles.input}
+        value={value}
+        onChange={event => onChange(event.target.value)}
+        disabled={disabled}
+      >
+        {outputBrandingModes.map(mode => (
+          <option key={mode.value} value={mode.value} disabled={mode.value === 'letterhead' && !hasLetterhead}>{mode.label}</option>
+        ))}
+      </select>
+      <span style={styles.formHelper}>Choose whether this output should use the firm letterhead, simple firm branding, or no firm branding.</span>
+      {!hasLetterhead && value === 'letterhead' ? <span style={{ color: theme.amber, fontSize: 12, fontWeight: 700 }}>Upload a firm letterhead first, or use simple branding.</span> : null}
+    </div>
+  );
+}
+
 function BrandProfilePreview({ draftTheme, firmName, logo }) {
   const primary = draftTheme.primaryColor;
   const accent = draftTheme.accentColor;
@@ -4389,9 +4450,14 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
   const [logoUploadMessage, setLogoUploadMessage] = useState(settings?.logo ? 'Saved logo loaded.' : '');
   const [logoUploadError, setLogoUploadError] = useState('');
   const [logoDragActive, setLogoDragActive] = useState(false);
+  const [letterheadFileName, setLetterheadFileName] = useState(settings?.letterhead ? 'Saved firm letterhead' : '');
+  const [letterheadUploadMessage, setLetterheadUploadMessage] = useState(settings?.letterhead ? 'Saved letterhead loaded.' : '');
+  const [letterheadUploadError, setLetterheadUploadError] = useState('');
+  const [letterheadDragActive, setLetterheadDragActive] = useState(false);
   const [smartSampleDragActive, setSmartSampleDragActive] = useState(false);
   const formRef = useRef(form);
   const logoInputRef = useRef(null);
+  const letterheadInputRef = useRef(null);
   const smartSampleInputRef = useRef(null);
 
   useEffect(() => { formRef.current = form; }, [form]);
@@ -4401,6 +4467,9 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
     setLogoFileName(settings?.logo ? 'Saved firm logo' : '');
     setLogoUploadMessage(settings?.logo ? 'Saved logo loaded.' : '');
     setLogoUploadError('');
+    setLetterheadFileName(settings?.letterhead ? 'Saved firm letterhead' : '');
+    setLetterheadUploadMessage(settings?.letterhead ? 'Saved letterhead loaded.' : '');
+    setLetterheadUploadError('');
   }, [settings]);
   useEffect(() => { loadNotices(); }, []);
 
@@ -4455,6 +4524,46 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
     setLogoFileName('');
     setLogoUploadError('');
     setLogoUploadMessage('Logo removed. Save to persist this change.');
+  }
+
+  async function handleLetterheadFile(file) {
+    const validationMessage = imageUploadError(file);
+    if (validationMessage) {
+      setLetterheadUploadError(validationMessage);
+      setLetterheadUploadMessage('');
+      return;
+    }
+    setLetterheadUploadError('');
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      setForm(current => ({ ...current, letterhead: dataUrl }));
+      setLetterheadFileName(file.name || 'Firm letterhead');
+      setLetterheadUploadMessage('Letterhead ready to save.');
+    } catch {
+      setLetterheadUploadError('Could not read this letterhead image. Try another PNG, JPEG, or WebP file.');
+      setLetterheadUploadMessage('');
+    }
+  }
+
+  async function chooseLetterhead(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    await handleLetterheadFile(file);
+    event.target.value = '';
+  }
+
+  function handleLetterheadDrop(event) {
+    event.preventDefault();
+    setLetterheadDragActive(false);
+    const file = event.dataTransfer?.files?.[0];
+    handleLetterheadFile(file);
+  }
+
+  function removeLetterhead() {
+    setForm(current => ({ ...current, letterhead: '' }));
+    setLetterheadFileName('');
+    setLetterheadUploadError('');
+    setLetterheadUploadMessage('Letterhead removed. Save to persist this change.');
   }
 
   function chooseNoticeFiles(event) {
@@ -4661,6 +4770,9 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
       setLogoUploadError('');
       setLogoUploadMessage(form.logo ? 'Logo saved.' : '');
       if (form.logo && !logoFileName) setLogoFileName('Saved firm logo');
+      setLetterheadUploadError('');
+      setLetterheadUploadMessage(form.letterhead ? 'Letterhead saved.' : '');
+      if (form.letterhead && !letterheadFileName) setLetterheadFileName('Saved firm letterhead');
       applyFirmTheme(completeBrandTheme(savedTheme, { ...form, primaryColor: draft.primaryColor, accentColor: draft.accentColor }));
       await reload();
       notify({ type: 'success', message: 'Brand profile saved.' });
@@ -4901,6 +5013,39 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                   {form.logo ? <button type="button" style={styles.dangerTinyButton} onClick={removeLogo}>Remove logo</button> : null}
                   <span style={styles.formHelper}>Resetting colours keeps the saved logo unless you remove it here and save.</span>
+                </div>
+              </section>
+
+              <section style={brandSectionStyle}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'start', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'grid', gap: 4 }}>
+                    <h3 style={brandSectionTitleStyle}>Firm letterhead</h3>
+                    <p style={brandSectionHintStyle}>Upload an image version of your firm letterhead to use it exactly as-is on selected generated documents.</p>
+                  </div>
+                  {form.letterhead ? <Badge tone="green">Saved image ready</Badge> : <Badge tone="amber">Optional</Badge>}
+                </div>
+                <input id="firm-letterhead-upload" ref={letterheadInputRef} type="file" accept={IMAGE_UPLOAD_ACCEPT} onChange={chooseLetterhead} style={{ display: 'none' }} />
+                <label
+                  htmlFor="firm-letterhead-upload"
+                  onDragEnter={event => { event.preventDefault(); setLetterheadDragActive(true); }}
+                  onDragOver={event => { event.preventDefault(); setLetterheadDragActive(true); }}
+                  onDragLeave={() => setLetterheadDragActive(false)}
+                  onDrop={handleLetterheadDrop}
+                  style={{ ...brandDropZoneStyle(letterheadDragActive), gridTemplateColumns: 'minmax(120px,180px) minmax(0,1fr)', alignItems: 'stretch' }}
+                >
+                  <span style={{ minHeight: 96, borderRadius: 8, background: '#fff', color: 'var(--lf-primary, #1A3628)', display: 'grid', placeItems: 'center', overflow: 'hidden', border: '1px solid var(--lf-card-border, var(--lf-border, #DDD8CE))', flexShrink: 0 }}>
+                    {form.letterhead ? <img src={form.letterhead} alt="Firm letterhead preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> : <IconUpload size={22} />}
+                  </span>
+                  <span style={{ display: 'grid', gap: 4, minWidth: 0, alignContent: 'center' }}>
+                    <strong style={{ color: 'var(--lf-card-text, #1A1A18)', fontSize: 13 }}>{letterheadFileName || 'Choose or drop a letterhead image'}</strong>
+                    <span style={styles.formHelper}>{letterheadUploadMessage || 'Letterhead preview appears here before saving.'}</span>
+                    <span style={{ ...styles.tinyButton, justifySelf: 'start' }}>Choose letterhead image</span>
+                  </span>
+                </label>
+                {letterheadUploadError ? <div role="alert" style={{ color: theme.red, fontWeight: 700, fontSize: 12 }}>{letterheadUploadError}</div> : null}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {form.letterhead ? <button type="button" style={styles.dangerTinyButton} onClick={removeLetterhead}>Remove letterhead</button> : null}
+                  <span style={styles.formHelper}>Resetting theme colours keeps the saved letterhead unless you remove it here and save.</span>
                 </div>
               </section>
 

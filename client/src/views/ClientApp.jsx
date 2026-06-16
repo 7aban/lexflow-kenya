@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconLayoutDashboard, IconBriefcase, IconBell, IconFile, IconInvoice, IconUserCircle, IconCalendarEvent, IconEye, IconEyeOff } from '@tabler/icons-react';
 import { api, changePassword, deleteMyAvatar, downloadWithAuth, fileToDataUrl, getMyAvatar, uploadMyAvatar } from '../lib/apiClient.js';
-import { defaultFirmSettings, styles, StyleTag, theme, loadAndApplyFirmTheme, resolveReadableTheme } from '../theme.jsx';
+import { appendBrandingModeToPath, defaultFirmSettings, defaultOutputBrandingMode, hasFirmLetterhead, outputBrandingModes, styles, StyleTag, theme, loadAndApplyFirmTheme, resolveReadableTheme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Field, kes, Logo, MeetingLink, safeHttpUrl, Skeleton, statusTone, Table, Toast, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText } from '../components/ui.jsx';
 import ClientChatWidget from '../components/ClientChatWidget.jsx';
 import MatterDocuments from '../components/MatterDocuments.jsx';
@@ -523,6 +523,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
             invoices={matterInvoices}
             events={matterEvents}
             notices={dashboard.notices}
+            firm={firm}
             proofs={dashboard.paymentProofs.filter(p => p.matterId === selected?.id)}
             invoicePayments={(dashboard.invoicePayments || []).filter(p => p.matterId === selected?.id)}
             uploadDoc={uploadDoc}
@@ -855,11 +856,19 @@ function ActivityTimeline({ data, onNavigate }) {
   );
 }
 
-function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, events, notices, proofs, invoicePayments, uploadDoc, uploading, payment, setPayment, submitPayment, notify, onNavigate, onOpenChat }) {
+function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, events, notices, firm, proofs, invoicePayments, uploadDoc, uploading, payment, setPayment, submitPayment, notify, onNavigate, onOpenChat }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [sortOrder, setSortOrder] = useState('newest');
   const [paymentHistoryOpen, setPaymentHistoryOpen] = useState(false);
+  const [outputBrandingMode, setOutputBrandingMode] = useState(defaultOutputBrandingMode(firm || defaultFirmSettings));
+
+  useEffect(() => {
+    setOutputBrandingMode(current => {
+      if (current === 'letterhead' && !hasFirmLetterhead(firm)) return 'simple';
+      return current || defaultOutputBrandingMode(firm || defaultFirmSettings);
+    });
+  }, [firm?.letterhead, firm?.theme?.letterhead]);
 
   const statusOptions = useMemo(() => {
     const s = new Set();
@@ -911,7 +920,7 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
       );
     }
     return payment.receiptNumber && payment.invoiceId
-      ? <DownloadButton label={payment.receiptNumber} ariaLabel={`Download receipt ${payment.receiptNumber}`} path={`/api/invoices/${payment.invoiceId}/payments/${payment.id}/receipt.pdf`} filename={`${payment.receiptNumber}.pdf`} notify={notify} />
+      ? <DownloadButton label={payment.receiptNumber} ariaLabel={`Download receipt ${payment.receiptNumber}`} path={appendBrandingModeToPath(`/api/invoices/${payment.invoiceId}/payments/${payment.id}/receipt.pdf`, outputBrandingMode)} filename={`${payment.receiptNumber}.pdf`} notify={notify} />
       : (payment.receiptNumber || '-');
   }
 
@@ -956,6 +965,7 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
         </Card>
         <MatterDocuments matterId={selected.id} clientMode notify={notify} />
         <Card title="Invoices and payment proof" hint="Upload M-PESA or bank transfer confirmation">
+          <OutputBrandingSelector id="client-matter-output-branding" value={outputBrandingMode} onChange={setOutputBrandingMode} firm={firm} />
           <div className="ux2-client-mobile-stack" aria-label="Invoices for this matter">
             {invoices.length ? invoices.map(i => (
               <article key={`matter-invoice-mobile-${i.id}`} className="ux2-client-mobile-card">
@@ -971,13 +981,13 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
                   <ClientMobileField label="Amount">{kes(i.amount)}</ClientMobileField>
                   <ClientMobileField label="Paid">{kes(i.amountPaid)}</ClientMobileField>
                   <ClientMobileField label="PDF">
-                    <DownloadButton label="Download PDF" ariaLabel={`Download invoice ${clientInvoiceLabel(i)} PDF`} path={`/api/invoices/${i.id}/pdf`} filename={`${clientInvoiceLabel(i)}.pdf`} notify={notify} />
+                    <DownloadButton label="Download PDF" ariaLabel={`Download invoice ${clientInvoiceLabel(i)} PDF`} path={appendBrandingModeToPath(`/api/invoices/${i.id}/pdf`, outputBrandingMode)} filename={`${clientInvoiceLabel(i)}.pdf`} notify={notify} />
                   </ClientMobileField>
                 </div>
               </article>
             )) : <ClientMobileEmpty>No invoices shared yet.</ClientMobileEmpty>}
           </div>
-          <div className="lf-client-invoices-cards ux2-client-desktop-table"><Table columns={['Invoice', 'Amount', 'Paid', 'Balance', 'Status', 'PDF']} rows={invoices.map(i => [clientInvoiceLabel(i), kes(i.amount), kes(i.amountPaid), kes(i.balance), renderClientInvoiceStatus(i), <DownloadButton key={`${i.id}-pdf`} label="PDF" ariaLabel={`Download invoice ${clientInvoiceLabel(i)} PDF`} path={`/api/invoices/${i.id}/pdf`} filename={`${clientInvoiceLabel(i)}.pdf`} notify={notify} />])} empty="No invoices shared yet." /></div>
+          <div className="lf-client-invoices-cards ux2-client-desktop-table"><Table columns={['Invoice', 'Amount', 'Paid', 'Balance', 'Status', 'PDF']} rows={invoices.map(i => [clientInvoiceLabel(i), kes(i.amount), kes(i.amountPaid), kes(i.balance), renderClientInvoiceStatus(i), <DownloadButton key={`${i.id}-pdf`} label="PDF" ariaLabel={`Download invoice ${clientInvoiceLabel(i)} PDF`} path={appendBrandingModeToPath(`/api/invoices/${i.id}/pdf`, outputBrandingMode)} filename={`${clientInvoiceLabel(i)}.pdf`} notify={notify} />])} empty="No invoices shared yet." /></div>
           <form onSubmit={submitPayment} style={{ ...styles.formGrid, marginTop: 14 }}>
             <Field label="Invoice"><select style={styles.input} value={payment.invoiceId} onChange={e => setPayment({ ...payment, invoiceId: e.target.value })}><option value="">General payment</option>{invoices.map(i => <option key={i.id} value={i.id}>{i.number || i.id}</option>)}</select></Field>
             <Field label="Method"><select style={styles.input} value={payment.method} onChange={e => setPayment({ ...payment, method: e.target.value })}><option>M-PESA</option><option>Bank Transfer</option><option>Cash Deposit</option></select></Field>
@@ -1391,6 +1401,21 @@ function DownloadButton({ label, path, filename, notify, ariaLabel }) {
   );
 }
 
+function OutputBrandingSelector({ value, onChange, firm, id }) {
+  const hasLetterhead = hasFirmLetterhead(firm);
+  return (
+    <div style={{ display: 'grid', gap: 4, marginBottom: 10 }}>
+      <label htmlFor={id} style={{ fontSize: 12, fontWeight: 700, color: '#6B7280' }}>Output branding</label>
+      <select id={id} style={styles.input} value={value} onChange={event => onChange(event.target.value)}>
+        {outputBrandingModes.map(mode => (
+          <option key={mode.value} value={mode.value} disabled={mode.value === 'letterhead' && !hasLetterhead}>{mode.label}</option>
+        ))}
+      </select>
+      <span style={{ fontSize: 12, color: '#6B7280' }}>Choose whether this output should use the firm letterhead, simple firm branding, or no firm branding.</span>
+    </div>
+  );
+}
+
 function PasswordField({ label, value, onChange, placeholder, showPassword, onToggleShow, autoComplete }) {
   return (
     <div style={{ marginBottom: 6 }}>
@@ -1658,9 +1683,17 @@ function BillingInvoices({ data, matters, firm, notify, selectMatter, onNavigate
   const [statusFilter, setStatusFilter] = useState('');
   const [matterFilter, setMatterFilter] = useState('');
   const [sortOrder, setSortOrder] = useState('newest');
+  const [outputBrandingMode, setOutputBrandingMode] = useState(defaultOutputBrandingMode(firm || defaultFirmSettings));
 
   const invoices = data.invoices || [];
   const proofs = data.paymentProofs || [];
+
+  useEffect(() => {
+    setOutputBrandingMode(current => {
+      if (current === 'letterhead' && !hasFirmLetterhead(firm)) return 'simple';
+      return current || defaultOutputBrandingMode(firm || defaultFirmSettings);
+    });
+  }, [firm?.letterhead, firm?.theme?.letterhead]);
 
   const filtered = useMemo(() => {
     let result = [...invoices];
@@ -1799,6 +1832,7 @@ function BillingInvoices({ data, matters, firm, notify, selectMatter, onNavigate
           </div>
         )}
       </div>
+      <OutputBrandingSelector id="client-all-invoices-output-branding" value={outputBrandingMode} onChange={setOutputBrandingMode} firm={firm} />
       <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         <input
           type="search"
@@ -1862,7 +1896,7 @@ function BillingInvoices({ data, matters, firm, notify, selectMatter, onNavigate
               <ClientMobileField label="Amount">{kes(i.amount)}</ClientMobileField>
               <ClientMobileField label="Paid">{kes(i.amountPaid)}</ClientMobileField>
               <ClientMobileField label="PDF">
-                <DownloadButton label="Download PDF" ariaLabel={`Download invoice ${billingInvoiceLabel(i)} PDF`} path={`/api/invoices/${i.id}/pdf`} filename={`${billingInvoiceLabel(i)}.pdf`} notify={notify} />
+                <DownloadButton label="Download PDF" ariaLabel={`Download invoice ${billingInvoiceLabel(i)} PDF`} path={appendBrandingModeToPath(`/api/invoices/${i.id}/pdf`, outputBrandingMode)} filename={`${billingInvoiceLabel(i)}.pdf`} notify={notify} />
               </ClientMobileField>
             </div>
           </article>
@@ -1878,7 +1912,7 @@ function BillingInvoices({ data, matters, firm, notify, selectMatter, onNavigate
             kes(i.amountPaid),
             kes(i.balance),
             renderBillingInvoiceStatus(i),
-            <DownloadButton key={`${i.id}-pdf`} label="PDF" ariaLabel={`Download invoice ${billingInvoiceLabel(i)} PDF`} path={`/api/invoices/${i.id}/pdf`} filename={`${billingInvoiceLabel(i)}.pdf`} notify={notify} />
+            <DownloadButton key={`${i.id}-pdf`} label="PDF" ariaLabel={`Download invoice ${billingInvoiceLabel(i)} PDF`} path={appendBrandingModeToPath(`/api/invoices/${i.id}/pdf`, outputBrandingMode)} filename={`${billingInvoiceLabel(i)}.pdf`} notify={notify} />
           ])}
           empty={emptyText}
         />

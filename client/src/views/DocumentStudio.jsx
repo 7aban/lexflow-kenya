@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { API_BASE, api, fileToDataUrl, fetchDocumentArrayBuffer, getMatterDocuments, listChecklistTemplates, listDocumentTemplates, mergePdfDocuments, readSession, saveMergedPdf, previewDocumentTemplate, rotatePdfDocument, saveRotatedPdf, extractPdfPages, saveExtractedPdf, splitPdfPages, saveSplitPdf, imagesToPdf, saveImagesToPdf, deletePdfPages, saveDeletedPdf, numberPdfPages, saveNumberedPdf, createCourtBundle, saveCourtBundle, stampPdf, saveStampedPdf, tenthLinePdf, saveTenthLinedPdf } from '../lib/apiClient.js';
-import { styles, theme } from '../theme.jsx';
+import { defaultFirmSettings, hasFirmLetterhead, outputBrandingModes, styles, theme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Skeleton } from '../components/ui.jsx';
 import DocumentToolCards from './document-studio/DocumentToolCards.jsx';
 import TemplatePreviewPanel from './document-studio/TemplatePreviewPanel.jsx';
@@ -192,6 +192,8 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
   const [bundleIncludeBookmarks, setBundleIncludeBookmarks] = useState(false);
   const [bundleIncludeCertificate, setBundleIncludeCertificate] = useState(false);
   const [firmName, setFirmName] = useState('');
+  const [firmSettings, setFirmSettings] = useState(defaultFirmSettings);
+  const [bundleBrandingMode, setBundleBrandingMode] = useState('plain');
   const [bundleLoading, setBundleLoading] = useState(false);
   const [bundleError, setBundleError] = useState(null);
   const [bundleSuccess, setBundleSuccess] = useState('');
@@ -268,8 +270,15 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     // Best-effort firm name for prefilling the optional cover "prepared by" field.
     api('/firm-settings').then(settings => {
       if (settings && typeof settings.name === 'string') setFirmName(settings.name);
+      if (settings) setFirmSettings({ ...defaultFirmSettings, ...settings });
     }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (bundleBrandingMode === 'letterhead' && !hasFirmLetterhead(firmSettings)) {
+      setBundleBrandingMode('simple');
+    }
+  }, [firmSettings.letterhead, firmSettings.theme?.letterhead, bundleBrandingMode]);
 
   useEffect(() => {
     if (mergeMatterId) {
@@ -1155,7 +1164,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     }
     setBundleLoading(true);
     try {
-      await createCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined, bundleIncludeCover, bundleIncludeCover ? bundleCover : undefined, bundleIncludeDividers, bundleIncludeDividers ? bundleDividerLabels : undefined, bundleIncludeBookmarks, bundleIncludeCertificate);
+      await createCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined, bundleIncludeCover, bundleIncludeCover ? bundleCover : undefined, bundleIncludeDividers, bundleIncludeDividers ? bundleDividerLabels : undefined, bundleIncludeBookmarks, bundleIncludeCertificate, bundleBrandingMode);
       setBundleSuccess('Court bundle downloaded.');
       notify?.({ type: 'success', message: 'Court bundle downloaded.' });
     } catch (err) {
@@ -1184,7 +1193,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     }
     setBundleSaveLoading(true);
     try {
-      await saveCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined, bundleIncludeCover, bundleIncludeCover ? bundleCover : undefined, bundleIncludeDividers, bundleIncludeDividers ? bundleDividerLabels : undefined, bundleIncludeBookmarks, bundleIncludeCertificate);
+      await saveCourtBundle(bundleMatterId, selectedBundleDocumentIds, bundleFilename, bundlePaginate, bundleStartNumber, bundlePosition, bundleIncludeIndex, bundleIncludeIndex ? bundleDocumentLabels : undefined, bundleIncludeCover, bundleIncludeCover ? bundleCover : undefined, bundleIncludeDividers, bundleIncludeDividers ? bundleDividerLabels : undefined, bundleIncludeBookmarks, bundleIncludeCertificate, bundleBrandingMode);
       setBundleSaveSuccess('Saved to matter documents. Open the matter Documents tab to view it.');
       notify?.({ type: 'success', message: 'Saved to matter documents. Open the matter Documents tab to view it.' });
     } catch (err) {
@@ -2646,6 +2655,21 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                 placeholder="court-bundle.pdf"
                 disabled={bundleLoading || bundleSaveLoading}
               />
+            </label>
+
+            <label style={{ ...styles.field, minWidth: 0, maxWidth: 420 }}>
+              <span style={{ fontSize: 12, color: theme.muted }}>Output branding</span>
+              <select
+                style={styles.input}
+                value={bundleBrandingMode}
+                onChange={event => setBundleBrandingMode(event.target.value)}
+                disabled={bundleLoading || bundleSaveLoading}
+              >
+                {outputBrandingModes.map(mode => (
+                  <option key={mode.value} value={mode.value} disabled={mode.value === 'letterhead' && !hasFirmLetterhead(firmSettings)}>{mode.label}</option>
+                ))}
+              </select>
+              <span style={{ fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>Choose whether this output should use the firm letterhead, simple firm branding, or no firm branding. For court bundles, branding is applied only to the optional generated cover page.</span>
             </label>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, minWidth: 0 }}>

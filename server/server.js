@@ -147,6 +147,7 @@ const defaultFirmSettings = {
   id: 'default',
   name: 'LexFlow Kenya',
   logo: '',
+  letterhead: '',
   primaryColor: '#1A3628',
   accentColor: '#C5973C',
   websiteURL: '',
@@ -1228,9 +1229,55 @@ function buildResolvedTheme(themeJson, primaryColor, accentColor) {
   });
 }
 
+const MAX_FIRM_LETTERHEAD_DATA_URI_LENGTH = 900 * 1024;
+const LETTERHEAD_DATA_URI_RE = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=\s]+)$/i;
+
+function parseThemeJsonObject(themeJson) {
+  if (!themeJson) return {};
+  try {
+    const parsed = JSON.parse(themeJson);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function normalizeFirmLetterhead(value) {
+  if (value === undefined) return { value: undefined };
+  if (value === null || value === '') return { value: '' };
+  if (typeof value !== 'string') return { error: 'Firm letterhead must be an image data URI.' };
+  const trimmed = value.trim();
+  if (!trimmed) return { value: '' };
+  if (trimmed.length > MAX_FIRM_LETTERHEAD_DATA_URI_LENGTH) {
+    return { error: 'Firm letterhead image is too large. Upload a smaller PNG, JPEG, or WebP image.' };
+  }
+  const match = LETTERHEAD_DATA_URI_RE.exec(trimmed);
+  if (!match) return { error: 'Firm letterhead must be a PNG, JPEG, or WebP image.' };
+  const subtype = match[1].toLowerCase() === 'jpg' ? 'jpeg' : match[1].toLowerCase();
+  const base64 = match[2].replace(/\s+/g, '');
+  let buffer;
+  try { buffer = Buffer.from(base64, 'base64'); } catch { buffer = null; }
+  if (!buffer || !buffer.length) return { error: 'Firm letterhead image could not be read.' };
+  return { value: `data:image/${subtype};base64,${base64}` };
+}
+
+function firmLetterheadFromThemeJson(themeJson) {
+  const parsed = parseThemeJsonObject(themeJson);
+  const normalized = normalizeFirmLetterhead(parsed.letterhead || '');
+  return normalized.error ? '' : (normalized.value || '');
+}
+
+function mergeLetterheadIntoThemeJson(themeJson, letterhead) {
+  const theme = parseThemeJsonObject(themeJson);
+  if (letterhead) theme.letterhead = letterhead;
+  else delete theme.letterhead;
+  return Object.keys(theme).length ? JSON.stringify(theme) : null;
+}
+
 async function getFirmSettings() {
   const settings = await get('SELECT * FROM firm_settings WHERE id=?', ['default']);
   const reminderSettings = await getReminderSettings();
+  const letterhead = settings ? firmLetterheadFromThemeJson(settings.themeJson) : '';
   const theme = settings
     ? buildResolvedTheme(
         settings.themeJson,
@@ -1247,6 +1294,7 @@ async function getFirmSettings() {
     normalized.primaryColor = defaultFirmSettings.primaryColor;
     normalized.accentColor = defaultFirmSettings.accentColor;
   }
+  normalized.letterhead = letterhead;
   normalized.defaultInvoiceDueDays = normalizeDefaultInvoiceDueDays(normalized.defaultInvoiceDueDays);
   return { ...normalized, reminderSettings, theme, moduleSettings };
 }
@@ -2095,10 +2143,96 @@ function drawFirmBillingBlock(doc, firm, x, startY, width) {
   return y;
 }
 
+const OUTPUT_BRANDING_MODES = new Set(['letterhead', 'simple', 'plain']);
+
+function requestedOutputBrandingMode(req, fallback = 'simple') {
+  const raw = req?.query?.brandingMode ?? req?.body?.brandingMode ?? req?.query?.branding ?? req?.body?.branding;
+  if (raw === undefined || raw === null || raw === '') return { mode: fallback };
+  const mode = String(raw).trim();
+  if (!OUTPUT_BRANDING_MODES.has(mode)) return { error: 'brandingMode must be one of: letterhead, simple, plain' };
+  return { mode };
+}
+
+function brandPrimary(firm) {
+  return firm?.theme?.primaryColor || firm?.primaryColor || defaultFirmSettings.primaryColor;
+}
+
+function brandAccent(firm) {
+  return firm?.theme?.accentColor || firm?.accentColor || defaultFirmSettings.accentColor;
+}
+
+function dataUriImageBuffer(dataUri) {
+  const normalized = normalizeFirmLetterhead(dataUri);
+  if (normalized.error || !normalized.value) return null;
+  const match = LETTERHEAD_DATA_URI_RE.exec(normalized.value);
+  if (!match) return null;
+  return {
+    mimeType: `image/${match[1].toLowerCase() === 'jpg' ? 'jpeg' : match[1].toLowerCase()}`,
+    buffer: Buffer.from(match[2].replace(/\s+/g, ''), 'base64'),
+  };
+}
+
+function drawPdfKitImageFit(doc, dataUri, x, y, maxWidth, maxHeight) {
+  const image = dataUriImageBuffer(dataUri);
+  if (!image || image.mimeType === 'image/webp') return null;
+  try {
+    const opened = doc.openImage(image.buffer);
+    const scale = Math.min(maxWidth / opened.width, maxHeight / opened.height);
+    const drawWidth = opened.width * scale;
+    const drawHeight = opened.height * scale;
+    const drawX = x + (maxWidth - drawWidth) / 2;
+    doc.image(image.buffer, drawX, y, { width: drawWidth, height: drawHeight });
+    return { width: drawWidth, height: drawHeight };
+  } catch {
+    return null;
+  }
+}
+
+function drawPdfKitSimpleBrandingHeader(doc, firm, title, { titleX = 400 } = {}) {
+  const primary = brandPrimary(firm);
+  const accent = brandAccent(firm);
+  doc.rect(48, 42, 52, 52).fill(primary);
+  if (firm.logo && String(firm.logo).startsWith('data:image')) {
+    const logo = drawPdfKitImageFit(doc, firm.logo, 52, 46, 44, 44);
+    if (!logo) doc.fillColor('#fff').fontSize(18).font('Helvetica-Bold').text('LF', 64, 60);
+  } else {
+    doc.fillColor('#fff').fontSize(18).font('Helvetica-Bold').text('LF', 64, 60);
+  }
+  doc.fillColor('#111827').fontSize(22).font('Helvetica-Bold').text(firm.name || defaultFirmSettings.name, 112, 46);
+  doc.fontSize(10).fillColor('#6B7280').font('Helvetica').text(firm.address || 'Kenyan Law Practice Management', 112, 74);
+  doc.fillColor(primary).fontSize(24).font('Helvetica-Bold').text(title, titleX, 48, { align: 'right', width: 547 - titleX });
+  doc.moveTo(48, 112).lineTo(547, 112).strokeColor(accent || '#E5E7EB').stroke();
+  return { mode: 'simple', startY: 132 };
+}
+
+function drawPdfKitPlainHeader(doc, title) {
+  doc.fillColor('#111827').fontSize(24).font('Helvetica-Bold').text(title, 48, 48, { align: 'right', width: 499 });
+  doc.moveTo(48, 86).lineTo(547, 86).strokeColor('#E5E7EB').stroke();
+  return { mode: 'plain', startY: 106 };
+}
+
+function drawPdfKitLetterheadHeader(doc, firm, title, opts = {}) {
+  const drawn = drawPdfKitImageFit(doc, firm.letterhead || firm.theme?.letterhead, 48, 34, 499, 122);
+  if (!drawn) return drawPdfKitSimpleBrandingHeader(doc, firm, title, opts);
+  const y = 34 + drawn.height + 24;
+  doc.fillColor('#111827').fontSize(24).font('Helvetica-Bold').text(title, opts.titleX || 400, y, { align: 'right', width: 547 - (opts.titleX || 400) });
+  doc.moveTo(48, y + 34).lineTo(547, y + 34).strokeColor('#E5E7EB').stroke();
+  return { mode: 'letterhead', startY: y + 54 };
+}
+
+function drawPdfKitOutputHeader(doc, firm, mode, title, opts = {}) {
+  if (mode === 'plain') return drawPdfKitPlainHeader(doc, title);
+  if (mode === 'letterhead') return drawPdfKitLetterheadHeader(doc, firm, title, opts);
+  return drawPdfKitSimpleBrandingHeader(doc, firm, title, opts);
+}
+
 app.put('/api/firm-settings', authenticate, requireAdmin, async (req, res) => {
   const existing = await get('SELECT * FROM firm_settings WHERE id=?', ['default']);
   const oldBillingVisibility = existing ? Number(existing.advocateBillingVisibility) : 1;
   const settings = { ...defaultFirmSettings, ...req.body, id: 'default' };
+  const letterheadProvided = Object.prototype.hasOwnProperty.call(req.body || {}, 'letterhead');
+  const letterheadValidation = letterheadProvided ? normalizeFirmLetterhead(req.body.letterhead) : { value: undefined };
+  if (letterheadValidation.error) return res.status(400).json({ error: letterheadValidation.error });
   settings.paymentInstructions = normalizeFirmBillingField(settings.paymentInstructions, 800);
   settings.kraPin = normalizeFirmBillingField(settings.kraPin, 80);
   settings.vatNumber = normalizeFirmBillingField(settings.vatNumber, 80);
@@ -2108,6 +2242,10 @@ app.put('/api/firm-settings', authenticate, requireAdmin, async (req, res) => {
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(id) DO UPDATE SET name=excluded.name, logo=excluded.logo, primaryColor=excluded.primaryColor, accentColor=excluded.accentColor, websiteURL=excluded.websiteURL, email=excluded.email, phone=excluded.phone, address=excluded.address, paymentInstructions=excluded.paymentInstructions, kraPin=excluded.kraPin, vatNumber=excluded.vatNumber, invoiceFooterNote=excluded.invoiceFooterNote, defaultInvoiceDueDays=excluded.defaultInvoiceDueDays`,
     [settings.id, settings.name, settings.logo, settings.primaryColor, settings.accentColor, settings.websiteURL, settings.email, settings.phone, settings.address, settings.paymentInstructions, settings.kraPin, settings.vatNumber, settings.invoiceFooterNote, settings.defaultInvoiceDueDays]);
+  if (letterheadProvided) {
+    const current = await get('SELECT themeJson FROM firm_settings WHERE id=?', ['default']);
+    await run('UPDATE firm_settings SET themeJson=? WHERE id=?', [mergeLetterheadIntoThemeJson(current?.themeJson, letterheadValidation.value || ''), 'default']);
+  }
   if (req.body.reminderSettings) {
     await saveReminderSettings(req.body.reminderSettings);
     await logAudit(req, 'update', 'reminder_settings', 'default', 'Updated reminder channel settings');
@@ -2172,8 +2310,9 @@ app.put('/api/firm-settings/theme', authenticate, requireAdmin, async (req, res)
     const { warnings, blocks } = themeValidation.validateThemeAccessibility(validation.value);
     if (blocks.length > 0) return res.status(400).json({ error: 'Theme blocked', details: blocks });
     const resolvedTheme = themeValidation.resolveReadableTheme(validation.value);
-    const themeJson = JSON.stringify(resolvedTheme);
-    const existing = await get('SELECT id FROM firm_settings WHERE id=?', ['default']);
+    const existing = await get('SELECT id, themeJson FROM firm_settings WHERE id=?', ['default']);
+    const existingLetterhead = firmLetterheadFromThemeJson(existing?.themeJson);
+    const themeJson = JSON.stringify(existingLetterhead ? { ...resolvedTheme, letterhead: existingLetterhead } : resolvedTheme);
     if (existing) {
       await run('UPDATE firm_settings SET themeJson=? WHERE id=?', [themeJson, 'default']);
     } else {
@@ -2190,14 +2329,15 @@ app.put('/api/firm-settings/theme', authenticate, requireAdmin, async (req, res)
 
 app.post('/api/firm-settings/theme/reset', authenticate, requireAdmin, async (req, res) => {
   try {
-    const existing = await get('SELECT id FROM firm_settings WHERE id=?', ['default']);
+    const existing = await get('SELECT id, themeJson FROM firm_settings WHERE id=?', ['default']);
+    const existingLetterhead = firmLetterheadFromThemeJson(existing?.themeJson);
     if (existing) {
-      await run('UPDATE firm_settings SET themeJson=NULL, primaryColor=?, accentColor=? WHERE id=?',
-        [defaultFirmSettings.primaryColor, defaultFirmSettings.accentColor, 'default']);
+      await run('UPDATE firm_settings SET themeJson=?, primaryColor=?, accentColor=? WHERE id=?',
+        [mergeLetterheadIntoThemeJson(null, existingLetterhead), defaultFirmSettings.primaryColor, defaultFirmSettings.accentColor, 'default']);
     }
     await logAudit(req, 'update', 'firm_theme', 'default', 'Reset firm theme to default');
     await recordAuditEvent(req, { action: 'firm_theme_reset', entityType: 'firm_theme', entityId: 'default' }).catch(() => {});
-    const resolved = buildResolvedTheme(null, defaultFirmSettings.primaryColor, defaultFirmSettings.accentColor);
+    const resolved = buildResolvedTheme(mergeLetterheadIntoThemeJson(null, existingLetterhead), defaultFirmSettings.primaryColor, defaultFirmSettings.accentColor);
     res.json({ theme: resolved, message: 'Firm branding restored to LexFlow default.' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -11143,7 +11283,62 @@ function wrapCoverText(text, font, size, maxWidth, maxLines) {
 
 // Build the single A4 cover page and insert it as the first page of bundlePdf.
 // Fields are already sanitized; the title falls back to COURT BUNDLE when blank.
-async function prependBundleCoverPage(bundlePdf, cover) {
+function hexToPdfRgbColor(hex, fallback = '#000000') {
+  const value = /^#[0-9A-Fa-f]{6}$/.test(String(hex || '')) ? String(hex) : fallback;
+  const int = parseInt(value.slice(1), 16);
+  return rgb(((int >> 16) & 255) / 255, ((int >> 8) & 255) / 255, (int & 255) / 255);
+}
+
+async function embedPdfLibDataUriImage(pdf, dataUri) {
+  const image = dataUriImageBuffer(dataUri);
+  if (!image || image.mimeType === 'image/webp') return null;
+  try {
+    if (image.mimeType === 'image/png') return await pdf.embedPng(image.buffer);
+    if (image.mimeType === 'image/jpeg') return await pdf.embedJpg(image.buffer);
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function drawPdfLibCoverBranding(bundlePdf, page, firm, mode, margin, maxWidth) {
+  if (mode === 'plain') return null;
+  const { width, height } = page.getSize();
+  if (mode === 'letterhead') {
+    const image = await embedPdfLibDataUriImage(bundlePdf, firm?.letterhead || firm?.theme?.letterhead);
+    if (image) {
+      const maxHeight = 122;
+      const scale = Math.min(maxWidth / image.width, maxHeight / image.height);
+      const drawWidth = image.width * scale;
+      const drawHeight = image.height * scale;
+      page.drawImage(image, { x: margin + (maxWidth - drawWidth) / 2, y: height - margin - drawHeight, width: drawWidth, height: drawHeight });
+      return height - margin - drawHeight - 46;
+    }
+  }
+
+  const helvetica = await bundlePdf.embedFont(StandardFonts.Helvetica);
+  const helveticaBold = await bundlePdf.embedFont(StandardFonts.HelveticaBold);
+  const primary = hexToPdfRgbColor(brandPrimary(firm), defaultFirmSettings.primaryColor);
+  const accent = hexToPdfRgbColor(brandAccent(firm), defaultFirmSettings.accentColor);
+  const boxY = height - margin - 42;
+  page.drawRectangle({ x: margin, y: boxY, width: 42, height: 42, color: primary });
+  const logo = await embedPdfLibDataUriImage(bundlePdf, firm?.logo);
+  if (logo) {
+    const scale = Math.min(34 / logo.width, 34 / logo.height);
+    const drawWidth = logo.width * scale;
+    const drawHeight = logo.height * scale;
+    page.drawImage(logo, { x: margin + 4 + (34 - drawWidth) / 2, y: boxY + 4 + (34 - drawHeight) / 2, width: drawWidth, height: drawHeight });
+  } else {
+    page.drawText('LF', { x: margin + 11, y: boxY + 13, size: 14, font: helveticaBold, color: rgb(1, 1, 1) });
+  }
+  page.drawText(sanitizeCoverField(firm?.name || defaultFirmSettings.name, 120), { x: margin + 54, y: boxY + 24, size: 14, font: helveticaBold, color: hexToPdfRgbColor('#111827') });
+  const address = sanitizeCoverField(firm?.address || 'Kenyan Law Practice Management', 120);
+  page.drawText(address, { x: margin + 54, y: boxY + 9, size: 9, font: helvetica, color: hexToPdfRgbColor('#6B7280') });
+  page.drawLine({ start: { x: margin, y: boxY - 14 }, end: { x: width - margin, y: boxY - 14 }, thickness: 0.75, color: accent });
+  return boxY - 58;
+}
+
+async function prependBundleCoverPage(bundlePdf, cover, branding = {}) {
   const page = bundlePdf.insertPage(0, BUNDLE_INDEX_PAGE_SIZE);
   const { width, height } = page.getSize();
   const helvetica = await bundlePdf.embedFont(StandardFonts.Helvetica);
@@ -11151,7 +11346,8 @@ async function prependBundleCoverPage(bundlePdf, cover) {
   const black = rgb(0, 0, 0);
   const margin = 64;
   const maxWidth = width - margin * 2;
-  let y = height - 120;
+  const brandedStartY = await drawPdfLibCoverBranding(bundlePdf, page, branding.firm, branding.mode || 'plain', margin, maxWidth);
+  let y = brandedStartY || height - 120;
 
   const drawCentered = (text, size, font, gapAfter, maxLines = 1) => {
     const lines = maxLines > 1
@@ -11415,7 +11611,7 @@ async function generateBundleCertificate(req, { matter, sourceDocs, sourcePageCo
 
 app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
   try {
-    const { matterId, documentIds: rawDocumentIds, filename: rawFilename, paginate: rawPaginate, startNumber: rawStart, position: rawPosition, includeIndex: rawIncludeIndex, documentLabels: rawDocumentLabels, includeCover: rawIncludeCover, cover: rawCover, includeDividers: rawIncludeDividers, dividerLabels: rawDividerLabels, includeBookmarks: rawIncludeBookmarks, includeCertificate: rawIncludeCertificate } = req.body || {};
+    const { matterId, documentIds: rawDocumentIds, filename: rawFilename, paginate: rawPaginate, startNumber: rawStart, position: rawPosition, includeIndex: rawIncludeIndex, documentLabels: rawDocumentLabels, includeCover: rawIncludeCover, cover: rawCover, includeDividers: rawIncludeDividers, dividerLabels: rawDividerLabels, includeBookmarks: rawIncludeBookmarks, includeCertificate: rawIncludeCertificate, brandingMode: rawBrandingMode } = req.body || {};
 
     if (!matterId) return res.status(400).json({ error: 'matterId is required' });
     const matter = await get('SELECT * FROM matters WHERE id=?', [matterId]);
@@ -11453,6 +11649,10 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
     const dividerLabels = rawDividerLabels && typeof rawDividerLabels === 'object' && !Array.isArray(rawDividerLabels) ? rawDividerLabels : {};
     const includeBookmarks = rawIncludeBookmarks === true;
     const includeCertificate = rawIncludeCertificate === true;
+    const brandingRequest = requestedOutputBrandingMode({ body: { brandingMode: rawBrandingMode } }, 'plain');
+    if (brandingRequest.error) return res.status(400).json({ error: brandingRequest.error });
+    const coverBrandingMode = includeCover ? brandingRequest.mode : 'plain';
+    const coverFirm = includeCover && coverBrandingMode !== 'plain' ? await getFirmSettings() : null;
 
     const outputFilename = cleanPdfDownloadName(rawFilename || 'court-bundle.pdf');
     const sourceDocs = [];
@@ -11536,7 +11736,7 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
 
     if (includeCover) {
       try {
-        await prependBundleCoverPage(bundlePdf, coverFields);
+        await prependBundleCoverPage(bundlePdf, coverFields, { mode: coverBrandingMode, firm: coverFirm });
       } catch {
         return res.status(400).json({ error: 'Could not generate the bundle cover page' });
       }
@@ -11610,6 +11810,7 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
     }
     metadata.includeCover = includeCover;
     metadata.coverFieldCount = includeCover ? coverFieldCount : 0;
+    if (includeCover) metadata.brandingMode = coverBrandingMode;
     metadata.includeDividers = includeDividers;
     metadata.dividerCount = includeDividers ? sourceDocs.length : 0;
     metadata.includeBookmarks = includeBookmarks;
@@ -11636,7 +11837,7 @@ app.post('/api/document-tools/court-bundle', requireStaff, async (req, res) => {
 
 app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async (req, res) => {
   try {
-    const { matterId, documentIds: rawDocumentIds, filename: rawFilename, paginate: rawPaginate, startNumber: rawStart, position: rawPosition, includeIndex: rawIncludeIndex, documentLabels: rawDocumentLabels, includeCover: rawIncludeCover, cover: rawCover, includeDividers: rawIncludeDividers, dividerLabels: rawDividerLabels, includeBookmarks: rawIncludeBookmarks, includeCertificate: rawIncludeCertificate } = req.body || {};
+    const { matterId, documentIds: rawDocumentIds, filename: rawFilename, paginate: rawPaginate, startNumber: rawStart, position: rawPosition, includeIndex: rawIncludeIndex, documentLabels: rawDocumentLabels, includeCover: rawIncludeCover, cover: rawCover, includeDividers: rawIncludeDividers, dividerLabels: rawDividerLabels, includeBookmarks: rawIncludeBookmarks, includeCertificate: rawIncludeCertificate, brandingMode: rawBrandingMode } = req.body || {};
 
     if (!matterId) return res.status(400).json({ error: 'matterId is required' });
     const matter = await get('SELECT * FROM matters WHERE id=?', [matterId]);
@@ -11674,6 +11875,10 @@ app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async 
     const dividerLabels = rawDividerLabels && typeof rawDividerLabels === 'object' && !Array.isArray(rawDividerLabels) ? rawDividerLabels : {};
     const includeBookmarks = rawIncludeBookmarks === true;
     const includeCertificate = rawIncludeCertificate === true;
+    const brandingRequest = requestedOutputBrandingMode({ body: { brandingMode: rawBrandingMode } }, 'plain');
+    if (brandingRequest.error) return res.status(400).json({ error: brandingRequest.error });
+    const coverBrandingMode = includeCover ? brandingRequest.mode : 'plain';
+    const coverFirm = includeCover && coverBrandingMode !== 'plain' ? await getFirmSettings() : null;
 
     const outputFilename = cleanPdfDownloadName(rawFilename || 'court-bundle.pdf');
     const sourceDocs = [];
@@ -11757,7 +11962,7 @@ app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async 
 
     if (includeCover) {
       try {
-        await prependBundleCoverPage(bundlePdf, coverFields);
+        await prependBundleCoverPage(bundlePdf, coverFields, { mode: coverBrandingMode, firm: coverFirm });
       } catch {
         return res.status(400).json({ error: 'Could not generate the bundle cover page' });
       }
@@ -11857,6 +12062,7 @@ app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async 
     }
     metadata.includeCover = includeCover;
     metadata.coverFieldCount = includeCover ? coverFieldCount : 0;
+    if (includeCover) metadata.brandingMode = coverBrandingMode;
     metadata.includeDividers = includeDividers;
     metadata.dividerCount = includeDividers ? sourceDocs.length : 0;
     metadata.includeBookmarks = includeBookmarks;
@@ -12346,6 +12552,8 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
   }
   const invoice = await invoiceWithDetails(req.params.id);
   if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+  const brandingRequest = requestedOutputBrandingMode(req, 'simple');
+  if (brandingRequest.error) return res.status(400).json({ error: brandingRequest.error });
   await recordAuditEvent(req, {
     action: 'invoice_pdf_downloaded',
     entityType: 'invoice',
@@ -12369,28 +12577,22 @@ app.get('/api/invoices/:id/pdf', async (req, res) => {
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${invoice.number || invoice.id}.pdf"`);
   doc.pipe(res);
-  doc.rect(48, 42, 52, 52).fill(firm.primaryColor || '#1B3A5C');
-  if (firm.logo && String(firm.logo).startsWith('data:image')) {
-    try { doc.image(Buffer.from(String(firm.logo).split(',').pop(), 'base64'), 52, 46, { fit: [44, 44] }); } catch { doc.fillColor('#fff').fontSize(18).font('Helvetica-Bold').text('LF', 64, 60); }
-  } else {
-    doc.fillColor('#fff').fontSize(18).font('Helvetica-Bold').text('LF', 64, 60);
-  }
-  doc.fillColor('#111827').fontSize(22).text(firm.name || 'LexFlow Kenya', 112, 46);
-  doc.fontSize(10).fillColor('#6B7280').font('Helvetica').text(firm.address || 'Kenyan Law Practice Management', 112, 74);
-  doc.fillColor('#1B3A5C').fontSize(24).font('Helvetica-Bold').text('INVOICE', 400, 48, { align: 'right' });
-  doc.moveTo(48, 112).lineTo(547, 112).strokeColor('#E5E7EB').stroke();
-  doc.fillColor('#111827').fontSize(10).font('Helvetica-Bold').text('Bill To', 48, 132);
-  doc.font('Helvetica').fillColor('#374151').text(invoice.clientName || 'Client', 48, 150).text(invoice.clientAddress || invoice.clientEmail || invoice.clientPhone || 'Address on file', 48, 166, { width: 230 });
-  [['Invoice #', invoice.number], ['Date', invoice.date], ['Due Date', invoice.dueDate], ['Status', invoice.status]].forEach(([label, value], i) => { const y = 132 + i * 18; doc.font('Helvetica-Bold').fillColor('#6B7280').text(label, 350, y); doc.font('Helvetica').fillColor('#111827').text(String(value || ''), 440, y, { width: 105, align: 'right' }); });
-  if (invoice.dueDate) doc.font('Helvetica').fontSize(8).fillColor('#6B7280').text(`Payment due by ${invoice.dueDate}.`, 350, 204, { width: 195, align: 'right' });
-  doc.font('Helvetica-Bold').fillColor('#111827').fontSize(11).text('Matter', 48, 220); doc.font('Helvetica').fontSize(10).text(`${invoice.reference || ''} ${invoice.matterTitle || ''}`.trim(), 48, 238, { width: 460 });
-  const top = 282; doc.rect(48, top, 499, 24).fill('#F3F4F6'); doc.fillColor('#374151').font('Helvetica-Bold').fontSize(9); doc.text('Date', 56, top + 8); doc.text('Description', 132, top + 8); doc.text('Hours', 330, top + 8, { width: 42, align: 'right' }); doc.text('Rate', 382, top + 8, { width: 70, align: 'right' }); doc.text('Amount', 465, top + 8, { width: 70, align: 'right' });
+  const branding = drawPdfKitOutputHeader(doc, firm, brandingRequest.mode, 'INVOICE', { titleX: 400 });
+  const baseY = branding.startY;
+  doc.fillColor('#111827').fontSize(10).font('Helvetica-Bold').text('Bill To', 48, baseY);
+  doc.font('Helvetica').fillColor('#374151').text(invoice.clientName || 'Client', 48, baseY + 18).text(invoice.clientAddress || invoice.clientEmail || invoice.clientPhone || 'Address on file', 48, baseY + 34, { width: 230 });
+  [['Invoice #', invoice.number], ['Date', invoice.date], ['Due Date', invoice.dueDate], ['Status', invoice.status]].forEach(([label, value], i) => { const y = baseY + i * 18; doc.font('Helvetica-Bold').fillColor('#6B7280').text(label, 350, y); doc.font('Helvetica').fillColor('#111827').text(String(value || ''), 440, y, { width: 105, align: 'right' }); });
+  if (invoice.dueDate) doc.font('Helvetica').fontSize(8).fillColor('#6B7280').text(`Payment due by ${invoice.dueDate}.`, 350, baseY + 72, { width: 195, align: 'right' });
+  doc.font('Helvetica-Bold').fillColor('#111827').fontSize(11).text('Matter', 48, baseY + 88); doc.font('Helvetica').fontSize(10).text(`${invoice.reference || ''} ${invoice.matterTitle || ''}`.trim(), 48, baseY + 106, { width: 460 });
+  const top = baseY + 150; doc.rect(48, top, 499, 24).fill('#F3F4F6'); doc.fillColor('#374151').font('Helvetica-Bold').fontSize(9); doc.text('Date', 56, top + 8); doc.text('Description', 132, top + 8); doc.text('Hours', 330, top + 8, { width: 42, align: 'right' }); doc.text('Rate', 382, top + 8, { width: 70, align: 'right' }); doc.text('Amount', 465, top + 8, { width: 70, align: 'right' });
   let y = top + 36; doc.font('Helvetica').fontSize(9).fillColor('#111827'); for (const item of invoice.items || []) { if (y > 690) { doc.addPage(); y = 60; } doc.text(item.date || invoice.date, 56, y); doc.text(item.description || 'Legal Services', 132, y, { width: 185 }); doc.text(Number(item.hours || 0).toFixed(item.hours ? 2 : 0), 330, y, { width: 42, align: 'right' }); doc.text(money(item.rate), 382, y, { width: 70, align: 'right' }); doc.text(money(item.amount), 465, y, { width: 70, align: 'right' }); y += 24; }
-  y = Math.max(y + 24, 610); [['Subtotal', subtotal], ['VAT (16%)', vat], ['Total', total]].forEach(([label, value], i) => { doc.font(i === 2 ? 'Helvetica-Bold' : 'Helvetica').fontSize(i === 2 ? 12 : 10).fillColor(i === 2 ? '#1B3A5C' : '#374151'); doc.text(label, 350, y + i * 22); doc.text(money(value), 440, y + i * 22, { width: 105, align: 'right' }); });
+  y = Math.max(y + 24, 610); [['Subtotal', subtotal], ['VAT (16%)', vat], ['Total', total]].forEach(([label, value], i) => { doc.font(i === 2 ? 'Helvetica-Bold' : 'Helvetica').fontSize(i === 2 ? 12 : 10).fillColor(i === 2 ? brandPrimary(firm) : '#374151'); doc.text(label, 350, y + i * 22); doc.text(money(value), 440, y + i * 22, { width: 105, align: 'right' }); });
   // Optional firm tax / payment / footer-note block on the left column so it
   // clears the right-aligned totals; nothing renders when all fields are blank.
   drawFirmBillingBlock(doc, firm, 48, y, 288);
-  doc.font('Helvetica').fontSize(9).fillColor('#6B7280').text(`${firm.name || 'LexFlow Kenya'} | ${firm.address || 'Nairobi, Kenya'} | ${firm.email || 'accounts@lexflow.co.ke'} | ${firm.phone || '+254 700 123456'}`, 48, 760, { align: 'center', width: 499 });
+  if (branding.mode === 'simple') {
+    doc.font('Helvetica').fontSize(9).fillColor('#6B7280').text(`${firm.name || 'LexFlow Kenya'} | ${firm.address || 'Nairobi, Kenya'} | ${firm.email || 'accounts@lexflow.co.ke'} | ${firm.phone || '+254 700 123456'}`, 48, 760, { align: 'center', width: 499 });
+  }
   doc.end();
 });
 
@@ -12410,6 +12612,8 @@ app.get('/api/invoices/:invoiceId/payments/:paymentId/receipt.pdf', async (req, 
   if (!payment) return res.status(404).json({ error: 'Payment not found' });
   if (payment.voidedAt) return res.status(409).json({ error: 'Payment receipt is voided' });
   if (!payment.receiptNumber) return res.status(404).json({ error: 'Receipt not available for this payment' });
+  const brandingRequest = requestedOutputBrandingMode(req, 'simple');
+  if (brandingRequest.error) return res.status(400).json({ error: brandingRequest.error });
   const receivedBy = payment.createdBy ? await get('SELECT fullName FROM users WHERE id=?', [payment.createdBy]) : null;
   await recordAuditEvent(req, {
     action: 'payment_receipt_downloaded',
@@ -12432,39 +12636,33 @@ app.get('/api/invoices/:invoiceId/payments/:paymentId/receipt.pdf', async (req, 
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${payment.receiptNumber}.pdf"`);
   doc.pipe(res);
-  doc.rect(48, 42, 52, 52).fill(firm.primaryColor || '#1B3A5C');
-  if (firm.logo && String(firm.logo).startsWith('data:image')) {
-    try { doc.image(Buffer.from(String(firm.logo).split(',').pop(), 'base64'), 52, 46, { fit: [44, 44] }); } catch { doc.fillColor('#fff').fontSize(18).font('Helvetica-Bold').text('LF', 64, 60); }
-  } else {
-    doc.fillColor('#fff').fontSize(18).font('Helvetica-Bold').text('LF', 64, 60);
-  }
-  doc.fillColor('#111827').fontSize(22).text(firm.name || 'LexFlow Kenya', 112, 46);
-  doc.fontSize(10).fillColor('#6B7280').font('Helvetica').text(firm.address || 'Kenyan Law Practice Management', 112, 74);
-  doc.fillColor('#1B3A5C').fontSize(24).font('Helvetica-Bold').text('PAYMENT RECEIPT', 320, 48, { align: 'right', width: 227 });
-  doc.moveTo(48, 112).lineTo(547, 112).strokeColor('#E5E7EB').stroke();
-  doc.fillColor('#111827').fontSize(10).font('Helvetica-Bold').text('Received From', 48, 132);
-  doc.font('Helvetica').fillColor('#374151').text(invoice.clientName || 'Client', 48, 150).text(invoice.clientAddress || invoice.clientEmail || invoice.clientPhone || 'Address on file', 48, 166, { width: 230 });
+  const branding = drawPdfKitOutputHeader(doc, firm, brandingRequest.mode, 'PAYMENT RECEIPT', { titleX: 320 });
+  const baseY = branding.startY;
+  doc.fillColor('#111827').fontSize(10).font('Helvetica-Bold').text('Received From', 48, baseY);
+  doc.font('Helvetica').fillColor('#374151').text(invoice.clientName || 'Client', 48, baseY + 18).text(invoice.clientAddress || invoice.clientEmail || invoice.clientPhone || 'Address on file', 48, baseY + 34, { width: 230 });
   [['Receipt #', payment.receiptNumber], ['Payment Date', payment.date || ''], ['Issued', (payment.receiptIssuedAt || '').slice(0, 10)], ['Method', payment.method || '-']].forEach(([label, value], i) => {
-    const y = 132 + i * 18;
+    const y = baseY + i * 18;
     doc.font('Helvetica-Bold').fillColor('#6B7280').text(label, 350, y);
     doc.font('Helvetica').fillColor('#111827').text(String(value || ''), 440, y, { width: 105, align: 'right' });
   });
-  doc.font('Helvetica-Bold').fillColor('#111827').fontSize(11).text('Matter', 48, 220);
-  doc.font('Helvetica').fontSize(10).text(`${invoice.reference || ''} ${invoice.matterTitle || ''}`.trim() || '-', 48, 238, { width: 460 });
-  doc.font('Helvetica-Bold').fillColor('#111827').fontSize(11).text('Invoice', 48, 266);
-  doc.font('Helvetica').fontSize(10).text(`${invoice.number || invoice.id} (Total ${money(Number(invoice.amount || 0))})`, 48, 284, { width: 460 });
-  doc.font('Helvetica-Bold').fillColor('#111827').fontSize(11).text('Reference', 48, 312);
-  doc.font('Helvetica').fontSize(10).text(payment.reference || '-', 48, 330, { width: 460 });
-  doc.font('Helvetica-Bold').fillColor('#111827').fontSize(11).text('Received By', 48, 358);
-  doc.font('Helvetica').fontSize(10).text(receivedBy?.fullName || 'Firm', 48, 376, { width: 460 });
-  const summaryTop = 420;
+  doc.font('Helvetica-Bold').fillColor('#111827').fontSize(11).text('Matter', 48, baseY + 88);
+  doc.font('Helvetica').fontSize(10).text(`${invoice.reference || ''} ${invoice.matterTitle || ''}`.trim() || '-', 48, baseY + 106, { width: 460 });
+  doc.font('Helvetica-Bold').fillColor('#111827').fontSize(11).text('Invoice', 48, baseY + 134);
+  doc.font('Helvetica').fontSize(10).text(`${invoice.number || invoice.id} (Total ${money(Number(invoice.amount || 0))})`, 48, baseY + 152, { width: 460 });
+  doc.font('Helvetica-Bold').fillColor('#111827').fontSize(11).text('Reference', 48, baseY + 180);
+  doc.font('Helvetica').fontSize(10).text(payment.reference || '-', 48, baseY + 198, { width: 460 });
+  doc.font('Helvetica-Bold').fillColor('#111827').fontSize(11).text('Received By', 48, baseY + 226);
+  doc.font('Helvetica').fontSize(10).text(receivedBy?.fullName || 'Firm', 48, baseY + 244, { width: 460 });
+  const summaryTop = baseY + 288;
   doc.rect(48, summaryTop, 499, 24).fill('#F3F4F6');
   doc.fillColor('#374151').font('Helvetica-Bold').fontSize(9).text('Description', 56, summaryTop + 8).text('Amount Received', 380, summaryTop + 8, { width: 160, align: 'right' });
   doc.font('Helvetica').fontSize(10).fillColor('#111827').text(`Payment against invoice ${invoice.number || invoice.id}`, 56, summaryTop + 36, { width: 320 });
-  doc.font('Helvetica-Bold').fontSize(12).fillColor('#1B3A5C').text(money(Number(payment.amount || 0)), 380, summaryTop + 36, { width: 160, align: 'right' });
+  doc.font('Helvetica-Bold').fontSize(12).fillColor(brandPrimary(firm)).text(money(Number(payment.amount || 0)), 380, summaryTop + 36, { width: 160, align: 'right' });
   doc.font('Helvetica').fontSize(10).fillColor('#374151').text('This is a payment receipt issued against the invoice referenced above. It does not replace or alter the invoice tax treatment.', 48, summaryTop + 90, { width: 499 });
   drawFirmBillingBlock(doc, firm, 48, summaryTop + 126, 499);
-  doc.font('Helvetica').fontSize(9).fillColor('#6B7280').text(`${firm.name || 'LexFlow Kenya'} | ${firm.address || 'Nairobi, Kenya'} | ${firm.email || 'accounts@lexflow.co.ke'} | ${firm.phone || '+254 700 123456'}`, 48, 760, { align: 'center', width: 499 });
+  if (branding.mode === 'simple') {
+    doc.font('Helvetica').fontSize(9).fillColor('#6B7280').text(`${firm.name || 'LexFlow Kenya'} | ${firm.address || 'Nairobi, Kenya'} | ${firm.email || 'accounts@lexflow.co.ke'} | ${firm.phone || '+254 700 123456'}`, 48, 760, { align: 'center', width: 499 });
+  }
   doc.end();
 });
 

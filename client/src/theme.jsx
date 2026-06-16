@@ -31,7 +31,28 @@ export const theme = {
   shadowLift: '0 14px 32px rgba(17,34,25,0.12)',
 };
 
-export const defaultFirmSettings = { name: 'LexFlow Kenya', logo: '', primaryColor: '#1A3628', accentColor: '#C5973C', websiteURL: '', email: 'accounts@lexflow.co.ke', phone: '+254 700 123456', address: 'Nairobi, Kenya', advocateBillingVisibility: 1, moduleSettings: { retainerManagement: false, kycCdd: false, corporateAuthority: false, retainerLedger: false, scopeVariation: false, clientTasks: false, advancedCompliance: false } };
+export const defaultFirmSettings = { name: 'LexFlow Kenya', logo: '', letterhead: '', primaryColor: '#1A3628', accentColor: '#C5973C', websiteURL: '', email: 'accounts@lexflow.co.ke', phone: '+254 700 123456', address: 'Nairobi, Kenya', advocateBillingVisibility: 1, moduleSettings: { retainerManagement: false, kycCdd: false, corporateAuthority: false, retainerLedger: false, scopeVariation: false, clientTasks: false, advancedCompliance: false } };
+
+export const outputBrandingModes = [
+  { value: 'letterhead', label: 'Use firm letterhead' },
+  { value: 'simple', label: 'Use simple firm branding' },
+  { value: 'plain', label: 'Plain / no firm branding' },
+];
+
+export function hasFirmLetterhead(firm = {}) {
+  return Boolean(firm?.letterhead || firm?.theme?.letterhead);
+}
+
+export function defaultOutputBrandingMode(firm = {}, fallback = 'simple') {
+  if (fallback === 'plain') return 'plain';
+  return hasFirmLetterhead(firm) ? 'letterhead' : 'simple';
+}
+
+export function appendBrandingModeToPath(path, brandingMode) {
+  if (!brandingMode) return path;
+  const separator = String(path).includes('?') ? '&' : '?';
+  return `${path}${separator}brandingMode=${encodeURIComponent(brandingMode)}`;
+}
 
 function normalizeHexColor(value) {
   if (typeof value !== 'string') return null;
