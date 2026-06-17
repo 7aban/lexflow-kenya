@@ -269,6 +269,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
   const templatesSectionRef = useRef(null);
   const toolsSectionRef = useRef(null);
   const pendingStampTargetRef = useRef(null);
+  const [signatureTargetInfo, setSignatureTargetInfo] = useState(null);
 
   useEffect(() => {
     load();
@@ -633,7 +634,10 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     } catch {
       target = null;
     }
-    if (!target || target.tool !== 'stamp') return;
+    if (!target || target.tool !== 'stamp') {
+      setSignatureTargetInfo(null);
+      return;
+    }
     pendingStampTargetRef.current = {
       matterId: String(target.matterId || ''),
       documentId: String(target.documentId || ''),
@@ -646,6 +650,11 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setStampSuccess('');
     setStampSaveError(null);
     setStampSaveSuccess('');
+    if (target.matterId && target.documentId) {
+      setSignatureTargetInfo({ status: 'ready', filename: target.filename || 'document' });
+    } else {
+      setSignatureTargetInfo({ status: 'stale' });
+    }
     setTimeout(() => stampPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
   }
 
@@ -1578,6 +1587,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
   const currentRole = session?.user?.role || '';
   const currentUserId = session?.user?.id || session?.user?.userId || '';
   const isAdmin = currentRole === 'admin';
+  const isAdvocateOrAdmin = currentRole === 'advocate' || currentRole === 'admin';
   const personalSignatureAssets = signatureAssets.filter(asset => asset.ownerType === 'user' && asset.assetType === 'signature' && (!currentUserId || asset.ownerId === currentUserId));
   const firmStampAssets = signatureAssets.filter(asset => asset.ownerType === 'firm' && asset.assetType === 'stamp');
   const selectedStampAsset = signatureAssets.find(asset => asset.id === stampAssetId);
@@ -1881,6 +1891,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                 {mergeLoading ? 'Merging...' : 'Merge and Download'}
               </button>
 
+              {isAdvocateOrAdmin ? (
               <button
                 type="button"
                 style={{ ...styles.ghostButton, minHeight: 36, opacity: canSave ? 1 : 0.65, cursor: canSave ? 'pointer' : 'not-allowed' }}
@@ -1889,6 +1900,9 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
               >
                 {saveLoading ? 'Saving...' : 'Save to matter documents'}
               </button>
+              ) : (
+              <span style={{ fontSize: 12, color: theme.muted, alignSelf: 'center' }}>Saving to matter documents requires an advocate or administrator.</span>
+              )}
             </div>
 
             {mattersError && <Alert tone="danger">{mattersError}</Alert>}
@@ -1971,7 +1985,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                 <strong style={{ fontSize: 14, color: theme.ink }}>Rotate PDF</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Rotate all pages then download or save</span>
+                <span style={{ fontSize: 12, color: theme.muted }}>Temporary download only</span>
               </div>
               <Badge tone="green">Available</Badge>
             </div>
@@ -2045,7 +2059,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                 {rotateLoading ? 'Rotating...' : 'Rotate and Download'}
               </button>
 
-              {rotateMatterId && (
+              {rotateMatterId && isAdvocateOrAdmin && (
                 <button
                   type="button"
                   style={{ ...styles.ghostButton, minHeight: 36, opacity: canRotateSave ? 1 : 0.65, cursor: canRotateSave ? 'pointer' : 'not-allowed' }}
@@ -2054,6 +2068,9 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                 >
                   {rotateSaveLoading ? 'Saving...' : 'Save to matter documents'}
                 </button>
+              )}
+              {rotateMatterId && !isAdvocateOrAdmin && (
+                <span style={{ fontSize: 12, color: theme.muted, alignSelf: 'center' }}>Saving to matter documents requires an advocate or administrator.</span>
               )}
             </div>
 
@@ -2073,7 +2090,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                 <strong style={{ fontSize: 14, color: theme.ink }}>Extract pages</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Pull selected page ranges then download or save</span>
+                <span style={{ fontSize: 12, color: theme.muted }}>Temporary download only</span>
               </div>
               <Badge tone="green">Available</Badge>
             </div>
@@ -2145,7 +2162,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                 {extractLoading ? 'Extracting...' : 'Extract and Download'}
               </button>
 
-              {extractMatterId && (
+              {extractMatterId && isAdvocateOrAdmin && (
                 <button
                   type="button"
                   style={{ ...styles.ghostButton, minHeight: 36, opacity: canExtractSave ? 1 : 0.65, cursor: canExtractSave ? 'pointer' : 'not-allowed' }}
@@ -2154,6 +2171,9 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                 >
                   {extractSaveLoading ? 'Saving...' : 'Save to matter documents'}
                 </button>
+              )}
+              {extractMatterId && !isAdvocateOrAdmin && (
+                <span style={{ fontSize: 12, color: theme.muted, alignSelf: 'center' }}>Saving to matter documents requires an advocate or administrator.</span>
               )}
             </div>
 
@@ -2173,7 +2193,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                 <strong style={{ fontSize: 14, color: theme.ink }}>Split / reorder pages</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Copy pages into a new order then download or save</span>
+                <span style={{ fontSize: 12, color: theme.muted }}>Temporary download only</span>
               </div>
               <Badge tone="green">Available</Badge>
             </div>
@@ -2245,7 +2265,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                 {splitLoading ? 'Reordering...' : 'Apply and Download'}
               </button>
 
-              {splitMatterId && (
+              {splitMatterId && isAdvocateOrAdmin && (
                 <button
                   type="button"
                   style={{ ...styles.ghostButton, minHeight: 36, opacity: canSplitSave ? 1 : 0.65, cursor: canSplitSave ? 'pointer' : 'not-allowed' }}
@@ -2254,6 +2274,9 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                 >
                   {splitSaveLoading ? 'Saving...' : 'Save to matter documents'}
                 </button>
+              )}
+              {splitMatterId && !isAdvocateOrAdmin && (
+                <span style={{ fontSize: 12, color: theme.muted, alignSelf: 'center' }}>Saving to matter documents requires an advocate or administrator.</span>
               )}
             </div>
 
@@ -2273,7 +2296,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                 <strong style={{ fontSize: 14, color: theme.ink }}>Images to PDF</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Combine existing image documents into a PDF then download or save</span>
+                <span style={{ fontSize: 12, color: theme.muted }}>Temporary download only</span>
               </div>
               <Badge tone="green">Available</Badge>
             </div>
@@ -2327,7 +2350,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                 {imagesLoading ? 'Converting...' : 'Apply and Download'}
               </button>
 
-              {imagesMatterId && (
+              {imagesMatterId && isAdvocateOrAdmin && (
                 <button
                   type="button"
                   style={{ ...styles.ghostButton, minHeight: 36, opacity: canImagesSave ? 1 : 0.65, cursor: canImagesSave ? 'pointer' : 'not-allowed' }}
@@ -2336,6 +2359,9 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                 >
                   {imagesSaveLoading ? 'Saving...' : 'Save to matter documents'}
                 </button>
+              )}
+              {imagesMatterId && !isAdvocateOrAdmin && (
+                <span style={{ fontSize: 12, color: theme.muted, alignSelf: 'center' }}>Saving to matter documents requires an advocate or administrator.</span>
               )}
             </div>
 
@@ -2393,7 +2419,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                 <strong style={{ fontSize: 14, color: theme.ink }}>Delete pages</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Remove unwanted pages then download or save</span>
+                <span style={{ fontSize: 12, color: theme.muted }}>Temporary download only</span>
               </div>
               <Badge tone="green">Available</Badge>
             </div>
@@ -2465,7 +2491,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                 {deleteLoading ? 'Deleting...' : 'Delete and Download'}
               </button>
 
-              {deleteMatterId && (
+              {deleteMatterId && isAdvocateOrAdmin && (
                 <button
                   type="button"
                   style={{ ...styles.ghostButton, minHeight: 36, opacity: canDeleteSave ? 1 : 0.65, cursor: canDeleteSave ? 'pointer' : 'not-allowed' }}
@@ -2474,6 +2500,9 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                 >
                   {deleteSaveLoading ? 'Saving...' : 'Save to matter documents'}
                 </button>
+              )}
+              {deleteMatterId && !isAdvocateOrAdmin && (
+                <span style={{ fontSize: 12, color: theme.muted, alignSelf: 'center' }}>Saving to matter documents requires an advocate or administrator.</span>
               )}
             </div>
 
@@ -2497,7 +2526,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                 <strong style={{ fontSize: 14, color: theme.ink }}>Add page numbers / paginate bundle</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Number every page then download or save</span>
+                <span style={{ fontSize: 12, color: theme.muted }}>Temporary download only</span>
               </div>
               <Badge tone="green">Available</Badge>
             </div>
@@ -2584,7 +2613,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                 {paginateLoading ? 'Adding numbers...' : 'Add numbers and Download'}
               </button>
 
-              {paginateMatterId && (
+              {paginateMatterId && isAdvocateOrAdmin && (
                 <button
                   type="button"
                   style={{ ...styles.ghostButton, minHeight: 36, opacity: canPaginateSave ? 1 : 0.65, cursor: canPaginateSave ? 'pointer' : 'not-allowed' }}
@@ -2593,6 +2622,9 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                 >
                   {paginateSaveLoading ? 'Saving...' : 'Save to matter documents'}
                 </button>
+              )}
+              {paginateMatterId && !isAdvocateOrAdmin && (
+                <span style={{ fontSize: 12, color: theme.muted, alignSelf: 'center' }}>Saving to matter documents requires an advocate or administrator.</span>
               )}
             </div>
 
@@ -2616,7 +2648,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                 <strong style={{ fontSize: 14, color: theme.ink }}>Court bundle prep</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Combine selected matter PDFs into a single court-ready bundle</span>
+                <span style={{ fontSize: 12, color: theme.muted }}>Temporary download only — combine selected matter PDFs into a single court-ready bundle</span>
               </div>
               <Badge tone="green">Available</Badge>
             </div>
@@ -2754,6 +2786,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
               >
                 {bundleLoading ? 'Creating bundle...' : 'Bundle and Download'}
               </button>
+              {isAdvocateOrAdmin ? (
               <button
                 type="button"
                 style={{ ...styles.ghostButton, minHeight: 36, opacity: canBundleSave ? 1 : 0.65, cursor: canBundleSave ? 'pointer' : 'not-allowed' }}
@@ -2762,6 +2795,9 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
               >
                 {bundleSaveLoading ? 'Saving...' : 'Save to matter documents'}
               </button>
+              ) : (
+              <span style={{ fontSize: 12, color: theme.muted, alignSelf: 'center' }}>Saving to matter documents requires an advocate or administrator.</span>
+              )}
             </div>
 
             {bundleDocsError && <Alert tone="danger">{bundleDocsError}</Alert>}
@@ -2974,11 +3010,17 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                 <strong style={{ fontSize: 14, color: theme.ink }}>Sign / stamp PDF</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Place a visual signature or firm stamp on a matter PDF</span>
+                <span style={{ fontSize: 12, color: theme.muted }}>Temporary download only</span>
               </div>
               <Badge tone="green">Available</Badge>
             </div>
 
+            {signatureTargetInfo?.status === 'ready' && (
+              <Alert tone="success">Ready to sign: {signatureTargetInfo.filename}</Alert>
+            )}
+            {signatureTargetInfo?.status === 'stale' && (
+              <Alert tone="warning">The selected document could not be loaded. Choose the matter and PDF manually.</Alert>
+            )}
             <div style={{ border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
               Place a visual signature or stamp image on a PDF. This does not create a certified electronic signature.
               <br />
@@ -2991,7 +3033,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                 <select
                   style={styles.input}
                   value={stampMatterId}
-                  onChange={event => { setStampMatterId(event.target.value); setStampError(null); setStampSuccess(''); setStampSaveError(null); setStampSaveSuccess(''); }}
+                  onChange={event => { setStampMatterId(event.target.value); setStampError(null); setStampSuccess(''); setStampSaveError(null); setStampSaveSuccess(''); setSignatureTargetInfo(null); }}
                   disabled={mattersLoading || stampLoading || stampSaveLoading}
                 >
                   <option value="">{mattersLoading ? 'Loading matters...' : 'Select a matter'}</option>
@@ -3088,7 +3130,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                 {stampLoading ? 'Stamping...' : 'Stamp and Download'}
               </button>
 
-              {stampMatterId && (
+              {stampMatterId && isAdvocateOrAdmin && (
                 <button
                   type="button"
                   style={{ ...styles.ghostButton, minHeight: 36, opacity: canStampSave ? 1 : 0.65, cursor: canStampSave ? 'pointer' : 'not-allowed' }}
@@ -3097,6 +3139,9 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                 >
                   {stampSaveLoading ? 'Saving...' : 'Save to matter documents'}
                 </button>
+              )}
+              {stampMatterId && !isAdvocateOrAdmin && (
+                <span style={{ fontSize: 12, color: theme.muted, alignSelf: 'center' }}>Saving signed copies to matter documents requires an advocate or administrator.</span>
               )}
             </div>
 
@@ -3116,7 +3161,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                 <strong style={{ fontSize: 14, color: theme.ink }}>Tenth-lining / appellate formatting</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Add right-margin line markers at every tenth line</span>
+                <span style={{ fontSize: 12, color: theme.muted }}>Temporary download only</span>
               </div>
               <Badge tone="green">Available</Badge>
             </div>
@@ -3193,7 +3238,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                 {tenthLoading ? 'Applying markers...' : 'Apply and Download'}
               </button>
 
-              {tenthMatterId && (
+              {tenthMatterId && isAdvocateOrAdmin && (
                 <button
                   type="button"
                   style={{ ...styles.ghostButton, minHeight: 36, opacity: canTenthSave ? 1 : 0.65, cursor: canTenthSave ? 'pointer' : 'not-allowed' }}
@@ -3202,6 +3247,9 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                 >
                   {tenthSaveLoading ? 'Saving...' : 'Save to matter documents'}
                 </button>
+              )}
+              {tenthMatterId && !isAdvocateOrAdmin && (
+                <span style={{ fontSize: 12, color: theme.muted, alignSelf: 'center' }}>Saving to matter documents requires an advocate or administrator.</span>
               )}
             </div>
 

@@ -9260,6 +9260,7 @@ app.post('/api/matters/:id/documents', async (req, res) => {
   if (![...allowed, ...imageAllowed].includes(mimeType)) return res.status(400).json({ error: 'Only PDF, Word and image documents are supported' });
   const id = genId('DOC');
   const buffer = Buffer.from(String(data).split(',').pop(), 'base64');
+  if (buffer.length > config.UPLOAD_MAX_FILE_MB * 1024 * 1024) return res.status(400).json({ error: `File exceeds the maximum upload size of ${config.UPLOAD_MAX_FILE_MB} MB.` });
   const source = req.user.role === 'client' ? 'client' : 'firm';
   let folderId = '';
   if (req.user.role === 'client') {
