@@ -9141,6 +9141,7 @@ app.post('/api/document-requests/:id/respond', async (req, res) => {
   if (![...allowed, ...imageAllowed].includes(mimeType)) return res.status(400).json({ error: 'Only PDF, Word and image documents are supported' });
   const docId = genId('DOC');
   const buffer = Buffer.from(String(data).split(',').pop(), 'base64');
+  if (buffer.length > config.UPLOAD_MAX_FILE_MB * 1024 * 1024) return res.status(400).json({ error: 'Document upload is limited to 25 MB.' });
   const cleanName = cleanDocumentName(name);
   const cleanDisplayName = cleanDocumentName(name);
   const type = imageAllowed.includes(mimeType) ? 'Image' : mimeType.includes('pdf') ? 'PDF' : 'Word';

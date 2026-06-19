@@ -1203,8 +1203,6 @@ function ClientDocumentRequests({ matters, notify }) {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(null);
-  const fileInputRef = useRef(null);
-  const [pendingRequestId, setPendingRequestId] = useState(null);
 
   async function loadRequests() {
     setLoading(true);
@@ -1219,7 +1217,10 @@ function ClientDocumentRequests({ matters, notify }) {
 
   async function handleUpload(requestId, event) {
     const file = event.target.files?.[0];
-    if (!file) return;
+    if (!file) {
+      event.target.value = '';
+      return;
+    }
     setUploading(requestId);
     try {
       await api(`/document-requests/${requestId}/respond`, {
@@ -1230,7 +1231,10 @@ function ClientDocumentRequests({ matters, notify }) {
       event.target.value = '';
       await loadRequests();
     } catch (err) { notify({ type: 'danger', message: err.message }); }
-    finally { setUploading(null); }
+    finally {
+      event.target.value = '';
+      setUploading(null);
+    }
   }
 
   if (loading && !requests.length) return null;
@@ -1257,8 +1261,8 @@ function ClientDocumentRequests({ matters, notify }) {
                     <Badge tone="gold">Pending</Badge>
                   </div>
                   <div>
-                    <input ref={fileInputRef} type="file" style={{ display: 'none' }} onChange={e => handleUpload(r.id, e)} accept="application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg,image/webp" />
-                    <button type="button" disabled={uploading === r.id} onClick={() => { setPendingRequestId(r.id); fileInputRef.current?.click(); }} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 12px' }}>
+                    <input id={`document-request-upload-${r.id}`} type="file" style={{ display: 'none' }} onChange={e => handleUpload(r.id, e)} accept="application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg,image/webp" />
+                    <button type="button" disabled={uploading === r.id} onClick={() => document.getElementById(`document-request-upload-${r.id}`)?.click()} style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 12px' }}>
                       {uploading === r.id ? 'Uploading…' : 'Upload document'}
                     </button>
                   </div>
