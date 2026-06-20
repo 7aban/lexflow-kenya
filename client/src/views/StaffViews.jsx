@@ -4582,6 +4582,7 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
   const [form, setForm] = useState({ ...defaultFirmSettings, ...settings });
   const [notices, setNotices] = useState([]);
   const [noticeForm, setNoticeForm] = useState(emptyNoticeForm);
+  const [noticeComposerOpen, setNoticeComposerOpen] = useState(false);
   const [publishingNotice, setPublishingNotice] = useState(false);
   const [firmTheme, setFirmTheme] = useState(null);
   const [presets, setPresets] = useState([]);
@@ -4731,6 +4732,11 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
 
   function removeNoticeFile(index) {
     setNoticeForm(current => ({ ...current, files: current.files.filter((_, fileIndex) => fileIndex !== index) }));
+  }
+
+  function closeNoticeComposer() {
+    setNoticeComposerOpen(false);
+    setNoticeForm(emptyNoticeForm);
   }
 
   useEffect(() => {
@@ -4976,6 +4982,7 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
       })));
       await api('/notices', { method: 'POST', body: { title: noticeForm.title, content: noticeForm.content, clientId: noticeForm.clientId, attachments } });
       setNoticeForm(emptyNoticeForm);
+      setNoticeComposerOpen(false);
       notify({ type: 'success', message: attachments.length ? 'Notice published with attachments.' : 'Notice published.' });
       await loadNotices();
     } catch (err) { notify({ type: 'danger', message: err.message }); }
@@ -5444,35 +5451,48 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
         </Card>
       )}
 
-      <Card title="Client Portal Notices" hint="Publish broadcast or client-specific updates with secure attachments">
-        <form onSubmit={createNotice} style={styles.formGrid}>
-          <Field label="Audience">
-            <select style={styles.input} value={noticeForm.clientId} onChange={e => setNoticeForm({ ...noticeForm, clientId: e.target.value })}>
-              <option value="">All clients</option>
-              {clientOptions.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
-            </select>
-          </Field>
-          <Field label="Title"><input required style={styles.input} value={noticeForm.title} onChange={e => setNoticeForm({ ...noticeForm, title: e.target.value })} /></Field>
-          <Field label="Attachments"><input type="file" multiple accept=".pdf,.doc,.docx,.txt,image/*" style={styles.input} onChange={chooseNoticeFiles} /></Field>
-          <Field label="Content">
-            <textarea required rows={4} style={{ ...styles.input, minHeight: 104, resize: 'vertical' }} value={noticeForm.content} onChange={e => setNoticeForm({ ...noticeForm, content: e.target.value })} />
-          </Field>
-          <div style={styles.formHelper}>Attachments are stored in LexFlow and exposed only through authenticated client downloads.</div>
-          {!!noticeForm.files.length && (
-            <div style={styles.noticeAttachmentPreview}>
-              {noticeForm.files.map((file, index) => (
-                <div key={`${file.name}-${file.lastModified}-${index}`} style={styles.noticeAttachmentPreviewItem}>
-                  <div>
-                    <strong>{file.name}</strong>
-                    <span>{file.type || 'File'} | {formatFileSize(file.size)}</span>
+      <Card
+        title="Client Portal Notices"
+        hint="Broadcast and client-specific updates remain available when needed."
+        action={
+          noticeComposerOpen
+            ? <button type="button" style={styles.ghostButton} onClick={closeNoticeComposer}>Close</button>
+            : <button type="button" style={styles.ghostButton} onClick={() => setNoticeComposerOpen(true)}>Publish notice</button>
+        }
+      >
+        {noticeComposerOpen ? (
+          <form onSubmit={createNotice} style={{ ...styles.formGrid, marginBottom: 14 }}>
+            <Field label="Audience">
+              <select style={styles.input} value={noticeForm.clientId} onChange={e => setNoticeForm({ ...noticeForm, clientId: e.target.value })}>
+                <option value="">All clients</option>
+                {clientOptions.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Title"><input required style={styles.input} value={noticeForm.title} onChange={e => setNoticeForm({ ...noticeForm, title: e.target.value })} /></Field>
+            <Field label="Attachments"><input type="file" multiple accept=".pdf,.doc,.docx,.txt,image/*" style={styles.input} onChange={chooseNoticeFiles} /></Field>
+            <Field label="Content">
+              <textarea required rows={4} style={{ ...styles.input, minHeight: 104, resize: 'vertical' }} value={noticeForm.content} onChange={e => setNoticeForm({ ...noticeForm, content: e.target.value })} />
+            </Field>
+            <div style={styles.formHelper}>Attachments are stored in LexFlow and exposed only through authenticated client downloads.</div>
+            {!!noticeForm.files.length && (
+              <div style={styles.noticeAttachmentPreview}>
+                {noticeForm.files.map((file, index) => (
+                  <div key={`${file.name}-${file.lastModified}-${index}`} style={styles.noticeAttachmentPreviewItem}>
+                    <div>
+                      <strong>{file.name}</strong>
+                      <span>{file.type || 'File'} | {formatFileSize(file.size)}</span>
+                    </div>
+                    <button type="button" style={styles.dangerTinyButton} onClick={() => removeNoticeFile(index)}>Remove</button>
                   </div>
-                  <button type="button" style={styles.dangerTinyButton} onClick={() => removeNoticeFile(index)}>Remove</button>
-                </div>
-              ))}
+                ))}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <button disabled={publishingNotice} style={styles.primaryButton}>{publishingNotice ? 'Publishing...' : 'Publish notice'}</button>
+              <button type="button" style={styles.ghostButton} onClick={closeNoticeComposer} disabled={publishingNotice}>Cancel</button>
             </div>
-          )}
-          <button disabled={publishingNotice} style={styles.primaryButton}>{publishingNotice ? 'Publishing...' : 'Publish notice'}</button>
-        </form>
+          </form>
+        ) : null}
         <Table
           columns={['Title', 'Audience', 'Attachments', 'Created', 'Actions']}
           rows={notices.map(n => [
