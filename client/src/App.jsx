@@ -44,23 +44,25 @@ const navIcons = {
 };
 
 const navDisplayLabels = {
+  Dashboard: 'Workspace',
   'Deadlines': 'Court Diary & Deadlines',
+  'Document Studio': 'Documents',
+  Invoices: 'Billing',
   'Audit Log': 'Audit Log (Legacy)',
   'Structured Audit': 'Audit Events',
 };
 
 const initialData = { dashboard: {}, clients: [], matters: [], tasks: [], invoices: [], firmSettings: defaultFirmSettings };
 const navGroups = [
-  { title: 'Work', items: [['Dashboard', ['admin', 'advocate', 'assistant']], ['Matters', ['admin', 'advocate', 'assistant']], ['Tasks', ['admin', 'advocate', 'assistant']], ['Deadlines', ['admin', 'advocate', 'assistant']], ['Communications', ['admin', 'advocate', 'assistant']]] },
-  { title: 'People', items: [['Clients', ['admin', 'advocate', 'assistant']], ['Invitations', ['admin']], ['My Leave', ['advocate', 'assistant']]] },
-  { title: 'Money', items: [['Invoices', ['admin']], ['Reports', ['admin']]] },
-  { title: 'Tools', items: [['Document Studio', ['admin', 'advocate']], ['Connected Accounts', ['admin', 'advocate', 'assistant']]] },
-  { title: 'Admin', items: [['Users', ['admin']], ['HR', ['admin']], ['Firm Settings', ['admin']], ['Audit Log', ['admin']], ['Structured Audit', ['admin']], ['Performance', ['admin']]] },
-  { title: 'Resources', items: [
+  { title: 'Primary', collapsible: false, showTitle: false, items: [['Dashboard', ['admin', 'advocate', 'assistant']], ['Matters', ['admin', 'advocate', 'assistant']], ['Tasks', ['admin', 'advocate', 'assistant']], ['Deadlines', ['admin', 'advocate', 'assistant']], ['Document Studio', ['admin', 'advocate']], ['Invoices', ['admin']], ['Clients', ['admin', 'advocate', 'assistant']], ['Reports', ['admin']], ['Communications', ['admin', 'advocate', 'assistant']]] },
+  { title: 'Tools', collapsible: true, items: [
+    ['Connected Accounts', ['admin', 'advocate', 'assistant']],
+    ['My Leave', ['advocate', 'assistant']],
     ['eFiling CTS', ['admin', 'advocate', 'assistant'], 'https://efiling.court.go.ke/auth'],
     ['eCitizen', ['admin', 'advocate', 'assistant'], 'https://www.ecitizen.go.ke'],
     ['Ardhi Sasa', ['admin', 'advocate', 'assistant'], 'https://ardhisasa.lands.go.ke/home'],
   ] },
+  { title: 'Admin', collapsible: true, items: [['Users', ['admin']], ['HR', ['admin']], ['Firm Settings', ['admin']], ['Audit Log', ['admin']], ['Structured Audit', ['admin']], ['Performance', ['admin']], ['Invitations', ['admin']]] },
 ];
 
 const staffViewSlugs = {
@@ -142,11 +144,7 @@ function allowedNavGroups(role) {
     .filter(group => group.items.length);
 }
 
-function defaultNavGroup(role) {
-  return allowedNavGroups(role)[0]?.title || 'Overview';
-}
-
-const OPEN_NAV_GROUPS_STORAGE_KEY = 'lexflow:v1:staff:openNavGroups';
+const OPEN_NAV_GROUPS_STORAGE_KEY = 'lexflow:v2:staff:openNavGroups';
 const LEGACY_OPEN_NAV_GROUPS_STORAGE_KEY = 'lexflowOpenNavGroups';
 
 function parseStoredNavGroups(key) {
@@ -182,31 +180,71 @@ function readOpenNavGroups(role) {
 }
 
 function StaffNavigation({ visibleGroups, openNavGroups, setOpenNavGroups, view, setView, onNavigate }) {
+  function toggleGroup(group) {
+    setOpenNavGroups(prev => {
+      const isActiveGroup = group.items.some(([label]) => label === view);
+      const next = new Set(prev);
+      if (next.has(group.title)) {
+        if (isActiveGroup) return prev;
+        next.delete(group.title);
+      } else {
+        next.add(group.title);
+      }
+      try { localStorage.setItem(OPEN_NAV_GROUPS_STORAGE_KEY, JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  }
+
   return (
     <nav style={styles.navList}>
       {visibleGroups.map(group => {
+        const isCollapsible = group.collapsible !== false;
+        const isOpen = !isCollapsible || openNavGroups.has(group.title);
+        const isActiveGroup = group.items.some(([label]) => label === view);
         return (
           <div key={group.title} style={styles.navGroup}>
-            <div className="lf-nav-group" style={styles.navGroupButton}>{group.title}</div>
-            <div style={styles.navGroupItems}>
+            {group.showTitle !== false && (
+              <button
+                type="button"
+                className="lf-nav-group lf-nav-group-button"
+                aria-expanded={isOpen}
+                onClick={() => isCollapsible && toggleGroup(group)}
+                style={{
+                  ...styles.navGroupButton,
+                  color: isActiveGroup ? 'var(--lf-on-sidebar, #fff)' : styles.navGroupButton.color,
+                  cursor: isCollapsible ? 'pointer' : 'default',
+                }}
+              >
+                <span>{group.title}</span>
+                {isCollapsible && (
+                  <IconChevronDown
+                    size={13}
+                    stroke={1.8}
+                    aria-hidden="true"
+                    style={{ transform: isOpen ? 'rotate(0deg)' : 'rotate(-90deg)', opacity: isActiveGroup ? 0.9 : 0.58 }}
+                  />
+                )}
+              </button>
+            )}
+            {isOpen && <div style={styles.navGroupItems}>
               {group.items.map(([label, , url]) => {
                 const NavIcon = navIcons[label];
                 if (url) {
                   return (
-                    <a key={label} className="lf-nav lf-resource-link" style={{ ...styles.navItem, textDecoration: 'none' }} href={url} target="_blank" rel="noopener noreferrer" onClick={onNavigate}>
+                    <a key={label} className="lf-nav lf-resource-link" style={{ ...styles.navItem, paddingLeft: group.showTitle === false ? 16 : 24, textDecoration: 'none' }} href={url} target="_blank" rel="noopener noreferrer" onClick={onNavigate}>
                       <span style={styles.navNumber}>{NavIcon ? <NavIcon size={16} /> : null}</span>
                       <span>{label}</span>
                     </a>
                   );
                 }
                 return (
-                  <button key={label} type="button" className={`lf-nav${view === label ? ' is-active' : ''}`} onClick={() => { setView(label); onNavigate?.(); }} style={{ ...styles.navItem, ...(view === label ? styles.navActive : {}) }}>
+                  <button key={label} type="button" className={`lf-nav${view === label ? ' is-active' : ''}`} onClick={() => { setView(label); onNavigate?.(); }} style={{ ...styles.navItem, paddingLeft: group.showTitle === false ? 16 : 24, ...(view === label ? styles.navActive : {}) }}>
                     <span style={styles.navNumber}>{NavIcon ? <NavIcon size={16} /> : null}</span>
                     <span>{navDisplayLabels[label] || label}</span>
                   </button>
                 );
               })}
-            </div>
+            </div>}
           </div>
         );
       })}
@@ -229,7 +267,7 @@ export default function App() {
   const [openNavGroups, setOpenNavGroups] = useState(() => {
     const currentRole = session?.user?.role || 'assistant';
     const saved = readOpenNavGroups(currentRole);
-    return saved || new Set([defaultNavGroup(currentRole)]);
+    return saved || new Set();
   });
   const [notifications, setNotifications] = useState([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
