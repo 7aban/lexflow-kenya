@@ -57,6 +57,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const [generationMessage, setGenerationMessage] = useState('');
   const [generationWarning, setGenerationWarning] = useState('');
   const [templateSearch, setTemplateSearch] = useState('');
+  const [uploadStatus, setUploadStatus] = useState({ fileName: '', state: '' });
 
   const showGenerateControls = canManage === true && clientMode === false && Boolean(matterId);
 
@@ -172,7 +173,11 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
 
   async function uploadDoc(event) {
     const file = event.target.files?.[0];
-    if (!file) return;
+    if (!file) {
+      setUploadStatus({ fileName: '', state: '' });
+      return;
+    }
+    setUploadStatus({ fileName: file.name, state: 'Uploading' });
     try {
       let targetFolderId = 'uncategorised';
       if (uploadFolderInput.trim()) {
@@ -195,9 +200,13 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       });
       event.target.value = '';
       setUploadFolderInput('');
+      setUploadStatus({ fileName: file.name, state: 'Uploaded' });
       notify?.({ type: 'success', message: clientMode ? 'Document shared with the firm.' : 'Document uploaded.' });
       await load();
-    } catch (err) { notify?.({ type: 'danger', message: err.message }); }
+    } catch (err) {
+      setUploadStatus({ fileName: file.name, state: 'Upload failed' });
+      notify?.({ type: 'danger', message: err.message });
+    }
   }
 
   async function moveDoc(doc, folderId) {
@@ -273,6 +282,9 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const documentCardHint = clientMode
     ? 'Client uploads are placed in Client Uploads automatically.'
     : canManage ? 'Upload, move and manage matter documents.' : 'View matter documents.';
+  const uploadDestination = clientMode
+    ? 'Client Uploads'
+    : uploadFolderInput.trim() || (selectedFolder === 'all' ? 'Uncategorised' : selectedName);
 
   return (
     <>
@@ -280,6 +292,8 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       .lf-doc-grid section { border-color: #DDD8CE !important; }
       .lf-doc-grid .lf-doc-table-wrap > div { border-color: #DDD8CE !important; }
       .lf-doc-upload-area, .lf-doc-generate-area { background: #FAF8F4; border: 1px solid #DDD8CE; border-radius: 8px; padding: 14px 16px; margin-bottom: 14px; }
+      .lf-doc-upload-area { border-style: dashed; border-color: #C9BFAF; box-shadow: 0 1px 2px rgba(17,34,25,.04); }
+      .lf-doc-upload-area:focus-within { border-color: #C5973C; box-shadow: 0 0 0 3px rgba(197,151,60,.14); }
     `}</style>
     <div className="lf-doc-grid" style={{ display: 'grid', gridTemplateColumns: '220px minmax(0,1fr)', gap: 16 }}>
       <Card title="Folders" hint="Matter document categories">
@@ -310,6 +324,22 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       <Card title={selectedName} hint={documentCardHint}>
         {showUploadControls && (
           <div className="lf-doc-upload-area">
+            <div style={{ display: 'grid', gap: 5, marginBottom: 12 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                  <strong style={{ fontSize: 14, color: theme.ink }}>Upload matter document</strong>
+                  <span style={{ fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
+                    Add pleadings, correspondence, evidence, or client documents to this matter.
+                  </span>
+                </div>
+                <span style={{ ...styles.badge, background: theme.goldPale, color: theme.goldDark, border: '1px solid #EAD7A8' }}>
+                  {clientMode ? 'Client upload' : 'Matter file'}
+                </span>
+              </div>
+              <span id="matter-document-upload-help" style={{ fontSize: 12, color: theme.muted, lineHeight: 1.45 }}>
+                PDF, Word, and image files are supported. Maximum 25 MB. Selecting a file uploads it immediately.
+              </span>
+            </div>
             <div style={{ ...styles.formGrid }}>
               {!clientMode && (
                 <Field label="Folder">
@@ -321,8 +351,16 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
                 </Field>
               )}
               <Field label={clientMode ? 'Upload to Client Uploads' : 'Upload Document'}>
-                <input style={styles.input} type="file" accept=".pdf,.doc,.docx,image/*" onChange={uploadDoc} />
+                <input style={styles.input} type="file" accept=".pdf,.doc,.docx,image/*" onChange={uploadDoc} aria-describedby="matter-document-upload-help matter-document-upload-status" />
               </Field>
+            </div>
+            <div id="matter-document-upload-status" aria-live="polite" style={{ marginTop: 10, borderTop: `1px solid ${theme.line}`, paddingTop: 10, display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap', fontSize: 12, color: theme.muted }}>
+              <span>Destination: <strong style={{ color: theme.ink }}>{uploadDestination}</strong></span>
+              <span>
+                {uploadStatus.fileName
+                  ? <><strong style={{ color: uploadStatus.state === 'Upload failed' ? theme.red : theme.ink }}>{uploadStatus.state}:</strong> {uploadStatus.fileName}</>
+                  : 'No file selected yet.'}
+              </span>
             </div>
           </div>
         )}
@@ -432,7 +470,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
           />
           </div>
           </div>
-        ) : <Empty title="This folder is empty" text="Documents uploaded or moved here will appear in this folder." />}
+        ) : <Empty title="No documents have been added to this matter yet." text="Documents uploaded or moved here will appear in this folder." />}
       </Card>
       <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
     </div>
