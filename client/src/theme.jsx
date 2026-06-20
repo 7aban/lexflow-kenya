@@ -523,12 +523,13 @@ export function StyleTag() { return <style>{`
     #root .lf-user-cards tbody td span { white-space: normal !important; max-width: 100% !important; }
     #root .lf-user-cards tbody td::before { min-width: 0 !important; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; overflow-wrap: normal; word-break: normal; }
     #root .lf-user-cards tbody tr:hover td { background: transparent !important; }
-    #root .lf-user-cards td:nth-child(1)::before { content: "Name"; }
-    #root .lf-user-cards td:nth-child(2)::before { content: "Email"; }
-    #root .lf-user-cards td:nth-child(3)::before { content: "Role"; }
-    #root .lf-user-cards td:nth-child(4)::before { content: "Status"; }
-    #root .lf-user-cards td:nth-child(5)::before { content: "Client"; }
-    #root .lf-user-cards td:nth-child(6)::before { content: "Actions"; }
+    #root .lf-user-cards td:nth-child(1)::before { content: "Photo"; }
+    #root .lf-user-cards td:nth-child(2)::before { content: "Name"; }
+    #root .lf-user-cards td:nth-child(3)::before { content: "Email"; }
+    #root .lf-user-cards td:nth-child(4)::before { content: "Role"; }
+    #root .lf-user-cards td:nth-child(5)::before { content: "Status"; }
+    #root .lf-user-cards td:nth-child(6)::before { content: "Client"; }
+    #root .lf-user-cards td:nth-child(7)::before { content: "Actions"; }
     /* R15g-4: TimeEntryEditorList mobile cards */
     #root .lf-time-entry-cards,
     #root .lf-time-entry-cards * { box-sizing: border-box !important; }

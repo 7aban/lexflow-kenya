@@ -6877,6 +6877,7 @@ export function Users({ clients = [], notify }) {
   const [users, setUsers] = useState([]);
   const [userLoadError, setUserLoadError] = useState('');
   const [form, setForm] = useState({ email: '', password: '', fullName: '', role: 'assistant', clientId: '' });
+  const [createUserOpen, setCreateUserOpen] = useState(false);
   const [includeInactive, setIncludeInactive] = useState(false);
   // PRODUCT-16B: client-side User Management filters (UI convenience only; no fetch/API/semantics change).
   const [userSearch, setUserSearch] = useState('');
@@ -6951,16 +6952,15 @@ export function Users({ clients = [], notify }) {
     setStatusFilter(nextStatus);
     if (nextStatus === 'inactive') setIncludeInactive(true);
   }
-  return <div className="lf-split-grid" style={styles.splitGrid}>
-    <Card title="Create user" hint="Role-based access"><form onSubmit={submit} style={styles.formGrid}>
-      <Field label="Full name"><input required style={styles.input} value={form.fullName} onChange={e => setForm({ ...form, fullName: e.target.value })} /></Field>
-      <Field label="Email"><input required style={styles.input} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field>
-      <Field label="Password"><input required type="password" style={styles.input} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} /></Field>
-      <Field label="Role"><select style={styles.input} value={form.role} onChange={e => setForm({ ...form, role: e.target.value, clientId: e.target.value === 'client' ? form.clientId : '' })}><option value="assistant">Assistant</option><option value="advocate">Advocate</option><option value="admin">Admin</option><option value="client">Client</option></select></Field>
-      {form.role === 'client' && <><Field label="Linked Client"><select required style={styles.input} value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })}><option value="">Select client</option>{clientOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field><div style={styles.formHelper}>Client users can view only the linked client's matters, documents, invoices, and messages. Share credentials manually after creating the account.</div></>}
-      <button style={styles.primaryButton}>Create user</button>
-    </form></Card>
-    <Card title="Team" hint={`${visibleUsers.length} users`}>
+  const compactControl = { ...styles.input, width: 'auto', minWidth: 112, padding: '5px 9px', fontSize: 12 };
+  const inlineRoleControl = { ...compactControl, width: 122, minWidth: 112 };
+  const subtleActionButton = { ...styles.tinyButton, padding: '3px 9px' };
+  return <div style={{ display: 'grid', gap: 14 }}>
+    <Card
+      title="Team"
+      hint={`${visibleUsers.length} users in the register`}
+      action={<button type="button" style={createUserOpen ? styles.ghostButton : styles.primaryButton} onClick={() => setCreateUserOpen(current => !current)}>{createUserOpen ? 'Close' : 'Create user'}</button>}
+    >
       {userLoadError && <div style={{ ...styles.alert, ...styles.alertDanger, marginBottom: 12 }}>{userLoadError}</div>}
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}>
         <input type="checkbox" checked={includeInactive} onChange={e => setIncludeInactive(e.target.checked)} />
@@ -6975,14 +6975,14 @@ export function Users({ clients = [], notify }) {
           onChange={e => setUserSearch(e.target.value)}
           style={{ flex: 1, minWidth: 150, border: `1px solid ${theme.line}`, borderRadius: 6, padding: '7px 11px', background: '#fff', fontSize: 13, outline: 'none' }}
         />
-        <select aria-label="Filter users by role" value={roleFilter} onChange={e => setRoleFilter(e.target.value)} style={{ ...styles.input, width: 'auto', minWidth: 128 }}>
+        <select aria-label="Filter users by role" value={roleFilter} onChange={e => setRoleFilter(e.target.value)} style={compactControl}>
           <option value="all">All roles</option>
           <option value="admin">Admin</option>
           <option value="advocate">Advocate</option>
           <option value="assistant">Assistant</option>
           <option value="client">Client</option>
         </select>
-        <select aria-label="Filter users by status" value={statusFilter} onChange={e => handleStatusFilterChange(e.target.value)} style={{ ...styles.input, width: 'auto', minWidth: 128 }}>
+        <select aria-label="Filter users by status" value={statusFilter} onChange={e => handleStatusFilterChange(e.target.value)} style={compactControl}>
           <option value="all">All statuses</option>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
@@ -7008,7 +7008,7 @@ export function Users({ clients = [], notify }) {
             )}
           </div>,
           u.email,
-          <select key={`role-${u.id}`} style={{ ...styles.input, width: 140 }} value={u.role} disabled={u.role === 'client'} onChange={e => updateRole(u.id, e.target.value, u.fullName)}>
+          <select key={`role-${u.id}`} style={inlineRoleControl} value={u.role} disabled={u.role === 'client'} onChange={e => updateRole(u.id, e.target.value, u.fullName)}>
             <option value="assistant">Assistant</option>
             <option value="advocate">Advocate</option>
             <option value="admin">Admin</option>
@@ -7016,11 +7016,26 @@ export function Users({ clients = [], notify }) {
           <Badge key={`status-${u.id}`} tone={u.isActive ? 'green' : 'red'}>{u.isActive ? 'Active' : 'Inactive'}</Badge>,
           u.clientId ? (clientOptions.find(c => c.id === u.clientId)?.name || <Badge key={`client-${u.id}`} tone="red">Not linked to a client record</Badge>) : '-',
           <div key={`actions-${u.id}`} style={{ display: 'flex', gap: 6 }}>
-            <button style={styles.tinyButton} onClick={() => toggleActive(u.id, !u.isActive, u.fullName)}>{u.isActive ? 'Deactivate' : 'Activate'}</button>
+            <button type="button" style={subtleActionButton} onClick={() => toggleActive(u.id, !u.isActive, u.fullName)}>{u.isActive ? 'Deactivate' : 'Activate'}</button>
           </div>,
         ])} empty={userEmptyText} />
       </div>
     </Card>
+    {createUserOpen && (
+      <Card title="Create user" hint="Role-based access for a new account">
+        <form onSubmit={submit} style={styles.formGrid}>
+          <Field label="Full name"><input required style={styles.input} value={form.fullName} onChange={e => setForm({ ...form, fullName: e.target.value })} /></Field>
+          <Field label="Email"><input required style={styles.input} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field>
+          <Field label="Password"><input required type="password" style={styles.input} value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} /></Field>
+          <Field label="Role"><select style={styles.input} value={form.role} onChange={e => setForm({ ...form, role: e.target.value, clientId: e.target.value === 'client' ? form.clientId : '' })}><option value="assistant">Assistant</option><option value="advocate">Advocate</option><option value="admin">Admin</option><option value="client">Client</option></select></Field>
+          {form.role === 'client' && <><Field label="Linked Client"><select required style={styles.input} value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })}><option value="">Select client</option>{clientOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field><div style={styles.formHelper}>Client users can view only the linked client's matters, documents, invoices, and messages. Share credentials manually after creating the account.</div></>}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button style={styles.primaryButton}>Create user</button>
+            <button type="button" style={styles.ghostButton} onClick={() => setCreateUserOpen(false)}>Cancel</button>
+          </div>
+        </form>
+      </Card>
+    )}
   </div>;
 }
 
