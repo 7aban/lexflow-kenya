@@ -3317,6 +3317,12 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
   const [invoiceDetails, setInvoiceDetails] = useState(null);
   const [payments, setPayments] = useState([]);
   const [paymentForm, setPaymentForm] = useState({ amount: '', method: 'Bank Transfer', reference: '', date: new Date().toISOString().slice(0, 10), note: '', proofId: '' });
+  const [createInvoiceOpen, setCreateInvoiceOpen] = useState(false);
+  const [paymentFormOpen, setPaymentFormOpen] = useState(false);
+  const [invoiceFiltersOpen, setInvoiceFiltersOpen] = useState(false);
+  const [invoiceOutputOpen, setInvoiceOutputOpen] = useState(false);
+  const [paymentProofOpen, setPaymentProofOpen] = useState(false);
+  const [agingOpen, setAgingOpen] = useState(false);
   const [voidDraft, setVoidDraft] = useState(null);
   const [firmSettings, setFirmSettings] = useState({ ...defaultFirmSettings, ...(providedFirmSettings || {}) });
   const [invoiceBrandingMode, setInvoiceBrandingMode] = useState(defaultOutputBrandingMode({ ...defaultFirmSettings, ...(providedFirmSettings || {}) }));
@@ -3468,6 +3474,10 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
       setCreating(false);
     }
   }
+  function closeCreateInvoice() {
+    setCreateForm({ matterId: '', manual: false, amount: '', description: '', dueDate: '' });
+    setCreateInvoiceOpen(false);
+  }
   // PRODUCT-15K: counts use DERIVED overdue (stored 'Overdue' OR isInvoiceOverdue) so the summary
   // matches the register and Command Summary after PRODUCT-15F. Unpaid is counted directly as
   // non-Paid to avoid double counting; outstanding = unpaid minus overdue. Stored status untouched.
@@ -3589,6 +3599,7 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
   async function openPayments(invoice) {
     try {
       setSelectedInvoiceId(invoice.id);
+      setPaymentFormOpen(false);
       const data = await listInvoicePayments(invoice.id);
       setPayments(data.payments || []);
       setPaymentForm(form => ({ ...form, amount: invoice.balance ? String(invoice.balance) : '', date: new Date().toISOString().slice(0, 10), proofId: '' }));
@@ -3668,6 +3679,7 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
     const proofAmount = Number(proof.amount || 0);
     const suggested = proofAmount > 0 && proofAmount <= balance ? String(proofAmount) : (balance ? String(balance) : '');
     setPaymentForm({ amount: suggested, method: proof.method || 'Bank Transfer', reference: proof.reference || '', date: new Date().toISOString().slice(0, 10), note: '', proofId: proof.id });
+    setPaymentFormOpen(true);
     notify({ type: 'info', message: 'Review the pre-filled payment details below, then confirm to record.' });
     scrollToSection('invoice-register');
   }
@@ -3878,16 +3890,46 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
   }
   return <>
     <style>{billingMobilePolishCss}</style>
+    <section aria-label="Billing position" style={{ marginBottom: 16, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: 14, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
+        <button type="button" onClick={() => goToInvoiceRegister('all')} style={{ ...styles.ghostButton, justifyContent: 'space-between', padding: '10px 12px' }}>
+          <span>Outstanding</span>
+          <strong style={{ fontSize: 12 }}>{kes(receivableTotals.outstanding)}</strong>
+        </button>
+        <button type="button" onClick={() => goToInvoiceRegister('Overdue')} style={{ ...styles.ghostButton, justifyContent: 'space-between', padding: '10px 12px', borderColor: invoiceSummary.overdue ? '#FCA5A5' : '#E5E7EB' }}>
+          <span>Overdue</span>
+          <Badge tone={invoiceSummary.overdue ? 'red' : 'green'}>{invoiceSummary.overdue}</Badge>
+        </button>
+        <button type="button" onClick={() => goToInvoiceRegister('Paid')} style={{ ...styles.ghostButton, justifyContent: 'space-between', padding: '10px 12px' }}>
+          <span>Collected</span>
+          <strong style={{ fontSize: 12 }}>{kes(receivableTotals.paid)}</strong>
+        </button>
+        <button type="button" onClick={() => goToInvoiceRegister('Outstanding')} style={{ ...styles.ghostButton, justifyContent: 'space-between', padding: '10px 12px' }}>
+          <span>Unpaid</span>
+          <Badge tone={invoiceSummary.unpaid ? 'amber' : 'green'}>{invoiceSummary.unpaid}</Badge>
+        </button>
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+        {canManage && <button type="button" style={styles.primaryButton} onClick={() => setCreateInvoiceOpen(true)}>Create invoice</button>}
+        <button type="button" style={styles.ghostButton} onClick={() => scrollToSection('invoice-register')}>Record payment</button>
+        <button type="button" style={styles.ghostButton} onClick={() => { setPaymentProofOpen(true); scrollToSection('payment-proof-queue'); }}>Upload proof</button>
+        <button type="button" style={styles.ghostButton} onClick={() => setInvoiceOutputOpen(open => !open)}>Output settings</button>
+        <button type="button" style={styles.ghostButton} onClick={exportInvoices} disabled={!registerInvoices.length}>Export / Download</button>
+      </div>
+    </section>
     {canManage && (
       <section aria-label="Create invoice" style={{ marginBottom: 16, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <IconCash size={16} stroke={1.75} style={{ color: '#697386' }} />
-          <span style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>Create invoice</span>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <IconCash size={16} stroke={1.75} style={{ color: '#697386' }} />
+            <span style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>Create invoice</span>
+          </div>
+          <button type="button" aria-expanded={createInvoiceOpen} onClick={() => createInvoiceOpen ? closeCreateInvoice() : setCreateInvoiceOpen(true)} style={{ ...styles.ghostButton, fontSize: 12, padding: '4px 10px' }}>{createInvoiceOpen ? 'Close' : 'Create invoice'}</button>
         </div>
         <p style={{ fontSize: 12, color: '#697386', margin: '6px 0 0' }}>
-          Pick a matter to invoice its unbilled time or fixed fee, or enter an amount manually.
+          {createInvoiceOpen ? 'Pick a matter to invoice its unbilled time or fixed fee, or enter an amount manually.' : 'Open only when you are ready to create a new invoice.'}
         </p>
-        <form onSubmit={createInvoice} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 10 }}>
+        {createInvoiceOpen && <form onSubmit={createInvoice} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 10 }}>
           <div style={{ flex: '2 1 220px', minWidth: 0 }}>
             <Field label="Matter">
               <select style={styles.input} value={createForm.matterId} onChange={e => setCreateForm(f => ({ ...f, matterId: e.target.value }))}>
@@ -3922,8 +3964,9 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
             </div>
           )}
           <button type="submit" style={styles.primaryButton} disabled={creating}>{creating ? 'Creating...' : 'Create invoice'}</button>
-        </form>
-        {selectedMatterBilling && !createForm.manual && (
+          <button type="button" style={styles.ghostButton} onClick={closeCreateInvoice}>Cancel</button>
+        </form>}
+        {createInvoiceOpen && selectedMatterBilling && !createForm.manual && (
           <p style={{ fontSize: 12, color: '#697386', margin: '8px 0 0' }}>
             {selectedMatterBilling.isFixed
               ? `Fixed-fee matter - this will invoice ${kes(selectedMatterBilling.fixedFee)}.`
@@ -4082,12 +4125,19 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
       ) : null}
     </div>
     <div style={{ marginBottom: 16, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <IconCash size={16} stroke={1.75} style={{ color: '#697386' }} />
-        <span style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>Receivables aging</span>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <IconCash size={16} stroke={1.75} style={{ color: '#697386' }} />
+          <span style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>Receivables aging</span>
+        </div>
+        <button type="button" aria-expanded={agingOpen} onClick={() => setAgingOpen(open => !open)} style={{ ...styles.ghostButton, fontSize: 12, padding: '4px 10px' }}>{agingOpen ? 'Hide aging' : 'Show aging'}</button>
       </div>
       {receivablesAging.visibleCount === 0 && receivablesAging.hidden === 0 ? (
         <p style={{ fontSize: 12, color: '#697386', margin: '8px 0 0', fontStyle: 'italic' }}>No unpaid receivables to age.</p>
+      ) : !agingOpen ? (
+        <p style={{ fontSize: 12, color: '#697386', margin: '8px 0 0' }}>
+          {receivablesAging.visibleCount} unpaid invoice{receivablesAging.visibleCount === 1 ? '' : 's'} visible; total outstanding {kes(receivablesAging.grandTotal)}.
+        </p>
       ) : (
         <>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
@@ -4111,15 +4161,26 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
     <InvoicePreviewCard />
     <div id="invoice-register">
       <Card title="Invoice register" hint="Receivables">
-        <div style={{ display: 'grid', gap: 10, marginBottom: 10 }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <Badge tone="blue">{registerInvoices.length} of {invoices.length}</Badge>
+            <span style={{ fontSize: 12, color: '#697386' }}>Register is filtered by {registerFilter === 'all' ? 'all statuses' : registerFilter}.</span>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button type="button" style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 12px' }} aria-expanded={invoiceFiltersOpen} onClick={() => setInvoiceFiltersOpen(open => !open)}>{invoiceFiltersOpen ? 'Hide filters' : 'Show filters'}</button>
+            <button type="button" style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 12px' }} aria-expanded={invoiceOutputOpen} onClick={() => setInvoiceOutputOpen(open => !open)}>{invoiceOutputOpen ? 'Hide output settings' : 'Output settings'}</button>
+            <button type="button" style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 12px' }} onClick={exportInvoices} disabled={!registerInvoices.length} title="Download the filtered invoices as a CSV file">Export CSV</button>
+          </div>
+        </div>
+        {invoiceOutputOpen && <div style={{ display: 'grid', gap: 10, marginBottom: 10 }}>
           <OutputBrandingSelector
             id="invoice-output-branding-mode"
             value={invoiceBrandingMode}
             onChange={mode => { setInvoiceBrandingTouched(true); setInvoiceBrandingMode(mode); }}
             firmSettings={firmSettings}
           />
-        </div>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        </div>}
+        {invoiceFiltersOpen && <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           <label htmlFor="invoice-register-filter" style={{ fontSize: 12, color: '#697386' }}>Filter</label>
           <select id="invoice-register-filter" style={styles.tableSelect} value={registerFilter} onChange={e => setRegisterFilter(e.target.value)}>
             <option value="all">All</option>
@@ -4128,8 +4189,8 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
             <option value="Paid">Paid</option>
           </select>
           <span style={{ fontSize: 12, color: '#697386' }}>{registerInvoices.length} of {invoices.length}</span>
-          <button type="button" style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 12px' }} onClick={exportInvoices} disabled={!registerInvoices.length} title="Download the filtered invoices as a CSV file">Export CSV</button>
-        </div>
+          <button type="button" style={styles.ghostButton} onClick={() => setRegisterFilter('all')}>Reset</button>
+        </div>}
         <div className="lf-invoice-cards">
           <Table
             columns={['Invoice', 'Client', 'Matter', 'Amount', 'Paid', 'Balance', 'Status', 'PDF', 'Actions']}
@@ -4188,6 +4249,13 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
               </div>
               {canRecordPayment && Number(selectedInvoice.balance || 0) > 0 && (
                 <>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+                  <button type="button" style={paymentFormOpen ? styles.ghostButton : styles.primaryButton} aria-expanded={paymentFormOpen} onClick={() => setPaymentFormOpen(open => !open)}>
+                    {paymentFormOpen ? 'Close payment form' : 'Record payment'}
+                  </button>
+                </div>
+                {paymentFormOpen && (
+                <>
                 {paymentForm.proofId && (
                   <div style={{ marginTop: 12, padding: '8px 10px', background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 6, fontSize: 12, color: '#1E3A8A', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                     <span>Recording against payment proof — review the details below, then confirm.</span>
@@ -4201,7 +4269,10 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
                   <Field label="Date"><input required type="date" style={styles.input} value={paymentForm.date} onChange={e => setPaymentForm({ ...paymentForm, date: e.target.value })} /></Field>
                   <Field label="Note"><input style={styles.input} value={paymentForm.note} onChange={e => setPaymentForm({ ...paymentForm, note: e.target.value })} /></Field>
                   <button style={styles.primaryButton}>Record payment</button>
+                  <button type="button" style={styles.ghostButton} onClick={() => setPaymentFormOpen(false)}>Cancel</button>
                 </form>
+                </>
+                )}
                 </>
               )}
             </Sub>
@@ -4218,6 +4289,8 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
       setProofNotes={setProofNotes}
       canReviewProof={canReviewProof}
       canRecordPayment={canRecordPayment}
+      open={paymentProofOpen}
+      setOpen={setPaymentProofOpen}
       onDownload={downloadProof}
       onReview={reviewProof}
       onRecordPayment={recordPaymentFromProof}
@@ -4261,7 +4334,7 @@ function proofStatusTone(status) {
 
 // PRODUCT-15I: staff/admin payment-proof review queue. Review is decision-only (no settlement);
 // "Record payment" routes into the existing manual record-payment flow above.
-function PaymentProofQueue({ proofs, proofFilter, setProofFilter, pendingProofCount, proofNotes, setProofNotes, canReviewProof, canRecordPayment, onDownload, onReview, onRecordPayment }) {
+function PaymentProofQueue({ proofs, proofFilter, setProofFilter, pendingProofCount, proofNotes, setProofNotes, canReviewProof, canRecordPayment, open, setOpen, onDownload, onReview, onRecordPayment }) {
   function proofLabel(proof) {
     return [proof.invoiceNumber || (proof.invoiceId ? proof.invoiceId : 'General payment'), proof.reference].filter(Boolean).join(' / ');
   }
@@ -4326,7 +4399,17 @@ function PaymentProofQueue({ proofs, proofFilter, setProofFilter, pendingProofCo
   });
   return (
     <div id="payment-proof-queue" style={{ marginTop: 16 }}>
-      <Card title="Payment proof review" hint={canReviewProof ? 'Review client-submitted proofs, then record payment manually' : 'Client-submitted payment proofs (view only)'}>
+      <Card title="Payment proof review" hint={canReviewProof ? 'Review client-submitted proofs, then record payment manually' : 'Client-submitted payment proofs (view only)'} action={
+        <button type="button" style={styles.ghostButton} aria-expanded={open} onClick={() => setOpen(openValue => !openValue)}>
+          {open ? 'Hide proofs' : `Show proofs${pendingProofCount ? ` (${pendingProofCount})` : ''}`}
+        </button>
+      }>
+        {!open ? (
+          <p style={{ margin: 0, color: theme.muted, fontSize: 13 }}>
+            {pendingProofCount ? `${pendingProofCount} payment proof${pendingProofCount === 1 ? '' : 's'} pending review.` : 'No pending payment proofs.'}
+          </p>
+        ) : (
+        <>
         <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           <label htmlFor="proof-filter" style={{ fontSize: 12, color: '#697386' }}>Status</label>
           <select id="proof-filter" style={styles.tableSelect} value={proofFilter} onChange={e => setProofFilter(e.target.value)}>
@@ -4363,6 +4446,8 @@ function PaymentProofQueue({ proofs, proofFilter, setProofFilter, pendingProofCo
           }) : <MobileEmpty>No payment proofs in this view.</MobileEmpty>}
         </div>
         <div className="lf-payment-proof-cards ux2-desktop-table"><Table columns={['Invoice', 'Client / Matter', 'Method / Ref', 'Amount', 'Uploaded', 'Status', 'File', 'Review note', 'Actions']} rows={rows} empty="No payment proofs in this view." /></div>
+        </>
+        )}
       </Card>
     </div>
   );
