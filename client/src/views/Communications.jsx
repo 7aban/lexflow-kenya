@@ -248,6 +248,9 @@ export default function Communications({ clients = [], matters = [], focus, noti
   const [newThread, setNewThread] = useState({ clientId: '', matterId: '', subject: '' });
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [showNewThread, setShowNewThread] = useState(false);
+  const [showReply, setShowReply] = useState(false);
+  const [showActivity, setShowActivity] = useState(false);
 
   const selected = conversations.find(item => item.id === selectedId);
   const filtered = useMemo(() => {
@@ -278,6 +281,7 @@ export default function Communications({ clients = [], matters = [], focus, noti
         matterId: focus.matterId || current.matterId,
         subject: current.subject || (matter ? `Follow up: ${matter.title}` : 'Client follow-up'),
       }));
+      setShowNewThread(true);
     }
   }, [focus?.matterId, focus?.clientId, focus?.ts, conversations]);
 
@@ -287,6 +291,8 @@ export default function Communications({ clients = [], matters = [], focus, noti
       setMessages([]);
       setActivity([]);
     }
+    setShowReply(false);
+    setShowActivity(false);
   }, [selected?.id]);
 
   async function loadConversations() {
@@ -352,10 +358,16 @@ export default function Communications({ clients = [], matters = [], focus, noti
       setNewThread({ clientId: '', matterId: '', subject: '' });
       setConversations(current => [created, ...current]);
       setSelectedId(created.id);
+      setShowNewThread(false);
       notify?.({ type: 'success', message: 'Conversation opened.' });
     } catch (err) {
       notify?.({ type: 'danger', message: err.message });
     }
+  }
+
+  function closeNewThread() {
+    setNewThread({ clientId: '', matterId: '', subject: '' });
+    setShowNewThread(false);
   }
 
   async function sendReply(event) {
@@ -370,6 +382,7 @@ export default function Communications({ clients = [], matters = [], focus, noti
       const saved = await sendConversationMessage(selected.id, { body: reply.body, attachments });
       setMessages(current => [...current, saved]);
       setReply({ body: '', file: null });
+      setShowReply(false);
       await loadConversations();
       notify?.({ type: 'success', message: 'Reply sent.' });
     } catch (err) {
@@ -390,44 +403,49 @@ export default function Communications({ clients = [], matters = [], focus, noti
         <div style={commStyles.heroFigure}>{conversations.length}</div>
       </section>
 
-      <div className="lf-split-grid" style={styles.splitGrid}>
+      <div className="lf-split-grid" style={{ ...styles.splitGrid, gridTemplateColumns: 'minmax(280px, .9fr) minmax(360px, 1.25fr)', alignItems: 'start' }}>
         <div style={styles.pageStack}>
-          <Card title="Start conversation" hint="Open a general or matter-specific thread">
-            <form onSubmit={startThread} style={styles.formGrid}>
-              <Field label="Client">
-                <select style={styles.input} value={newThread.clientId} onChange={event => setNewThread({ ...newThread, clientId: event.target.value, matterId: '' })}>
-                  <option value="">Select client</option>
-                  {clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
-                </select>
-              </Field>
-              <Field label="Matter">
-                <select style={styles.input} value={newThread.matterId} onChange={event => {
-                  const matter = matters.find(item => item.id === event.target.value);
-                  setNewThread({ ...newThread, matterId: event.target.value, clientId: matter?.clientId || newThread.clientId });
-                }}>
-                  <option value="">General thread</option>
-                  {matterOptions.map(matter => <option key={matter.id} value={matter.id}>{matter.reference || matter.id} - {matter.title}</option>)}
-                </select>
-              </Field>
-              <Field label="Subject">
-                <input style={styles.input} value={newThread.subject} onChange={event => setNewThread({ ...newThread, subject: event.target.value })} placeholder="Document review, hearing update..." />
-              </Field>
-              <button style={commStyles.primaryButton}>Open thread</button>
-            </form>
-          </Card>
-
           <Card title="Inbox" hint={`${filtered.length} conversation(s)`}>
-            <Field label="Search">
-              <input style={styles.input} value={search} onChange={event => setSearch(event.target.value)} placeholder="Client, matter, reference..." />
-            </Field>
-            <Field label="Status">
-              <select style={styles.input} value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
-                <option value="all">All statuses</option>
-                <option value="open">Open</option>
-                <option value="pending">Pending</option>
-                <option value="resolved">Resolved</option>
-              </select>
-            </Field>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) minmax(130px, 160px)', gap: 8, flex: '1 1 280px' }}>
+                <input aria-label="Search conversations" style={styles.input} value={search} onChange={event => setSearch(event.target.value)} placeholder="Client, matter, reference..." />
+                <select aria-label="Filter by status" style={styles.input} value={statusFilter} onChange={event => setStatusFilter(event.target.value)}>
+                  <option value="all">All statuses</option>
+                  <option value="open">Open</option>
+                  <option value="pending">Pending</option>
+                  <option value="resolved">Resolved</option>
+                </select>
+              </div>
+              <button type="button" style={commStyles.primaryButton} onClick={() => setShowNewThread(true)}>Start conversation</button>
+            </div>
+            {showNewThread && (
+              <div style={{ border: `1px solid ${commPalette.border}`, borderRadius: 8, background: commPalette.warm, padding: 12, marginBottom: 12 }}>
+                <form onSubmit={startThread} style={styles.formGrid}>
+                  <Field label="Client">
+                    <select style={styles.input} value={newThread.clientId} onChange={event => setNewThread({ ...newThread, clientId: event.target.value, matterId: '' })}>
+                      <option value="">Select client</option>
+                      {clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Matter">
+                    <select style={styles.input} value={newThread.matterId} onChange={event => {
+                      const matter = matters.find(item => item.id === event.target.value);
+                      setNewThread({ ...newThread, matterId: event.target.value, clientId: matter?.clientId || newThread.clientId });
+                    }}>
+                      <option value="">General thread</option>
+                      {matterOptions.map(matter => <option key={matter.id} value={matter.id}>{matter.reference || matter.id} - {matter.title}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Subject">
+                    <input style={styles.input} value={newThread.subject} onChange={event => setNewThread({ ...newThread, subject: event.target.value })} placeholder="Document review, hearing update..." />
+                  </Field>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <button style={commStyles.primaryButton}>Open thread</button>
+                    <button type="button" style={commStyles.tinyButton} onClick={closeNewThread}>Cancel</button>
+                  </div>
+                </form>
+              </div>
+            )}
             <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
               {filtered.length ? filtered.map(item => (
                 <button key={item.id} type="button" onClick={() => setSelectedId(item.id)} style={{ ...styles.matterButton, ...commStyles.threadButton, ...(item.isUnread ? commStyles.threadUnread : {}), ...(selectedId === item.id ? commStyles.threadActive : {}) }}>
@@ -457,6 +475,8 @@ export default function Communications({ clients = [], matters = [], focus, noti
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                     <button type="button" style={commStyles.tinyButton} onClick={markSelectedRead}>Mark read</button>
+                    <button type="button" style={commStyles.tinyButton} onClick={() => setShowReply(current => !current)}>{showReply ? 'Close reply' : 'Reply'}</button>
+                    <button type="button" style={commStyles.tinyButton} onClick={() => setShowActivity(current => !current)}>{showActivity ? 'Hide activity' : 'Thread activity'}</button>
                     {['open', 'pending', 'resolved'].map(status => (
                       <button key={status} type="button" style={{ ...commStyles.tinyButton, ...(selected.status === status ? commStyles.statusActive : {}) }} onClick={() => changeSelectedStatus(status)}>
                         {status}
@@ -487,35 +507,46 @@ export default function Communications({ clients = [], matters = [], focus, noti
                   }) : <CommunicationsEmpty title="No messages yet" text="Send the first note in this thread." />}
                 </div>
 
-                <form onSubmit={sendReply} style={{ display: 'grid', gap: 10, borderTop: `1px solid ${theme.line}`, paddingTop: 12 }}>
-                  <Field label="Message">
-                    <textarea style={{ ...styles.input, minHeight: 96, resize: 'vertical' }} value={reply.body} onChange={event => setReply({ ...reply, body: event.target.value })} placeholder="Write a clear client-friendly message..." />
-                  </Field>
-                  <Field label="Attachment">
-                    <input type="file" style={styles.input} onChange={event => setReply({ ...reply, file: event.target.files?.[0] || null })} />
-                  </Field>
-                  <button style={commStyles.primaryButton}>Send message</button>
-                </form>
+                {showReply ? (
+                  <form onSubmit={sendReply} style={{ display: 'grid', gap: 10, borderTop: `1px solid ${theme.line}`, paddingTop: 12 }}>
+                    <Field label="Message">
+                      <textarea style={{ ...styles.input, minHeight: 96, resize: 'vertical' }} value={reply.body} onChange={event => setReply({ ...reply, body: event.target.value })} placeholder="Write a clear client-friendly message..." />
+                    </Field>
+                    <Field label="Attachment">
+                      <input type="file" style={styles.input} onChange={event => setReply({ ...reply, file: event.target.files?.[0] || null })} />
+                    </Field>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <button style={commStyles.primaryButton}>Send message</button>
+                      <button type="button" style={commStyles.tinyButton} onClick={() => { setReply({ body: '', file: null }); setShowReply(false); }}>Cancel</button>
+                    </div>
+                  </form>
+                ) : (
+                  <div style={{ borderTop: `1px solid ${theme.line}`, paddingTop: 12 }}>
+                    <button type="button" style={commStyles.primaryButton} onClick={() => setShowReply(true)}>Reply</button>
+                  </div>
+                )}
               </div>
             )}
           </Card>
 
-          <Card title="Client activity" hint="Recent portal activity for this client">
-            <div className="lf-communications-cards">
-              {activity.length ? (
-                <Table
-                  columns={['When', 'Action', 'Matter', 'Summary']}
-                  rows={activity.map(item => [
-                    previewTime(item.createdAt),
-                    item.action || '-',
-                    item.matterTitle || item.reference || '-',
-                    item.summary || '-',
-                  ])}
-                  empty="No activity yet."
-                />
-              ) : <CommunicationsEmpty title="No activity yet." text="Once records exist, they will appear here." />}
-            </div>
-          </Card>
+          {selected && showActivity && (
+            <Card title="Client activity" hint="Recent portal activity for this client">
+              <div className="lf-communications-cards">
+                {activity.length ? (
+                  <Table
+                    columns={['When', 'Action', 'Matter', 'Summary']}
+                    rows={activity.map(item => [
+                      previewTime(item.createdAt),
+                      item.action || '-',
+                      item.matterTitle || item.reference || '-',
+                      item.summary || '-',
+                    ])}
+                    empty="No activity yet."
+                  />
+                ) : <CommunicationsEmpty title="No activity yet." text="Once records exist, they will appear here." />}
+              </div>
+            </Card>
+          )}
         </div>
       </div>
     </div>
