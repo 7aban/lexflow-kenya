@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { confirmLegalDeadlineSuggestion, createDeadline, createLegalDeadlineRule, createLegalDeadlineSuggestion, deleteDeadline, deleteLegalDeadlineRule, getComplianceGuidance, getDeadlines, getLegalDeadlineRules, getLegalDeadlineSuggestions, previewLegalDeadlineRule, reviewLegalDeadlineRule, updateDeadline, updateLegalDeadlineRule, updateLegalDeadlineSuggestion } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
-import { Badge, Card, ConfirmModal, Empty, Field, MeetingLink, safeHttpUrl, Skeleton, Stat, Table } from '../components/ui.jsx';
+import { Badge, Card, ConfirmModal, Empty, Field, MeetingLink, safeHttpUrl, Skeleton, Table } from '../components/ui.jsx';
 
 const blankForm = { title: '', type: 'statutory', dueDate: '', owner: '', matterId: '', clientId: '', notes: '' };
 // KENYA-32B: legal deadline rule library form (advocate-verified planning data).
@@ -87,10 +87,12 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
   const [deadlines, setDeadlines] = useState([]);
   const [guidance, setGuidance] = useState([]);
   const [guidanceOpen, setGuidanceOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState({ type: '', status: '' });
   const [activeTab, setActiveTab] = useState('overdue');
   const [visibleCount, setVisibleCount] = useState(LIST_BATCH_SIZE);
   const [formOpen, setFormOpen] = useState(false);
+  const [formKind, setFormKind] = useState('deadline');
   const [form, setForm] = useState(blankForm);
   const [confirm, setConfirm] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -99,6 +101,9 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
   const [rules, setRules] = useState([]);
   const [ruleModuleEnabled, setRuleModuleEnabled] = useState(null); // null=unknown, true, false
   const [rulesLoading, setRulesLoading] = useState(false);
+  const [intelligenceOpen, setIntelligenceOpen] = useState(false);
+  const [ruleFormOpen, setRuleFormOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [ruleForm, setRuleForm] = useState(blankRuleForm);
   const [editingRuleId, setEditingRuleId] = useState(null);
   const [savingRule, setSavingRule] = useState(false);
@@ -149,6 +154,10 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
 
   const summary = useMemo(() => {
     const open = deadlines.filter(row => row.status !== 'Done');
+    const nextCourt = open
+      .filter(row => row.type === 'Court Date' && row.dueDate && row.dueDate >= new Date().toISOString().slice(0, 10))
+      .slice()
+      .sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)))[0];
     return {
       overdue: open.filter(row => dayDiff(row.dueDate) < 0).length,
       week: open.filter(row => {
@@ -160,6 +169,7 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
         return days !== null && days >= 0 && days <= 30;
       }).length,
       open: open.length,
+      nextCourt,
     };
   }, [deadlines]);
 
@@ -241,7 +251,7 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
       setRules(list);
       setRuleModuleEnabled(true);
     } catch (err) {
-      if (err.message === 'feature_disabled') {
+      if (err.message === 'feature_disabled' || /advanced compliance|not enabled|access denied/i.test(err.message)) {
         setRuleModuleEnabled(false);
         setRules([]);
       } else {
@@ -251,10 +261,11 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
       setRulesLoading(false);
     }
   }
-  useEffect(() => { loadRules(); }, []);
 
   function editRule(rule) {
     setEditingRuleId(rule.id);
+    setIntelligenceOpen(true);
+    setRuleFormOpen(true);
     setRuleForm({
       ruleType: rule.ruleType || 'limitation',
       jurisdiction: rule.jurisdiction || 'Kenya',
@@ -278,6 +289,21 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
   function cancelRuleEdit() {
     setEditingRuleId(null);
     setRuleForm(blankRuleForm);
+    setRuleFormOpen(false);
+  }
+
+  function openDeadlineForm(kind) {
+    const type = kind === 'court' ? 'Court Date' : 'statutory';
+    setFormKind(kind);
+    setForm({ ...blankForm, type });
+    setFormOpen(true);
+  }
+
+  function openLegalHelp(options = {}) {
+    setIntelligenceOpen(true);
+    if (options.preview) setPreviewOpen(true);
+    if (options.rules) setRuleFormOpen(true);
+    if (ruleModuleEnabled === null && !rulesLoading) loadRules();
   }
 
   async function submitRule(event) {
@@ -487,11 +513,32 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
 
   return (
     <div style={styles.pageStack}>
-      <div style={styles.statsGrid}>
-        <Stat label="Needs action" value={summary.overdue} tone="red" onClick={() => setActiveTab('overdue')} ariaLabel="Show overdue items" />
-        <Stat label="Due next 7 days" value={summary.week} tone="gold" onClick={() => setActiveTab('upcoming')} ariaLabel="Show upcoming items" />
-        <Stat label="Due next 30 days" value={summary.month} tone="gold" onClick={() => setActiveTab('upcoming')} ariaLabel="Show upcoming items" />
-        <Stat label="Open items" value={summary.open} tone="navy" onClick={() => setActiveTab('all')} ariaLabel="Show all items" />
+      <div style={{ border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 10, padding: 14, background: 'var(--lf-card, #fff)', color: 'var(--lf-card-text, #101827)', boxShadow: theme.shadow, display: 'grid', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
+          <button type="button" onClick={() => setActiveTab('overdue')} style={{ ...styles.ghostButton, justifyContent: 'space-between', padding: '10px 12px', borderColor: summary.overdue ? theme.redBg : theme.line }}>
+            <span>Overdue</span>
+            <Badge tone={summary.overdue ? 'red' : 'green'}>{summary.overdue}</Badge>
+          </button>
+          <button type="button" onClick={() => setActiveTab('upcoming')} style={{ ...styles.ghostButton, justifyContent: 'space-between', padding: '10px 12px' }}>
+            <span>Due soon</span>
+            <Badge tone={summary.week ? 'gold' : 'green'}>{summary.week}</Badge>
+          </button>
+          <button type="button" onClick={() => { setActiveTab('court'); scrollToTimeline(); }} style={{ ...styles.ghostButton, justifyContent: 'space-between', padding: '10px 12px' }}>
+            <span>Next court</span>
+            <strong style={{ fontSize: 12 }}>{summary.nextCourt?.dueDate || 'None'}</strong>
+          </button>
+          <button type="button" onClick={() => setActiveTab('all')} style={{ ...styles.ghostButton, justifyContent: 'space-between', padding: '10px 12px' }}>
+            <span>Active items</span>
+            <Badge tone="blue">{summary.open}</Badge>
+          </button>
+        </div>
+        {canManage && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button type="button" style={styles.primaryButton} onClick={() => openDeadlineForm('court')}>Add court date</button>
+            <button type="button" style={styles.ghostButton} onClick={() => openDeadlineForm('deadline')}>Add deadline</button>
+            {ruleModuleEnabled !== false && <button type="button" style={styles.ghostButton} onClick={() => openLegalHelp({ preview: true })}>Suggest legal deadline</button>}
+          </div>
+        )}
       </div>
 
       <div style={{ border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 10, padding: 16, background: 'var(--lf-card, #fff)', color: 'var(--lf-card-text, #101827)', boxShadow: theme.shadow, display: 'grid', gap: 12 }}>
@@ -571,8 +618,8 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
       </Card>
 
       <div className="lf-split-grid" style={styles.splitGrid}>
-        <Card title="Add court date / deadline" hint="Capture client promises, internal bring-ups, tax and statutory filing dates." action={
-          canManage ? <button type="button" style={formOpen ? styles.ghostButton : styles.primaryButton} onClick={() => setFormOpen(open => !open)}>{formOpen ? 'Cancel' : '+ Add court date / deadline'}</button> : null
+        <Card title={formKind === 'court' ? 'Add court date' : 'Add deadline'} hint="Capture client promises, court appearances, internal bring-ups, tax and statutory filing dates." action={
+          canManage ? <button type="button" style={formOpen ? styles.ghostButton : styles.primaryButton} onClick={() => formOpen ? setFormOpen(false) : openDeadlineForm('deadline')}>{formOpen ? 'Close' : 'Add deadline'}</button> : null
         }>
           {formOpen ? (
             <form onSubmit={submit} style={styles.formGrid}>
@@ -581,6 +628,7 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
               </Field>
               <Field label="Type">
                 <select title="Choose statutory or tax for filing obligations; client for client response dates; internal for firm bring-ups." style={styles.input} value={form.type} onChange={event => setForm({ ...form, type: event.target.value })}>
+                  <option value="Court Date">Court Date</option>
                   <option value="statutory">Statutory</option>
                   <option value="tax">Tax</option>
                   <option value="regulatory">Regulatory</option>
@@ -620,8 +668,10 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
           {!canManage && <p>Assistants can view the calendar of obligations, but only advocates and admins can create custom deadlines.</p>}
         </Card>
 
-        <Card title="List filters" hint="Optional filters for statutory, court or internal obligations.">
-          <div style={styles.formGrid}>
+        <Card title="Filters" hint="Optional filters for statutory, court or internal obligations." action={
+          <button type="button" style={styles.ghostButton} aria-expanded={filtersOpen} onClick={() => setFiltersOpen(open => !open)}>{filtersOpen ? 'Hide filters' : 'Show filters'}</button>
+        }>
+          {filtersOpen ? <div style={styles.formGrid}>
             <Field label="Type">
               <select style={styles.input} value={filters.type || 'all'} onChange={event => setFilters(current => ({ ...current, type: event.target.value === 'all' ? '' : event.target.value }))}>
                 {typeOptions.map(option => <option key={option} value={option}>{option === 'all' ? 'All' : prettyType(option)}</option>)}
@@ -635,7 +685,11 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
               </select>
             </Field>
             <button type="button" style={styles.ghostButton} onClick={() => setFilters({ type: '', status: '' })}>Reset</button>
-          </div>
+          </div> : (
+            <p style={{ margin: 0, color: theme.muted, fontSize: 13 }}>
+              {filters.type || filters.status ? `Filtered by ${filters.type || 'all types'}${filters.status ? ` · ${filters.status}` : ''}` : 'Showing all court dates and deadlines.'}
+            </p>
+          )}
         </Card>
       </div>
 
@@ -697,11 +751,37 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
             Advanced Compliance is not enabled for this firm. An administrator can enable it in Firm Settings to use the legal deadline rule library and date preview.
           </p>
         </Card>
-      ) : ruleModuleEnabled === true ? (
-        <div className="lf-split-grid" style={styles.splitGrid}>
+      ) : (
+        <>
+          <Card title="Legal deadline help" hint="Preview suggested dates and manage firm rules when needed." action={
+            <button type="button" style={styles.ghostButton} aria-expanded={intelligenceOpen} onClick={() => intelligenceOpen ? setIntelligenceOpen(false) : openLegalHelp()}>
+              {intelligenceOpen ? 'Hide help' : 'Show help'}
+            </button>
+          }>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <Badge tone="blue">{rules.length} rule{rules.length === 1 ? '' : 's'}</Badge>
+              <Badge tone={suggestions.some(suggestion => suggestion.status === 'draft') ? 'gold' : 'green'}>
+                {suggestions.filter(suggestion => suggestion.status === 'draft').length} draft suggestion{suggestions.filter(suggestion => suggestion.status === 'draft').length === 1 ? '' : 's'}
+              </Badge>
+              <button type="button" style={styles.ghostButton} onClick={() => openLegalHelp({ preview: true })}>Suggest legal deadline</button>
+              {canManage && <button type="button" style={styles.ghostButton} onClick={() => ruleFormOpen ? setRuleFormOpen(false) : openLegalHelp({ rules: true })}>{ruleFormOpen ? 'Close rule form' : 'Manage rules'}</button>}
+            </div>
+          </Card>
+          {intelligenceOpen && ruleModuleEnabled === null && (
+            <Card title="Legal deadline help" hint="Checking whether Advanced Compliance is available.">
+              <Skeleton rows={2} />
+            </Card>
+          )}
+          {intelligenceOpen && ruleModuleEnabled === true && <div className="lf-split-grid" style={styles.splitGrid}>
           {canManage && (
             <Card title="Legal Deadline Rules" hint="Firm-maintained planning aids. Confirm legal basis before use.">
-              <form onSubmit={submitRule} style={styles.formGrid}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: ruleFormOpen ? 12 : 0 }}>
+                <span style={{ color: theme.muted, fontSize: 13 }}>{rules.length ? `${rules.length} active rule${rules.length === 1 ? '' : 's'}` : 'No active rules yet.'}</span>
+                <button type="button" style={styles.ghostButton} onClick={() => { setRuleFormOpen(open => !open); if (ruleFormOpen) cancelRuleEdit(); }}>
+                  {ruleFormOpen ? 'Close form' : 'Add rule'}
+                </button>
+              </div>
+              {ruleFormOpen && <form onSubmit={submitRule} style={styles.formGrid}>
                 <Field label="Rule type">
                   <select style={styles.input} value={ruleForm.ruleType} onChange={e => setRuleForm({ ...ruleForm, ruleType: e.target.value })}>
                     {RULE_TYPE_OPTIONS.map(opt => <option key={opt} value={opt}>{prettyType(opt)}</option>)}
@@ -760,8 +840,8 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
                   <button type="submit" style={styles.primaryButton} disabled={savingRule}>{savingRule ? 'Saving...' : editingRuleId ? 'Update rule' : 'Add rule'}</button>
                   {editingRuleId && <button type="button" style={styles.ghostButton} onClick={cancelRuleEdit}>Cancel edit</button>}
                 </div>
-              </form>
-              <p style={{ marginTop: 12, color: theme.muted, fontSize: 12 }}>Rules are firm-maintained planning aids. Confirm legal basis before use.</p>
+              </form>}
+              {ruleFormOpen && <p style={{ marginTop: 12, color: theme.muted, fontSize: 12 }}>Rules are firm-maintained planning aids. Confirm legal basis before use.</p>}
               <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
                 {rulesLoading ? <Skeleton rows={2} /> : rules.length ? rules.map(rule => (
                   <div key={rule.id} style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: 12, display: 'grid', gap: 6 }}>
@@ -813,7 +893,11 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
           )}
 
           <Card title="Deadline Intelligence" hint="Suggest a date from a rule and trigger date. Creates no deadline.">
-            <form onSubmit={runPreview} style={styles.formGrid}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: previewOpen ? 12 : 0 }}>
+              <span style={{ color: theme.muted, fontSize: 13 }}>Create a draft suggestion only after previewing the rule result.</span>
+              <button type="button" style={styles.ghostButton} onClick={() => setPreviewOpen(open => !open)}>{previewOpen ? 'Close' : 'Suggest legal deadline'}</button>
+            </div>
+            {previewOpen && <form onSubmit={runPreview} style={styles.formGrid}>
               <Field label="Rule">
                 <select style={styles.input} value={previewRuleId} onChange={e => { setPreviewRuleId(e.target.value); setPreviewResult(null); }}>
                   <option value="">Choose a rule</option>
@@ -830,7 +914,7 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
                 </select>
               </Field>
               <button type="submit" style={styles.primaryButton} disabled={previewing || !previewRuleId || !previewTrigger}>{previewing ? 'Computing...' : 'Preview suggested date'}</button>
-            </form>
+            </form>}
             {previewResult && (
               <div style={{ marginTop: 12, border: `1px solid ${theme.line}`, borderRadius: 8, padding: 14, display: 'grid', gap: 8 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -896,8 +980,9 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
             )}
             {!canManage && <p style={{ margin: '8px 0 0', fontSize: 12, color: theme.muted }}>Assistants can save and cancel draft suggestions; only advocates and admins can confirm a deadline.</p>}
           </Card>
-        </div>
-      ) : null}
+          </div>}
+        </>
+      )}
 
       <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
     </div>
