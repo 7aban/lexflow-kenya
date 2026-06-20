@@ -2589,6 +2589,12 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
   // PRODUCT-16M: client-side Matter list filters (UI convenience only; no fetch/API/selection/semantics change).
   const [matterSearch, setMatterSearch] = useState('');
   const [matterStage, setMatterStage] = useState('open');
+  const [matterListOpen, setMatterListOpen] = useState(false);
+  const [matterTaskFormOpen, setMatterTaskFormOpen] = useState(false);
+  const [matterTimeFormOpen, setMatterTimeFormOpen] = useState(false);
+  const [courtDateFormOpen, setCourtDateFormOpen] = useState(false);
+  const [invoiceFormOpen, setInvoiceFormOpen] = useState(false);
+  const [noteFormOpen, setNoteFormOpen] = useState(false);
   const emptyMatterForm = { clientId: '', title: '', practiceArea: '', stage: 'Intake / Initial Consultation', assignedTo: '', paralegal: '', description: '', court: '', judge: '', caseNo: '', opposingCounsel: '', priority: 'Medium', solDate: '', billingType: 'hourly', billingRate: '', fixedFee: '', retainerBalance: 0, remindersEnabled: 'firm_default', courtRemindersEnabled: 'firm_default', invoiceRemindersEnabled: 'firm_default' };
   const [form, setForm] = useState(emptyMatterForm);
   // LOCAL-PILOT-FIX-14: hours kept as a string while typing so decimals like 1.25
@@ -2785,15 +2791,16 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
     }
   }
   async function createMatter(event) { event.preventDefault(); try { if (editingMatter && detail) { await api(`/matters/${detail.id}`, { method: 'PATCH', body: form }); setEditingMatter(false); notify({ type: 'success', message: 'Matter updated.' }); await loadDetail(detail.id); } else { await api('/matters', { method: 'POST', body: form }); notify({ type: 'success', message: 'Matter created.' }); } setForm(emptyMatterForm); setMatterFormOpen(false); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
-  async function logTime(event) { event.preventDefault(); if (!detail) return; const hours = Number(time.hours); if (!Number.isFinite(hours) || hours <= 0) { notify({ type: 'warning', message: 'Enter the hours worked as a number, e.g. 0.5 or 1.25.' }); return; } try { const body = { ...time, hours, billable: Boolean(time.billable), matterId: detail.id }; if (!canViewBilling) delete body.rate; await api('/time-entries', { method: 'POST', body }); setTime({ hours: '1', description: '', rate: canViewBilling ? detail.billingRate || 15000 : 0, billable: true }); notify({ type: 'success', message: 'Time logged.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
-  async function addNote(event) { event.preventDefault(); if (!detail || !note.trim()) return; try { await api(`/matters/${detail.id}/notes`, { method: 'POST', body: { content: note } }); setNote(''); notify({ type: 'success', message: 'Case note saved.' }); await loadDetail(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
-  async function createEvent(event) { event.preventDefault(); if (!detail) return; try { await api('/appearances', { method: 'POST', body: { ...eventForm, matterId: detail.id } }); setEventForm(emptyEventForm); notify({ type: 'success', message: 'Court appearance scheduled.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
+  async function logTime(event) { event.preventDefault(); if (!detail) return; const hours = Number(time.hours); if (!Number.isFinite(hours) || hours <= 0) { notify({ type: 'warning', message: 'Enter the hours worked as a number, e.g. 0.5 or 1.25.' }); return; } try { const body = { ...time, hours, billable: Boolean(time.billable), matterId: detail.id }; if (!canViewBilling) delete body.rate; await api('/time-entries', { method: 'POST', body }); setTime({ hours: '1', description: '', rate: canViewBilling ? detail.billingRate || 15000 : 0, billable: true }); setMatterTimeFormOpen(false); notify({ type: 'success', message: 'Time logged.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
+  async function addNote(event) { event.preventDefault(); if (!detail || !note.trim()) return; try { await api(`/matters/${detail.id}/notes`, { method: 'POST', body: { content: note } }); setNote(''); setNoteFormOpen(false); notify({ type: 'success', message: 'Case note saved.' }); await loadDetail(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
+  async function createEvent(event) { event.preventDefault(); if (!detail) return; try { await api('/appearances', { method: 'POST', body: { ...eventForm, matterId: detail.id } }); setEventForm(emptyEventForm); setCourtDateFormOpen(false); notify({ type: 'success', message: 'Court appearance scheduled.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
 
-  async function generateInvoice() { if (!detail) return; try { const body = { matterId: detail.id }; if (invoiceDueDateOverride) body.dueDate = invoiceDueDateOverride; await api('/invoices/generate', { method: 'POST', body }); setInvoiceDueDateOverride(''); notify({ type: 'success', message: 'Invoice generated.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message === NO_BILLABLE_MESSAGE ? 'This matter has no unbilled billable time and no fixed fee. Log billable time first, or create a manual invoice from the Invoices page.' : err.message }); } }
+  async function generateInvoice() { if (!detail) return; try { const body = { matterId: detail.id }; if (invoiceDueDateOverride) body.dueDate = invoiceDueDateOverride; await api('/invoices/generate', { method: 'POST', body }); setInvoiceDueDateOverride(''); setInvoiceFormOpen(false); notify({ type: 'success', message: 'Invoice generated.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message === NO_BILLABLE_MESSAGE ? 'This matter has no unbilled billable time and no fixed fee. Log billable time first, or create a manual invoice from the Invoices page.' : err.message }); } }
   function startMatterEdit() { if (!detail) return; setEditingMatter(true); setMatterFormOpen(true); setForm({ ...emptyMatterForm, ...detail }); }
   function closeMatterForm() { setEditingMatter(false); setForm(emptyMatterForm); setMatterFormOpen(false); }
   function openMatterDetail(id) {
     setSelectedId(id);
+    setMatterListOpen(false);
     onMatterSelected?.(id);
     if (window.matchMedia?.('(max-width: 760px)').matches) {
       setTimeout(() => matterDetailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
@@ -2861,7 +2868,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
       setApplyingTemplate(false);
     }
   }
-  async function createMatterTask(event) { event.preventDefault(); if (!detail) return; try { await api('/tasks', { method: 'POST', body: { ...matterTaskForm, matterId: detail.id } }); setMatterTaskForm(emptyMatterTaskForm); notify({ type: 'success', message: 'Task added to this matter.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
+  async function createMatterTask(event) { event.preventDefault(); if (!detail) return; try { await api('/tasks', { method: 'POST', body: { ...matterTaskForm, matterId: detail.id } }); setMatterTaskForm(emptyMatterTaskForm); setMatterTaskFormOpen(false); notify({ type: 'success', message: 'Task added to this matter.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function saveTask(task, values) { try { await api(`/tasks/${task.id}`, { method: 'PATCH', body: values }); setEditingTask(null); notify({ type: 'success', message: 'Task updated.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteTaskRecord(task) { try { await api(`/tasks/${task.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Task deleted.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteDocumentRecord(doc) { try { await api(`/documents/${doc.id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Document deleted.' }); await loadDetail(detail.id); } catch (err) { notify({ type: 'danger', message: err.message }); } }
@@ -2888,6 +2895,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
     return true;
   });
   const matterEmptyText = data.matters.length === 0 ? 'No matters yet.' : 'No matters match these filters.';
+  const matterListVisible = !detail || matterListOpen;
   // PRODUCT-17B: export exactly the filtered matter rows the user is viewing (no fetch, no hidden data).
   function exportMatters() {
     if (!filteredMatters.length) return;
@@ -2895,8 +2903,8 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
   }
 
   return (
-    <div className="lf-matter-grid" style={styles.matterGrid}>
-      <Card title="Matter list" hint={`Showing ${filteredMatters.length} of ${data.matters.length} matters`}>
+    <div className="lf-matter-grid" style={{ ...styles.matterGrid, gridTemplateColumns: matterListVisible ? styles.matterGrid.gridTemplateColumns : 'minmax(0, 1fr)' }}>
+      {matterListVisible && <Card title="Matter list" hint={`Showing ${filteredMatters.length} of ${data.matters.length} matters`}>
         {data.matters.length ? (
           <>
             <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -2919,8 +2927,15 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
             )) : <Empty title="No matches" text={matterEmptyText} />}
           </>
         ) : <Empty title="No matters" text={matterEmptyText} />}
-      </Card>
+      </Card>}
       <div style={styles.pageStack}>
+        {detail && data.matters.length ? (
+          <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+            <button type="button" style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 12px' }} onClick={() => setMatterListOpen(open => !open)}>
+              {matterListOpen ? 'Hide matter list' : 'Show matter list'}
+            </button>
+          </div>
+        ) : null}
         {canManage && !data.matters.length ? <button type="button" style={styles.primaryButton} onClick={() => { setEditingMatter(false); setForm(emptyMatterForm); setMatterFormOpen(true); }}>+ New matter</button> : null}
         {canManage && matterFormOpen && (
           <Card title={editingMatter ? 'Edit matter' : 'Open a new matter'} hint={editingMatter ? 'Update matter profile' : 'Matter setup'}>
@@ -2967,8 +2982,9 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
             <div className="lf-matter-detail-workspace" style={{ ...styles.detailStack, minWidth: 0 }}>
               <div style={styles.chips}>
                 <Badge tone="blue">{detail.stage || 'Intake'}</Badge>
+                <Badge tone={detail.priority === 'High' ? 'red' : detail.priority === 'Low' ? 'green' : 'amber'}>{detail.priority || 'Medium'} risk</Badge>
+                <span>{detail.reference || detail.caseNo || detail.id}</span>
                 <span>{detail.clientName || 'No client'}</span>
-                <span>{detail.practiceArea || 'General'}</span>
                 {isAdmin && (
                   <span className="lf-admin-reassign-control" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 8 }}>
                     <Badge tone="navy">Advocate: {detail.assignedTo || 'Unassigned'}</Badge>
@@ -3038,13 +3054,16 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
                     <Sub title="Tasks">
                       <div style={{ ...styles.formHelper, marginBottom: 10 }}>Use this section to track work still pending on this matter. Log time after or while doing the work.</div>
                       {canManage && (
-                        <form onSubmit={createMatterTask} style={{ ...styles.formGrid, marginBottom: 12 }}>
-                          <Field label="Task title"><input required style={styles.input} value={matterTaskForm.title} onChange={e => setMatterTaskForm({ ...matterTaskForm, title: e.target.value })} placeholder="e.g. Draft witness statement" list="task-suggestions-matter" /></Field>
-                          <datalist id="task-suggestions-matter"><option value="File pleadings" /><option value="Serve summons" /><option value="Draft agreement" /><option value="Prepare affidavit" /><option value="Attend court" /><option value="Legal research" /><option value="Client meeting" /><option value="Review documents" /><option value="Update client" /><option value="File application" /><option value="Prepare submissions" /><option value="Witness preparation" /><option value="Settlement discussions" /><option value="Obtain orders" /><option value="Taxation of costs" /></datalist>
-                          <Field label="Due date / target date"><input type="date" style={styles.input} value={matterTaskForm.dueDate} onChange={e => setMatterTaskForm({ ...matterTaskForm, dueDate: e.target.value })} /></Field>
-                          <Field label="Assignee (optional)"><input style={styles.input} value={matterTaskForm.assignee} onChange={e => setMatterTaskForm({ ...matterTaskForm, assignee: e.target.value })} placeholder="e.g. Sarah Mwangi" /></Field>
-                          <button style={styles.primaryButton}>Add task</button>
-                        </form>
+                        matterTaskFormOpen ? (
+                          <form onSubmit={createMatterTask} style={{ ...styles.formGrid, marginBottom: 12 }}>
+                            <Field label="Task title"><input required style={styles.input} value={matterTaskForm.title} onChange={e => setMatterTaskForm({ ...matterTaskForm, title: e.target.value })} placeholder="e.g. Draft witness statement" list="task-suggestions-matter" /></Field>
+                            <datalist id="task-suggestions-matter"><option value="File pleadings" /><option value="Serve summons" /><option value="Draft agreement" /><option value="Prepare affidavit" /><option value="Attend court" /><option value="Legal research" /><option value="Client meeting" /><option value="Review documents" /><option value="Update client" /><option value="File application" /><option value="Prepare submissions" /><option value="Witness preparation" /><option value="Settlement discussions" /><option value="Obtain orders" /><option value="Taxation of costs" /></datalist>
+                            <Field label="Due date / target date"><input type="date" style={styles.input} value={matterTaskForm.dueDate} onChange={e => setMatterTaskForm({ ...matterTaskForm, dueDate: e.target.value })} /></Field>
+                            <Field label="Assignee (optional)"><input style={styles.input} value={matterTaskForm.assignee} onChange={e => setMatterTaskForm({ ...matterTaskForm, assignee: e.target.value })} placeholder="e.g. Sarah Mwangi" /></Field>
+                            <button style={styles.primaryButton}>Add task</button>
+                            <button type="button" style={styles.ghostButton} onClick={() => setMatterTaskFormOpen(false)}>Cancel</button>
+                          </form>
+                        ) : <button type="button" style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 12px', marginBottom: 12 }} onClick={() => setMatterTaskFormOpen(true)}>Create task</button>
                       )}
                       <Sub title="Open tasks"><TaskEditorList tasks={(detail.tasks || []).filter(task => !task.completed)} entries={detail.timeEntries || []} matter={detail} canManage={canManage} canViewBilling={canViewBilling} editingTask={editingTask} setEditingTask={setEditingTask} saveTask={saveTask} taskTimer={taskTimer} setTaskTimer={setTaskTimer} notify={notify} onTimerSaved={async () => { await loadDetail(detail.id); await reload(); }} confirmDelete={task => setConfirm({ title: 'Delete task?', message: 'Delete this task?', onConfirm: () => deleteTaskRecord(task) })} emptyTitle="No open tasks for this matter yet." emptyText="Add a task above to track pending work." /></Sub>
                       <Sub title="Completed tasks"><TaskEditorList tasks={(detail.tasks || []).filter(task => task.completed)} entries={detail.timeEntries || []} matter={detail} canManage={canManage} canViewBilling={canViewBilling} editingTask={editingTask} setEditingTask={setEditingTask} saveTask={saveTask} taskTimer={taskTimer} setTaskTimer={setTaskTimer} notify={notify} onTimerSaved={async () => { await loadDetail(detail.id); await reload(); }} confirmDelete={task => setConfirm({ title: 'Delete task?', message: 'Delete this task?', onConfirm: () => deleteTaskRecord(task) })} emptyTitle="No completed tasks yet." emptyText="Tasks you mark done will appear here." /></Sub>
@@ -3052,14 +3071,18 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
                   </div>
                   <div style={{ minWidth: 0, maxWidth: '100%' }}>
                     <Sub title="Log time / completed work">
-                      <form id="matter-section-time" onSubmit={logTime} style={styles.formGrid}>
-                        <Field label="Hours"><input type="number" min="0" step="any" inputMode="decimal" placeholder="e.g. 1.25" style={styles.input} value={time.hours} onChange={e => setTime({ ...time, hours: e.target.value })} /></Field>
-                        <Field label="Description"><input style={styles.input} value={time.description} onChange={e => setTime({ ...time, description: e.target.value })} /></Field>
-                        {canViewBilling && <Field label="Rate"><input type="number" style={styles.input} value={time.rate} onChange={e => setTime({ ...time, rate: Number(e.target.value) })} /></Field>}
-                        <Field label="Billing class"><select style={styles.input} value={time.billable ? 'billable' : 'non_billable'} onChange={e => setTime({ ...time, billable: e.target.value === 'billable' })}><option value="billable">Billable</option><option value="non_billable">Non-billable</option></select></Field>
-                        <div style={{ ...styles.formHelper, gridColumn: '1 / -1' }}>{BILLABLE_TIME_GUIDANCE}</div>
-                        <button style={styles.primaryButton}>Log time</button>
-                      </form>
+                      {canManage && !matterTimeFormOpen ? <button type="button" style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 12px' }} onClick={() => setMatterTimeFormOpen(true)}>Log time</button> : null}
+                      {canManage && matterTimeFormOpen ? (
+                        <form id="matter-section-time" onSubmit={logTime} style={styles.formGrid}>
+                          <Field label="Hours"><input type="number" min="0" step="any" inputMode="decimal" placeholder="e.g. 1.25" style={styles.input} value={time.hours} onChange={e => setTime({ ...time, hours: e.target.value })} /></Field>
+                          <Field label="Description"><input style={styles.input} value={time.description} onChange={e => setTime({ ...time, description: e.target.value })} /></Field>
+                          {canViewBilling && <Field label="Rate"><input type="number" style={styles.input} value={time.rate} onChange={e => setTime({ ...time, rate: Number(e.target.value) })} /></Field>}
+                          <Field label="Billing class"><select style={styles.input} value={time.billable ? 'billable' : 'non_billable'} onChange={e => setTime({ ...time, billable: e.target.value === 'billable' })}><option value="billable">Billable</option><option value="non_billable">Non-billable</option></select></Field>
+                          <div style={{ ...styles.formHelper, gridColumn: '1 / -1' }}>{BILLABLE_TIME_GUIDANCE}</div>
+                          <button style={styles.primaryButton}>Log time</button>
+                          <button type="button" style={styles.ghostButton} onClick={() => setMatterTimeFormOpen(false)}>Cancel</button>
+                        </form>
+                      ) : null}
                     </Sub>
                   </div>
                   <div style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Time entries"><TimeEntryEditorList entries={detail.timeEntries || []} canManage={canManage} canViewBilling={canViewBilling} editingTime={editingTime} setEditingTime={setEditingTime} saveTimeEntry={saveTimeEntry} confirmDelete={entry => setConfirm({ title: 'Delete time entry?', message: 'Delete this time entry?', onConfirm: () => deleteTimeEntryRecord(entry) })} /></Sub></div>
@@ -3069,41 +3092,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
 
               {cockpitSection === 'court-diary' && (
                 <>
-                  {workMetadataLinks.length > 0 && (
-                    <section aria-label="Linked metadata" style={{ border: `1px solid ${theme.line}`, background: '#fff', borderRadius: 10, padding: 14, display: 'grid', gap: 10, marginBottom: 12 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-                        <div style={{ display: 'grid', gap: 2 }}>
-                          <strong style={{ fontSize: 13 }}>Linked metadata <span style={{ color: theme.muted, fontSize: 12, fontWeight: 400 }}>({workMetadataLinks.length})</span></strong>
-                          <span style={{ color: theme.muted, fontSize: 12 }}>Confirmed email and calendar metadata linked to this matter.</span>
-                        </div>
-                        <a href="/connected-accounts" style={{ ...styles.ghostButton, fontSize: 12, padding: '4px 10px', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}><IconExternalLink size={14} stroke={1.75} /> View all</a>
-                      </div>
-                      <div style={{ display: 'grid', gap: 8 }}>
-                        {workMetadataLinks.map(link => (
-                          <div key={link.linkId} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 10px', border: `1px solid ${theme.line}`, borderRadius: 8, background: '#F9FAFB' }}>
-                            <div style={{ flexShrink: 0, marginTop: 2 }}>
-                              {link.sourceType === 'email' ? <IconMail size={16} stroke={1.75} style={{ color: '#697386' }} /> : <IconCalendarEvent size={16} stroke={1.75} style={{ color: '#697386' }} />}
-                            </div>
-                            <div style={{ flex: 1, minWidth: 0, display: 'grid', gap: 3 }}>
-                              <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{link.subject || '(No subject)'}</div>
-                              <div style={{ fontSize: 12, color: theme.muted, display: 'flex', flexWrap: 'wrap', gap: '2px 12px' }}>
-                                {link.sourceType === 'email' && link.sender && <span>From: {link.sender}</span>}
-                                {link.sourceType === 'calendar' && link.organizer && <span>Organizer: {link.organizer}</span>}
-                                {link.sourceType === 'email' && link.receivedAt && <span>{new Date(link.receivedAt).toLocaleString()}</span>}
-                                {link.sourceType === 'calendar' && link.startTime && <span>{new Date(link.startTime).toLocaleString()}</span>}
-                                {link.sourceType === 'email' && Number(link.hasAttachments) > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><IconPaperclip size={12} stroke={1.75} /> Attachments</span>}
-                                {link.sourceType === 'calendar' && link.meetingLink && <MeetingLink href={safeHttpUrl(link.meetingLink)} />}
-                                <span style={{ color: '#9CA3AF' }}>{link.accountProvider} &middot; {link.accountEmail}</span>
-                              </div>
-                              <div style={{ fontSize: 11, color: '#9CA3AF' }}>Confirmed by {link.confirmedBy || 'System'} &middot; {link.confirmedAt ? new Date(link.confirmedAt).toLocaleString() : ''}</div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </section>
-                  )}
-                  <div id="matter-section-court" style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Court Diary / Appearances"><div style={{ ...styles.formHelper, marginBottom: 10 }}>Diary entries here are recorded under this matter. They also appear in the firm-wide Court Diary under Deadlines.</div>{canManage && <form onSubmit={createEvent} style={{ ...styles.formGrid, marginBottom: 12 }}><Field label="Court diary title / brief note"><input required style={styles.input} value={eventForm.title} onChange={e => setEventForm({ ...eventForm, title: e.target.value })} placeholder="e.g. Mention for directions" /></Field><Field label="Date"><input required type="date" style={styles.input} value={eventForm.date} onChange={e => setEventForm({ ...eventForm, date: e.target.value })} /></Field><Field label="Time"><input style={styles.input} value={eventForm.time} onChange={e => setEventForm({ ...eventForm, time: e.target.value })} /></Field><Field label="Type"><AppearanceTypeSelect value={eventForm.type} onChange={e => setEventForm({ ...eventForm, type: e.target.value })} /></Field><Field label="Location"><input style={styles.input} value={eventForm.location} onChange={e => setEventForm({ ...eventForm, location: e.target.value })} placeholder="e.g. Milimani Law Courts" list="appearance-location-list" /></Field><datalist id="appearance-location-list"><option value="Milimani Law Courts, Nairobi" /><option value="Kiambu Law Courts" /><option value="Kajiado Law Courts" /><option value="Machakos Law Courts" /><option value="Makadara Law Courts, Nairobi" /><option value="Kibera Law Courts, Nairobi" /><option value="Mombasa Law Courts" /><option value="Kisumu Law Courts" /><option value="Nakuru Law Courts" /><option value="Eldoret Law Courts" /><option value="Nyeri Law Courts" /><option value="Kakamega Law Courts" /><option value="Meru Law Courts" /><option value="Kerugoya Law Courts" /><option value="Bungoma Law Courts" /><option value="Busia Law Courts" /><option value="Kisii Law Courts" /><option value="Malindi Law Courts" /><option value="Garissa Law Courts" /><option value="Court of Appeal, Nairobi" /><option value="Supreme Court of Kenya" /></datalist><Field label="Meeting Link"><input type="url" placeholder="https://..." style={styles.input} value={eventForm.meetingLink} onChange={e => setEventForm({ ...eventForm, meetingLink: e.target.value })} /></Field><button style={styles.ghostButton}>Schedule event</button></form>}<AppearanceEditorList events={detail.appearances || []} canManage={canManage} editingEvent={editingEvent} setEditingEvent={setEditingEvent} saveEvent={saveEvent} confirmDelete={event => setConfirm({ title: 'Delete appearance?', message: 'Delete this court appearance?', onConfirm: () => deleteEventRecord(event) })} /></Sub></div>
-                  <MatterCourtMode detail={detail} nextActionHints={nextActionHints} />
+                  <div id="matter-section-court" style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Court Diary / Appearances"><div style={{ ...styles.formHelper, marginBottom: 10 }}>Diary entries here are recorded under this matter. They also appear in the firm-wide Court Diary under Deadlines.</div>{canManage && (courtDateFormOpen ? <form onSubmit={createEvent} style={{ ...styles.formGrid, marginBottom: 12 }}><Field label="Court diary title / brief note"><input required style={styles.input} value={eventForm.title} onChange={e => setEventForm({ ...eventForm, title: e.target.value })} placeholder="e.g. Mention for directions" /></Field><Field label="Date"><input required type="date" style={styles.input} value={eventForm.date} onChange={e => setEventForm({ ...eventForm, date: e.target.value })} /></Field><Field label="Time"><input style={styles.input} value={eventForm.time} onChange={e => setEventForm({ ...eventForm, time: e.target.value })} /></Field><Field label="Type"><AppearanceTypeSelect value={eventForm.type} onChange={e => setEventForm({ ...eventForm, type: e.target.value })} /></Field><Field label="Location"><input style={styles.input} value={eventForm.location} onChange={e => setEventForm({ ...eventForm, location: e.target.value })} placeholder="e.g. Milimani Law Courts" list="appearance-location-list" /></Field><datalist id="appearance-location-list"><option value="Milimani Law Courts, Nairobi" /><option value="Kiambu Law Courts" /><option value="Kajiado Law Courts" /><option value="Machakos Law Courts" /><option value="Makadara Law Courts, Nairobi" /><option value="Kibera Law Courts, Nairobi" /><option value="Mombasa Law Courts" /><option value="Kisumu Law Courts" /><option value="Nakuru Law Courts" /><option value="Eldoret Law Courts" /><option value="Nyeri Law Courts" /><option value="Kakamega Law Courts" /><option value="Meru Law Courts" /><option value="Kerugoya Law Courts" /><option value="Bungoma Law Courts" /><option value="Busia Law Courts" /><option value="Kisii Law Courts" /><option value="Malindi Law Courts" /><option value="Garissa Law Courts" /><option value="Court of Appeal, Nairobi" /><option value="Supreme Court of Kenya" /></datalist><Field label="Meeting Link"><input type="url" placeholder="https://..." style={styles.input} value={eventForm.meetingLink} onChange={e => setEventForm({ ...eventForm, meetingLink: e.target.value })} /></Field><button style={styles.primaryButton}>Add court date</button><button type="button" style={styles.ghostButton} onClick={() => setCourtDateFormOpen(false)}>Cancel</button></form> : <button type="button" style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 12px', marginBottom: 12 }} onClick={() => setCourtDateFormOpen(true)}>Add court date</button>)}<AppearanceEditorList events={detail.appearances || []} canManage={canManage} editingEvent={editingEvent} setEditingEvent={setEditingEvent} saveEvent={saveEvent} confirmDelete={event => setConfirm({ title: 'Delete appearance?', message: 'Delete this court appearance?', onConfirm: () => deleteEventRecord(event) })} /></Sub></div>
                 </>
               )}
 
@@ -3155,16 +3144,19 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
                   <div id="matter-section-invoices" style={{ minWidth: 0, maxWidth: '100%' }}>
                     <Sub title="Invoices">
                       {canManage && (
-                        <div style={{ ...styles.formGrid, marginBottom: 12, alignItems: 'end' }}>
-                          <Field label="Default due">
-                            <div style={{ ...styles.input, background: '#F9FAFB', color: theme.muted }}>{defaultInvoiceDueDays} days ({formatTimelineDate(defaultInvoiceDueDate)})</div>
-                          </Field>
-                          <Field label="Due-date override">
-                            <input type="date" style={styles.input} value={invoiceDueDateOverride} onChange={e => setInvoiceDueDateOverride(e.target.value)} />
-                            <div style={styles.formHelper}>Leave blank to use the firm default.</div>
-                          </Field>
-                          <button type="button" style={styles.primaryButton} onClick={generateInvoice}>Generate invoice</button>
-                        </div>
+                        invoiceFormOpen ? (
+                          <div style={{ ...styles.formGrid, marginBottom: 12, alignItems: 'end' }}>
+                            <Field label="Default due">
+                              <div style={{ ...styles.input, background: '#F9FAFB', color: theme.muted }}>{defaultInvoiceDueDays} days ({formatTimelineDate(defaultInvoiceDueDate)})</div>
+                            </Field>
+                            <Field label="Due-date override">
+                              <input type="date" style={styles.input} value={invoiceDueDateOverride} onChange={e => setInvoiceDueDateOverride(e.target.value)} />
+                              <div style={styles.formHelper}>Leave blank to use the firm default.</div>
+                            </Field>
+                            <button type="button" style={styles.primaryButton} onClick={generateInvoice}>Generate invoice</button>
+                            <button type="button" style={styles.ghostButton} onClick={() => setInvoiceFormOpen(false)}>Cancel</button>
+                          </div>
+                        ) : <button type="button" style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 12px', marginBottom: 12 }} onClick={() => setInvoiceFormOpen(true)}>Add invoice</button>
                       )}
                       <div style={{ marginBottom: 12 }}>
                         <OutputBrandingSelector
@@ -3219,7 +3211,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
 
               {cockpitSection === 'notes' && (
                 <>
-                  <div id="matter-section-notes" style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Case notes"><form onSubmit={addNote} style={styles.noteForm}><input style={styles.input} value={note} onChange={e => setNote(e.target.value)} placeholder="Add a note" /><button style={styles.ghostButton}>Save note</button></form><div className="lf-matter-notes-cards"><Table columns={['Note', 'Author', 'Created']} rows={(detail.notes || []).map(n => [n.content, n.author || '-', n.createdAt ? new Date(n.createdAt).toLocaleString() : '-'])} empty="No notes yet." /></div></Sub></div>
+                  <div id="matter-section-notes" style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Case notes">{noteFormOpen ? <form onSubmit={addNote} style={styles.noteForm}><input style={styles.input} value={note} onChange={e => setNote(e.target.value)} placeholder="Add a note" /><button style={styles.ghostButton}>Save note</button><button type="button" style={styles.ghostButton} onClick={() => setNoteFormOpen(false)}>Cancel</button></form> : <button type="button" style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 12px', marginBottom: 12 }} onClick={() => setNoteFormOpen(true)}>Record note</button>}<div className="lf-matter-notes-cards"><Table columns={['Note', 'Author', 'Created']} rows={(detail.notes || []).map(n => [n.content, n.author || '-', n.createdAt ? new Date(n.createdAt).toLocaleString() : '-'])} empty="No notes yet." /></div></Sub></div>
                   <HearingBriefCard detail={detail} canManage={canManage} notify={notify} onChanged={() => loadDetail(detail.id)} onSectionNav={selectCockpitSection} />
                 </>
               )}
