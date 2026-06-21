@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconLayoutDashboard, IconBriefcase, IconBell, IconFile, IconInvoice, IconUserCircle, IconCalendarEvent, IconEye, IconEyeOff } from '@tabler/icons-react';
 import { api, changePassword, deleteMyAvatar, downloadWithAuth, fileToDataUrl, getMyAvatar, uploadMyAvatar } from '../lib/apiClient.js';
-import { appendBrandingModeToPath, defaultFirmSettings, defaultOutputBrandingMode, hasFirmLetterhead, letterheadPdfOutputWarning, outputBrandingModes, styles, StyleTag, theme, loadAndApplyFirmTheme, resolveReadableTheme } from '../theme.jsx';
+import { appendBrandingModeToPath, defaultFirmSettings, defaultOutputBrandingMode, styles, StyleTag, theme, loadAndApplyFirmTheme, resolveReadableTheme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Field, kes, Logo, MeetingLink, safeHttpUrl, Skeleton, statusTone, Table, Toast, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText } from '../components/ui.jsx';
 import ClientChatWidget from '../components/ClientChatWidget.jsx';
 import MatterDocuments from '../components/MatterDocuments.jsx';
@@ -66,6 +66,13 @@ function initialClientView() {
 
 const clientPortalChromeCss = `
   .lf-client-mobile-actions { display: none; }
+  #root .lf-client-topbar {
+    height: auto !important;
+    min-height: 54px;
+    align-items: flex-start;
+    padding-top: 10px !important;
+    padding-bottom: 10px !important;
+  }
   .lf-client-welcome-name {
     display: block;
     color: var(--lf-accent, #C5973C);
@@ -85,6 +92,9 @@ const clientPortalChromeCss = `
       width: 100%;
       justify-content: center;
       text-align: center;
+    }
+    #root .lf-client-topbar {
+      align-items: stretch;
     }
     #root .lf-client-hero {
       padding: 18px 16px !important;
@@ -498,7 +508,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
         </div>
       )}
       <main style={styles.main}>
-        <header className="lf-topbar" style={styles.topbar}>
+        <header className="lf-topbar lf-client-topbar" style={styles.topbar}>
           <div className="lf-topbar-title" style={styles.topbarTitle}>
             <button type="button" className="lf-mobile-only" aria-label="Open portal navigation menu" title="Open portal navigation menu" onClick={() => setMobileMenuOpen(true)} style={styles.mobileMenuButton}>Menu</button>
             <div style={{ minWidth: 0 }}>
@@ -861,14 +871,7 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
   const [statusFilter, setStatusFilter] = useState('');
   const [sortOrder, setSortOrder] = useState('newest');
   const [paymentHistoryOpen, setPaymentHistoryOpen] = useState(false);
-  const [outputBrandingMode, setOutputBrandingMode] = useState(defaultOutputBrandingMode(firm || defaultFirmSettings));
-
-  useEffect(() => {
-    setOutputBrandingMode(current => {
-      if (current === 'letterhead' && !hasFirmLetterhead(firm)) return 'simple';
-      return current || defaultOutputBrandingMode(firm || defaultFirmSettings);
-    });
-  }, [firm?.letterhead, firm?.theme?.letterhead]);
+  const outputBrandingMode = defaultOutputBrandingMode(firm || defaultFirmSettings);
 
   const statusOptions = useMemo(() => {
     const s = new Set();
@@ -965,7 +968,6 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
         </Card>
         <MatterDocuments matterId={selected.id} clientMode notify={notify} />
         <Card title="Invoices and payment proof" hint="Upload M-PESA or bank transfer confirmation">
-          <OutputBrandingSelector id="client-matter-output-branding" value={outputBrandingMode} onChange={setOutputBrandingMode} firm={firm} />
           <div className="ux2-client-mobile-stack" aria-label="Invoices for this matter">
             {invoices.length ? invoices.map(i => (
               <article key={`matter-invoice-mobile-${i.id}`} className="ux2-client-mobile-card">
@@ -1406,23 +1408,6 @@ function DownloadButton({ label, path, filename, notify, ariaLabel }) {
   );
 }
 
-function OutputBrandingSelector({ value, onChange, firm, id }) {
-  const hasLetterhead = hasFirmLetterhead(firm);
-  const letterheadWarning = value === 'letterhead' ? letterheadPdfOutputWarning(firm) : '';
-  return (
-    <div style={{ display: 'grid', gap: 4, marginBottom: 10 }}>
-      <label htmlFor={id} style={{ fontSize: 12, fontWeight: 700, color: '#6B7280' }}>Output branding</label>
-      <select id={id} style={styles.input} value={value} onChange={event => onChange(event.target.value)}>
-        {outputBrandingModes.map(mode => (
-          <option key={mode.value} value={mode.value} disabled={mode.value === 'letterhead' && !hasLetterhead}>{mode.label}</option>
-        ))}
-      </select>
-      <span style={{ fontSize: 12, color: '#6B7280' }}>Choose whether this output should use the firm letterhead, simple firm branding, or no firm branding.</span>
-      {letterheadWarning ? <span style={{ fontSize: 12, color: theme.amber, fontWeight: 700 }}>{letterheadWarning}</span> : null}
-    </div>
-  );
-}
-
 function PasswordField({ label, value, onChange, placeholder, showPassword, onToggleShow, autoComplete }) {
   return (
     <div style={{ marginBottom: 6 }}>
@@ -1690,17 +1675,10 @@ function BillingInvoices({ data, matters, firm, notify, selectMatter, onNavigate
   const [statusFilter, setStatusFilter] = useState('');
   const [matterFilter, setMatterFilter] = useState('');
   const [sortOrder, setSortOrder] = useState('newest');
-  const [outputBrandingMode, setOutputBrandingMode] = useState(defaultOutputBrandingMode(firm || defaultFirmSettings));
+  const outputBrandingMode = defaultOutputBrandingMode(firm || defaultFirmSettings);
 
   const invoices = data.invoices || [];
   const proofs = data.paymentProofs || [];
-
-  useEffect(() => {
-    setOutputBrandingMode(current => {
-      if (current === 'letterhead' && !hasFirmLetterhead(firm)) return 'simple';
-      return current || defaultOutputBrandingMode(firm || defaultFirmSettings);
-    });
-  }, [firm?.letterhead, firm?.theme?.letterhead]);
 
   const filtered = useMemo(() => {
     let result = [...invoices];
@@ -1839,7 +1817,6 @@ function BillingInvoices({ data, matters, firm, notify, selectMatter, onNavigate
           </div>
         )}
       </div>
-      <OutputBrandingSelector id="client-all-invoices-output-branding" value={outputBrandingMode} onChange={setOutputBrandingMode} firm={firm} />
       <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         <input
           type="search"
