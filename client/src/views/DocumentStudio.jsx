@@ -248,6 +248,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
 
   const [toolsOpen, setToolsOpen] = useState(false);
   const [selectedTool, setSelectedTool] = useState(null);
+  const [signingAssetsOpen, setSigningAssetsOpen] = useState(false);
   const [signatureAssets, setSignatureAssets] = useState([]);
   const [signatureAssetsLoading, setSignatureAssetsLoading] = useState(false);
   const [signatureAssetsError, setSignatureAssetsError] = useState(null);
@@ -613,6 +614,11 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setToolsOpen(true);
     if (toolId) setSelectedTool(toolId);
     scrollToRef(toolsSectionRef);
+  }
+
+  function openSigningAssets() {
+    setSigningAssetsOpen(true);
+    scrollToRef(signatureSectionRef);
   }
 
   function openMatterDocuments() {
@@ -1597,6 +1603,9 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
   const canStampSave = !!stampDocumentId && !!stampAssetId && !!stampMatterId && !selectedStampAssetBlocked && !stampSaveLoading;
   const commandCardStyle = { ...themedPanelStyle, padding: '14px 16px', display: 'grid', gap: 10, alignContent: 'start', minWidth: 0 };
   const signaturePanelStyle = { ...themedPanelStyle, padding: 14, display: 'grid', gap: 12, minWidth: 0 };
+  const signingAssetsSummary = signatureAssetsLoading
+    ? 'Loading saved signing assets...'
+    : `${personalSignatureAssets.length} signature image${personalSignatureAssets.length === 1 ? '' : 's'} and ${firmStampAssets.length} firm stamp${firmStampAssets.length === 1 ? '' : 's'} saved.`;
 
   function renderSignatureAssetRows(assets, canManage) {
     if (signatureAssetsLoading) return <Skeleton />;
@@ -1672,7 +1681,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             <span style={{ fontSize: 13, ...mutedPanelTextStyle, lineHeight: 1.5 }}>Upload reusable signature or stamp images, then place them on matter PDFs.</span>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button type="button" style={{ ...styles.primaryButton, justifySelf: 'start', fontSize: 12, padding: '5px 12px' }} onClick={() => openTools('stamp')}>Sign a PDF</button>
-              <button type="button" style={{ ...styles.ghostButton, justifySelf: 'start', fontSize: 12, padding: '5px 12px' }} onClick={() => scrollToRef(signatureSectionRef)}>Manage assets</button>
+              <button type="button" style={{ ...styles.ghostButton, justifySelf: 'start', fontSize: 12, padding: '5px 12px' }} onClick={openSigningAssets}>Manage assets</button>
             </div>
           </div>
           <div style={commandCardStyle}>
@@ -1684,39 +1693,62 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
       </Card>
 
       <div ref={signatureSectionRef} style={{ minWidth: 0 }}>
-      <Card title="Signatures & stamps" hint="This stores a PNG/JPEG image for visual placement on PDFs. It is not a certified electronic signature.">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))', gap: 14, minWidth: 0 }}>
-          <div style={signaturePanelStyle}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-              <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
-                <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Visual signature image</strong>
-                <span style={{ fontSize: 12, ...mutedPanelTextStyle }}>Personal reusable PNG/JPEG image asset</span>
-              </div>
-              <label style={{ ...styles.primaryButton, opacity: signatureAssetBusy === 'upload-signature' ? 0.65 : 1, cursor: signatureAssetBusy === 'upload-signature' ? 'not-allowed' : 'pointer' }}>
-                {signatureAssetBusy === 'upload-signature' ? 'Uploading...' : 'Upload signature image'}
-                <input type="file" accept="image/png,image/jpeg" style={{ display: 'none' }} disabled={Boolean(signatureAssetBusy)} onChange={event => uploadSignatureAsset('signature', event)} />
-              </label>
+      <Card title="Signing assets" hint="Reusable signature and stamp images are available when signing a PDF.">
+        <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
+          <div style={{ ...themedPanelStyle, padding: '12px 14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))', gap: 12, alignItems: 'center', minWidth: 0 }}>
+            <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
+              <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Manage signing assets</strong>
+              <span style={{ fontSize: 13, ...mutedPanelTextStyle, lineHeight: 1.45 }}>{signingAssetsSummary}</span>
+              <span style={{ fontSize: 12, ...mutedPanelTextStyle, lineHeight: 1.45 }}>PNG/JPEG images can be placed visually on PDFs. This is not a certified electronic signature.</span>
             </div>
-            {renderSignatureAssetRows(personalSignatureAssets, true)}
+            <button
+              type="button"
+              onClick={() => setSigningAssetsOpen(open => !open)}
+              aria-expanded={signingAssetsOpen}
+              aria-controls="signing-assets-panel"
+              style={{ ...styles.ghostButton, minHeight: 36, whiteSpace: 'nowrap' }}
+            >
+              {signingAssetsOpen ? 'Close' : 'Manage signing assets'}
+            </button>
           </div>
 
-          <div style={signaturePanelStyle}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-              <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
-                <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Firm stamp image</strong>
-                <span style={{ fontSize: 12, ...mutedPanelTextStyle }}>Firm reusable PNG/JPEG image asset</span>
+          {signingAssetsOpen && (
+          <div id="signing-assets-panel" style={{ display: 'grid', gap: 14, minWidth: 0 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))', gap: 14, minWidth: 0 }}>
+              <div style={signaturePanelStyle}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                    <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Visual signature image</strong>
+                    <span style={{ fontSize: 12, ...mutedPanelTextStyle }}>Personal reusable PNG/JPEG image asset</span>
+                  </div>
+                  <label style={{ ...styles.primaryButton, opacity: signatureAssetBusy === 'upload-signature' ? 0.65 : 1, cursor: signatureAssetBusy === 'upload-signature' ? 'not-allowed' : 'pointer' }}>
+                    {signatureAssetBusy === 'upload-signature' ? 'Uploading...' : 'Upload signature image'}
+                    <input type="file" accept="image/png,image/jpeg" style={{ display: 'none' }} disabled={Boolean(signatureAssetBusy)} onChange={event => uploadSignatureAsset('signature', event)} />
+                  </label>
+                </div>
+                {renderSignatureAssetRows(personalSignatureAssets, true)}
               </div>
-              {isAdmin && (
-                <label style={{ ...styles.primaryButton, opacity: signatureAssetBusy === 'upload-stamp' ? 0.65 : 1, cursor: signatureAssetBusy === 'upload-stamp' ? 'not-allowed' : 'pointer' }}>
-                  {signatureAssetBusy === 'upload-stamp' ? 'Uploading...' : 'Upload stamp image'}
-                  <input type="file" accept="image/png,image/jpeg" style={{ display: 'none' }} disabled={Boolean(signatureAssetBusy)} onChange={event => uploadSignatureAsset('stamp', event)} />
-                </label>
-              )}
+
+              <div style={signaturePanelStyle}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                    <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Firm stamp image</strong>
+                    <span style={{ fontSize: 12, ...mutedPanelTextStyle }}>Firm reusable PNG/JPEG image asset</span>
+                  </div>
+                  {isAdmin && (
+                    <label style={{ ...styles.primaryButton, opacity: signatureAssetBusy === 'upload-stamp' ? 0.65 : 1, cursor: signatureAssetBusy === 'upload-stamp' ? 'not-allowed' : 'pointer' }}>
+                      {signatureAssetBusy === 'upload-stamp' ? 'Uploading...' : 'Upload stamp image'}
+                      <input type="file" accept="image/png,image/jpeg" style={{ display: 'none' }} disabled={Boolean(signatureAssetBusy)} onChange={event => uploadSignatureAsset('stamp', event)} />
+                    </label>
+                  )}
+                </div>
+                {renderSignatureAssetRows(firmStampAssets, isAdmin)}
+              </div>
             </div>
-            {renderSignatureAssetRows(firmStampAssets, isAdmin)}
+            {signatureAssetsError && <Alert tone="danger">{signatureAssetsError}</Alert>}
           </div>
+          )}
         </div>
-        {signatureAssetsError && <Alert tone="danger">{signatureAssetsError}</Alert>}
       </Card>
       </div>
 
