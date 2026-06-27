@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { IconLayoutDashboard, IconBriefcase, IconBell, IconFile, IconInvoice, IconUserCircle, IconCalendarEvent, IconEye, IconEyeOff } from '@tabler/icons-react';
+import { IconLayoutDashboard, IconBriefcase, IconBell, IconFile, IconInvoice, IconUserCircle, IconCalendarEvent, IconEye, IconEyeOff, IconMessage } from '@tabler/icons-react';
 import { api, changePassword, deleteMyAvatar, downloadWithAuth, fileToDataUrl, getMyAvatar, uploadMyAvatar } from '../lib/apiClient.js';
 import { appendBrandingModeToPath, defaultFirmSettings, defaultOutputBrandingMode, styles, StyleTag, theme, loadAndApplyFirmTheme, resolveReadableTheme } from '../theme.jsx';
 import { Alert, Badge, Card, Empty, Field, kes, Logo, MeetingLink, safeHttpUrl, Skeleton, statusTone, Table, Toast, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText } from '../components/ui.jsx';
@@ -66,6 +66,65 @@ function initialClientView() {
 
 const clientPortalChromeCss = `
   .lf-client-mobile-actions { display: none; }
+  .lf-client-action-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
+  }
+  #root .lf-client-action-card {
+    width: 100%;
+    min-width: 0;
+    min-height: 126px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 14px;
+    border: 1px solid var(--lf-card-border, #E5E7EB);
+    border-radius: 10px;
+    background: var(--lf-card, #fff);
+    color: var(--lf-card-text, #111827);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    box-shadow: 0 1px 2px rgba(17,34,25,.04);
+  }
+  #root .lf-client-action-card:hover {
+    border-color: var(--lf-accent, #C5973C);
+    background: color-mix(in srgb, var(--lf-card, #fff) 94%, var(--lf-accent, #C5973C));
+  }
+  #root .lf-client-action-card:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--lf-accent, #C5973C) 38%, transparent);
+    outline-offset: 2px;
+  }
+  .lf-client-action-icon {
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--lf-primary, #1A3628) 10%, transparent);
+    color: var(--lf-primary, #1A3628);
+    flex: 0 0 auto;
+  }
+  .lf-client-action-title {
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1.25;
+  }
+  .lf-client-action-description {
+    color: var(--lf-card-muted, #6B7280);
+    font-size: 12px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+  .lf-client-action-link {
+    margin-top: auto;
+    color: var(--lf-link, #8A641D);
+    font-size: 12px;
+    font-weight: 700;
+  }
   #root .lf-client-topbar {
     height: auto !important;
     min-height: 54px;
@@ -79,7 +138,34 @@ const clientPortalChromeCss = `
     overflow-wrap: anywhere;
     word-break: normal;
   }
+  @media (max-width: 1199px) {
+    .lf-client-action-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
   @media (max-width: 767px) {
+    .lf-client-action-grid {
+      grid-template-columns: 1fr;
+    }
+    #root .lf-client-action-card {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 30px minmax(0, 1fr) auto;
+      grid-template-areas:
+        "icon title link"
+        "icon description description";
+      align-items: center;
+      column-gap: 10px;
+      row-gap: 3px;
+      padding: 12px;
+    }
+    .lf-client-action-icon { grid-area: icon; }
+    .lf-client-action-title { grid-area: title; }
+    .lf-client-action-description { grid-area: description; }
+    .lf-client-action-link {
+      grid-area: link;
+      margin-top: 0;
+    }
     #root .lf-client-desktop-actions { display: none !important; }
     #root .lf-client-mobile-actions {
       display: grid;
@@ -523,7 +609,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
           </div>
         </header>
         {loading && <Skeleton />}
-        {!loading && view === 'Dashboard' && <ClientDashboard data={dashboard} stats={stats} user={user} avatarUrl={myAvatarUrl} selectMatter={id => { setSelectedId(id); switchView('My Matters'); }} onNavigate={switchView} />}
+        {!loading && view === 'Dashboard' && <ClientDashboard data={dashboard} stats={stats} user={user} avatarUrl={myAvatarUrl} selectMatter={id => { setSelectedId(id); switchView('My Matters'); }} onNavigate={switchView} onOpenChat={() => setChatOpen(true)} />}
         {!loading && view === 'My Matters' && (
           <ClientMatterDetail
             matters={dashboard.matters}
@@ -558,7 +644,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
   );
 }
 
-function ClientDashboard({ data, stats, user, avatarUrl, selectMatter, onNavigate }) {
+function ClientDashboard({ data, stats, user, avatarUrl, selectMatter, onNavigate, onOpenChat }) {
   const today = new Date().toISOString().slice(0, 10);
   const nextCourt = data.appearances.filter(a => a.date >= today).sort((a, b) => a.date.localeCompare(b.date))[0];
   const matterForInvoices = data.invoices.length > 0 ? data.matters.find(m => data.invoices.some(i => i.matterId === m.id)) || data.matters[0] : null;
@@ -577,6 +663,7 @@ function ClientDashboard({ data, stats, user, avatarUrl, selectMatter, onNavigat
           <span style={{ minWidth: 0, overflowWrap: 'anywhere', lineHeight: 1.25 }}>{stats.activeMatters} active matter{stats.activeMatters === 1 ? '' : 's'}</span>
         </div>
       </section>
+      <ClientActionCards onNavigate={onNavigate} onOpenChat={onOpenChat} />
       <section style={{ background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 14 }}>
         <h3 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>Matter status</h3>
         {data.matters.length > 0 ? (
@@ -674,6 +761,62 @@ function ClientDashboard({ data, stats, user, avatarUrl, selectMatter, onNavigat
         </Card>
       </div>
     </div>
+  );
+}
+
+function ClientActionCards({ onNavigate, onOpenChat }) {
+  const actions = [
+    {
+      key: 'matters',
+      label: 'My matters',
+      description: 'View your active matters and updates.',
+      Icon: IconBriefcase,
+      action: () => onNavigate('My Matters'),
+    },
+    {
+      key: 'documents',
+      label: 'Shared documents',
+      description: 'Review files shared with you or upload requested documents.',
+      Icon: IconFile,
+      action: () => onNavigate('Documents'),
+    },
+    {
+      key: 'court',
+      label: 'Court dates',
+      description: 'Check upcoming court dates and deadlines.',
+      Icon: IconCalendarEvent,
+      action: () => onNavigate('Court Dates'),
+    },
+    {
+      key: 'invoices',
+      label: 'Invoices & payments',
+      description: 'View invoices and submit payment proof where available.',
+      Icon: IconInvoice,
+      action: () => onNavigate('Invoices'),
+    },
+    {
+      key: 'messages',
+      label: 'Messages',
+      description: 'Read updates and communicate with the firm.',
+      Icon: IconMessage,
+      action: onOpenChat,
+    },
+  ];
+
+  return (
+    <section aria-labelledby="client-action-cards-title">
+      <h3 id="client-action-cards-title" style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>What would you like to do?</h3>
+      <div className="lf-client-action-grid">
+        {actions.map(({ key, label, description, Icon, action }) => (
+          <button key={key} type="button" className="lf-client-action-card" onClick={action} aria-label={`${label}: ${description}`}>
+            <span className="lf-client-action-icon" aria-hidden="true"><Icon size={18} stroke={1.8} /></span>
+            <span className="lf-client-action-title">{label}</span>
+            <span className="lf-client-action-description">{description}</span>
+            <span className="lf-client-action-link" aria-hidden="true">Open →</span>
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 
