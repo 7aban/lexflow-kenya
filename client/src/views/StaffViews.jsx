@@ -1892,9 +1892,9 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
   const [clientType, setClientType] = useState('all');
   // CLIENT-31C: which client's concise read-only snapshot card is open (null = none).
   const [snapshotClientId, setSnapshotClientId] = useState(null);
-  // LOCAL-PILOT-FIX-10: post-create onboarding prompt ({ id, name, type } of the
-  // just-created client). Only set when the KYC and/or retainer module is enabled;
-  // the buttons open the existing module cards — no records are auto-created.
+  // LOCAL-PILOT-FIX-10 / PHASE-30: post-create onboarding prompt for the
+  // just-created client. The client snapshot now supplies the shared workflow
+  // handoff actions; no matter, invitation, or onboarding record is auto-created.
   const [postCreate, setPostCreate] = useState(null);
   // RET-31D: retainer module gate state and retainer CRUD panel.
   const [retainerEnabled, setRetainerEnabled] = useState(false);
@@ -1951,9 +1951,10 @@ export function Clients({ clients, matters, canManage, isAdmin = false, reload, 
         await api(`/clients/${editing.id}`, { method: 'PATCH', body: form });
       } else {
         const created = await api('/clients', { method: 'POST', body: form });
-        // LOCAL-PILOT-FIX-10: surface the next-step prompt only when a module that
-        // has a follow-up workflow is enabled. Works for Individual and Company.
-        setPostCreate((kycEnabled || retainerEnabled) && created?.id ? { id: created.id, name: created.name || '', type: created.type || 'Individual' } : null);
+        // PHASE-30: every newly created client gets the same safe workflow handoff
+        // as a selected client, independent of optional KYC/retainer modules.
+        setPostCreate(created?.id ? { id: created.id, name: created.name || '', type: created.type || 'Individual' } : null);
+        if (created?.id) setSnapshotClientId(created.id);
       }
       setForm(emptyClientForm);
       setEditing(null);
@@ -2300,6 +2301,12 @@ function ClientSnapshotCard({ clientId, onClose }) {
   const [snapshot, setSnapshot] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [portalState, setPortalState] = useState('unavailable');
+  const [portalFeedback, setPortalFeedback] = useState('');
+  const [inviteConfirm, setInviteConfirm] = useState(null);
+  const session = readSession();
+  const isAdmin = session?.user?.role === 'admin';
+  const canManage = ['admin', 'advocate'].includes(session?.user?.role);
   useEffect(() => {
     if (!clientId) { setSnapshot(null); setError(''); return undefined; }
     let active = true;
@@ -2312,16 +2319,95 @@ function ClientSnapshotCard({ clientId, onClose }) {
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [clientId]);
+  useEffect(() => {
+    if (!clientId || !isAdmin) { setPortalState('unavailable'); return undefined; }
+    let active = true;
+    setPortalState('loading');
+    Promise.all([api('/auth/users'), api('/invitations')])
+      .then(([users, invitations]) => {
+        if (!active) return;
+        const hasAccount = (users || []).some(user => user.role === 'client' && user.clientId === clientId);
+        const hasPendingInvitation = (invitations || []).some(invitation => invitation.clientId === clientId && invitation.status === 'pending');
+        setPortalState(hasAccount ? 'active' : hasPendingInvitation ? 'pending' : 'available');
+      })
+      .catch(() => { if (active) setPortalState('unavailable'); });
+    return () => { active = false; };
+  }, [clientId, isAdmin]);
   if (!clientId) return null;
   const closeAction = <button type="button" style={styles.tinyButton} onClick={onClose} aria-label="Close client snapshot">Close</button>;
   const c = snapshot?.client;
   const title = c?.name ? `Client snapshot · ${c.name}` : 'Client snapshot';
+  function openMatterWorkflow(mode) {
+    window.location.hash = `#/staff/matters/client/${encodeURIComponent(clientId)}${mode === 'create' ? '/create' : ''}`;
+  }
+  function openPortalManagement() {
+    window.location.hash = '#/staff/invitations';
+  }
+  async function generateInvitation() {
+    if (!c?.email) {
+      setPortalFeedback('Add an email address before generating a portal invitation.');
+      return;
+    }
+    try {
+      const invitation = await api('/invitations', { method: 'POST', body: { email: c.email, clientId } });
+      await navigator.clipboard?.writeText(invitation.url).catch(() => {});
+      setPortalState('pending');
+      setPortalFeedback('Invitation generated. The link was copied if clipboard access is available.');
+    } catch (err) {
+      setPortalFeedback(err.message || 'Unable to generate the invitation.');
+    }
+  }
+  function requestInvitation() {
+    setInviteConfirm({
+      title: 'Generate client invitation?',
+      message: `Generate a secure portal invitation for ${c?.name || 'this client'}? Nothing is sent automatically; the link must still be shared with the client.`,
+      onConfirm: generateInvitation,
+    });
+  }
+  const portalLabel = portalState === 'active' ? 'Manage portal access' : portalState === 'pending' ? 'Invitation pending' : 'Invite client';
+  const portalDescription = portalState === 'active'
+    ? 'Review the existing client portal account.'
+    : portalState === 'pending'
+      ? 'Review or copy the pending invitation.'
+      : c?.email
+        ? 'Prepare secure portal access for this client.'
+        : 'Add an email address before inviting this client.';
+  const workflowActions = [
+    ...(canManage ? [{ label: 'Create matter', description: 'Open a new matter for this client.', onClick: () => openMatterWorkflow('create'), primary: true }] : []),
+    { label: 'View matters', description: 'Review matters linked to this client.', onClick: () => openMatterWorkflow('view') },
+    ...(isAdmin && portalState !== 'loading' ? [{
+      label: portalLabel,
+      description: portalDescription,
+      onClick: portalState === 'available' ? requestInvitation : portalState === 'active' || portalState === 'pending' ? openPortalManagement : undefined,
+    }] : []),
+    {
+      label: 'Review details',
+      description: 'Check client contacts and intake information.',
+      onClick: () => document.getElementById(`client-snapshot-details-${clientId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }),
+    },
+  ];
   return (
     <Card title={title} hint="Read-only overview from existing matter, billing and obligation data" action={closeAction}>
       {loading && <div style={{ fontSize: 13, color: theme.muted, padding: '4px 0' }}>Loading client snapshot…</div>}
       {error && !loading && <div style={{ fontSize: 13, color: theme.red, background: theme.redBg, border: `1px solid ${theme.red}`, borderRadius: 8, padding: '8px 10px' }}>{error}</div>}
       {snapshot && !loading && (
         <div>
+          <div role="region" aria-label="Client workflow" style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#111827', marginBottom: 8 }}>Client workflow</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 8 }}>
+              {workflowActions.map(action => (
+                <div key={action.label} style={{ border: `1px solid ${theme.line}`, borderRadius: 9, padding: 10, background: theme.surface || '#F9FAFB', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6, minWidth: 0 }}>
+                  <strong style={{ fontSize: 13, color: '#111827' }}>{action.label}</strong>
+                  <span style={{ fontSize: 12, lineHeight: 1.4, color: theme.muted, flex: 1 }}>{action.description}</span>
+                  <button type="button" style={action.primary ? styles.primaryButton : styles.tinyButton} onClick={action.onClick} disabled={!action.onClick}>
+                    {action.label}
+                  </button>
+                </div>
+              ))}
+            </div>
+            {portalFeedback ? <div role="status" style={{ marginTop: 8, fontSize: 12, color: theme.muted }}>{portalFeedback}</div> : null}
+          </div>
+          <div id={`client-snapshot-details-${clientId}`}>
           <SnapshotSection title="Identity & contact">
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 6 }}>
               {c.type && <Badge tone="blue">{c.type}</Badge>}
@@ -2336,6 +2422,7 @@ function ClientSnapshotCard({ clientId, onClose }) {
               {!c.contact && !c.email && !c.phone && <span style={{ color: theme.muted }}>No contact details on file.</span>}
             </div>
           </SnapshotSection>
+          </div>
 
           <SnapshotSection title="Matters">
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -2498,6 +2585,7 @@ function ClientSnapshotCard({ clientId, onClose }) {
               </div>
             ) : <div style={{ fontSize: 12, color: theme.muted }}>No attention items.</div>}
           </SnapshotSection>
+          <ConfirmModal confirm={inviteConfirm} onClose={() => setInviteConfirm(null)} />
         </div>
       )}
     </Card>
@@ -2626,6 +2714,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
   const [applyingTemplate, setApplyingTemplate] = useState(false);
   const timekeeperFocusHandled = useRef(null);
   const missingMatterFocusHandled = useRef(null);
+  const clientMatterFocusHandled = useRef(null);
   const matterDetailRef = useRef(null);
   const session = readSession();
   const isAdmin = session?.user?.role === 'admin';
@@ -2672,6 +2761,31 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
     setSelectedId(focus.matterId);
     setCockpitSection(MATTER_COCKPIT_SECTION_IDS.includes(focus.section) ? focus.section : 'overview');
   }, [focus?.matterId, focus?.section, focus?.ts, data.matters]);
+  useEffect(() => {
+    if (!focus?.clientId || clientMatterFocusHandled.current === focus.ts) return;
+    clientMatterFocusHandled.current = focus.ts;
+    const client = data.clients.find(item => item.id === focus.clientId);
+    if (!client) {
+      notify?.({ type: 'warning', message: 'Client context could not be opened. Showing Matters instead.' });
+      return;
+    }
+    if (focus.mode === 'create') {
+      if (!canManage) {
+        notify?.({ type: 'warning', message: 'You do not have permission to create matters.' });
+        return;
+      }
+      setEditingMatter(false);
+      setForm({ ...emptyMatterForm, clientId: client.id });
+      setMatterFormOpen(true);
+      setMatterListOpen(false);
+      notify?.({ type: 'info', message: `New matter prepared for ${client.name}. Review the details before saving.` });
+      return;
+    }
+    setMatterSearch(client.name || '');
+    setMatterStage('all');
+    setMatterListOpen(true);
+    notify?.({ type: 'info', message: `Showing matters linked to ${client.name}.` });
+  }, [focus?.clientId, focus?.mode, focus?.ts, data.clients, canManage]);
   useEffect(() => {
     const settings = data.firmSettings || defaultFirmSettings;
     const hasLetterhead = hasFirmLetterhead(settings);

@@ -117,6 +117,8 @@ function setAppHash(hash, { replace = false } = {}) {
 function staffHashFor(view, options = {}) {
   const slug = staffViewSlugs[view] || staffViewSlugs.Dashboard;
   if (view !== 'Matters') return `#/staff/${slug}`;
+  const clientId = options.clientId ? encodeURIComponent(options.clientId) : '';
+  if (clientId) return `#/staff/matters/client/${clientId}${options.mode === 'create' ? '/create' : ''}`;
   const matterId = options.matterId ? encodeURIComponent(options.matterId) : '';
   const section = options.section && validMatterSections.has(options.section) ? encodeURIComponent(options.section) : '';
   if (matterId && section) return `#/staff/matters/${matterId}/${section}`;
@@ -125,9 +127,16 @@ function staffHashFor(view, options = {}) {
 }
 
 function parseStaffRoute(hash = window.location.hash) {
-  const [area, slug, matterId, section] = readHashParts(hash);
+  const [area, slug, matterId, section, action] = readHashParts(hash);
   if (area !== 'staff') return null;
   if (slug === 'matters') {
+    if (matterId === 'client' && section) {
+      return {
+        view: 'Matters',
+        clientId: section,
+        mode: action === 'create' ? 'create' : 'view',
+      };
+    }
     return {
       view: 'Matters',
       matterId: matterId || '',
@@ -351,8 +360,8 @@ export default function App() {
   function navigateToView(nextView, options = {}) {
     const safeView = visibleViewSet.has(nextView) ? nextView : 'Dashboard';
     setView(safeView);
-    if (safeView === 'Matters' && (options.matterId || options.section)) {
-      setMatterFocus({ matterId: options.matterId || '', section: options.section || '', ts: Date.now() });
+    if (safeView === 'Matters' && (options.matterId || options.section || options.clientId)) {
+      setMatterFocus({ matterId: options.matterId || '', section: options.section || '', clientId: options.clientId || '', mode: options.mode || '', ts: Date.now() });
     }
     if (safeView === 'Clients' && options.clientId) setClientFocus({ clientId: options.clientId, ts: Date.now() });
     if (safeView === 'Tasks' && options.taskId) setTaskFocus({ taskId: options.taskId, ts: Date.now() });
@@ -370,7 +379,7 @@ export default function App() {
     const safeView = visibleViewSet.has(route.view) ? route.view : 'Dashboard';
     setView(safeView);
     if (safeView === 'Matters') {
-      setMatterFocus({ matterId: route.matterId || '', section: route.section || '', ts: Date.now() });
+      setMatterFocus({ matterId: route.matterId || '', section: route.section || '', clientId: route.clientId || '', mode: route.mode || '', ts: Date.now() });
     }
     if (replace || route.replace || safeView !== route.view) {
       setAppHash(staffHashFor(safeView, safeView === 'Matters' ? route : {}), { replace: true });
