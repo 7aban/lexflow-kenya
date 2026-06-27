@@ -85,9 +85,14 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
     if (mode === 'staff') checkOAuth();
   }, [mode]);
 
-  useEffect(() => {
+  function handleModeChange(nextMode) {
+    if (nextMode === mode) return;
+    setMode(nextMode);
+    setEmail('');
+    setPassword('');
     setError('');
-  }, [mode]);
+    setShowPassword(false);
+  }
 
   async function handleOAuth(provider) {
     setOauthBusy(true);
@@ -200,8 +205,8 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
           <form onSubmit={submit} className="lf-login-card-form" style={styles.loginCardForm}>
             <div style={{ display: 'grid', gap: 14, marginBottom: 22 }}>
               <div style={styles.portalTabs} role="tablist" aria-label="Login type">
-                <button type="button" role="tab" aria-selected={mode === 'staff'} onClick={() => setMode('staff')} className="lf-login-portal-tab" style={{ ...styles.portalTab, ...(mode === 'staff' ? styles.portalTabActive : {}) }}>Staff Login</button>
-                <button type="button" role="tab" aria-selected={mode === 'client'} onClick={() => setMode('client')} className="lf-login-portal-tab" style={{ ...styles.portalTab, ...(mode === 'client' ? styles.portalTabActive : {}) }}>Client Portal</button>
+                <button type="button" role="tab" aria-selected={mode === 'staff'} onClick={() => handleModeChange('staff')} className="lf-login-portal-tab" style={{ ...styles.portalTab, ...(mode === 'staff' ? styles.portalTabActive : {}) }}>Staff Login</button>
+                <button type="button" role="tab" aria-selected={mode === 'client'} onClick={() => handleModeChange('client')} className="lf-login-portal-tab" style={{ ...styles.portalTab, ...(mode === 'client' ? styles.portalTabActive : {}) }}>Client Portal</button>
               </div>
               <h2 style={styles.loginCardTitle}>{modeCopy.title}</h2>
               <p style={{ margin: 0, color: 'var(--lf-card-muted, #6B6B66)', fontSize: 13, lineHeight: 1.5 }}>{modeCopy.hint}</p>
