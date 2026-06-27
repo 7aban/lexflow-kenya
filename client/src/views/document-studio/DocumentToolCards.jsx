@@ -48,17 +48,10 @@ const documentToolCards = [
     description: 'Place a saved visual signature or firm stamp on a matter PDF, then download or save a signed copy.',
   },
   {
-    id: 'tenth-lining',
+    id: 'tenth',
     title: 'Tenth-lining / appellate formatting',
     description: 'Prepare legal-document formatting helpers for appellate practice.',
   },
-];
-
-const workflowPrinciples = [
-  'First outputs will use temporary preview/download before any matter record is created.',
-  'Saving to matter documents will be an explicit later action with audit history.',
-  'Client access will be considered later only where the workflow is appropriate.',
-  'Current matter, document, and client visibility controls remain unchanged.',
 ];
 
 const activeToolNames = new Set(['Merge PDFs', 'Rotate pages', 'Extract pages', 'Split / reorder pages', 'Delete pages', 'Add page numbers / paginate bundle', 'Court bundle prep', 'Images to PDF', 'Sign / stamp PDF', 'Tenth-lining / appellate formatting']);
@@ -78,16 +71,16 @@ export default function DocumentToolCards({ onOpenMerge, onOpenRotate, onOpenExt
   };
 
   return (
-    <>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(230px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
         {documentToolCards.map(tool => {
           const active = activeToolNames.has(tool.title);
           const handler = openHandlers[tool.title];
+          const selected = selectedTool === tool.id;
           return (
-            <div key={tool.title} style={{ border: `1px solid ${active ? theme.blue : theme.line}`, borderRadius: 8, background: '#fff', padding: '14px 16px', display: 'grid', gap: 10, minWidth: 0 }}>
+            <div key={tool.id} style={{ border: `1px solid ${selected ? theme.gold : theme.line}`, borderLeft: `4px solid ${selected ? theme.forest : theme.line}`, borderRadius: 8, background: selected ? theme.goldPale : '#fff', padding: '14px 16px', display: 'grid', gap: 10, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
                 <strong style={{ fontSize: 14, color: theme.ink, lineHeight: 1.35, wordBreak: 'break-word' }}>{tool.title}</strong>
-                <Badge tone={active ? 'green' : 'amber'}>{active ? 'Available' : 'Coming soon'}</Badge>
+                {selected && <Badge tone="green">Selected</Badge>}
               </div>
               <span style={{ fontSize: 13, color: theme.muted, lineHeight: 1.5 }}>{tool.description}</span>
               <button
@@ -99,33 +92,17 @@ export default function DocumentToolCards({ onOpenMerge, onOpenRotate, onOpenExt
                   justifySelf: 'start',
                   fontSize: 12,
                   padding: '5px 12px',
-                  color: active ? 'var(--lf-primary, #1B3A5C)' : theme.muted,
-                  borderColor: active ? theme.blue : theme.line,
+                  color: active ? theme.forest : theme.muted,
+                  borderColor: selected ? theme.gold : active ? theme.forest : theme.line,
                   cursor: active ? 'pointer' : 'not-allowed',
                   opacity: active ? 1 : 0.75,
                 }}
               >
-                {selectedTool === tool.id ? 'Active' : active ? 'Open Tool' : 'Not available yet'}
+                {selected ? 'Continue' : active ? 'Open tool' : 'Not available yet'}
               </button>
             </div>
           );
         })}
       </div>
-
-      <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#F8FAFC', padding: '14px 16px', display: 'grid', gap: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-          <strong style={{ fontSize: 14, color: theme.ink }}>Planned workflow</strong>
-          <Badge tone="blue">Design principle</Badge>
-        </div>
-        <div style={{ display: 'grid', gap: 7 }}>
-          {workflowPrinciples.map(item => (
-            <div key={item} style={{ display: 'grid', gridTemplateColumns: '8px minmax(0, 1fr)', gap: 8, alignItems: 'start', fontSize: 13, color: theme.muted, lineHeight: 1.5 }}>
-              <span style={{ width: 8, height: 8, borderRadius: 999, background: theme.blue, marginTop: 6 }} />
-              <span>{item}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </>
   );
 }

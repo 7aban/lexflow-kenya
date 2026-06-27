@@ -249,6 +249,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
   const [toolsOpen, setToolsOpen] = useState(false);
   const [selectedTool, setSelectedTool] = useState(null);
   const [signingAssetsOpen, setSigningAssetsOpen] = useState(false);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   const [signatureAssets, setSignatureAssets] = useState([]);
   const [signatureAssetsLoading, setSignatureAssetsLoading] = useState(false);
   const [signatureAssetsError, setSignatureAssetsError] = useState(null);
@@ -612,13 +613,8 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
 
   function openTools(toolId) {
     setToolsOpen(true);
-    if (toolId) setSelectedTool(toolId);
+    if (toolId) handleSelectTool(toolId);
     scrollToRef(toolsSectionRef);
-  }
-
-  function openSigningAssets() {
-    setSigningAssetsOpen(true);
-    scrollToRef(signatureSectionRef);
   }
 
   function openMatterDocuments() {
@@ -1547,6 +1543,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
   }
 
   function handleSelectTool(tool) {
+    setToolsOpen(true);
     setSelectedTool(tool);
     if (!matters.length && !mattersLoading) loadMatters();
   }
@@ -1601,7 +1598,6 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
   const selectedStampAssetMessage = selectedStampAssetBlocked ? PDF_SIGNATURE_IMAGE_MESSAGE : '';
   const canStampDownload = !!stampDocumentId && !!stampAssetId && !selectedStampAssetBlocked && !stampLoading;
   const canStampSave = !!stampDocumentId && !!stampAssetId && !!stampMatterId && !selectedStampAssetBlocked && !stampSaveLoading;
-  const commandCardStyle = { ...themedPanelStyle, padding: '14px 16px', display: 'grid', gap: 10, alignContent: 'start', minWidth: 0 };
   const signaturePanelStyle = { ...themedPanelStyle, padding: 14, display: 'grid', gap: 12, minWidth: 0 };
   const signingAssetsSummary = signatureAssetsLoading
     ? 'Loading saved signing assets...'
@@ -1659,41 +1655,30 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
 
   return (
     <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
-      <Card title="What do you want to do?" hint="Choose the existing workspace for the document task.">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
-          <div style={commandCardStyle}>
-            <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Work on matter documents</strong>
-            <span style={{ fontSize: 13, ...mutedPanelTextStyle, lineHeight: 1.5 }}>Upload, organise, request, and manage documents inside a matter.</span>
-            <button type="button" style={{ ...styles.ghostButton, justifySelf: 'start', fontSize: 12, padding: '5px 12px' }} onClick={openMatterDocuments}>Open matter documents</button>
-          </div>
-          <div style={commandCardStyle}>
-            <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Create a court bundle</strong>
-            <span style={{ fontSize: 13, ...mutedPanelTextStyle, lineHeight: 1.5 }}>Build indexed, paginated court bundles from matter PDFs.</span>
-            <button type="button" style={{ ...styles.ghostButton, justifySelf: 'start', fontSize: 12, padding: '5px 12px' }} onClick={() => openTools('bundle')}>Open court bundle tool</button>
-          </div>
-          <div style={commandCardStyle}>
-            <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>PDF tools</strong>
-            <span style={{ fontSize: 13, ...mutedPanelTextStyle, lineHeight: 1.5 }}>Merge, split, rotate, extract, delete pages, paginate, and convert images to PDF.</span>
-            <button type="button" style={{ ...styles.ghostButton, justifySelf: 'start', fontSize: 12, padding: '5px 12px' }} onClick={() => openTools('merge')}>Open PDF tools</button>
-          </div>
-          <div style={commandCardStyle}>
-            <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Signatures and stamps</strong>
-            <span style={{ fontSize: 13, ...mutedPanelTextStyle, lineHeight: 1.5 }}>Upload reusable signature or stamp images, then place them on matter PDFs.</span>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button type="button" style={{ ...styles.primaryButton, justifySelf: 'start', fontSize: 12, padding: '5px 12px' }} onClick={() => openTools('stamp')}>Sign a PDF</button>
-              <button type="button" style={{ ...styles.ghostButton, justifySelf: 'start', fontSize: 12, padding: '5px 12px' }} onClick={openSigningAssets}>Manage assets</button>
-            </div>
-          </div>
-          <div style={commandCardStyle}>
-            <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Templates</strong>
-            <span style={{ fontSize: 13, ...mutedPanelTextStyle, lineHeight: 1.5 }}>Use existing document templates and preview them against a selected matter.</span>
-            <button type="button" style={{ ...styles.ghostButton, justifySelf: 'start', fontSize: 12, padding: '5px 12px' }} onClick={() => scrollToRef(templatesSectionRef)}>Open templates</button>
+      <Card title="Document Studio" hint="Choose one tool, complete the document task, then download or save the result.">
+        <div style={{ display: 'grid', gap: 14, minWidth: 0 }}>
+          <DocumentToolCards
+            onOpenMerge={() => openTools('merge')}
+            onOpenRotate={() => openTools('rotate')}
+            onOpenExtract={() => openTools('extract')}
+            onOpenSplit={() => openTools('split')}
+            onOpenDelete={() => openTools('delete')}
+            onOpenPaginate={() => openTools('paginate')}
+            onOpenBundle={() => openTools('bundle')}
+            onOpenImages={() => openTools('images')}
+            onOpenStamp={() => openTools('stamp')}
+            onOpenTenth={() => openTools('tenth')}
+            selectedTool={selectedTool}
+          />
+          <div style={{ borderTop: `1px solid ${theme.line}`, paddingTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12, ...mutedPanelTextStyle, lineHeight: 1.5 }}>Need to upload, organise, or request files for a case? Use the matter workspace.</span>
+            <button type="button" style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 12px' }} onClick={openMatterDocuments}>Open Matter Documents</button>
           </div>
         </div>
       </Card>
 
-      <div ref={signatureSectionRef} style={{ minWidth: 0 }}>
-      <Card title="Signing assets" hint="Reusable signature and stamp images are available when signing a PDF.">
+      <div ref={signatureSectionRef} style={{ minWidth: 0, order: 3 }}>
+      <Card title="More document tools" hint="Supporting assets and administration stay out of the active workflow until needed.">
         <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
           <div style={{ ...themedPanelStyle, padding: '12px 14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))', gap: 12, alignItems: 'center', minWidth: 0 }}>
             <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
@@ -1752,8 +1737,22 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
       </Card>
       </div>
 
-      <div ref={templatesSectionRef} style={{ minWidth: 0 }}>
-      <Card title="Active Templates" hint={hint}>
+      <div ref={templatesSectionRef} style={{ minWidth: 0, order: 4 }}>
+      <Card title="Manage templates" hint="Preview existing document templates only when the task calls for one.">
+        <button
+          type="button"
+          onClick={() => setTemplatesOpen(open => !open)}
+          aria-expanded={templatesOpen}
+          aria-controls="document-templates-panel"
+          style={{ ...styles.ghostButton, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, width: '100%', textAlign: 'left', minHeight: 40, marginBottom: templatesOpen ? 14 : 0 }}
+        >
+          <span style={{ display: 'grid', gap: 2, minWidth: 0 }}>
+            <span style={{ fontWeight: 600, fontSize: 13, color: theme.ink }}>{templatesOpen ? 'Hide templates ▲' : 'Manage templates ▼'}</span>
+            <span style={{ fontSize: 12, color: theme.muted, lineHeight: 1.45 }}>{hint}. Select a template to preview it against a matter.</span>
+          </span>
+        </button>
+        {templatesOpen && (
+        <div id="document-templates-panel" style={{ display: 'grid', gap: 14, minWidth: 0 }}>
         {templates.length === 0 ? (
           <Empty title="No templates configured" text="Contact your administrator." />
         ) : (
@@ -1800,6 +1799,8 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
           onClose={closePreview}
           panelRef={panelRef}
         />
+        </div>
+        )}
       </Card>
       </div>
 
@@ -1842,9 +1843,13 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
         </div>
       </Card>}
 
-      <div ref={toolsSectionRef} style={{ minWidth: 0 }}>
-      <Card title="Document Tools" hint="Prepare, combine, paginate, and format court-ready documents">
+      <div ref={toolsSectionRef} style={{ minWidth: 0, order: 1 }}>
+      <Card title="Selected workflow" hint={selectedTool ? 'Work through the steps below, then download or save the result.' : 'Choose a tool above to begin.'}>
         <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
+          {!selectedTool && (
+            <Empty title="Choose a document tool above" text="Select a tool to open its working area. For matter-specific uploads and document management, open Matter Documents." />
+          )}
+          {selectedTool && (
           <button
             type="button"
             onClick={() => setToolsOpen(open => !open)}
@@ -1853,26 +1858,19 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             style={{ ...styles.ghostButton, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, width: '100%', textAlign: 'left', minHeight: 40 }}
           >
             <span style={{ display: 'grid', gap: 2, minWidth: 0 }}>
-              <span style={{ fontWeight: 600, fontSize: 13, color: theme.ink }}>{toolsOpen ? 'Hide document tools ▲' : 'Show document tools ▼'}</span>
-              <span style={{ fontSize: 12, color: theme.muted, lineHeight: 1.45 }}>PDF merge, rotate, extract, delete, paginate, and court bundle tools are inside.</span>
+              <span style={{ fontWeight: 600, fontSize: 13, color: theme.ink }}>{toolsOpen ? 'Hide selected workflow ▲' : 'Resume selected workflow ▼'}</span>
+              <span style={{ fontSize: 12, color: theme.muted, lineHeight: 1.45 }}>Only the selected tool is shown here. Choose another tool from the launcher above to switch.</span>
             </span>
           </button>
+          )}
 
-          {toolsOpen && (
+          {toolsOpen && selectedTool && (
           <div id="document-tools-panel" style={{ display: 'grid', gap: 16, minWidth: 0 }}>
-            <DocumentToolCards
-              onOpenMerge={() => handleSelectTool('merge')}
-              onOpenRotate={() => handleSelectTool('rotate')}
-              onOpenExtract={() => handleSelectTool('extract')}
-              onOpenSplit={() => handleSelectTool('split')}
-              onOpenDelete={() => handleSelectTool('delete')}
-              onOpenPaginate={() => handleSelectTool('paginate')}
-               onOpenBundle={() => handleSelectTool('bundle')}
-               onOpenImages={() => handleSelectTool('images')}
-               onOpenStamp={() => handleSelectTool('stamp')}
-               onOpenTenth={() => handleSelectTool('tenth')}
-               selectedTool={selectedTool}
-             />
+            <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: theme.goldPale, padding: '10px 12px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(150px, 100%), 1fr))', gap: 8, minWidth: 0 }}>
+              {['1. Choose document', '2. Apply action', '3. Review guidance', '4. Download or save'].map(step => (
+                <span key={step} style={{ fontSize: 12, color: theme.forest, fontWeight: 600, lineHeight: 1.4 }}>{step}</span>
+              ))}
+            </div>
 
            {selectedTool === 'merge' && (
           <div
