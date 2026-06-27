@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, createFolder, deleteFolder, downloadWithAuth, fileToDataUrl, generateDocumentFromTemplate, getMatterDocuments, getMatterFolders, listDocumentTemplates, moveDocument, updateDocument, updateFolder } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
-import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, Skeleton, Table } from './ui.jsx';
+import { ActionGroup, Badge, Card, ConfirmModal, Field, Skeleton, Table } from './ui.jsx';
 
 function folderIcon(folder) {
   if (folder.id === 'all') return 'ALL';
@@ -41,7 +41,7 @@ function documentLabel(doc) {
   return doc.displayName || doc.friendlyName || doc.name || 'Document';
 }
 
-export default function MatterDocuments({ matterId, clientMode = false, canManage = false, notify }) {
+export default function MatterDocuments({ matterId, clientMode = false, canManage = false, notify, activeAction = '', onChooseAction, onOpenDocumentStudio }) {
   const [folders, setFolders] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [selectedFolder, setSelectedFolder] = useState('all');
@@ -278,7 +278,8 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     const sel = templates.find(t => String(t.id) === String(selectedTemplateId));
     return sel ? [sel, ...filteredTemplates] : filteredTemplates;
   }, [filteredTemplates, templates, selectedTemplateId, templateSearch]);
-  const showUploadControls = clientMode || canManage;
+  const showUploadControls = clientMode || (canManage && activeAction === 'upload');
+  const showFolderControls = clientMode || activeAction === 'manage';
   const documentCardHint = clientMode
     ? 'Client uploads are placed in Client Uploads automatically.'
     : canManage ? 'Upload, move and manage matter documents.' : 'View matter documents.';
@@ -294,9 +295,11 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       .lf-doc-upload-area, .lf-doc-generate-area { background: #FAF8F4; border: 1px solid #DDD8CE; border-radius: 8px; padding: 14px 16px; margin-bottom: 14px; }
       .lf-doc-upload-area { border-style: dashed; border-color: #C9BFAF; box-shadow: 0 1px 2px rgba(17,34,25,.04); }
       .lf-doc-upload-area:focus-within { border-color: #C5973C; box-shadow: 0 0 0 3px rgba(197,151,60,.14); }
+      .lf-doc-secondary-tools > summary { cursor: pointer; color: #234936; font-size: 13px; font-weight: 700; padding: 11px 0; }
+      .lf-doc-secondary-tools[open] > summary { margin-bottom: 8px; }
     `}</style>
-    <div className="lf-doc-grid" style={{ display: 'grid', gridTemplateColumns: '220px minmax(0,1fr)', gap: 16 }}>
-      <Card title="Folders" hint="Matter document categories">
+    <div className="lf-doc-grid" style={{ display: 'grid', gridTemplateColumns: showFolderControls ? '220px minmax(0,1fr)' : 'minmax(0,1fr)', gap: 16 }}>
+      {showFolderControls && <Card title="Folders" hint="Filter and organise matter files">
         <div style={{ display: 'grid', gap: 6 }}>
           {folders.map(folder => (
             <div key={folder.id} style={{ display: 'grid', gridTemplateColumns: canManage && !folder.virtual ? '1fr auto' : '1fr', gap: 6, alignItems: 'center' }}>
@@ -319,9 +322,9 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
             <button style={styles.ghostButton}>+ New Folder</button>
           </form>
         )}
-      </Card>
+      </Card>}
 
-      <Card title={selectedName} hint={documentCardHint}>
+      <Card title={selectedFolder === 'all' ? 'Matter files' : selectedName} hint={documentCardHint}>
         {showUploadControls && (
           <div className="lf-doc-upload-area">
             <div style={{ display: 'grid', gap: 5, marginBottom: 12 }}>
@@ -364,10 +367,11 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
             </div>
           </div>
         )}
-        {showGenerateControls && (
-          <div style={{ background: theme.amberBg, border: '1px solid #DDD8CE', borderLeft: `3px solid ${theme.amber}`, borderRadius: 8, padding: '12px 14px', marginBottom: 12 }}>
+        {showGenerateControls && showFolderControls && (
+          <details className="lf-doc-secondary-tools" style={{ background: theme.amberBg, border: '1px solid #DDD8CE', borderLeft: `3px solid ${theme.amber}`, borderRadius: 8, padding: '0 14px', marginBottom: 12 }}>
+            <summary>Generate a draft from a template</summary>
+          <div style={{ paddingBottom: 12 }}>
             <div style={{ display: 'grid', gap: 6 }}>
-              <strong style={{ fontSize: 13, color: theme.ink }}>Generate document</strong>
               <span style={{ fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>Choose a template, review the matter details, then generate a draft document.</span>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '2px 0' }}>
                 {['1. Pick template', '2. Confirm matter details', '3. Generate and review'].map(step => (
@@ -377,20 +381,8 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
               {!templatesLoading && !templates.length && (
                 <span style={{ fontSize: 12, color: theme.muted }}>Templates will appear here once created.</span>
               )}
-              <button
-                type="button"
-                style={{ ...styles.ghostButton, alignSelf: 'start', fontSize: 12, padding: '4px 10px', marginTop: 2 }}
-                onClick={() => {
-                  const el = document.querySelector('.lf-doc-generate-area');
-                  if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); el.querySelector('select')?.focus(); }
-                }}
-              >
-                Go to Generate Draft ↓
-              </button>
             </div>
           </div>
-        )}
-        {showGenerateControls && (
           <div className="lf-doc-generate-area">
             <form onSubmit={generateDraft} style={{ display: 'grid', gap: 8 }}>
               {templates.length > 0 && (
@@ -434,6 +426,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
               {generationWarning && <small style={{ color: theme.amber }}>{generationWarning}</small>}
             </form>
           </div>
+          </details>
         )}
         {loading ? <Skeleton rows={2} /> : documents.length ? (
           <div className={canManage ? "lf-doc-cards-staff" : "lf-doc-cards-client"}>
@@ -470,7 +463,20 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
           />
           </div>
           </div>
-        ) : <Empty title="No documents have been added to this matter yet." text="Documents uploaded or moved here will appear in this folder." />}
+        ) : (
+          <div style={{ ...styles.empty, alignItems: 'flex-start', textAlign: 'left' }}>
+            <div style={styles.emptyIcon}>LF</div>
+            <strong>No documents have been added to this matter yet.</strong>
+            <span>Upload a file, request one from the client, or use Document Studio. Documents saved here stay linked to this matter.</span>
+            {!clientMode && canManage && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
+                <button type="button" style={styles.primaryButton} onClick={() => onChooseAction?.('upload')}>Upload document</button>
+                <button type="button" style={styles.ghostButton} onClick={() => onChooseAction?.('request')}>Request document</button>
+                <button type="button" style={styles.ghostButton} onClick={onOpenDocumentStudio}>Open Document Studio</button>
+              </div>
+            )}
+          </div>
+        )}
       </Card>
       <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
     </div>

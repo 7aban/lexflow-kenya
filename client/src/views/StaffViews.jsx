@@ -2682,6 +2682,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
   const [matterTaskFormOpen, setMatterTaskFormOpen] = useState(false);
   const [matterTimeFormOpen, setMatterTimeFormOpen] = useState(false);
   const [courtDateFormOpen, setCourtDateFormOpen] = useState(false);
+  const [documentWorkspaceAction, setDocumentWorkspaceAction] = useState('');
   const [invoiceFormOpen, setInvoiceFormOpen] = useState(false);
   const [noteFormOpen, setNoteFormOpen] = useState(false);
   const emptyMatterForm = { clientId: '', title: '', practiceArea: '', stage: 'Intake / Initial Consultation', assignedTo: '', paralegal: '', description: '', court: '', judge: '', caseNo: '', opposingCounsel: '', priority: 'Medium', solDate: '', billingType: 'hourly', billingRate: '', fixedFee: '', retainerBalance: 0, remindersEnabled: 'firm_default', courtRemindersEnabled: 'firm_default', invoiceRemindersEnabled: 'firm_default' };
@@ -2745,6 +2746,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
   );
 
   useEffect(() => { if (selected?.id) { setSelectedId(selected.id); loadDetail(selected.id); } else { setDetail(null); setSuggestions([]); } }, [selected?.id]);
+  useEffect(() => { setDocumentWorkspaceAction(''); }, [detail?.id]);
   useEffect(() => { if (detail && isAdmin) getUsers(true).then(users => { setAdvocates((users || []).filter(u => u.role === 'advocate' && u.isActive)); setReassignTo(detail.assignedTo || ''); }).catch(() => {}); }, [detail?.id]);
   useEffect(() => { if (CHECKLISTS_UI_ENABLED && ['admin', 'advocate', 'assistant'].includes(userRole)) loadChecklistTemplates(); }, [userRole]);
   useEffect(() => {
@@ -2941,6 +2943,19 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
     }
     notify?.({ type: 'info', message: 'Opening Document Studio to sign this PDF.' });
     onNavigate?.('Document Studio');
+  }
+  function openDocumentStudio() {
+    notify?.({ type: 'info', message: 'Opening Document Studio for advanced PDF tools.' });
+    onNavigate?.('Document Studio');
+  }
+  function chooseDocumentWorkspaceAction(action) {
+    setDocumentWorkspaceAction(action);
+    window.setTimeout(() => {
+      const target = document.getElementById(`matter-document-action-${action}`);
+      target?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      if (action === 'upload') target?.querySelector('input[type="file"]')?.focus();
+      if (action === 'request') target?.querySelector('button')?.focus();
+    }, 0);
   }
   async function archiveMatter() { if (!detail) return; try { await api(`/matters/${detail.id}/status`, { method: 'PATCH', body: { stage: 'Closed' } }); notify({ type: 'success', message: 'Matter archived.' }); await loadDetail(detail.id); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
   async function deleteMatterRecord() { if (!detail) return; try { const id = detail.id; await api(`/matters/${id}`, { method: 'DELETE' }); notify({ type: 'success', message: 'Matter deleted.' }); setDetail(null); setSelectedId(''); await reload(); } catch (err) { notify({ type: 'danger', message: err.message }); } }
@@ -3214,13 +3229,93 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
               {cockpitSection === 'documents' && (
                 <>
                   <div id="matter-section-documents" style={{ minWidth: 0, maxWidth: '100%' }}>
-                    <Sub title="Documents">
-                      {canManage && (
-                        <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#FAFAF9', padding: 12, display: 'grid', gap: 10, marginBottom: 12, minWidth: 0 }}>
+                    <Sub title="Matter documents">
+                      <style>{`
+                        .lf-matter-document-actions {
+                          display: grid;
+                          grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                          gap: 10px;
+                        }
+                        .lf-matter-document-action {
+                          min-width: 0;
+                          min-height: 112px;
+                          text-align: left;
+                        }
+                        @media (max-width: 520px) {
+                          .lf-matter-document-actions { grid-template-columns: 1fr; }
+                          .lf-matter-document-action { min-height: 0; }
+                        }
+                      `}</style>
+                      <div style={{ display: 'grid', gap: 4, marginBottom: 12 }}>
+                        <strong style={{ color: theme.ink, fontSize: 15 }}>Files, requests, and signing for this matter</strong>
+                        <span style={{ color: theme.muted, fontSize: 12, lineHeight: 1.5 }}>Choose a task to reveal its controls. Matter files remain available below.</span>
+                        <span style={{ color: theme.muted, fontSize: 12, lineHeight: 1.5 }}>Open Document Studio for advanced PDF tools.</span>
+                      </div>
+                      <div className="lf-matter-document-actions" aria-label="Matter document actions" style={{ marginBottom: 14 }}>
+                        {(canManage ? [
+                          { id: 'upload', label: 'Upload document', description: 'Add a file to this matter.', icon: IconUpload },
+                          { id: 'manage', label: 'Manage files', description: 'Review, rename, organise, or download matter files.', icon: IconPaperclip },
+                          { id: 'sign', label: 'Sign or send', description: 'Prepare a document for signature, sharing, or client action.', icon: IconSignature },
+                          { id: 'request', label: 'Request document', description: 'Ask the client to upload a specific document.', icon: IconMail },
+                        ] : [
+                          { id: 'manage', label: 'Manage files', description: 'Review and download matter files.', icon: IconPaperclip },
+                        ]).map(action => {
+                          const ActionIcon = action.icon;
+                          const active = documentWorkspaceAction === action.id;
+                          return (
+                            <button
+                              key={action.id}
+                              type="button"
+                              className="lf-matter-document-action"
+                              aria-pressed={active}
+                              onClick={() => chooseDocumentWorkspaceAction(action.id)}
+                              style={{
+                                border: `1px solid ${active ? theme.gold : '#DDD8CE'}`,
+                                borderTop: `3px solid ${active ? theme.gold : '#234936'}`,
+                                borderRadius: 9,
+                                background: active ? theme.goldPale : '#FFFEFC',
+                                padding: '12px 13px',
+                                cursor: 'pointer',
+                                display: 'grid',
+                                alignContent: 'start',
+                                gap: 7,
+                                color: theme.ink,
+                              }}
+                            >
+                              <ActionIcon size={19} stroke={1.7} color={active ? theme.goldDark : '#234936'} />
+                              <strong style={{ fontSize: 13 }}>{action.label}</strong>
+                              <span style={{ fontSize: 11, lineHeight: 1.45, color: theme.muted }}>{action.description}</span>
+                            </button>
+                          );
+                        })}
+                        <button
+                          type="button"
+                          className="lf-matter-document-action"
+                          onClick={openDocumentStudio}
+                          style={{
+                            border: '1px solid #DDD8CE',
+                            borderTop: '3px solid #C5973C',
+                            borderRadius: 9,
+                            background: '#FFFEFC',
+                            padding: '12px 13px',
+                            cursor: 'pointer',
+                            display: 'grid',
+                            alignContent: 'start',
+                            gap: 7,
+                            color: theme.ink,
+                          }}
+                        >
+                          <IconExternalLink size={19} stroke={1.7} color={theme.goldDark} />
+                          <strong style={{ fontSize: 13 }}>Advanced PDF tools</strong>
+                          <span style={{ fontSize: 11, lineHeight: 1.45, color: theme.muted }}>Open Document Studio for signing, stamping, bundles, and PDF tools.</span>
+                        </button>
+                      </div>
+                      {canManage && documentWorkspaceAction === 'sign' && (
+                        <div id="matter-document-action-sign" style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#FAFAF9', padding: 12, display: 'grid', gap: 10, marginBottom: 12, minWidth: 0 }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
                             <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
-                              <strong style={{ fontSize: 13, color: theme.ink }}>Sign a PDF</strong>
-                              <span style={{ fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>Choose a matter PDF and place a visual signature or firm stamp. The original file stays unchanged.</span>
+                              <strong style={{ fontSize: 13, color: theme.ink }}>Sign or share a matter document</strong>
+                              <span style={{ fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>Choose a PDF to sign or stamp in Document Studio. To share a file, use its Client access control in Matter files below. The original stays unchanged.</span>
                             </div>
                             <Badge tone="blue">{matterPdfDocuments.length} PDF{matterPdfDocuments.length === 1 ? '' : 's'}</Badge>
                           </div>
@@ -3247,10 +3342,25 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
                           )}
                         </div>
                       )}
-                      <MatterDocuments matterId={detail.id} canManage={canManage} notify={notify} />
+                      <div id={['upload', 'manage'].includes(documentWorkspaceAction) ? `matter-document-action-${documentWorkspaceAction}` : undefined}>
+                        <MatterDocuments
+                          matterId={detail.id}
+                          canManage={canManage}
+                          notify={notify}
+                          activeAction={documentWorkspaceAction}
+                          onChooseAction={chooseDocumentWorkspaceAction}
+                          onOpenDocumentStudio={openDocumentStudio}
+                        />
+                      </div>
                     </Sub>
                   </div>
-                  <div id="matter-section-document-requests" style={{ minWidth: 0, maxWidth: '100%' }}><Sub title="Document requests"><DocumentRequestsPanel matterId={detail.id} canManage={canManage} notify={notify} downloadWithAuth={downloadWithAuth} /></Sub></div>
+                  {documentWorkspaceAction === 'request' && (
+                    <div id="matter-document-action-request" style={{ minWidth: 0, maxWidth: '100%' }}>
+                      <Sub title="Document requests">
+                        <DocumentRequestsPanel matterId={detail.id} canManage={canManage} notify={notify} downloadWithAuth={downloadWithAuth} />
+                      </Sub>
+                    </div>
+                  )}
                 </>
               )}
 
