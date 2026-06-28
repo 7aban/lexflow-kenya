@@ -7636,7 +7636,7 @@ function AssistantSuggestions({ suggestions, hints = [] }) {
     <div style={styles.assistantPanel}>
       <div style={styles.assistantIntro}>
         <strong>Matter Assistant</strong>
-        <span>Rule-based prompts drawn from tasks, billing, documents, notes, and upcoming court dates.</span>
+        <span>Review before acting. No deadlines, tasks, or notes are created automatically.</span>
       </div>
       {!hasContent ? (
         <div style={styles.suggestionList}>
@@ -7773,6 +7773,37 @@ function MatterCourtPrepCard({ detail, onSectionNav }) {
 
 const hearingPrepCategories = ['general', 'document', 'witness', 'authority', 'submission', 'client', 'filing'];
 const hearingPrepLabels = { general: 'General', document: 'Documents', witness: 'Witnesses', authority: 'Authorities', submission: 'Submissions', client: 'Client', filing: 'Filing' };
+
+function MatterNotePreview({ note }) {
+  const [open, setOpen] = useState(false);
+  const content = String(note?.content || '');
+  const compactContent = content.replace(/\s+/g, ' ').trim();
+  const isLong = content.length > 220 || content.split(/\r?\n/).length > 3;
+  const preview = compactContent.length > 180 ? `${compactContent.slice(0, 180).trimEnd()}…` : compactContent;
+
+  if (!isLong) {
+    return <span style={{ fontSize: 12, color: theme.ink, overflowWrap: 'anywhere' }}>{content}</span>;
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 6, minWidth: 0 }}>
+      <span style={{ fontSize: 12, color: theme.ink, overflowWrap: 'anywhere' }}>{preview}</span>
+      {open && (
+        <div style={{ fontSize: 12, color: theme.ink, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+          {content}
+        </div>
+      )}
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(value => !value)}
+        style={{ ...styles.ghostButton, justifySelf: 'start', fontSize: 12, padding: '4px 9px' }}
+      >
+        {open ? 'Hide full note' : 'Show full note'}
+      </button>
+    </div>
+  );
+}
 
 function HearingBriefCard({ detail, canManage = false, notify, onChanged, onSectionNav }) {
   const [prepForm, setPrepForm] = useState({ title: '', category: 'general', notes: '' });
@@ -7952,7 +7983,7 @@ function HearingBriefCard({ detail, canManage = false, notify, onChanged, onSect
       <div style={{ display: 'grid', gap: 4 }}>
         <span style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: theme.muted }}>Recent notes</span>
         {recentNotes.length ? recentNotes.map((n, i) => (
-          <span key={n.id || i} style={{ fontSize: 12, color: theme.ink }}>{n.content}</span>
+          <MatterNotePreview key={n.id || i} note={n} />
         )) : <span style={emptyStyle}>No notes recorded.</span>}
       </div>
     </section>
@@ -8061,7 +8092,7 @@ function MatterNextActionHints({ hints = [] }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <div style={{ display: 'grid', gap: 2 }}>
           <strong style={{ fontSize: 13 }}>Next-Action Hints</strong>
-          <span style={{ color: theme.muted, fontSize: 12 }}>Rule-based from current matter detail only.</span>
+          <span style={{ color: theme.muted, fontSize: 12 }}>Read-only guidance from matter data.</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <Badge tone="blue">{visibleHints.length} shown</Badge>
@@ -8079,7 +8110,7 @@ function MatterNextActionHints({ hints = [] }) {
       <div id={hintsBodyId}>
         {!hintsOpen ? (
           <div style={{ border: `1px dashed ${theme.line}`, borderRadius: 8, padding: 12, color: theme.muted, fontSize: 13 }}>
-            {visibleHints.length ? 'Review next-action hints when you need rule-based prompts from current matter signals.' : 'Matter appears current from available signals.'}
+            {visibleHints.length ? 'Open to review the next actions indicated by current matter signals.' : 'Matter appears current from available signals.'}
           </div>
         ) : visibleHints.length ? (
           <div style={{ display: 'grid', gap: 8 }}>
@@ -8180,7 +8211,7 @@ function MatterCommandSummary({ detail, nextActionHints = [] }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
         <div style={{ display: 'grid', gap: 2 }}>
           <strong style={{ fontSize: 13 }}>Matter Command Summary</strong>
-          <span style={{ color: theme.muted, fontSize: 12 }}>Read-only snapshot from current matter data.</span>
+          <span style={{ color: theme.muted, fontSize: 12 }}>Current matter snapshot.</span>
         </div>
         <button
           type="button"
