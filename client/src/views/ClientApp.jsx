@@ -600,7 +600,7 @@ export default function ClientApp({ user, firm, logout, notify, toast, setToast 
             <div style={{ minWidth: 0 }}>
               <div style={styles.eyebrow}>{firmName}</div>
               <h1 style={styles.title}>{view}</h1>
-              <p style={styles.subtitle}>Your secure matter portal for documents, court dates, invoices and firm notices.</p>
+              <p style={styles.subtitle}>Your secure client portal.</p>
             </div>
           </div>
           <div className="lf-top-actions lf-client-desktop-actions" style={styles.topActions}>
@@ -656,7 +656,6 @@ function ClientDashboard({ data, stats, user, avatarUrl, selectMatter, onNavigat
         <div style={{ minWidth: 0 }}>
           <div style={styles.heroKicker}>Client workspace</div>
           <h2 style={{ color: '#fff', margin: '0 0 6px', lineHeight: 1.15 }}>Welcome, <span className="lf-client-welcome-name">{identityName}</span></h2>
-          <p style={{ color: 'rgba(255,255,255,.82)', margin: 0 }}>Track active files, court appearances, invoices and documents shared by the firm.</p>
         </div>
         <div style={{ ...styles.heroFigure, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, minWidth: 0, fontSize: 14 }}>
           <AvatarCircle src={avatarUrl} name={identityName} size={46} />
@@ -710,10 +709,9 @@ function ClientDashboard({ data, stats, user, avatarUrl, selectMatter, onNavigat
       </div>
       <section style={{ background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 10, padding: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-          <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>More activity & updates</h3>
-          <button type="button" aria-expanded={activityOpen} onClick={() => setActivityOpen(open => !open)} style={{ ...styles.ghostButton, fontSize: 12, padding: '4px 10px' }}>{activityOpen ? 'Hide' : 'Show'}</button>
+          <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Recent activity</h3>
+          <button type="button" aria-expanded={activityOpen} onClick={() => setActivityOpen(open => !open)} style={{ ...styles.ghostButton, fontSize: 12, padding: '4px 10px' }}>{activityOpen ? 'Hide recent activity' : 'Show recent activity'}</button>
         </div>
-        {!activityOpen && <p style={{ margin: '6px 0 0', fontSize: 12, color: '#6B7280' }}>Recent activity and update summaries are tucked away to keep this page focused. Select Show to view them.</p>}
       </section>
       {activityOpen && (
         <>
@@ -1144,9 +1142,8 @@ function ClientMatterDetail({ matters, selected, setSelectedId, docs, invoices, 
           </form>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 14 }}>
             <h4 style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>Payment history</h4>
-            <button type="button" aria-expanded={paymentHistoryOpen} onClick={() => setPaymentHistoryOpen(open => !open)} style={{ ...styles.ghostButton, fontSize: 12, padding: '4px 10px' }}>{paymentHistoryOpen ? 'Hide' : 'Show'}</button>
+            <button type="button" aria-expanded={paymentHistoryOpen} onClick={() => setPaymentHistoryOpen(open => !open)} style={{ ...styles.ghostButton, fontSize: 12, padding: '4px 10px' }}>{paymentHistoryOpen ? 'Hide payment history' : 'Show payment history'}</button>
           </div>
-          {!paymentHistoryOpen && <p style={{ margin: '6px 0 0', fontSize: 12, color: '#6B7280' }}>Receipts and proof review history are tucked away until needed. Select Show to view them.</p>}
           {paymentHistoryOpen && (
             <>
           <div className="ux2-client-mobile-stack" aria-label="Payments recorded for this matter" style={{ marginTop: 10 }}>
