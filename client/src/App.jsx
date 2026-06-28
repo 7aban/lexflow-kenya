@@ -731,7 +731,7 @@ export default function App() {
     'Firm Settings': 'Client-ready branding, invoice identity and contact details.',
     Users: 'Role-based access for advocates, assistants and administrators.',
     HR: 'Admin-only staff HR profile records.',
-    'Connected Accounts': 'Authorize future Google Workspace and Microsoft 365 integrations.',
+    'Connected Accounts': 'Review provider connections and imported account metadata.',
     Invitations: 'Secure client portal onboarding links and invitation status.',
     'Audit Log': 'A secure activity trail for important changes and accountability.',
     'Structured Audit': 'Structured event trail for security, access, and operational auditing.',

@@ -66,8 +66,6 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
   const [oauthBusy, setOauthBusy] = useState(false);
   const [oauthEnabled, setOauthEnabled] = useState(false);
   const firmName = firm?.displayName || firm?.firmName || firm?.appName || firm?.name || defaultFirmSettings.name;
-  const isDev = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.DEV;
-
   useEffect(() => {
     async function checkOAuth() {
       try {
@@ -131,7 +129,7 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
 
   const modeCopy = mode === 'client'
     ? { title: 'Client Portal', hint: 'Access your case files, notices, invoices and shared documents.', placeholder: 'client@example.com', button: 'Enter client portal' }
-    : { title: 'Welcome back', hint: 'Enter your advocate credentials to manage the firm workspace.', placeholder: 'advocate@yourfirm.co.ke', button: 'Sign in securely' };
+    : { title: 'Welcome back', hint: 'Sign in to your LexFlow workspace using your firm-issued credentials.', placeholder: 'advocate@yourfirm.co.ke', button: 'Sign in securely' };
 
   const resolvedLoginTheme = resolveReadableTheme(firm?.theme || {
     primaryColor: firm?.primaryColor || defaultFirmSettings.primaryColor,
@@ -196,7 +194,7 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
               </div>
               <div style={styles.loginTrustItem}>
                 <span style={styles.loginTrustIcon}><IconServer size={15} stroke={1.8} /></span>
-                <span>Resilient deployment</span>
+                <span>Secure workspace access</span>
               </div>
             </div>
           </div>
@@ -258,9 +256,8 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
               {oauthEnabled ? (
                 <div style={{ fontSize: 11, color: 'var(--lf-card-muted, #6B6B66)', textAlign: 'center', marginTop: 8 }}>For authorised firm users only.</div>
               ) : (
-                <div style={{ fontSize: 11, color: 'var(--lf-card-muted, #6B6B66)', textAlign: 'center', marginTop: 8, lineHeight: 1.5 }}>OAuth is not configured for this local pilot. Use email and password.</div>
+                <div style={{ fontSize: 11, color: 'var(--lf-card-muted, #6B6B66)', textAlign: 'center', marginTop: 8, lineHeight: 1.5 }}>Single sign-on is currently unavailable. Password sign-in remains available.</div>
               )}
-              {isDev && <div style={styles.loginDemoHint}>Use the seeded demo credentials from the project README / seed output.</div>}
             </div>
           </form>
         </div>

@@ -1043,11 +1043,8 @@ export function ConnectedAccounts({ notify, onPasswordChanged }) {
   return (
     <div style={styles.pageStack}>
       <ChangePasswordCard notify={notify} onPasswordChanged={onPasswordChanged} />
-      <Card title="Connected Accounts" hint="Authorize external provider access for future integrations">
+      <Card title="Connected Accounts" hint="Review provider connections and account metadata">
         <div style={{ display: 'grid', gap: 12 }}>
-          <div style={{ ...styles.alert, padding: 10, borderRadius: 6 }}>
-            Demo metadata only; no provider tokens are stored for demo accounts. Email bodies and attachments are not imported.
-          </div>
           <div style={{ ...styles.alert, padding: 10, borderRadius: 6 }}>
             Metadata only. Email bodies and attachments are not imported. Calendar events are not created, edited, or deleted.
           </div>
@@ -1056,7 +1053,7 @@ export function ConnectedAccounts({ notify, onPasswordChanged }) {
           </div>
           {oauthAvailability && !oauthAvailability.google && !oauthAvailability.microsoft ? (
             <div style={{ ...styles.alert, padding: 10, borderRadius: 6 }}>
-              OAuth is not configured for this local pilot. Use your email and password to sign in — connected accounts are optional and can be set up later.
+              Provider connections are not configured. Contact the firm administrator to configure Google or Microsoft.
             </div>
           ) : (
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -1079,7 +1076,7 @@ export function ConnectedAccounts({ notify, onPasswordChanged }) {
           ? <div style={styles.mutedText}>Loading connected accounts...</div>
           : accounts.length
             ? <Table columns={['Provider', 'Email', 'Status', 'Last sync', 'Actions']} rows={rows} />
-            : <Empty title="No connected accounts." text="Connect Google or Microsoft when provider authorization is ready." />}
+            : <Empty title="No provider account is connected." text="Connect an available provider above, or contact the firm administrator to configure one." />}
       </Card>
       <Card title="Work Email Metadata" hint={`${messages.length} recent metadata message${messages.length === 1 ? '' : 's'}`}>
         {loading
