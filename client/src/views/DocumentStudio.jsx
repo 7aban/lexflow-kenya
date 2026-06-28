@@ -1655,7 +1655,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
 
   return (
     <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
-      <Card title="Document Studio" hint="Choose one tool, complete the document task, then download or save the result.">
+      <Card title="Document Studio">
         <div style={{ display: 'grid', gap: 14, minWidth: 0 }}>
           <DocumentToolCards
             onOpenMerge={() => openTools('merge')}
@@ -1670,15 +1670,14 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             onOpenTenth={() => openTools('tenth')}
             selectedTool={selectedTool}
           />
-          <div style={{ borderTop: `1px solid ${theme.line}`, paddingTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 12, ...mutedPanelTextStyle, lineHeight: 1.5 }}>Need to upload, organise, or request files for a case? Use the matter workspace.</span>
+          <div style={{ borderTop: `1px solid ${theme.line}`, paddingTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
             <button type="button" style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 12px' }} onClick={openMatterDocuments}>Open Matter Documents</button>
           </div>
         </div>
       </Card>
 
       <div ref={signatureSectionRef} style={{ minWidth: 0, order: 3 }}>
-      <Card title="More document tools" hint="Supporting assets and administration stay out of the active workflow until needed.">
+      <Card title="More document tools">
         <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
           <div style={{ ...themedPanelStyle, padding: '12px 14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))', gap: 12, alignItems: 'center', minWidth: 0 }}>
             <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
@@ -1738,7 +1737,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
       </div>
 
       <div ref={templatesSectionRef} style={{ minWidth: 0, order: 4 }}>
-      <Card title="Manage templates" hint="Preview existing document templates only when the task calls for one.">
+      <Card title="Manage templates">
         <button
           type="button"
           onClick={() => setTemplatesOpen(open => !open)}
@@ -1748,7 +1747,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
         >
           <span style={{ display: 'grid', gap: 2, minWidth: 0 }}>
             <span style={{ fontWeight: 600, fontSize: 13, color: theme.ink }}>{templatesOpen ? 'Hide templates ▲' : 'Manage templates ▼'}</span>
-            <span style={{ fontSize: 12, color: theme.muted, lineHeight: 1.45 }}>{hint}. Select a template to preview it against a matter.</span>
+            <span style={{ fontSize: 12, color: theme.muted, lineHeight: 1.45 }}>{hint}.</span>
           </span>
         </button>
         {templatesOpen && (
@@ -1844,10 +1843,10 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
       </Card>}
 
       <div ref={toolsSectionRef} style={{ minWidth: 0, order: 1 }}>
-      <Card title="Selected workflow" hint={selectedTool ? 'Work through the steps below, then download or save the result.' : 'Choose a tool above to begin.'}>
+      <Card title="Selected workflow">
         <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
           {!selectedTool && (
-            <Empty title="Choose a document tool above" text="Select a tool to open its working area. For matter-specific uploads and document management, open Matter Documents." />
+            <Empty title="No tool selected" text="Select a document tool above." />
           )}
           {selectedTool && (
           <button
@@ -1857,21 +1856,12 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             aria-controls="document-tools-panel"
             style={{ ...styles.ghostButton, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, width: '100%', textAlign: 'left', minHeight: 40 }}
           >
-            <span style={{ display: 'grid', gap: 2, minWidth: 0 }}>
-              <span style={{ fontWeight: 600, fontSize: 13, color: theme.ink }}>{toolsOpen ? 'Hide selected workflow ▲' : 'Resume selected workflow ▼'}</span>
-              <span style={{ fontSize: 12, color: theme.muted, lineHeight: 1.45 }}>Only the selected tool is shown here. Choose another tool from the launcher above to switch.</span>
-            </span>
+            <span style={{ fontWeight: 600, fontSize: 13, color: theme.ink }}>{toolsOpen ? 'Hide selected workflow ▲' : 'Resume selected workflow ▼'}</span>
           </button>
           )}
 
           {toolsOpen && selectedTool && (
           <div id="document-tools-panel" style={{ display: 'grid', gap: 16, minWidth: 0 }}>
-            <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: theme.goldPale, padding: '10px 12px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(150px, 100%), 1fr))', gap: 8, minWidth: 0 }}>
-              {['1. Choose document', '2. Apply action', '3. Review guidance', '4. Download or save'].map(step => (
-                <span key={step} style={{ fontSize: 12, color: theme.forest, fontWeight: 600, lineHeight: 1.4 }}>{step}</span>
-              ))}
-            </div>
-
            {selectedTool === 'merge' && (
           <div
             ref={mergePanelRef}
@@ -1880,7 +1870,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                 <strong style={{ fontSize: 14, color: theme.ink }}>Merge PDFs</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Temporary download only</span>
+                <span style={{ fontSize: 12, color: theme.muted }}>Download to device or save to matter</span>
               </div>
               <Badge tone="green">Available</Badge>
             </div>
@@ -2015,7 +2005,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                 <strong style={{ fontSize: 14, color: theme.ink }}>Rotate PDF</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Temporary download only</span>
+                <span style={{ fontSize: 12, color: theme.muted }}>Download to device or save to matter</span>
               </div>
               <Badge tone="green">Available</Badge>
             </div>
@@ -2120,7 +2110,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                 <strong style={{ fontSize: 14, color: theme.ink }}>Extract pages</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Temporary download only</span>
+                <span style={{ fontSize: 12, color: theme.muted }}>Download to device or save to matter</span>
               </div>
               <Badge tone="green">Available</Badge>
             </div>
@@ -2223,7 +2213,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                 <strong style={{ fontSize: 14, color: theme.ink }}>Split / reorder pages</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Temporary download only</span>
+                <span style={{ fontSize: 12, color: theme.muted }}>Download to device or save to matter</span>
               </div>
               <Badge tone="green">Available</Badge>
             </div>
@@ -2326,7 +2316,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                 <strong style={{ fontSize: 14, color: theme.ink }}>Images to PDF</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Temporary download only</span>
+                <span style={{ fontSize: 12, color: theme.muted }}>Download to device or save to matter</span>
               </div>
               <Badge tone="green">Available</Badge>
             </div>
@@ -2449,7 +2439,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                 <strong style={{ fontSize: 14, color: theme.ink }}>Delete pages</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Temporary download only</span>
+                <span style={{ fontSize: 12, color: theme.muted }}>Download to device or save to matter</span>
               </div>
               <Badge tone="green">Available</Badge>
             </div>
@@ -2556,7 +2546,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                 <strong style={{ fontSize: 14, color: theme.ink }}>Add page numbers / paginate bundle</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Temporary download only</span>
+                <span style={{ fontSize: 12, color: theme.muted }}>Download to device or save to matter</span>
               </div>
               <Badge tone="green">Available</Badge>
             </div>
@@ -2678,7 +2668,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                 <strong style={{ fontSize: 14, color: theme.ink }}>Court bundle prep</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Temporary download only — combine selected matter PDFs into a single court-ready bundle</span>
+                <span style={{ fontSize: 12, color: theme.muted }}>Download to device or save to matter</span>
               </div>
               <Badge tone="green">Available</Badge>
             </div>
@@ -3040,7 +3030,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                 <strong style={{ fontSize: 14, color: theme.ink }}>Sign / stamp PDF</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Temporary download only</span>
+                <span style={{ fontSize: 12, color: theme.muted }}>Download to device or save to matter</span>
               </div>
               <Badge tone="green">Available</Badge>
             </div>
@@ -3191,7 +3181,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                 <strong style={{ fontSize: 14, color: theme.ink }}>Tenth-lining / appellate formatting</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Temporary download only</span>
+                <span style={{ fontSize: 12, color: theme.muted }}>Download to device or save to matter</span>
               </div>
               <Badge tone="green">Available</Badge>
             </div>

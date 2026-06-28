@@ -5,52 +5,52 @@ const documentToolCards = [
   {
     id: 'merge',
     title: 'Merge PDFs',
-    description: 'Combine pleadings, exhibits, and annexures into one staged court bundle.',
+    description: 'Combine PDFs into one file.',
   },
   {
     id: 'extract',
     title: 'Extract pages',
-    description: 'Pull selected page ranges from one matter PDF into a new document.',
+    description: 'Create a PDF from selected pages.',
   },
   {
     id: 'split',
     title: 'Split / reorder pages',
-    description: 'Prepare page ranges and reorder scanned bundles before final export.',
+    description: 'Reorder or select pages for a new PDF.',
   },
   {
     id: 'delete',
     title: 'Delete pages',
-    description: 'Remove duplicate, blank, or incorrectly scanned pages during review.',
+    description: 'Remove selected pages from a PDF.',
   },
   {
     id: 'rotate',
     title: 'Rotate pages',
-    description: 'Correct sideways pages in affidavits, exhibits, and annexures.',
+    description: 'Correct page orientation.',
   },
   {
     id: 'paginate',
     title: 'Add page numbers / paginate bundle',
-    description: 'Apply court-ready pagination before filing or service.',
+    description: 'Add page numbers to a PDF.',
   },
   {
     id: 'bundle',
     title: 'Court bundle prep',
-    description: 'Combine selected matter PDFs into a single court-ready bundle with optional page numbers.',
+    description: 'Prepare a court-ready PDF bundle.',
   },
   {
     id: 'images',
     title: 'Images to PDF',
-    description: 'Convert evidence images and scanned pages into PDF output.',
+    description: 'Convert images to PDF.',
   },
   {
     id: 'stamp',
     title: 'Sign / stamp PDF',
-    description: 'Place a saved visual signature or firm stamp on a matter PDF, then download or save a signed copy.',
+    description: 'Add a saved signature or firm stamp.',
   },
   {
     id: 'tenth',
     title: 'Tenth-lining / appellate formatting',
-    description: 'Prepare legal-document formatting helpers for appellate practice.',
+    description: 'Format documents for appellate filing.',
   },
 ];
 
