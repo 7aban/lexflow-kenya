@@ -219,13 +219,13 @@ export default function Reports({ data = {}, notify }) {
 
   return (
     <div className="lf-reports-page" style={{ display: 'grid', gap: 16, minWidth: 0 }}>
-      <Card title="Reports overview" hint="Billing, collections, matter activity, and workload trends from current LexFlow records.">
+      <Card title="Reports overview">
         {noData && deadlinesState !== 'loading' ? (
           <Empty title="No report data yet" text="Reports populate once matters, invoices, clients, or deadlines are recorded." />
         ) : (
           <div style={{ display: 'grid', gap: 14 }}>
             <p style={{ margin: 0, color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', maxWidth: 760 }}>
-              Use these read-only summaries for partner review. Billed is the total invoice amount, collected is paid invoices, and outstanding is the unpaid balance.
+              Billed is the total invoice amount, collected is paid invoices, and outstanding is the unpaid balance.
             </p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
               <Stat label="Open matters" value={activeMatters} tone="navy" />
@@ -247,7 +247,6 @@ export default function Reports({ data = {}, notify }) {
       <div className="lf-split-grid" style={styles.splitGrid}>
         <Card
           title="Matter activity"
-          hint="Open and closed matters grouped by current stage."
           action={<ExportButton onClick={exportPipeline} disabled={!pipeline.length} />}
         >
           <ReportBars
@@ -265,7 +264,6 @@ export default function Reports({ data = {}, notify }) {
 
         <Card
           title="Workload by practice area"
-          hint="Matter count by practice area, using the matter profile value where available."
           action={<ExportButton onClick={exportPractice} disabled={!practiceMix.length} />}
         >
           <ReportBars
@@ -285,7 +283,7 @@ export default function Reports({ data = {}, notify }) {
 
       <Card
         title="Billing and collections"
-        hint="Billed, collected, outstanding, overdue, and draft invoice balances. Unpaid invoices are not counted as collected."
+        hint="Unpaid invoices are not counted as collected."
         action={<ExportButton onClick={exportAging} disabled={!invoices.length} />}
       >
         <ReportBars
