@@ -2363,15 +2363,15 @@ function ClientSnapshotCard({ clientId, onClose }) {
   }
   const portalLabel = portalState === 'active' ? 'Manage portal access' : portalState === 'pending' ? 'Invitation pending' : 'Invite client';
   const portalDescription = portalState === 'active'
-    ? 'Review the existing client portal account.'
+    ? 'Review the client portal account.'
     : portalState === 'pending'
-      ? 'Review or copy the pending invitation.'
+      ? 'Review or copy the invitation.'
       : c?.email
-        ? 'Prepare secure portal access for this client.'
+        ? 'Prepare secure portal access.'
         : 'Add an email address before inviting this client.';
   const workflowActions = [
-    ...(canManage ? [{ label: 'Create matter', description: 'Open a new matter for this client.', onClick: () => openMatterWorkflow('create'), primary: true }] : []),
-    { label: 'View matters', description: 'Review matters linked to this client.', onClick: () => openMatterWorkflow('view') },
+    ...(canManage ? [{ label: 'Create matter', description: 'Open a new file for this client.', onClick: () => openMatterWorkflow('create'), primary: true }] : []),
+    { label: 'View matters', description: 'Show linked matters.', onClick: () => openMatterWorkflow('view') },
     ...(isAdmin && portalState !== 'loading' ? [{
       label: portalLabel,
       description: portalDescription,
@@ -2379,7 +2379,7 @@ function ClientSnapshotCard({ clientId, onClose }) {
     }] : []),
     {
       label: 'Review details',
-      description: 'Check client contacts and intake information.',
+      description: 'Check contact and record details.',
       onClick: () => document.getElementById(`client-snapshot-details-${clientId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }),
     },
   ];

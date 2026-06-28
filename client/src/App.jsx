@@ -720,7 +720,7 @@ export default function App() {
 
   const subtitles = {
     Dashboard: 'Command center for active work, hearings, billing and firm movement.',
-    Clients: 'A polished directory for intake, contacts and relationship context.',
+    Clients: 'Client records, matters, and portal access.',
     Matters: 'Matter pipeline, billing, documents, notes and invoice actions.',
     Tasks: 'Track pending and completed work across matters — add tasks, mark them done, and log time as you go.',
     Deadlines: 'Track court appearances, limitation dates, filing dates, and urgent action items.',
