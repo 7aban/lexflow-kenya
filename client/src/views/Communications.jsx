@@ -102,29 +102,6 @@ const commPalette = {
 };
 
 const commStyles = {
-  heroCard: {
-    borderRadius: 10,
-    background: `linear-gradient(135deg, ${commPalette.forestDark}, ${commPalette.forest})`,
-    color: '#fff',
-    padding: 24,
-    display: 'flex',
-    justifyContent: 'space-between',
-    gap: 20,
-    alignItems: 'end',
-    boxShadow: '0 1px 3px rgba(17,34,25,.08), 0 18px 40px rgba(17,34,25,.10)',
-  },
-  heroKicker: {
-    color: commPalette.gold,
-    fontSize: 11,
-    fontWeight: 700,
-    textTransform: 'uppercase',
-    letterSpacing: 0,
-  },
-  heroFigure: {
-    fontSize: 24,
-    fontWeight: 700,
-    color: commPalette.gold,
-  },
   primaryButton: {
     border: 0,
     borderRadius: 8,
@@ -157,11 +134,11 @@ const commStyles = {
     color: theme.ink,
   },
   threadUnread: {
-    borderLeftColor: commPalette.gold,
+    borderLeft: `3px solid ${commPalette.gold}`,
     background: commPalette.warmStrong,
   },
   threadActive: {
-    borderLeftColor: commPalette.gold,
+    borderLeft: `3px solid ${commPalette.gold}`,
     background: commPalette.warm,
     boxShadow: `inset 0 0 0 1px ${commPalette.border}`,
   },
@@ -394,18 +371,9 @@ export default function Communications({ clients = [], matters = [], focus, noti
 
   return (
     <div style={styles.pageStack}>
-      <section style={commStyles.heroCard}>
-        <div>
-          <div style={commStyles.heroKicker}>Client communications</div>
-          <h2>One calm inbox for client conversations.</h2>
-          <p>Threaded messages, matter context, file attachments, and client activity in one workspace.</p>
-        </div>
-        <div style={commStyles.heroFigure}>{conversations.length}</div>
-      </section>
-
       <div className="lf-split-grid" style={{ ...styles.splitGrid, gridTemplateColumns: 'minmax(280px, .9fr) minmax(360px, 1.25fr)', alignItems: 'start' }}>
         <div style={styles.pageStack}>
-          <Card title="Inbox" hint={`${filtered.length} conversation(s)`}>
+          <Card title="Inbox" hint={`${filtered.length} conversation${filtered.length === 1 ? '' : 's'}`}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) minmax(130px, 160px)', gap: 8, flex: '1 1 280px' }}>
                 <input aria-label="Search conversations" style={styles.input} value={search} onChange={event => setSearch(event.target.value)} placeholder="Client, matter, reference..." />
