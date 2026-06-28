@@ -4132,7 +4132,7 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
         {canManage && <button type="button" style={styles.primaryButton} onClick={() => setCreateInvoiceOpen(true)}>Create invoice</button>}
         <button type="button" style={styles.ghostButton} onClick={() => scrollToSection('invoice-register')}>Record payment</button>
-        <button type="button" style={styles.ghostButton} onClick={() => { setPaymentProofOpen(true); scrollToSection('payment-proof-queue'); }}>Upload proof</button>
+        <button type="button" style={styles.ghostButton} onClick={() => { setPaymentProofOpen(true); scrollToSection('payment-proof-queue'); }}>Review proof</button>
         <button type="button" style={styles.ghostButton} onClick={() => setInvoiceOutputOpen(open => !open)}>Output settings</button>
         <button type="button" style={styles.ghostButton} onClick={exportInvoices} disabled={!registerInvoices.length}>Export / Download</button>
       </div>
@@ -4146,9 +4146,11 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
           </div>
           <button type="button" aria-expanded={createInvoiceOpen} onClick={() => createInvoiceOpen ? closeCreateInvoice() : setCreateInvoiceOpen(true)} style={{ ...styles.ghostButton, fontSize: 12, padding: '4px 10px' }}>{createInvoiceOpen ? 'Close' : 'Create invoice'}</button>
         </div>
-        <p style={{ fontSize: 12, color: '#697386', margin: '6px 0 0' }}>
-          {createInvoiceOpen ? 'Pick a matter to invoice its unbilled time or fixed fee, or enter an amount manually.' : 'Open only when you are ready to create a new invoice.'}
-        </p>
+        {createInvoiceOpen && (
+          <p style={{ fontSize: 12, color: '#697386', margin: '6px 0 0' }}>
+            Pick a matter to invoice its unbilled time or fixed fee, or enter an amount manually.
+          </p>
+        )}
         {createInvoiceOpen && <form onSubmit={createInvoice} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 10 }}>
           <div style={{ flex: '2 1 220px', minWidth: 0 }}>
             <Field label="Matter">
@@ -4384,7 +4386,7 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
         <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <Badge tone="blue">{registerInvoices.length} of {invoices.length}</Badge>
-            <span style={{ fontSize: 12, color: '#697386' }}>Register is filtered by {registerFilter === 'all' ? 'all statuses' : registerFilter}.</span>
+            <span style={{ fontSize: 12, color: '#697386' }}>{registerFilter === 'all' ? 'All statuses' : registerFilter}</span>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button type="button" style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 12px' }} aria-expanded={invoiceFiltersOpen} onClick={() => setInvoiceFiltersOpen(open => !open)}>{invoiceFiltersOpen ? 'Hide filters' : 'Show filters'}</button>
