@@ -3247,18 +3247,16 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
                         }
                       `}</style>
                       <div style={{ display: 'grid', gap: 4, marginBottom: 12 }}>
-                        <strong style={{ color: theme.ink, fontSize: 15 }}>Files, requests, and signing for this matter</strong>
-                        <span style={{ color: theme.muted, fontSize: 12, lineHeight: 1.5 }}>Choose a task to reveal its controls. Matter files remain available below.</span>
-                        <span style={{ color: theme.muted, fontSize: 12, lineHeight: 1.5 }}>Open Document Studio for advanced PDF tools.</span>
+                        <strong style={{ color: theme.ink, fontSize: 15 }}>Files, requests, and signing for this matter.</strong>
                       </div>
                       <div className="lf-matter-document-actions" aria-label="Matter document actions" style={{ marginBottom: 14 }}>
                         {(canManage ? [
-                          { id: 'upload', label: 'Upload document', description: 'Add a file to this matter.', icon: IconUpload },
-                          { id: 'manage', label: 'Manage files', description: 'Review, rename, organise, or download matter files.', icon: IconPaperclip },
-                          { id: 'sign', label: 'Sign or send', description: 'Prepare a document for signature, sharing, or client action.', icon: IconSignature },
-                          { id: 'request', label: 'Request document', description: 'Ask the client to upload a specific document.', icon: IconMail },
+                          { id: 'upload', label: 'Upload document', description: 'Add a matter file.', icon: IconUpload },
+                          { id: 'manage', label: 'Manage files', description: 'Review matter files.', icon: IconPaperclip },
+                          { id: 'sign', label: 'Sign or send', description: 'Sign or share files.', icon: IconSignature },
+                          { id: 'request', label: 'Request document', description: 'Request a client upload.', icon: IconMail },
                         ] : [
-                          { id: 'manage', label: 'Manage files', description: 'Review and download matter files.', icon: IconPaperclip },
+                          { id: 'manage', label: 'Manage files', description: 'Review matter files.', icon: IconPaperclip },
                         ]).map(action => {
                           const ActionIcon = action.icon;
                           const active = documentWorkspaceAction === action.id;
@@ -3307,7 +3305,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
                         >
                           <IconExternalLink size={19} stroke={1.7} color={theme.goldDark} />
                           <strong style={{ fontSize: 13 }}>Advanced PDF tools</strong>
-                          <span style={{ fontSize: 11, lineHeight: 1.45, color: theme.muted }}>Open Document Studio for signing, stamping, bundles, and PDF tools.</span>
+                          <span style={{ fontSize: 11, lineHeight: 1.45, color: theme.muted }}>Open advanced PDF tools.</span>
                         </button>
                       </div>
                       {canManage && documentWorkspaceAction === 'sign' && (
