@@ -111,7 +111,7 @@ export default function AuditLog({ notify, navigate }) {
 
   return (
     <div style={styles.pageStack}>
-      <Card title="Audit Log" hint="A searchable accountability trail for important changes across the firm.">
+      <Card title="Audit Log" hint="System activity and user actions.">
         <div style={styles.formGrid}>
           <Field label="Search">
             <input

@@ -138,7 +138,7 @@ export default function StructuredAuditLog({ notify }) {
 
   return (
     <div style={styles.pageStack}>
-      <Card title="Structured Audit" hint="A detailed accountability trail for security and operational events across the firm.">
+      <Card title="Structured Audit" hint="Detailed event history from firm activity.">
         <div style={styles.formGrid}>
           <Field label="Search">
             <input
