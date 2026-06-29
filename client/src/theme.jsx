@@ -671,6 +671,9 @@ export function StyleTag() { return <style>{`
     #root .lf-timer-bubble { display: none !important; }
   }
   @media (min-width: 768px) and (max-width: 900px) {
+    /* LOCAL-PILOT: stack the Communications inbox/thread split while the desktop sidebar still reduces the available tablet width. */
+    #root .lf-communications-grid { grid-template-columns: minmax(0,1fr) !important; width: 100% !important; max-width: 100% !important; }
+    #root .lf-communications-grid > * { min-width: 0 !important; }
     /* R15g-8: Client portal My Matters - stack grid at tablet widths */
     #root .lf-client-matter-grid { grid-template-columns: minmax(0,1fr) !important; width: 100% !important; max-width: 100% !important; }
     /* R15g-6-C: Matter detail tablet cards only */

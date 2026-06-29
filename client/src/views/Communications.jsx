@@ -371,7 +371,7 @@ export default function Communications({ clients = [], matters = [], focus, noti
 
   return (
     <div style={styles.pageStack}>
-      <div className="lf-split-grid" style={{ ...styles.splitGrid, gridTemplateColumns: 'minmax(280px, .9fr) minmax(360px, 1.25fr)', alignItems: 'start' }}>
+      <div className="lf-split-grid lf-communications-grid" style={{ ...styles.splitGrid, gridTemplateColumns: 'minmax(280px, .9fr) minmax(360px, 1.25fr)', alignItems: 'start' }}>
         <div style={styles.pageStack}>
           <Card title="Inbox" hint={`${filtered.length} conversation${filtered.length === 1 ? '' : 's'}`}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
