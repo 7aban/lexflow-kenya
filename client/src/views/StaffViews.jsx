@@ -7254,6 +7254,7 @@ export function Users({ clients = [], notify }) {
             <option value="assistant">Assistant</option>
             <option value="advocate">Advocate</option>
             <option value="admin">Admin</option>
+            <option value="client" disabled>Client</option>
           </select>,
           <Badge key={`status-${u.id}`} tone={u.isActive ? 'green' : 'red'}>{u.isActive ? 'Active' : 'Inactive'}</Badge>,
           u.clientId ? (clientOptions.find(c => c.id === u.clientId)?.name || <Badge key={`client-${u.id}`} tone="red">Not linked to a client record</Badge>) : '-',
