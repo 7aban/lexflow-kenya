@@ -4,10 +4,15 @@ const VIEWPORTS = [360, 390, 768, 1280];
 
 const STAFF_VIEWS = ['Dashboard', 'Communications', 'Performance', 'Matters', 'Invoices', 'Users'];
 
+const STAFF_NAV_LABELS = {
+  Dashboard: 'Workspace',
+  Invoices: 'Billing',
+};
+
 const STAFF_GROUPS = {
-  Performance: 'Overview',
-  Invoices: 'Finance',
-  Users: 'Administration',
+  Performance: 'Admin',
+  Users: 'Admin',
+  Invitations: 'Admin',
 };
 
 const CLIENT_VIEWS = ['My Matters'];
@@ -51,39 +56,42 @@ async function seededClientLoginAvailable(request) {
 
 async function staffNavigate(page, view) {
   const group = STAFF_GROUPS[view];
+  const navLabel = STAFF_NAV_LABELS[view] || view;
+  const sidebar = page.locator('.lf-desktop-sidebar');
+  const navBtn = sidebar.getByRole('button', { name: navLabel, exact: true });
   if (group) {
-    const groupBtn = page.locator('button.lf-nav-group', { hasText: group });
-    const navBtn = page.locator('button.lf-nav', { hasText: view });
     if (await navBtn.isVisible().catch(() => false)) {
       await navBtn.click();
     } else {
-      await groupBtn.click();
+      await sidebar.getByRole('button', { name: group, exact: true }).click();
       await navBtn.waitFor({ state: 'visible', timeout: 5000 });
       await navBtn.click();
     }
   } else {
-    await page.locator('button.lf-nav', { hasText: view }).click();
+    await navBtn.click();
   }
-  await page.waitForTimeout(600);
+  await expect(page.getByRole('heading', { name: navLabel, exact: true })).toBeVisible({ timeout: 15000 });
 }
 
 async function clientNavigate(page, view) {
-  await page.locator('button.lf-nav', { hasText: view }).click();
-  await page.waitForTimeout(600);
+  await page.locator('.lf-desktop-sidebar').getByRole('button', { name: view, exact: true }).click();
+  await expect(page.getByRole('heading', { name: view, exact: true })).toBeVisible({ timeout: 15000 });
 }
 
 async function openStaffMatterTasks(page) {
   await staffNavigate(page, 'Matters');
-  const matterButton = page.locator('button').filter({ has: page.locator('small') }).first();
-  await expect(matterButton).toBeVisible({ timeout: 15000 });
-  await matterButton.click();
-  await page.locator('.lf-matter-detail-workspace').waitFor({ state: 'visible', timeout: 15000 });
-  const tasksTab = page.locator('.lf-matter-detail-workspace button', { hasText: /^Tasks\b/ }).first();
+  const matterWorkspace = page.locator('.lf-matter-detail-workspace');
+  if (!await matterWorkspace.isVisible().catch(() => false)) {
+    const matterButton = page.locator('.lf-matter-grid button').filter({ has: page.locator('strong') }).first();
+    await expect(matterButton, 'A matter must be available for the read-only matter tasks check').toBeVisible({ timeout: 15000 });
+    await matterButton.click();
+  }
+  await matterWorkspace.waitFor({ state: 'visible', timeout: 15000 });
+  const tasksTab = matterWorkspace.getByRole('button', { name: /^Tasks\b/ }).first();
   await expect(tasksTab).toBeVisible({ timeout: 15000 });
   await tasksTab.click();
-  const addTaskForm = page.locator('.lf-matter-detail-workspace form').filter({ hasText: 'Add task' }).first();
-  await expect(addTaskForm).toBeVisible({ timeout: 15000 });
-  return page.locator('.lf-matter-detail-workspace');
+  await expect(matterWorkspace.getByText('Open tasks', { exact: true })).toBeVisible({ timeout: 15000 });
+  return matterWorkspace;
 }
 
 async function measureOverflow(page, vw) {
@@ -220,7 +228,7 @@ test.describe('Responsive Overflow Verification', () => {
   });
 
   test('Client portal exit returns an empty login form', async ({ page, request }) => {
-    test.skip(!await seededClientLoginAvailable(request), 'Current local pilot has no seeded client portal login.');
+    test.skip(!await seededClientLoginAvailable(request), 'No deterministic client portal test account is configured for this local pilot.');
     await clientLogin(page);
     await page.locator('button:visible', { hasText: /^Exit$/ }).first().click();
     await expect(page.locator('input[type="email"]')).toHaveValue('');
@@ -232,10 +240,22 @@ test.describe('Responsive Overflow Verification', () => {
     test(`Staff portal ${view} — no horizontal overflow at 360, 390, 768, 1280`, async ({ page }) => {
       await staffLogin(page);
       await staffNavigate(page, view);
+      const userCards = view === 'Users' ? page.locator('.lf-user-cards') : null;
+      const clientRole = view === 'Users' ? userCards.locator('select:disabled').first() : null;
+      if (view === 'Users') {
+        await expect(page.getByText('Team', { exact: true })).toBeVisible({ timeout: 15000 });
+        await expect(userCards).toBeVisible();
+        await expect(clientRole, 'The existing client user role should render as Client without being editable').toHaveValue('client');
+        await expect(clientRole.locator('option:checked')).toHaveText('Client');
+      }
       const results = { [view]: [] };
       for (const vw of VIEWPORTS) {
         const m = await measureOverflow(page, vw);
         results[view].push(m);
+        if (view === 'Users') {
+          await expect(userCards).toBeVisible();
+          await expect(clientRole).toBeVisible();
+        }
       }
       logMatrix(`STAFF RESPONSIVE OVERFLOW — ${view}`, results);
       for (let i = 0; i < VIEWPORTS.length; i++) {
@@ -286,14 +306,7 @@ test.describe('Responsive Overflow Verification', () => {
 
   test('Invitations mobile cards — thead hidden and labels at 360px; desktop intact at 1280px', async ({ page }) => {
     await staffLogin(page);
-    const groupBtn = page.locator('button.lf-nav-group', { hasText: 'Relationships' });
-    const navBtn = page.locator('button.lf-nav', { hasText: 'Invitations' });
-    if (!await navBtn.isVisible().catch(() => false)) {
-      await groupBtn.click();
-      await navBtn.waitFor({ state: 'visible', timeout: 5000 });
-    }
-    await navBtn.click();
-    await page.waitForTimeout(600);
+    await staffNavigate(page, 'Invitations');
 
     await page.setViewportSize({ width: 360, height: 900 });
     await page.waitForTimeout(400);
@@ -339,7 +352,7 @@ test.describe('Responsive Overflow Verification', () => {
   });
 
   test('Client portal — no horizontal overflow at 360, 390, 768, 1280', async ({ page, request }) => {
-    test.skip(!await seededClientLoginAvailable(request), 'Current local pilot has no seeded client portal login.');
+    test.skip(!await seededClientLoginAvailable(request), 'No deterministic client portal test account is configured for this local pilot.');
     await clientLogin(page);
     const results = {};
     for (const view of CLIENT_VIEWS) {
