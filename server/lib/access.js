@@ -28,17 +28,26 @@ module.exports = ({ get, all }) => {
 
   const canAccessDocument = async (req, doc) => {
     if (!doc) return false;
-    if (req.user?.role !== 'client') return true;
-    if (doc.noticeId) return Number(doc.clientVisible || 0) === 1 && (await canAccessNotice(req, doc.noticeId));
-    if (doc.messageId) {
-      const thread = await get(`SELECT conv.id
-        FROM messages msg
-        JOIN conversations conv ON conv.id=msg.conversationId
-        WHERE msg.id=? AND conv.clientId=?`, [doc.messageId, req.user.clientId || '']);
-      if (thread) return true;
+    if (req.user?.role === 'client') {
+      if (doc.noticeId) return Number(doc.clientVisible || 0) === 1 && (await canAccessNotice(req, doc.noticeId));
+      if (doc.messageId) {
+        const thread = await get(`SELECT conv.id
+          FROM messages msg
+          JOIN conversations conv ON conv.id=msg.conversationId
+          WHERE msg.id=? AND conv.clientId=?`, [doc.messageId, req.user.clientId || '']);
+        if (thread) return true;
+      }
+      if (!doc.matterId || !(await canAccessMatter(req, doc.matterId))) return false;
+      return doc.source === 'client' || Number(doc.clientVisible || 0) === 1;
     }
-    if (!doc.matterId || !(await canAccessMatter(req, doc.matterId))) return false;
-    return doc.source === 'client' || Number(doc.clientVisible || 0) === 1;
+
+    if (doc.matterId) return canAccessMatter(req, doc.matterId);
+    if (doc.noticeId) return canAccessNotice(req, doc.noticeId);
+    if (doc.messageId) {
+      const message = await get('SELECT conversationId FROM messages WHERE id=?', [doc.messageId]);
+      return Boolean(message?.conversationId) && canAccessConversation(req, message.conversationId);
+    }
+    return false;
   };
 
   const canAccessClient = async (req, clientId) => {

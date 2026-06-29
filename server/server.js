@@ -12115,7 +12115,7 @@ app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async 
 app.patch('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
   const doc = await get(`SELECT ${documentMetadataColumns()} FROM documents WHERE id=?`, [req.params.id]);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
-  if (doc.matterId && !(await canAccessMatter(req, doc.matterId))) {
+  if (!(await canAccessDocument(req, doc))) {
     await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
     return res.status(403).json({ error: 'Document access denied' });
   }
@@ -12176,7 +12176,7 @@ app.patch('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
 app.delete('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
   const doc = await get(`SELECT ${documentMetadataColumns()} FROM documents WHERE id=? AND deletedAt IS NULL`, [req.params.id]);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
-  if (doc.matterId && !(await canAccessMatter(req, doc.matterId))) {
+  if (!(await canAccessDocument(req, doc))) {
     await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
     return res.status(403).json({ error: 'Document access denied' });
   }
