@@ -178,9 +178,13 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
 
-  const courtItems = useMemo(() => {
-    return (deadlines || []).filter(d => d.type === 'Court Date' && d.status !== 'Done');
+  const allCourtItems = useMemo(() => {
+    return (deadlines || []).filter(d => d.type === 'Court Date');
   }, [deadlines]);
+
+  const courtItems = useMemo(() => {
+    return allCourtItems.filter(d => d.status !== 'Done');
+  }, [allCourtItems]);
 
   const todayIso = new Date().toISOString().slice(0, 10);
 
@@ -191,6 +195,31 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
       .sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)))
       .slice(0, 5);
   }, [courtItems, todayIso]);
+
+  const overdueCourtItems = useMemo(() => {
+    return courtItems.filter(d => d.dueDate && d.dueDate < todayIso);
+  }, [courtItems, todayIso]);
+
+  const pastCourtItems = useMemo(() => {
+    return allCourtItems.filter(d => d.dueDate && d.dueDate < todayIso);
+  }, [allCourtItems, todayIso]);
+
+  const courtDiaryEmptyCopy = useMemo(() => {
+    if (upcomingCourtItems.length > 0) return '';
+    if (overdueCourtItems.length > 0) {
+      return `No upcoming court appearances. ${overdueCourtItems.length} overdue court appearance${overdueCourtItems.length === 1 ? '' : 's'} require review.`;
+    }
+    if (courtItems.length > 0) {
+      return `No upcoming court appearances. ${courtItems.length} open court appearance${courtItems.length === 1 ? '' : 's'} require review.`;
+    }
+    if (allCourtItems.length > 0) {
+      return pastCourtItems.length > 0
+        ? `No upcoming court appearances. ${pastCourtItems.length} past court appearance${pastCourtItems.length === 1 ? '' : 's'} recorded.`
+        : 'No upcoming court appearances.';
+    }
+    if (filters.type || filters.status) return 'No court appearances match this view.';
+    return 'No court appearances recorded.';
+  }, [allCourtItems, courtItems, filters.status, filters.type, overdueCourtItems, pastCourtItems, upcomingCourtItems]);
 
   const todayCourtItems = useMemo(() => {
     return courtItems.filter(d => d.dueDate === todayIso);
@@ -578,7 +607,7 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
             </div>
           </>
         ) : (
-          <span style={{ color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', fontSize: 13 }}>No court appearances recorded.</span>
+          <span style={{ color: overdueCourtItems.length ? theme.red : 'var(--lf-card-muted, var(--lf-text-muted, #697386))', fontSize: 13, fontWeight: overdueCourtItems.length ? 700 : 400 }}>{courtDiaryEmptyCopy}</span>
         )}
       </div>
 
