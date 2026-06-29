@@ -12,22 +12,27 @@ const STAFF_GROUPS = {
 
 const CLIENT_VIEWS = ['My Matters'];
 
+async function fillLoginField(locator, value) {
+  await locator.click();
+  await locator.fill(value);
+}
+
 async function staffLogin(page) {
   await page.goto('/');
-  await page.waitForSelector('input[autocomplete="email"]');
-  await page.fill('input[autocomplete="email"]', 'admin@lexflow.co.ke');
-  await page.fill('input[autocomplete="current-password"]', 'password123');
+  await page.waitForSelector('input[type="email"]');
+  await fillLoginField(page.locator('input[type="email"]'), 'admin@lexflow.co.ke');
+  await fillLoginField(page.locator('input[autocomplete$=" current-password"]'), 'password123');
   await page.click('button:has-text("Sign in securely")');
   await page.waitForSelector('.lf-desktop-sidebar', { timeout: 15000 });
 }
 
 async function clientLogin(page) {
   await page.goto('/');
-  await page.waitForSelector('input[autocomplete="email"]');
+  await page.waitForSelector('input[type="email"]');
   await page.click('button:has-text("Client Portal")');
   await page.waitForTimeout(200);
-  await page.fill('input[autocomplete="email"]', 'margaret.wairimu@example.co.ke');
-  await page.fill('input[autocomplete="current-password"]', 'password123');
+  await fillLoginField(page.locator('input[type="email"]'), 'margaret.wairimu@example.co.ke');
+  await fillLoginField(page.locator('input[autocomplete$=" current-password"]'), 'password123');
   await page.click('button:has-text("Enter client portal")');
   await page.waitForSelector('.lf-desktop-sidebar', { timeout: 15000 });
 }
@@ -163,6 +168,66 @@ function logMatrix(title, results) {
 }
 
 test.describe('Responsive Overflow Verification', () => {
+  test('Login credentials reset across mode switches, staff logout and Back navigation', async ({ page }) => {
+    await page.goto('/');
+    const email = page.locator('input[type="email"]');
+    const password = page.locator('input[autocomplete$=" current-password"]');
+
+    await fillLoginField(email, 'staff-draft@example.com');
+    await fillLoginField(password, 'staff-draft-password');
+    await page.getByRole('button', { name: 'Show password' }).click();
+    await expect(password).toHaveAttribute('type', 'text');
+    await page.route('**/api/auth/login', route => route.fulfill({
+      status: 401,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'Test login error' }),
+    }));
+    await page.getByRole('button', { name: 'Sign in securely' }).click();
+    await expect(page.getByText('Test login error')).toBeVisible();
+    await page.unroute('**/api/auth/login');
+
+    await page.getByRole('tab', { name: 'Client Portal' }).click();
+    await expect(email).toHaveValue('');
+    await expect(password).toHaveValue('');
+    await expect(password).toHaveAttribute('type', 'password');
+    await expect(page.getByText('Test login error')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Continue with Google' })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Continue with Microsoft' })).toBeHidden();
+
+    await fillLoginField(email, 'client-draft@example.com');
+    await fillLoginField(password, 'client-draft-password');
+    await page.getByRole('button', { name: 'Show password' }).click();
+    await page.getByRole('tab', { name: 'Staff Login' }).click();
+    await expect(email).toHaveValue('');
+    await expect(password).toHaveValue('');
+    await expect(password).toHaveAttribute('type', 'password');
+
+    await fillLoginField(email, 'admin@lexflow.co.ke');
+    await fillLoginField(password, 'password123');
+    await page.getByRole('button', { name: 'Sign in securely' }).click();
+    await page.waitForSelector('.lf-desktop-sidebar', { timeout: 15000 });
+    await page.getByRole('button', { name: 'Account menu' }).click();
+    await page.locator('button:visible', { hasText: /^Exit$/ }).first().click();
+
+    await expect(email).toHaveValue('');
+    await expect(password).toHaveValue('');
+    await expect(password).toHaveAttribute('type', 'password');
+    await page.goBack();
+    await expect(page.locator('.lf-desktop-sidebar')).toHaveCount(0);
+    await page.goForward();
+    await expect(email).toHaveValue('');
+    await expect(password).toHaveValue('');
+  });
+
+  test('Client portal exit returns an empty login form', async ({ page, request }) => {
+    test.skip(!await seededClientLoginAvailable(request), 'Current local pilot has no seeded client portal login.');
+    await clientLogin(page);
+    await page.locator('button:visible', { hasText: /^Exit$/ }).first().click();
+    await expect(page.locator('input[type="email"]')).toHaveValue('');
+    await expect(page.locator('input[autocomplete$=" current-password"]')).toHaveValue('');
+    await expect(page.locator('input[autocomplete$=" current-password"]')).toHaveAttribute('type', 'password');
+  });
+
   for (const view of STAFF_VIEWS) {
     test(`Staff portal ${view} — no horizontal overflow at 360, 390, 768, 1280`, async ({ page }) => {
       await staffLogin(page);

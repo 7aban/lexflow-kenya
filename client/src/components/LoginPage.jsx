@@ -54,15 +54,24 @@ function LoginField({ label, children }) {
   );
 }
 
-export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, installDismissed, setInstallDismissed, onInstall }) {
+export default function LoginPage({ firm, onLogin, loginResetNonce, deferredPrompt, isInstalled, installDismissed, setInstallDismissed, onInstall }) {
   const [mode, setMode] = useState('staff');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [emailReady, setEmailReady] = useState(false);
+  const [passwordReady, setPasswordReady] = useState(false);
 
-  useEffect(() => { setPassword(''); }, []);
+  useEffect(() => {
+    setEmail('');
+    setPassword('');
+    setError('');
+    setShowPassword(false);
+    setEmailReady(false);
+    setPasswordReady(false);
+  }, [loginResetNonce]);
   const [oauthBusy, setOauthBusy] = useState(false);
   const [oauthEnabled, setOauthEnabled] = useState(false);
   const firmName = firm?.displayName || firm?.firmName || firm?.appName || firm?.name || defaultFirmSettings.name;
@@ -90,6 +99,8 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
     setPassword('');
     setError('');
     setShowPassword(false);
+    setEmailReady(false);
+    setPasswordReady(false);
   }
 
   async function handleOAuth(provider) {
@@ -200,7 +211,7 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
           </div>
         </div>
         <div className="lf-login-card-wrap" style={styles.loginCardWrap}>
-          <form onSubmit={submit} className="lf-login-card-form" style={styles.loginCardForm}>
+          <form onSubmit={submit} autoComplete="off" className="lf-login-card-form" style={styles.loginCardForm}>
             <div style={{ display: 'grid', gap: 14, marginBottom: 22 }}>
               <div style={styles.portalTabs} role="tablist" aria-label="Login type">
                 <button type="button" role="tab" aria-selected={mode === 'staff'} onClick={() => handleModeChange('staff')} className="lf-login-portal-tab" style={{ ...styles.portalTab, ...(mode === 'staff' ? styles.portalTabActive : {}) }}>Staff Login</button>
@@ -228,11 +239,11 @@ export default function LoginPage({ firm, onLogin, deferredPrompt, isInstalled, 
             )}
             <div style={{ display: 'grid', gap: 14 }}>
               <LoginField label="Email">
-                <input className="lf-login-input" style={styles.loginInput} value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" placeholder={modeCopy.placeholder} />
+                <input className="lf-login-input" style={styles.loginInput} type="email" name={`lexflow-${mode}-email-${loginResetNonce}`} value={email} readOnly={!emailReady} onFocus={() => setEmailReady(true)} onChange={event => setEmail(event.target.value)} autoComplete={`section-lexflow-${mode}-${loginResetNonce} username`} placeholder={modeCopy.placeholder} />
               </LoginField>
               <LoginField label="Password">
                 <div style={{ position: 'relative' }}>
-                  <input className="lf-login-input" style={{ ...styles.loginInput, paddingRight: 40 }} type={showPassword ? 'text' : 'password'} value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" placeholder={mode === 'client' ? 'Portal password' : 'Workspace password'} />
+                  <input className="lf-login-input" style={{ ...styles.loginInput, paddingRight: 40 }} type={showPassword ? 'text' : 'password'} name={`lexflow-${mode}-password-${loginResetNonce}`} value={password} readOnly={!passwordReady} onFocus={() => setPasswordReady(true)} onChange={event => setPassword(event.target.value)} autoComplete={`section-lexflow-${mode}-${loginResetNonce} current-password`} placeholder={mode === 'client' ? 'Portal password' : 'Workspace password'} />
                   <button type="button" tabIndex={-1} aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword(s => !s)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', border: 0, background: 'none', cursor: 'pointer', padding: 4, color: 'var(--lf-card-muted, #6B6B66)', display: 'flex', alignItems: 'center' }}>
                     {showPassword ? <IconEyeOff size={18} /> : <IconEye size={18} />}
                   </button>

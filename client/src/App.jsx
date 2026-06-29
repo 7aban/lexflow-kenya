@@ -293,6 +293,7 @@ export default function App() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [installDismissed, setInstallDismissed] = useState(false);
+  const [loginResetNonce, setLoginResetNonce] = useState(0);
   const [myAvatarUrl, setMyAvatarUrl] = useState(null);
   const [themeOverride, setThemeOverride] = useState(null);
   const myAvatarUrlRef = useRef(null);
@@ -662,6 +663,7 @@ export default function App() {
     setData(initialData);
     setThemeOverride(null);
     clearAllLexFlowStorage();
+    setLoginResetNonce(current => current + 1);
   }
 
   function openMatterDocumentsFromStudio() {
@@ -699,7 +701,7 @@ export default function App() {
   if (!authenticated) {
     return (
       <>
-        <LoginPage firm={themedFirm} onLogin={login} deferredPrompt={deferredPrompt} isInstalled={isInstalled} installDismissed={installDismissed} setInstallDismissed={setInstallDismissed} onInstall={handleInstall} />
+        <LoginPage key={`login-${loginResetNonce}`} loginResetNonce={loginResetNonce} firm={themedFirm} onLogin={login} deferredPrompt={deferredPrompt} isInstalled={isInstalled} installDismissed={installDismissed} setInstallDismissed={setInstallDismissed} onInstall={handleInstall} />
         <Toast toast={toast} onClose={() => setToast(null)} />
       </>
     );
