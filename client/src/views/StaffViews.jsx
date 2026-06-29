@@ -7777,34 +7777,80 @@ function MatterCourtPrepCard({ detail, onSectionNav }) {
 const hearingPrepCategories = ['general', 'document', 'witness', 'authority', 'submission', 'client', 'filing'];
 const hearingPrepLabels = { general: 'General', document: 'Documents', witness: 'Witnesses', authority: 'Authorities', submission: 'Submissions', client: 'Client', filing: 'Filing' };
 
-function MatterNotePreview({ note }) {
-  const [open, setOpen] = useState(false);
-  const content = String(note?.content || '');
-  const compactContent = content.replace(/\s+/g, ' ').trim();
-  const isLong = content.length > 220 || content.split(/\r?\n/).length > 3;
-  const preview = compactContent.length > 180 ? `${compactContent.slice(0, 180).trimEnd()}…` : compactContent;
+function noteTextBlocks(content) {
+  return String(content || '')
+    .split(/\r?\n\s*\r?\n/)
+    .map(block => block.trim())
+    .filter(Boolean);
+}
 
-  if (!isLong) {
-    return <span style={{ fontSize: 12, color: theme.ink, overflowWrap: 'anywhere' }}>{content}</span>;
-  }
+function MatterNoteText({ content, blocks }) {
+  const shownBlocks = blocks || noteTextBlocks(content);
+  const bulletPattern = /^\s*(?:[-*•]|\d+[.)])\s+/;
+  const labelPattern = /^([^:\r\n]{1,44}):\s*(.*)$/;
 
   return (
-    <div style={{ display: 'grid', gap: 6, minWidth: 0 }}>
-      <span style={{ fontSize: 12, color: theme.ink, overflowWrap: 'anywhere' }}>{preview}</span>
-      {open && (
-        <div style={{ fontSize: 12, color: theme.ink, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-          {content}
-        </div>
-      )}
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen(value => !value)}
-        style={{ ...styles.ghostButton, justifySelf: 'start', fontSize: 12, padding: '4px 9px' }}
-      >
-        {open ? 'Hide full note' : 'Show full note'}
-      </button>
+    <div style={{ display: 'grid', gap: 10, minWidth: 0, maxWidth: 820 }}>
+      {shownBlocks.map((block, blockIndex) => {
+        const lines = block.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+        const allBullets = lines.length > 0 && lines.every(line => bulletPattern.test(line));
+        if (allBullets) {
+          return (
+            <ul key={blockIndex} style={{ margin: 0, paddingLeft: 20, display: 'grid', gap: 5, color: theme.ink, fontSize: 13, lineHeight: 1.6 }}>
+              {lines.map((line, lineIndex) => <li key={lineIndex} style={{ paddingLeft: 2, overflowWrap: 'anywhere' }}>{line.replace(bulletPattern, '')}</li>)}
+            </ul>
+          );
+        }
+
+        return (
+          <div key={blockIndex} style={{ display: 'grid', gap: 6 }}>
+            {lines.map((line, lineIndex) => {
+              const labelled = line.match(labelPattern);
+              if (labelled) {
+                return (
+                  <div key={lineIndex} style={{ display: 'grid', gap: 2, borderLeft: `3px solid ${theme.line}`, paddingLeft: 9 }}>
+                    <span style={{ color: theme.muted, fontSize: 10, fontWeight: 800, letterSpacing: '.045em', textTransform: 'uppercase' }}>{labelled[1]}:</span>
+                    {labelled[2] && <span style={{ color: theme.ink, fontSize: 13, lineHeight: 1.6, overflowWrap: 'anywhere' }}>{labelled[2]}</span>}
+                  </div>
+                );
+              }
+              return <p key={lineIndex} style={{ margin: 0, color: theme.ink, fontSize: 13, lineHeight: 1.65, overflowWrap: 'anywhere' }}>{line}</p>;
+            })}
+          </div>
+        );
+      })}
     </div>
+  );
+}
+
+function MatterNotePreview({ note }) {
+  const [open, setOpen] = useState(false);
+  const content = String(note?.content || '').trim();
+  const blocks = noteTextBlocks(content);
+  const isLong = content.length > 360 || blocks.length > 2 || content.split(/\r?\n/).length > 5;
+  const previewBlocks = isLong ? blocks.slice(0, 2) : blocks;
+  const noteMeta = [
+    note?.author ? `By ${note.author}` : null,
+    note?.createdAt ? new Date(note.createdAt).toLocaleString() : null,
+  ].filter(Boolean);
+
+  return (
+    <article style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: 12, display: 'grid', gap: 10, minWidth: 0 }}>
+      {noteMeta.length > 0 && <span style={{ color: theme.muted, fontSize: 11, fontWeight: 600 }}>{noteMeta.join(' · ')}</span>}
+      <div style={{ maxHeight: !open && isLong ? 150 : 'none', overflow: 'hidden' }}>
+        <MatterNoteText content={content} blocks={open ? blocks : previewBlocks} />
+      </div>
+      {isLong && (
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen(value => !value)}
+          style={{ ...styles.ghostButton, justifySelf: 'start', fontSize: 12, padding: '5px 10px' }}
+        >
+          {open ? 'Hide full source note' : 'Show full source note'}
+        </button>
+      )}
+    </article>
   );
 }
 
@@ -7881,31 +7927,57 @@ function HearingBriefCard({ detail, canManage = false, notify, onChanged, onSect
   const sortedDocs = [...documents].sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 3);
   const openChecklist = checklistItems.filter(i => !i.completed).slice(0, 3);
   const recentNotes = [...notes].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))).slice(0, 3);
-  const cardStyle = { border: `1px solid ${theme.line}`, borderLeft: `4px solid ${theme.blue}`, borderRadius: 10, padding: 14, background: '#fff', display: 'grid', gap: 8 };
+  const glanceItems = [
+    nextAppearance?.date ? { label: 'Next appearance', value: formatTimelineDate(nextAppearance.date) } : null,
+    (nextAppearance?.location || detail?.court) ? { label: 'Court', value: nextAppearance?.location || detail.court } : null,
+    (detail?.caseNo || detail?.reference) ? { label: 'Case', value: detail.caseNo || detail.reference } : null,
+    detail?.stage ? { label: 'Stage', value: detail.stage } : null,
+    nextAppearance ? { label: 'Status', value: attendanceLabels[nextAppearance.attendanceStatus || 'scheduled'] || 'Scheduled' } : null,
+  ].filter(Boolean);
+  const cardStyle = { border: `1px solid ${theme.line}`, borderLeft: `4px solid ${theme.blue}`, borderRadius: 10, padding: 16, background: '#fff', display: 'grid', gap: 16 };
+  const sectionStyle = { display: 'grid', gap: 8, minWidth: 0, borderTop: `1px solid ${theme.line}`, paddingTop: 14 };
+  const sectionLabelStyle = { fontSize: 11, textTransform: 'uppercase', letterSpacing: '.045em', fontWeight: 800, color: theme.muted };
   const emptyStyle = { color: theme.muted, fontSize: 12, fontStyle: 'italic' };
   return (
     <section aria-label="Hearing brief" style={cardStyle}>
-      <strong style={{ fontSize: 13 }}>Hearing Brief</strong>
+      <div style={{ display: 'grid', gap: 3 }}>
+        <strong style={{ fontSize: 16, color: theme.ink }}>Hearing brief</strong>
+        <span style={{ color: theme.muted, fontSize: 12 }}>Court context, preparation, and source notes from this matter.</span>
+      </div>
+      {glanceItems.length > 0 && (
+        <div>
+          <span style={sectionLabelStyle}>At a glance</span>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(140px, 100%), 1fr))', gap: 8, marginTop: 8 }}>
+            {glanceItems.map(item => (
+              <div key={item.label} style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#F8FAFC', padding: '9px 10px', display: 'grid', gap: 3, minWidth: 0 }}>
+                <span style={{ color: theme.muted, fontSize: 10, fontWeight: 800, letterSpacing: '.04em', textTransform: 'uppercase' }}>{item.label}</span>
+                <span style={{ color: theme.ink, fontSize: 13, fontWeight: 700, lineHeight: 1.4, overflowWrap: 'anywhere' }}>{item.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {nextAppearance ? (
-        <div style={{ display: 'grid', gap: 6 }}>
+        <div style={{ ...sectionStyle, padding: 12, border: `1px solid ${theme.line}`, borderLeft: `4px solid ${theme.gold}`, borderRadius: 8, background: '#FFFCF5' }}>
           <div style={{ display: 'grid', gap: 2 }}>
-            <span style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: theme.muted }}>Next appearance</span>
-            <span style={{ fontSize: 13, fontWeight: 600, color: theme.ink }}>{nextAppearance.title || nextAppearance.type || 'Appearance'}</span>
-            <span style={{ fontSize: 12, color: theme.muted }}>{nextAppearance.date}{nextAppearance.time ? ` at ${nextAppearance.time}` : ''}{nextAppearance.location ? ` — ${nextAppearance.location}` : ''}</span>
-            <span style={{ fontSize: 12, color: theme.muted }}>Attendance: {attendanceLabels[nextAppearance.attendanceStatus || 'scheduled'] || 'Scheduled'}{nextAppearance.appearedBy ? ` / ${nextAppearance.appearedBy}` : ''}</span>
+            <span style={sectionLabelStyle}>Appearance details</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: theme.ink }}>{nextAppearance.title || nextAppearance.type || 'Appearance'}</span>
+            <span style={{ fontSize: 13, lineHeight: 1.55, color: theme.ink }}>{formatTimelineDate(nextAppearance.date)}{nextAppearance.time ? ` at ${nextAppearance.time}` : ''}{nextAppearance.location ? ` — ${nextAppearance.location}` : ''}</span>
+            {nextAppearance.appearedBy && <span style={{ fontSize: 12, color: theme.muted }}>Appearing: {nextAppearance.appearedBy}</span>}
             {safeHttpUrl(nextAppearance.meetingLink) && <a href={safeHttpUrl(nextAppearance.meetingLink)} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: theme.blue, textDecoration: 'underline' }}>Join meeting</a>}
           </div>
           {nextAppearance.prepNote && (
-            <div style={{ padding: 8, background: '#F0F4FF', borderRadius: 6, fontSize: 12, color: theme.ink }}>
-              <span style={{ fontWeight: 600 }}>Prep note: </span>{nextAppearance.prepNote}
+            <div style={{ padding: 10, background: '#fff', border: `1px solid ${theme.line}`, borderRadius: 6, display: 'grid', gap: 6 }}>
+              <span style={sectionLabelStyle}>Prep note</span>
+              <MatterNoteText content={nextAppearance.prepNote} />
             </div>
           )}
         </div>
       ) : (
         <span style={emptyStyle}>No upcoming court appearance recorded.</span>
       )}
-      <div style={{ display: 'grid', gap: 4 }}>
-        <span style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: theme.muted }}>Hearing prep checklist</span>
+      <div style={sectionStyle}>
+        <span style={sectionLabelStyle}>Hearing prep checklist</span>
         {nextAppearance ? (
           <div style={{ display: 'grid', gap: 6 }}>
             {openPrepItems.length ? openPrepItems.map(item => {
@@ -7946,8 +8018,8 @@ function HearingBriefCard({ detail, canManage = false, notify, onChanged, onSect
           </div>
         ) : <span style={emptyStyle}>No appearance selected for prep.</span>}
       </div>
-      <div style={{ display: 'grid', gap: 4 }}>
-        <span style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: theme.muted }}>Documents for this hearing</span>
+      <div style={sectionStyle}>
+        <span style={sectionLabelStyle}>Documents for this hearing</span>
         {nextAppearance ? (
           <div style={{ display: 'grid', gap: 6 }}>
             {linkedDocs.length ? linkedDocs.map(link => (
@@ -7971,20 +8043,23 @@ function HearingBriefCard({ detail, canManage = false, notify, onChanged, onSect
           </div>
         ) : <span style={emptyStyle}>No appearance selected for documents.</span>}
       </div>
-      <div style={{ display: 'grid', gap: 4 }}>
-        <span style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: theme.muted }}>Recent documents</span>
+      <div style={sectionStyle}>
+        <span style={sectionLabelStyle}>Recent documents</span>
         {sortedDocs.length ? sortedDocs.map((doc, i) => (
           <span key={doc.id || i} style={{ fontSize: 12, color: theme.ink }}>{doc.displayName || doc.friendlyName || doc.name || 'Document'}</span>
         )) : <span style={emptyStyle}>No documents recorded.</span>}
       </div>
-      <div style={{ display: 'grid', gap: 4 }}>
-        <span style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: theme.muted }}>Open action items</span>
+      <div style={sectionStyle}>
+        <span style={sectionLabelStyle}>Open action items</span>
         {openChecklist.length ? openChecklist.map((item, i) => (
           <span key={item.id || i} style={{ fontSize: 12, color: theme.ink }}>{item.title}</span>
         )) : <span style={emptyStyle}>No open action items.</span>}
       </div>
-      <div style={{ display: 'grid', gap: 4 }}>
-        <span style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: theme.muted }}>Recent notes</span>
+      <div style={{ ...sectionStyle, gap: 10 }}>
+        <div style={{ display: 'grid', gap: 2 }}>
+          <span style={sectionLabelStyle}>Key notes</span>
+          <span style={{ color: theme.muted, fontSize: 12 }}>Recent matter notes; expand long entries for the full source text.</span>
+        </div>
         {recentNotes.length ? recentNotes.map((n, i) => (
           <MatterNotePreview key={n.id || i} note={n} />
         )) : <span style={emptyStyle}>No notes recorded.</span>}
