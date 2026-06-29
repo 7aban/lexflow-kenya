@@ -45,7 +45,9 @@ beforeAll(async () => {
   adminToken = login.body.token;
   expect(adminToken).toBeDefined();
 
-  const settings = await request(app).get('/api/firm-settings');
+  const settings = await request(app)
+    .get('/api/firm-settings')
+    .set('Authorization', `Bearer ${adminToken}`);
   expect(settings.statusCode).toBe(200);
   originalModules = {
     kycCdd: Boolean(settings.body.moduleSettings?.kycCdd),
@@ -130,7 +132,9 @@ describe('client creation (intake contract unchanged)', () => {
 describe('KYC / retainer modules and the post-create prompt workflows', () => {
   test('enabling kycCdd + retainerManagement does not break client creation', async () => {
     await setModules({ kycCdd: true, retainerManagement: true });
-    const settings = await request(app).get('/api/firm-settings');
+    const settings = await request(app)
+      .get('/api/firm-settings')
+      .set('Authorization', `Bearer ${adminToken}`);
     expect(settings.body.moduleSettings.kycCdd).toBe(true);
     expect(settings.body.moduleSettings.retainerManagement).toBe(true);
 

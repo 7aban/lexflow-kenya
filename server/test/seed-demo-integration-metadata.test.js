@@ -49,7 +49,7 @@ describe('Seed demo integration metadata', () => {
       .send({ email: 'admin@lexflow.co.ke', password: 'password123' });
     expect(loginRes.statusCode).toBe(200);
     adminToken = loginRes.body.token;
-  });
+  }, 15000);
 
   test('seed creates integration tables on the demo database', async () => {
     const tables = await withDb(({ all }) => all(

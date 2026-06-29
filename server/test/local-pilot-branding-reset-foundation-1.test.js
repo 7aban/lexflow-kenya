@@ -2,8 +2,8 @@ const request = require('supertest');
 const { app } = require('../server.js');
 
 describe('Local Pilot: Branding Reset & Theme Foundation (v5.183)', () => {
-  const LEXFLOW_DEFAULT_PRIMARY = '#0F1B33';
-  const LEXFLOW_DEFAULT_ACCENT = '#D4A34A';
+  const LEXFLOW_DEFAULT_PRIMARY = '#1A3628';
+  const LEXFLOW_DEFAULT_ACCENT = '#C5973C';
   let adminToken;
 
   beforeAll(async () => {

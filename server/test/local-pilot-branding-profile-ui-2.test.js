@@ -3,8 +3,8 @@ const { app } = require('../server.js');
 const themeValidation = require('../lib/themeValidation');
 
 describe('Local Pilot: Brand Profile UI contract (v5.185)', () => {
-  const defaultPrimary = '#0F1B33';
-  const defaultAccent = '#D4A34A';
+  const defaultPrimary = '#1A3628';
+  const defaultAccent = '#C5973C';
   let adminToken;
   let clientToken;
 

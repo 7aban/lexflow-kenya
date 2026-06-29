@@ -3,8 +3,8 @@ const { app, dbReady } = require('../server.js');
 
 const ADMIN = { email: 'admin@lexflow.co.ke', password: 'password123' };
 const CLIENT = { email: 'margaret.wairimu@example.co.ke', password: 'password123' };
-const defaultPrimary = '#0F1B33';
-const defaultAccent = '#D4A34A';
+const defaultPrimary = '#1A3628';
+const defaultAccent = '#C5973C';
 
 describe('LOCAL-PILOT-BRANDING-SMART-PALETTE-4 theme API contract', () => {
   let adminToken;

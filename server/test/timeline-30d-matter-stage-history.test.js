@@ -44,9 +44,8 @@ describe('TIMELINE-30D matter stage history capture', () => {
     const a = await request(app).post('/api/auth/login').send(ADMIN); adminToken = a.body.token;
     const adv = await request(app).post('/api/auth/login').send(ADVOCATE); advocateToken = adv.body.token; advocateName = adv.body.user.fullName;
     const cl = await request(app).post('/api/auth/client-login').send(CLIENT); clientToken = cl.body.token;
-    const matters = await request(app).get('/api/matters').set(auth(adminToken));
-    const list = Array.isArray(matters.body) ? matters.body : (matters.body.matters || []);
-    seededMatterId = list[0]?.id;
+    const seededMatter = await dbGet("SELECT id FROM matters WHERE reference='LEX-2026-0001'");
+    seededMatterId = seededMatter?.id;
   });
 
   afterAll(async () => {

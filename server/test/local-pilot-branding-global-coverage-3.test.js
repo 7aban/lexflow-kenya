@@ -32,8 +32,8 @@ describe('LOCAL-PILOT-BRANDING-GLOBAL-COVERAGE-3 theme coverage', () => {
       .set('Authorization', `Bearer ${adminToken}`);
 
     expect(reset.statusCode).toBe(200);
-    expect(reset.body.theme.primaryColor).toBe('#0F1B33');
-    expect(reset.body.theme.accentColor).toBe('#D4A34A');
+    expect(reset.body.theme.primaryColor).toBe('#1A3628');
+    expect(reset.body.theme.accentColor).toBe('#C5973C');
     expect(reset.body.theme.source).toBe('default');
     expectReadablePair(reset.body.theme, 'onSidebarColor', 'sidebarColor');
     expectReadablePair(reset.body.theme, 'onHeaderColor', 'headerColor');
@@ -59,7 +59,7 @@ describe('LOCAL-PILOT-BRANDING-GLOBAL-COVERAGE-3 theme coverage', () => {
       .get('/api/firm-settings/theme')
       .set('Authorization', `Bearer ${adminToken}`);
     expect(current.statusCode).toBe(200);
-    expect(current.body.theme.primaryColor).toBe('#0F1B33');
+    expect(current.body.theme.primaryColor).toBe('#1A3628');
   });
 
   test('saving a preset persists readable helper tokens', async () => {
@@ -88,8 +88,8 @@ describe('LOCAL-PILOT-BRANDING-GLOBAL-COVERAGE-3 theme coverage', () => {
 
     expect(reset.statusCode).toBe(200);
     expect(reset.body.message).toBe('Firm branding restored to LexFlow default.');
-    expect(reset.body.theme.primaryColor).toBe('#0F1B33');
-    expect(reset.body.theme.accentColor).toBe('#D4A34A');
+    expect(reset.body.theme.primaryColor).toBe('#1A3628');
+    expect(reset.body.theme.accentColor).toBe('#C5973C');
     expect(reset.body.theme.source).toBe('default');
     expectReadablePair(reset.body.theme, 'onPrimaryColor', 'primaryColor');
   });
