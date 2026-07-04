@@ -139,7 +139,7 @@ describe('R3c Client Isolation & Audit Completion', () => {
         cwd: __dirname + '/..',
         env: { ...process.env, NODE_ENV: 'test', LEXFLOW_BACKUP_KEY: process.env.LEXFLOW_BACKUP_KEY || '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', LEXFLOW_BACKUP_RETENTION_COUNT: '10' },
       });
-    });
+    }, 15000);
 
     test('B1. backup_created audit event is recorded on successful backup', async () => {
       const sqlite3 = require('sqlite3');

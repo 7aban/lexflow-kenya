@@ -6,6 +6,7 @@
 // 4. email/password login still works
 const request = require('supertest');
 const { app } = require('../server.js');
+const config = require('../lib/config');
 
 describe('LOCAL-PILOT-FIX-8 Login OAuth availability', () => {
   test('GET /api/auth/oauth/availability returns only booleans and never 500', async () => {
@@ -27,13 +28,25 @@ describe('LOCAL-PILOT-FIX-8 Login OAuth availability', () => {
   });
 
   test('OAuth start route returns 503 (not 500) when unconfigured — google', async () => {
-    const res = await request(app).get('/api/auth/oauth/google/start');
-    expect([503]).toContain(res.statusCode);
+    const original = config.OAUTH_STAFF_ENABLED;
+    config.OAUTH_STAFF_ENABLED = false;
+    try {
+      const res = await request(app).get('/api/auth/oauth/google/start');
+      expect(res.statusCode).toBe(503);
+    } finally {
+      config.OAUTH_STAFF_ENABLED = original;
+    }
   });
 
   test('OAuth start route returns 503 (not 500) when unconfigured — microsoft', async () => {
-    const res = await request(app).get('/api/auth/oauth/microsoft/start');
-    expect([503]).toContain(res.statusCode);
+    const original = config.OAUTH_STAFF_ENABLED;
+    config.OAUTH_STAFF_ENABLED = false;
+    try {
+      const res = await request(app).get('/api/auth/oauth/microsoft/start');
+      expect(res.statusCode).toBe(503);
+    } finally {
+      config.OAUTH_STAFF_ENABLED = original;
+    }
   });
 
   test('email/password login still works', async () => {

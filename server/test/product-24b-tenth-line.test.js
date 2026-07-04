@@ -26,8 +26,15 @@ function dbRun(sql, params = []) {
   const db = new sqlite3.Database(config.DATABASE_PATH);
   return new Promise((resolve, reject) => {
     db.run(sql, params, function onRun(err) {
-      db.close();
-      err ? reject(err) : resolve(this);
+      db.close(closeErr => {
+        if (err) {
+          reject(err);
+        } else if (closeErr) {
+          reject(closeErr);
+        } else {
+          resolve(this);
+        }
+      });
     });
   });
 }
@@ -36,8 +43,15 @@ function dbGet(sql, params = []) {
   const db = new sqlite3.Database(config.DATABASE_PATH);
   return new Promise((resolve, reject) => {
     db.get(sql, params, (err, row) => {
-      db.close();
-      err ? reject(err) : resolve(row);
+      db.close(closeErr => {
+        if (err) {
+          reject(err);
+        } else if (closeErr) {
+          reject(closeErr);
+        } else {
+          resolve(row);
+        }
+      });
     });
   });
 }

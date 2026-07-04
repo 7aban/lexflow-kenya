@@ -8,6 +8,7 @@ const config = require('../lib/config');
 const { app } = require('../server.js');
 
 const TEST_EMAIL = 'local-pilot-fix2@test.lexflow.co.ke';
+const SHORT_PASSWORD_EMAIL = 'short-accepted@test.lexflow.co.ke';
 const PASSWORD_8 = 'Pilot8!a'; // exactly 8 chars, meets complexity rules
 const PASSWORD_8_NEXT = 'Next8!ab'; // exactly 8 chars, meets complexity rules
 const PASSWORD_7 = 'Pi8!abc'; // 7 chars — under the new minimum
@@ -25,6 +26,8 @@ const dbRun = (sql, params = []) => new Promise((resolve, reject) => {
 });
 
 beforeAll(async () => {
+  await dbRun('DELETE FROM users WHERE email IN (?, ?)', [TEST_EMAIL, SHORT_PASSWORD_EMAIL]);
+
   const adminRes = await request(app)
     .post('/api/auth/login')
     .send({ email: 'admin@lexflow.co.ke', password: 'password123' });
@@ -50,7 +53,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   try {
-    await dbRun('DELETE FROM users WHERE email=?', [TEST_EMAIL]);
+    await dbRun('DELETE FROM users WHERE email IN (?, ?)', [TEST_EMAIL, SHORT_PASSWORD_EMAIL]);
     for (const invoiceId of createdInvoiceIds) {
       await dbRun('DELETE FROM invoice_items WHERE invoiceId=?', [invoiceId]);
       await dbRun('DELETE FROM invoices WHERE id=?', [invoiceId]);
@@ -62,7 +65,9 @@ afterAll(async () => {
     }
     if (clientId) await dbRun('DELETE FROM clients WHERE id=?', [clientId]);
   } finally {
-    db.close();
+    await new Promise((resolve, reject) => {
+      db.close(err => err ? reject(err) : resolve());
+    });
   }
 });
 
@@ -84,7 +89,7 @@ describe('P0-1 Password policy minimum 8', () => {
     const res = await request(app)
       .post('/api/auth/register')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ email: 'short-accepted@test.lexflow.co.ke', password: PASSWORD_7, fullName: 'Short Accepted', role: 'assistant' });
+      .send({ email: SHORT_PASSWORD_EMAIL, password: PASSWORD_7, fullName: 'Short Accepted', role: 'assistant' });
     expect(res.statusCode).toBe(200);
   });
 

@@ -12,15 +12,39 @@ const createdDeadlineIds = [];
 
 function dbAll(sql, params = []) {
   const d = new sqlite3.Database(config.DATABASE_PATH);
-  return new Promise((resolve, reject) => { d.all(sql, params, (e, r) => { d.close(); e ? reject(e) : resolve(r); }); });
+  return new Promise((resolve, reject) => {
+    d.all(sql, params, (e, r) => {
+      d.close(closeErr => {
+        if (e) reject(e);
+        else if (closeErr) reject(closeErr);
+        else resolve(r);
+      });
+    });
+  });
 }
 function dbGet(sql, params = []) {
   const d = new sqlite3.Database(config.DATABASE_PATH);
-  return new Promise((resolve, reject) => { d.get(sql, params, (e, r) => { d.close(); e ? reject(e) : resolve(r); }); });
+  return new Promise((resolve, reject) => {
+    d.get(sql, params, (e, r) => {
+      d.close(closeErr => {
+        if (e) reject(e);
+        else if (closeErr) reject(closeErr);
+        else resolve(r);
+      });
+    });
+  });
 }
 function dbRun(sql, params = []) {
   const d = new sqlite3.Database(config.DATABASE_PATH);
-  return new Promise((resolve, reject) => { d.run(sql, params, function (e) { d.close(); e ? reject(e) : resolve(); }); });
+  return new Promise((resolve, reject) => {
+    d.run(sql, params, e => {
+      d.close(closeErr => {
+        if (e) reject(e);
+        else if (closeErr) reject(closeErr);
+        else resolve();
+      });
+    });
+  });
 }
 async function latestAudit(action) {
   const rows = await dbAll('SELECT * FROM audit_events WHERE action=? ORDER BY timestamp DESC, id DESC LIMIT 1', [action]);
@@ -65,7 +89,11 @@ afterAll(async () => {
   try { for (const id of createdSuggestionIds) await dbRun('DELETE FROM legal_deadline_suggestions WHERE id=?', [id]); } catch {}
   try { for (const id of createdRuleIds) await dbRun('DELETE FROM legal_deadline_rules WHERE id=?', [id]); } catch {}
   try { await enableAdvancedCompliance(false); } catch {}
-  try { db.close(); } catch {}
+  if (db) {
+    await new Promise((resolve, reject) => {
+      db.close(err => err ? reject(err) : resolve());
+    });
+  }
 });
 
 describe('KENYA-32D legal deadline rule review controls', () => {

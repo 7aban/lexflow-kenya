@@ -1,3 +1,9 @@
+process.env.OAUTH_STATE_SECRET ||= 'test-connected-accounts-oauth-state-secret';
+process.env.GOOGLE_CLIENT_ID ||= 'test-google-client-id';
+process.env.GOOGLE_CLIENT_SECRET ||= 'test-google-client-secret';
+process.env.MICROSOFT_CLIENT_ID ||= 'test-microsoft-client-id';
+process.env.MICROSOFT_CLIENT_SECRET ||= 'test-microsoft-client-secret';
+
 const request = require('supertest');
 const sqlite3 = require('sqlite3');
 const { app, dbReady } = require('../server.js');

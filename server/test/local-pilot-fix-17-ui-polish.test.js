@@ -10,9 +10,10 @@ function read(relativePath) {
 describe('LOCAL-PILOT-FIX-17 quick UI polish guards', () => {
   test('staff sidebar uses clear open groups and no typed chevrons', () => {
     const app = read('client/src/App.jsx');
-    expect(app).toContain("{ title: 'Work', items: [['Dashboard'");
-    expect(app).toContain("{ title: 'Money', items: [['Invoices'");
-    expect(app).toContain("{ title: 'Admin', items: [['Users'");
+    expect(app).toContain("{ title: 'Primary', collapsible: false, showTitle: false, items: [['Dashboard'");
+    expect(app).toContain("{ title: 'Tools', collapsible: true, items: [");
+    expect(app).toContain("{ title: 'Admin', collapsible: true, items: [['Users'");
+    expect(app).toContain('<IconChevronDown');
     expect(app).not.toContain("openNavGroups.has(group.title) ? 'v' : '>'");
   });
 

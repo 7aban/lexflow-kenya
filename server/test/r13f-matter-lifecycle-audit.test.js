@@ -1,7 +1,7 @@
 const request = require('supertest');
 const sqlite3 = require('sqlite3');
 const path = require('path');
-const { app } = require('../server.js');
+const { app, dbReady } = require('../server.js');
 
 function dbAll(sql, params = []) {
   const db = new sqlite3.Database(path.join(__dirname, '..', 'lawfirm.db'));
@@ -39,6 +39,7 @@ describe('R13f matter lifecycle structured audit events', () => {
   let createdMatterId;
 
   beforeAll(async () => {
+    await dbReady;
     const adminRes = await request(app)
       .post('/api/auth/login')
       .send({ email: 'admin@lexflow.co.ke', password: 'password123' });

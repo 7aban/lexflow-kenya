@@ -1,11 +1,12 @@
 const request = require('supertest');
-const { app } = require('../server.js');
+const { app, dbReady } = require('../server.js');
 
 let adminToken;
 let advocateToken;
 let clientToken;
 
 beforeAll(async () => {
+  await dbReady;
   const adminRes = await request(app)
     .post('/api/auth/login')
     .send({ email: 'admin@lexflow.co.ke', password: 'password123' });

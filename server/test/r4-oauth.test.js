@@ -153,19 +153,42 @@ describe('R4 Staff OAuth Backend', () => {
 
   describe('C. OAuth callback validation', () => {
     test('C1. Callback rejects unknown user', async () => {
-      const res = await request(app)
-        .get('/api/auth/oauth/google/callback')
-        .query({ code: 'fake-code', state: signState('google') });
-      expect(res.status).toBe(302);
-      const location = res.header.location;
-      expect(location).toContain('error=');
+      const spyGoogle = jest.spyOn(googleOAuth, 'handleCallback').mockResolvedValue({
+        provider: 'google',
+        providerSubject: `test-subject-unknown-${Date.now()}`,
+        email: `unknown-oauth-${Date.now()}@lexflow.co.ke`,
+        emailVerified: true,
+      });
+
+      try {
+        const res = await request(app)
+          .get('/api/auth/oauth/google/callback')
+          .query({ code: 'fake-code', state: signState('google') });
+        expect(res.status).toBe(302);
+        const location = res.header.location;
+        expect(location).toContain('error=');
+      } finally {
+        spyGoogle.mockRestore();
+      }
     });
 
     test('C2. Callback rejects client email', async () => {
-      const res = await request(app)
-        .get('/api/auth/oauth/google/callback')
-        .query({ code: 'fake-code', state: signState('google') });
-      expect(res.status).toBe(302);
+      const spyGoogle = jest.spyOn(googleOAuth, 'handleCallback').mockResolvedValue({
+        provider: 'google',
+        providerSubject: `test-subject-client-${Date.now()}`,
+        email: 'margaret.wairimu@example.co.ke',
+        emailVerified: true,
+      });
+
+      try {
+        const res = await request(app)
+          .get('/api/auth/oauth/google/callback')
+          .query({ code: 'fake-code', state: signState('google') });
+        expect(res.status).toBe(302);
+        expect(res.header.location).toContain('error=');
+      } finally {
+        spyGoogle.mockRestore();
+      }
     });
 
     test('C3. Invalid state is rejected on callback', async () => {

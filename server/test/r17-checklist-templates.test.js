@@ -7,8 +7,15 @@ function dbAll(sql, params = []) {
   const db = new sqlite3.Database(path.join(__dirname, '..', 'lawfirm.db'));
   return new Promise((resolve, reject) => {
     db.all(sql, params, (err, rows) => {
-      db.close();
-      err ? reject(err) : resolve(rows);
+      db.close(closeErr => {
+        if (err) {
+          reject(err);
+        } else if (closeErr) {
+          reject(closeErr);
+        } else {
+          resolve(rows);
+        }
+      });
     });
   });
 }

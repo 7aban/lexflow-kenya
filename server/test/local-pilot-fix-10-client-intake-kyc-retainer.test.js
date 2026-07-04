@@ -15,7 +15,7 @@
 //    coerces string billingRate/fixedFee values, which the retyped Rate/Fee
 //    input now submits.
 const request = require('supertest');
-const { app } = require('../server.js');
+const { app, dbReady } = require('../server.js');
 
 const INDIVIDUAL_NAME = 'LP-FIX10 John Kamau';
 const COMPANY_NAME = 'LP-FIX10 ABC Limited';
@@ -39,6 +39,7 @@ async function setModules(modules) {
 }
 
 beforeAll(async () => {
+  await dbReady;
   const login = await request(app)
     .post('/api/auth/login')
     .send({ email: 'admin@lexflow.co.ke', password: 'password123' });

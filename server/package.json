@@ -7,7 +7,7 @@
     "start": "node server.js",
     "seed:demo": "node scripts/seed-demo-data.js",
     "test": "npx jest --runInBand",
-    "test:seeded": "npm run seed:demo && npm test",
+    "test:seeded": "npm run seed:demo && node scripts/run-seeded-tests.js",
     "backup": "node scripts/backup.js",
     "restore:backup": "node scripts/restore-backup.js"
   },
