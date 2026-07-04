@@ -199,7 +199,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
         },
       });
       event.target.value = '';
-      setUploadFolderInput('');
+      setUploadFolderInput(clientMode || selectedFolder === 'all' ? '' : selectedName);
       setUploadStatus({ fileName: file.name, state: 'Uploaded' });
       notify?.({ type: 'success', message: clientMode ? 'Document shared with the firm.' : 'Document uploaded.' });
       await load();
@@ -262,8 +262,25 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   }
 
   const realFolders = folders.filter(folder => !folder.virtual);
+  const clientUploadsFolder = realFolders.find(folder => (folder.name || '').trim().toLowerCase() === 'client uploads');
+  const customFolders = realFolders.filter(folder => folder.id !== clientUploadsFolder?.id);
+  const explorerFolders = useMemo(() => {
+    const all = folders.find(folder => folder.id === 'all') || {
+      id: 'all',
+      name: 'All documents',
+      virtual: true,
+      ...(selectedFolder === 'all' ? { documentCount: documents.length } : {}),
+    };
+    const uncategorised = folders.find(folder => folder.id === 'uncategorised') || {
+      id: 'uncategorised',
+      name: 'Uncategorised',
+      virtual: true,
+      ...(selectedFolder === 'uncategorised' ? { documentCount: documents.length } : {}),
+    };
+    return [all, uncategorised, ...(clientUploadsFolder ? [clientUploadsFolder] : []), ...customFolders];
+  }, [folders, clientUploadsFolder, customFolders, selectedFolder, documents.length]);
   const folderOptions = useMemo(() => [{ id: 'uncategorised', name: 'Uncategorised' }, ...realFolders], [realFolders]);
-  const selectedName = folders.find(folder => folder.id === selectedFolder)?.name || 'All Documents';
+  const selectedName = explorerFolders.find(folder => folder.id === selectedFolder)?.name || 'All documents';
 
   const filteredTemplates = useMemo(() => {
     const q = templateSearch.trim().toLowerCase();
@@ -279,7 +296,8 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     return sel ? [sel, ...filteredTemplates] : filteredTemplates;
   }, [filteredTemplates, templates, selectedTemplateId, templateSearch]);
   const showUploadControls = clientMode || (canManage && activeAction === 'upload');
-  const showFolderControls = clientMode || activeAction === 'manage';
+  const showFolderControls = true;
+  const showAdvancedFolderControls = canManage && activeAction === 'manage';
   const documentCardHint = clientMode
     ? 'Client uploads are placed in Client Uploads automatically.'
     : canManage ? 'Upload, move and manage matter documents.' : 'View matter documents.';
@@ -297,17 +315,21 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       .lf-doc-upload-area:focus-within { border-color: #C5973C; box-shadow: 0 0 0 3px rgba(197,151,60,.14); }
       .lf-doc-secondary-tools > summary { cursor: pointer; color: #234936; font-size: 13px; font-weight: 700; padding: 11px 0; }
       .lf-doc-secondary-tools[open] > summary { margin-bottom: 8px; }
+      .lf-doc-folder-button { width: 100%; text-align: left; }
+      @media (max-width: 640px) {
+        .lf-doc-grid { grid-template-columns: minmax(0, 1fr) !important; }
+      }
     `}</style>
     <div className="lf-doc-grid" style={{ display: 'grid', gridTemplateColumns: showFolderControls ? '220px minmax(0,1fr)' : 'minmax(0,1fr)', gap: 16 }}>
       {showFolderControls && <Card title="Folders" hint="Filter and organise matter files">
         <div style={{ display: 'grid', gap: 6 }}>
-          {folders.map(folder => (
-            <div key={folder.id} style={{ display: 'grid', gridTemplateColumns: canManage && !folder.virtual ? '1fr auto' : '1fr', gap: 6, alignItems: 'center' }}>
-              <button type="button" style={{ ...styles.matterButton, ...(selectedFolder === folder.id ? styles.matterActive : {}), padding: '9px 8px' }} onClick={() => setSelectedFolder(folder.id)}>
+          {explorerFolders.map(folder => (
+            <div key={folder.id} style={{ display: 'grid', gridTemplateColumns: showAdvancedFolderControls && !folder.virtual ? '1fr auto' : '1fr', gap: 6, alignItems: 'center' }}>
+              <button className="lf-doc-folder-button" type="button" aria-pressed={selectedFolder === folder.id} style={{ ...styles.matterButton, ...(selectedFolder === folder.id ? styles.matterActive : {}), padding: '9px 8px' }} onClick={() => setSelectedFolder(folder.id)}>
                 <strong>{folderIcon(folder)} {folder.name}</strong>
                 {folder.documentCount !== undefined && <small>{folder.documentCount} document(s)</small>}
               </button>
-              {canManage && !folder.virtual && (
+              {showAdvancedFolderControls && !folder.virtual && (
                 <ActionGroup actions={[
                   ['Rename', () => renameFolder(folder)],
                   ['Delete', () => setConfirm({ title: 'Delete folder?', message: 'Delete this folder? It must be empty.', onConfirm: () => removeFolder(folder) })],
@@ -315,6 +337,11 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
               )}
             </div>
           ))}
+          {!customFolders.length && (
+            <span style={{ color: theme.muted, fontSize: 12, lineHeight: 1.45, padding: '4px 2px' }}>
+              No custom folders yet.
+            </span>
+          )}
         </div>
         {canManage && (
           <form onSubmit={addFolder} style={{ display: 'grid', gap: 8, marginTop: 12 }}>
@@ -367,7 +394,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
             </div>
           </div>
         )}
-        {showGenerateControls && showFolderControls && (
+        {showGenerateControls && showAdvancedFolderControls && (
           <details className="lf-doc-secondary-tools" style={{ background: theme.amberBg, border: '1px solid #DDD8CE', borderLeft: `3px solid ${theme.amber}`, borderRadius: 8, padding: '0 14px', marginBottom: 12 }}>
             <summary>Generate a draft from a template</summary>
           <div style={{ paddingBottom: 12 }}>
@@ -466,8 +493,18 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
         ) : (
           <div style={{ ...styles.empty, alignItems: 'flex-start', textAlign: 'left' }}>
             <div style={styles.emptyIcon}>LF</div>
-            <strong>No documents have been added to this matter yet.</strong>
-            <span>Upload a file, request one from the client, or use Document Studio. Documents saved here stay linked to this matter.</span>
+            <strong>
+              {selectedFolder === 'all'
+                ? 'No documents have been added to this matter yet.'
+                : selectedFolder === clientUploadsFolder?.id
+                  ? 'The Client Uploads folder is empty.'
+                  : `No documents in ${selectedName}.`}
+            </strong>
+            <span>
+              {selectedFolder === 'all'
+                ? 'Upload a file, request one from the client, or use Document Studio. Documents saved here stay linked to this matter.'
+                : 'Choose another folder or upload a document to this folder.'}
+            </span>
             {!clientMode && canManage && (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
                 <button type="button" style={styles.primaryButton} onClick={() => onChooseAction?.('upload')}>Upload document</button>
