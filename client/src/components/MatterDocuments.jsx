@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { api, createFolder, deleteFolder, downloadWithAuth, fileToDataUrl, generateDocumentFromTemplate, getMatterDocuments, getMatterFolders, listDocumentTemplates, moveDocument, updateDocument, updateFolder } from '../lib/apiClient.js';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { api, createFolder, deleteFolder, downloadWithAuth, fetchDocumentArrayBuffer, fileToDataUrl, generateDocumentFromTemplate, getMatterDocuments, getMatterFolders, listDocumentTemplates, moveDocument, updateDocument, updateFolder } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { ActionGroup, Badge, Card, ConfirmModal, Field, Skeleton, Table } from './ui.jsx';
 
@@ -41,6 +41,38 @@ function documentLabel(doc) {
   return doc.displayName || doc.friendlyName || doc.name || 'Document';
 }
 
+function documentPreviewKind(doc) {
+  const mimeType = String(doc.mimeType || doc.type || '').toLowerCase();
+  const name = documentLabel(doc).toLowerCase();
+  if (mimeType.includes('pdf') || name.endsWith('.pdf')) return 'pdf';
+  if (mimeType.startsWith('image/') || /\.(avif|bmp|gif|jpe?g|png|svg|webp)$/i.test(name)) return 'image';
+  return '';
+}
+
+function documentTypeLabel(doc) {
+  const mimeType = String(doc.mimeType || doc.type || '').trim();
+  if (mimeType) return mimeType;
+  const extension = documentLabel(doc).match(/\.([^.]+)$/)?.[1];
+  return extension ? extension.toUpperCase() : 'File type unavailable';
+}
+
+function previewMimeType(doc, kind) {
+  if (kind === 'pdf') return 'application/pdf';
+  const mimeType = String(doc.mimeType || doc.type || '').toLowerCase();
+  if (mimeType.startsWith('image/')) return mimeType;
+  const extension = documentLabel(doc).match(/\.([^.]+)$/)?.[1]?.toLowerCase();
+  return {
+    avif: 'image/avif',
+    bmp: 'image/bmp',
+    gif: 'image/gif',
+    jpeg: 'image/jpeg',
+    jpg: 'image/jpeg',
+    png: 'image/png',
+    svg: 'image/svg+xml',
+    webp: 'image/webp',
+  }[extension] || 'application/octet-stream';
+}
+
 export default function MatterDocuments({ matterId, clientMode = false, canManage = false, notify, activeAction = '', onChooseAction, onOpenDocumentStudio }) {
   const [folders, setFolders] = useState([]);
   const [documents, setDocuments] = useState([]);
@@ -58,6 +90,9 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const [generationWarning, setGenerationWarning] = useState('');
   const [templateSearch, setTemplateSearch] = useState('');
   const [uploadStatus, setUploadStatus] = useState({ fileName: '', state: '' });
+  const [preview, setPreview] = useState(null);
+  const previewUrlRef = useRef('');
+  const previewRequestRef = useRef(0);
 
   const showGenerateControls = canManage === true && clientMode === false && Boolean(matterId);
 
@@ -87,6 +122,11 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       setUploadFolderInput('');
     }
   }, [clientMode, selectedFolder, folders]);
+
+  useEffect(() => () => {
+    previewRequestRef.current += 1;
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+  }, []);
 
   async function load() {
     setLoading(true);
@@ -258,6 +298,52 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       await downloadWithAuth(`/api/documents/${doc.id}/download`, documentLabel(doc));
     } catch (err) {
       notify?.({ type: 'danger', message: err.message });
+    }
+  }
+
+  function revokePreviewUrl() {
+    if (!previewUrlRef.current) return;
+    URL.revokeObjectURL(previewUrlRef.current);
+    previewUrlRef.current = '';
+  }
+
+  function closePreview() {
+    previewRequestRef.current += 1;
+    revokePreviewUrl();
+    setPreview(null);
+  }
+
+  async function openPreview(doc) {
+    const kind = documentPreviewKind(doc);
+    const requestId = previewRequestRef.current + 1;
+    previewRequestRef.current = requestId;
+    revokePreviewUrl();
+    setPreview({
+      doc,
+      kind,
+      status: kind ? 'loading' : 'unsupported',
+      url: '',
+      error: '',
+    });
+    if (!kind) return;
+
+    try {
+      const bytes = await fetchDocumentArrayBuffer(doc.id);
+      if (previewRequestRef.current !== requestId) return;
+      const url = URL.createObjectURL(new Blob([bytes], { type: previewMimeType(doc, kind) }));
+      if (previewRequestRef.current !== requestId) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      previewUrlRef.current = url;
+      setPreview(current => current?.doc.id === doc.id
+        ? { ...current, status: 'ready', url }
+        : current);
+    } catch (err) {
+      if (previewRequestRef.current !== requestId) return;
+      setPreview(current => current?.doc.id === doc.id
+        ? { ...current, status: 'error', error: err.message || 'Unable to preview this document.' }
+        : current);
     }
   }
 
@@ -459,17 +545,18 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
           <div className={canManage ? "lf-doc-cards-staff" : "lf-doc-cards-client"}>
           <div className="lf-doc-table-wrap">
           <Table
-            columns={canManage ? ['Name', 'Folder', 'Date', 'Size', 'Source', 'Client Access', 'Move', 'Actions'] : ['Name', 'Folder', 'Date', 'Size', 'Source', 'Download']}
+            columns={canManage ? ['Name', 'Folder', 'Date', 'Size', 'Source', 'Client Access', 'Move', 'Actions'] : ['Name', 'Folder', 'Date', 'Size', 'Source', 'Actions']}
             rows={documents.map(doc => {
               const metaStyle = { color: theme.muted, fontSize: 12 };
               const download = <button key={`${doc.id}-download`} type="button" style={{ ...styles.link, border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }} onClick={() => downloadDoc(doc)}>Download</button>;
+              const previewAction = <button key={`${doc.id}-preview`} type="button" style={{ ...styles.link, border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }} onClick={() => openPreview(doc)}>Preview</button>;
               if (!canManage) return [
                 <strong key={`${doc.id}-n`} style={{ fontWeight: 600 }}>{documentLabel(doc)}</strong>,
                 <span key={`${doc.id}-f`} style={metaStyle}>{doc.folderName || 'Uncategorised'}</span>,
                 <span key={`${doc.id}-d`} style={metaStyle}>{doc.date || '-'}</span>,
                 <span key={`${doc.id}-s`} style={metaStyle}>{doc.size || '-'}</span>,
                 sourceBadge(doc, clientMode),
-                download,
+                <span key={`${doc.id}-file-actions`} style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>{previewAction}{download}</span>,
               ];
               return [
                 <strong key={`${doc.id}-n`} style={{ fontWeight: 600 }}>{documentLabel(doc)}</strong>,
@@ -483,7 +570,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
                 <select key={`${doc.id}-move`} style={styles.tableSelect} value={doc.folderId || 'uncategorised'} onChange={e => moveDoc(doc, e.target.value)}>
                   {folderOptions.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
                 </select>,
-                <ActionGroup key={`${doc.id}-actions`} actions={[['Download', () => downloadDoc(doc)], ['Delete', () => setConfirm({ title: 'Delete document?', message: 'Delete this document?', onConfirm: () => deleteDoc(doc) })]]} />,
+                <ActionGroup key={`${doc.id}-actions`} actions={[['Preview', () => openPreview(doc)], ['Download', () => downloadDoc(doc)], ['Delete', () => setConfirm({ title: 'Delete document?', message: 'Delete this document?', onConfirm: () => deleteDoc(doc) })]]} />,
               ];
             })}
             empty="No documents."
@@ -515,6 +602,53 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
           </div>
         )}
       </Card>
+      {preview && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="matter-document-preview-title"
+          style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(17, 34, 25, 0.62)', padding: 16, display: 'grid', placeItems: 'center' }}
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) closePreview();
+          }}
+        >
+          <section style={{ width: 'min(100%, 1080px)', height: 'min(90vh, 820px)', background: theme.paper || '#fff', borderRadius: 10, boxShadow: '0 24px 64px rgba(0,0,0,.28)', display: 'grid', gridTemplateRows: 'auto minmax(0, 1fr)', overflow: 'hidden' }}>
+            <header style={{ borderBottom: `1px solid ${theme.line}`, padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <div style={{ minWidth: 0 }}>
+                <strong id="matter-document-preview-title" style={{ display: 'block', overflowWrap: 'anywhere' }}>{documentLabel(preview.doc)}</strong>
+                <small style={{ color: theme.muted }}>{documentTypeLabel(preview.doc)}</small>
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" style={styles.ghostButton} onClick={() => downloadDoc(preview.doc)}>Download</button>
+                <button type="button" style={styles.primaryButton} onClick={closePreview}>Close</button>
+              </div>
+            </header>
+            <div style={{ minHeight: 0, padding: 16, background: '#F4F1EB', display: 'grid', placeItems: 'center', overflow: 'auto' }}>
+              {preview.status === 'loading' && <div role="status">Loading preview…</div>}
+              {preview.status === 'unsupported' && (
+                <div style={{ ...styles.empty, background: '#fff', maxWidth: 480 }}>
+                  <strong>Preview not available for this file type.</strong>
+                  <span>You can download the document to open it instead.</span>
+                  <button type="button" style={styles.primaryButton} onClick={() => downloadDoc(preview.doc)}>Download</button>
+                </div>
+              )}
+              {preview.status === 'error' && (
+                <div style={{ ...styles.empty, background: '#fff', maxWidth: 480 }}>
+                  <strong>Unable to preview this document.</strong>
+                  <span>{preview.error || 'Use download instead.'}</span>
+                  <button type="button" style={styles.primaryButton} onClick={() => downloadDoc(preview.doc)}>Use download instead</button>
+                </div>
+              )}
+              {preview.status === 'ready' && preview.kind === 'pdf' && (
+                <iframe title={`Preview of ${documentLabel(preview.doc)}`} src={preview.url} style={{ width: '100%', height: '100%', minHeight: 420, border: 0, background: '#fff' }} />
+              )}
+              {preview.status === 'ready' && preview.kind === 'image' && (
+                <img src={preview.url} alt={`Preview of ${documentLabel(preview.doc)}`} style={{ display: 'block', maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+              )}
+            </div>
+          </section>
+        </div>
+      )}
       <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
     </div>
     </>
