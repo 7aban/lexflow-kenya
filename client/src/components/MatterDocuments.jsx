@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { api, createFolder, deleteFolder, downloadWithAuth, fetchDocumentArrayBuffer, fileToDataUrl, generateDocumentFromTemplate, getMatterDocuments, getMatterFolders, listDocumentTemplates, moveDocument, updateDocument, updateFolder } from '../lib/apiClient.js';
+import { api, createFolder, deleteFolder, downloadWithAuth, fetchDocumentArrayBuffer, fileToDataUrl, generateDocumentFromTemplate, getMatterDocuments, getMatterFolders, listDocumentTemplates, moveDocument, restoreDocument, updateDocument, updateFolder } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { ActionGroup, Badge, Card, ConfirmModal, Field, Skeleton, Table } from './ui.jsx';
 
 function folderIcon(folder) {
   if (folder.id === 'all') return 'ALL';
   if (folder.id === 'uncategorised') return 'UNC';
+  if (folder.id === 'archived') return 'ARC';
   if ((folder.name || '').toLowerCase() === 'client uploads') return 'UP';
   return 'DIR';
 }
@@ -131,9 +132,10 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   async function load() {
     setLoading(true);
     try {
+      const archivedView = selectedFolder === 'archived';
       const [nextFolders, docs] = await Promise.all([
         getMatterFolders(matterId),
-        getMatterDocuments(matterId, selectedFolder),
+        getMatterDocuments(matterId, archivedView ? 'all' : selectedFolder, archivedView ? 'archived' : 'active'),
       ]);
       setFolders(nextFolders);
       setDocuments(docs);
@@ -285,10 +287,18 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     await updateClientVisible(doc, nextVisible);
   }
 
-  async function deleteDoc(doc) {
+  async function archiveDoc(doc) {
     try {
       await api(`/documents/${doc.id}`, { method: 'DELETE' });
-      notify?.({ type: 'success', message: 'Document deleted.' });
+      notify?.({ type: 'success', message: 'Document archived.' });
+      await load();
+    } catch (err) { notify?.({ type: 'danger', message: err.message }); }
+  }
+
+  async function restoreDoc(doc) {
+    try {
+      await restoreDocument(doc.id);
+      notify?.({ type: 'success', message: 'Document restored to active matter documents.' });
       await load();
     } catch (err) { notify?.({ type: 'danger', message: err.message }); }
   }
@@ -363,8 +373,14 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       virtual: true,
       ...(selectedFolder === 'uncategorised' ? { documentCount: documents.length } : {}),
     };
-    return [all, uncategorised, ...(clientUploadsFolder ? [clientUploadsFolder] : []), ...customFolders];
-  }, [folders, clientUploadsFolder, customFolders, selectedFolder, documents.length]);
+    const archived = {
+      id: 'archived',
+      name: 'Archived documents',
+      virtual: true,
+      ...(selectedFolder === 'archived' ? { documentCount: documents.length } : {}),
+    };
+    return [all, uncategorised, ...(clientUploadsFolder ? [clientUploadsFolder] : []), ...customFolders, ...(canManage && !clientMode ? [archived] : [])];
+  }, [folders, clientUploadsFolder, customFolders, selectedFolder, documents.length, canManage, clientMode]);
   const folderOptions = useMemo(() => [{ id: 'uncategorised', name: 'Uncategorised' }, ...realFolders], [realFolders]);
   const selectedName = explorerFolders.find(folder => folder.id === selectedFolder)?.name || 'All documents';
 
@@ -381,7 +397,8 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     const sel = templates.find(t => String(t.id) === String(selectedTemplateId));
     return sel ? [sel, ...filteredTemplates] : filteredTemplates;
   }, [filteredTemplates, templates, selectedTemplateId, templateSearch]);
-  const showUploadControls = clientMode || (canManage && activeAction === 'upload');
+  const archivedView = selectedFolder === 'archived';
+  const showUploadControls = !archivedView && (clientMode || (canManage && activeAction === 'upload'));
   const showFolderControls = true;
   const showAdvancedFolderControls = canManage && activeAction === 'manage';
   const documentCardHint = clientMode
@@ -437,7 +454,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
         )}
       </Card>}
 
-      <Card title={selectedFolder === 'all' ? 'Matter files' : selectedName} hint={documentCardHint}>
+      <Card title={selectedFolder === 'all' ? 'Matter files' : selectedName} hint={archivedView ? 'Archived records are kept safely and can be restored to active matter documents.' : documentCardHint}>
         {showUploadControls && (
           <div className="lf-doc-upload-area">
             <div style={{ display: 'grid', gap: 5, marginBottom: 12 }}>
@@ -480,7 +497,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
             </div>
           </div>
         )}
-        {showGenerateControls && showAdvancedFolderControls && (
+        {!archivedView && showGenerateControls && showAdvancedFolderControls && (
           <details className="lf-doc-secondary-tools" style={{ background: theme.amberBg, border: '1px solid #DDD8CE', borderLeft: `3px solid ${theme.amber}`, borderRadius: 8, padding: '0 14px', marginBottom: 12 }}>
             <summary>Generate a draft from a template</summary>
           <div style={{ paddingBottom: 12 }}>
@@ -545,11 +562,23 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
           <div className={canManage ? "lf-doc-cards-staff" : "lf-doc-cards-client"}>
           <div className="lf-doc-table-wrap">
           <Table
-            columns={canManage ? ['Name', 'Folder', 'Date', 'Size', 'Source', 'Client Access', 'Move', 'Actions'] : ['Name', 'Folder', 'Date', 'Size', 'Source', 'Actions']}
+            columns={archivedView ? ['Name', 'Folder', 'Date', 'Size', 'Source', 'Actions'] : canManage ? ['Name', 'Folder', 'Date', 'Size', 'Source', 'Client Access', 'Move', 'Actions'] : ['Name', 'Folder', 'Date', 'Size', 'Source', 'Actions']}
             rows={documents.map(doc => {
               const metaStyle = { color: theme.muted, fontSize: 12 };
               const download = <button key={`${doc.id}-download`} type="button" style={{ ...styles.link, border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }} onClick={() => downloadDoc(doc)}>Download</button>;
               const previewAction = <button key={`${doc.id}-preview`} type="button" style={{ ...styles.link, border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }} onClick={() => openPreview(doc)}>Preview</button>;
+              if (archivedView) return [
+                <strong key={`${doc.id}-n`} style={{ fontWeight: 600 }}>{documentLabel(doc)}</strong>,
+                <span key={`${doc.id}-f`} style={metaStyle}>{doc.folderName || 'Uncategorised'}</span>,
+                <span key={`${doc.id}-d`} style={metaStyle}>{doc.date || '-'}</span>,
+                <span key={`${doc.id}-s`} style={metaStyle}>{doc.size || '-'}</span>,
+                sourceBadge(doc, clientMode),
+                <ActionGroup key={`${doc.id}-actions`} actions={[['Restore', () => setConfirm({
+                  title: 'Restore document?',
+                  message: 'Restore this document to active matter documents?',
+                  onConfirm: () => restoreDoc(doc),
+                })]]} />,
+              ];
               if (!canManage) return [
                 <strong key={`${doc.id}-n`} style={{ fontWeight: 600 }}>{documentLabel(doc)}</strong>,
                 <span key={`${doc.id}-f`} style={metaStyle}>{doc.folderName || 'Uncategorised'}</span>,
@@ -570,7 +599,11 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
                 <select key={`${doc.id}-move`} style={styles.tableSelect} value={doc.folderId || 'uncategorised'} onChange={e => moveDoc(doc, e.target.value)}>
                   {folderOptions.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
                 </select>,
-                <ActionGroup key={`${doc.id}-actions`} actions={[['Preview', () => openPreview(doc)], ['Download', () => downloadDoc(doc)], ['Delete', () => setConfirm({ title: 'Delete document?', message: 'Delete this document?', onConfirm: () => deleteDoc(doc) })]]} />,
+                <ActionGroup key={`${doc.id}-actions`} actions={[['Preview', () => openPreview(doc)], ['Download', () => downloadDoc(doc)], ['Archive', () => setConfirm({
+                  title: 'Archive document?',
+                  message: 'Archive removes this document from active matter documents. It does not permanently delete the record, and you can restore it later from Archived documents.',
+                  onConfirm: () => archiveDoc(doc),
+                })]]} />,
               ];
             })}
             empty="No documents."
@@ -581,18 +614,22 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
           <div style={{ ...styles.empty, alignItems: 'flex-start', textAlign: 'left' }}>
             <div style={styles.emptyIcon}>LF</div>
             <strong>
-              {selectedFolder === 'all'
+              {archivedView
+                ? 'No archived documents.'
+                : selectedFolder === 'all'
                 ? 'No documents have been added to this matter yet.'
                 : selectedFolder === clientUploadsFolder?.id
                   ? 'The Client Uploads folder is empty.'
                   : `No documents in ${selectedName}.`}
             </strong>
             <span>
-              {selectedFolder === 'all'
+              {archivedView
+                ? 'Archived documents will appear here and can be restored to active matter documents.'
+                : selectedFolder === 'all'
                 ? 'Upload a file, request one from the client, or use Document Studio. Documents saved here stay linked to this matter.'
                 : 'Choose another folder or upload a document to this folder.'}
             </span>
-            {!clientMode && canManage && (
+            {!archivedView && !clientMode && canManage && (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
                 <button type="button" style={styles.primaryButton} onClick={() => onChooseAction?.('upload')}>Upload document</button>
                 <button type="button" style={styles.ghostButton} onClick={() => onChooseAction?.('request')}>Request document</button>

@@ -399,7 +399,11 @@ export const getMatterFolders = matterId => api(`/matters/${matterId}/folders`);
 export const createFolder = (matterId, data) => api(`/matters/${matterId}/folders`, { method: 'POST', body: data });
 export const updateFolder = (folderId, data) => api(`/folders/${folderId}`, { method: 'PATCH', body: data });
 export const deleteFolder = folderId => api(`/folders/${folderId}`, { method: 'DELETE' });
-export const getMatterDocuments = (matterId, folderId = 'all') => api(`/matters/${matterId}/documents${folderId && folderId !== 'all' ? `?folderId=${encodeURIComponent(folderId)}` : ''}`);
+export const getMatterDocuments = (matterId, folderId = 'all', status = 'active') => api(queryPath(`/matters/${matterId}/documents`, {
+  ...(folderId && folderId !== 'all' ? { folderId } : {}),
+  ...(status === 'archived' ? { status } : {}),
+}));
+export const restoreDocument = documentId => api(`/documents/${encodeURIComponent(documentId)}/restore`, { method: 'PATCH' });
 // TIMELINE-30B: read-only unified matter timeline (staff-only on the backend).
 export const getMatterTimeline = (matterId, params = {}) => api(queryPath(`/matters/${encodeURIComponent(matterId)}/timeline`, params));
 // KENYA-34B: staff-only links between matter documents and a specific appearance.

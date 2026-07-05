@@ -233,12 +233,57 @@ describe('LOCAL-PILOT document access contract', () => {
     expect(stillDownloadable.statusCode).toBe(200);
   });
 
-  test('assigned advocate can soft-delete an accessible document', async () => {
-    const deleted = await request(app)
+  test('archive and restore preserve access controls and active-list isolation', async () => {
+    const archived = await request(app)
       .delete(`/api/documents/${deletableDocumentId}`)
       .set(auth(assignedAdvocateToken));
-    expect(deleted.statusCode).toBe(200);
-    expect(deleted.body).toEqual({ id: deletableDocumentId, deleted: true });
+    expect(archived.statusCode).toBe(200);
+    expect(archived.body).toEqual({ id: deletableDocumentId, deleted: true });
+
+    const activeAfterArchive = await request(app)
+      .get(`/api/matters/${ownMatterId}/documents`)
+      .set(auth(assignedAdvocateToken));
+    expect(activeAfterArchive.statusCode).toBe(200);
+    expect(activeAfterArchive.body.some(row => row.id === deletableDocumentId)).toBe(false);
+
+    const archivedList = await request(app)
+      .get(`/api/matters/${ownMatterId}/documents?status=archived`)
+      .set(auth(assignedAdvocateToken));
+    expect(archivedList.statusCode).toBe(200);
+    expect(archivedList.body.some(row => row.id === deletableDocumentId)).toBe(true);
+
+    const deniedList = await request(app)
+      .get(`/api/matters/${ownMatterId}/documents?status=archived`)
+      .set(auth(unassignedAdvocateToken));
+    expect(deniedList.statusCode).toBe(403);
+
+    const clientDeniedList = await request(app)
+      .get(`/api/matters/${ownMatterId}/documents?status=archived`)
+      .set(auth(ownClientToken));
+    expect(clientDeniedList.statusCode).toBe(403);
+
+    const deniedRestore = await request(app)
+      .patch(`/api/documents/${deletableDocumentId}/restore`)
+      .set(auth(unassignedAdvocateToken));
+    expect(deniedRestore.statusCode).toBe(403);
+
+    const restored = await request(app)
+      .patch(`/api/documents/${deletableDocumentId}/restore`)
+      .set(auth(assignedAdvocateToken));
+    expect(restored.statusCode).toBe(200);
+    expect(restored.body.id).toBe(deletableDocumentId);
+
+    const activeAfterRestore = await request(app)
+      .get(`/api/matters/${ownMatterId}/documents`)
+      .set(auth(assignedAdvocateToken));
+    expect(activeAfterRestore.statusCode).toBe(200);
+    expect(activeAfterRestore.body.some(row => row.id === deletableDocumentId)).toBe(true);
+
+    const archivedAfterRestore = await request(app)
+      .get(`/api/matters/${ownMatterId}/documents?status=archived`)
+      .set(auth(assignedAdvocateToken));
+    expect(archivedAfterRestore.statusCode).toBe(200);
+    expect(archivedAfterRestore.body.some(row => row.id === deletableDocumentId)).toBe(false);
   });
 
   test('unlinked matterless document is denied by default', async () => {

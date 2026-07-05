@@ -9229,9 +9229,11 @@ app.delete('/api/folders/:id', requireAdvocateOrAdmin, async (req, res) => {
 });
 app.get('/api/matters/:id/documents', async (req, res) => {
   if (!(await canAccessMatter(req, req.params.id))) return res.status(403).json({ error: 'Matter access denied' });
+  const archived = String(req.query.status || '').toLowerCase() === 'archived';
+  if (archived && req.user.role === 'client') return res.status(403).json({ error: 'Archived document access denied' });
   const folderId = req.query.folderId || '';
   const params = [req.params.id];
-  let where = 'd.matterId=? AND d.deletedAt IS NULL';
+  let where = `d.matterId=? AND d.deletedAt IS ${archived ? 'NOT ' : ''}NULL`;
   if (folderId && folderId !== 'all') {
     if (folderId === 'uncategorised') where += ' AND (d.folderId IS NULL OR d.folderId="")';
     else { where += ' AND d.folderId=?'; params.push(folderId); }
@@ -12181,7 +12183,7 @@ app.delete('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
     return res.status(403).json({ error: 'Document access denied' });
   }
   await run("UPDATE documents SET deletedAt=? WHERE id=?", [new Date().toISOString(), req.params.id]);
-  await logAudit(req, 'delete', 'document', req.params.id, `Soft-deleted document ${doc?.name || req.params.id}`);
+  await logAudit(req, 'delete', 'document', req.params.id, `Archived document ${doc?.name || req.params.id}`);
   await recordAuditEvent(req, {
     action: 'document_deleted',
     entityType: 'document',
@@ -12191,6 +12193,26 @@ app.delete('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
     metadata: safeDocumentMetadata(doc, documentAuditContext(doc), 'document_delete'),
   }).catch(() => {});
   res.json({ id: req.params.id, deleted: true });
+});
+app.patch('/api/documents/:id/restore', requireAdvocateOrAdmin, async (req, res) => {
+  const doc = await get(`SELECT ${documentMetadataColumns()} FROM documents WHERE id=? AND deletedAt IS NOT NULL`, [req.params.id]);
+  if (!doc) return res.status(404).json({ error: 'Archived document not found' });
+  if (!(await canAccessDocument(req, doc)) || !doc.matterId || !(await canAccessMatter(req, doc.matterId))) {
+    await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: req.params.id, matterId: doc.matterId || '', metadata: { reason: 'insufficient permissions', route: 'document_restore' } }).catch(() => {});
+    return res.status(403).json({ error: 'Document access denied' });
+  }
+  await run('UPDATE documents SET deletedAt=NULL WHERE id=? AND deletedAt IS NOT NULL', [req.params.id]);
+  const restored = await get(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=?`, [req.params.id]);
+  await logAudit(req, 'restore', 'document', req.params.id, `Restored document ${doc.name || req.params.id}`);
+  await recordAuditEvent(req, {
+    action: 'document_restored',
+    entityType: 'document',
+    entityId: req.params.id,
+    matterId: doc.matterId || '',
+    clientId: await documentAuditClientId(doc, req),
+    metadata: safeDocumentMetadata(doc, documentAuditContext(doc), 'document_restore'),
+  }).catch(() => {});
+  res.json(publicDocument(restored));
 });
 
 app.get('/api/matters/:id/notes', async (req, res) => { if (!(await canAccessMatter(req, req.params.id))) return res.status(403).json({ error: 'Matter access denied' }); if (req.user.role === 'client') return res.json([]); res.json(await all('SELECT * FROM case_notes WHERE matterId=? ORDER BY createdAt DESC', [req.params.id])); });
