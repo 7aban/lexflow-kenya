@@ -3123,46 +3123,6 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
                   </span>
                 )}
               </div>
-              <div className="lf-matter-quick-actions-card" style={{ border: `1px solid ${theme.line}`, borderRadius: 10, padding: 12, background: theme.soft, display: 'grid', gap: 8, marginBottom: 12 }}>
-                <style>{`
-                  .lf-matter-quick-actions-grid {
-                    display: grid;
-                    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-                    gap: 6px;
-                  }
-                  @media (max-width: 520px) {
-                    .lf-matter-quick-actions-grid {
-                      grid-template-columns: 1fr;
-                    }
-                  }
-                `}</style>
-                <div>
-                  <strong style={{ fontSize: 13, color: theme.ink }}>Matter quick actions</strong>
-                  <div style={{ color: theme.muted, fontSize: 12, marginTop: 2 }}>Use these shortcuts to move the file forward without leaving the matter workspace.</div>
-                </div>
-                <div className="lf-matter-quick-actions-grid">
-                  <button type="button" onClick={() => selectCockpitSection('tasks')} style={{ ...styles.ghostButton, fontSize: 12, padding: '7px 10px', display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-start', gap: 6, margin: 0 }} aria-label="Add or view matter tasks">
-                    <IconListCheck size={14} stroke={1.75} /> Tasks
-                  </button>
-                  <button type="button" onClick={() => onNavigate?.('Deadlines')} style={{ ...styles.ghostButton, fontSize: 12, padding: '7px 10px', display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-start', gap: 6, margin: 0 }} aria-label="Add or view deadlines">
-                    <IconClockHour4 size={14} stroke={1.75} /> Deadlines
-                  </button>
-                  <button type="button" onClick={() => selectCockpitSection('court-diary')} style={{ ...styles.ghostButton, fontSize: 12, padding: '7px 10px', display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-start', gap: 6, margin: 0 }} aria-label="Add or view court dates">
-                    <IconCalendarEvent size={14} stroke={1.75} /> Court date
-                  </button>
-                  <button type="button" onClick={() => selectCockpitSection('documents')} style={{ ...styles.ghostButton, fontSize: 12, padding: '7px 10px', display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-start', gap: 6, margin: 0 }} aria-label="Upload or view matter documents">
-                    <IconUpload size={14} stroke={1.75} /> Documents
-                  </button>
-                  {canViewBilling && (
-                    <button type="button" onClick={() => selectCockpitSection('billing')} style={{ ...styles.ghostButton, fontSize: 12, padding: '7px 10px', display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-start', gap: 6, margin: 0 }} aria-label="Create an invoice or view matter billing">
-                      <IconCash size={14} stroke={1.75} /> Billing
-                    </button>
-                  )}
-                  <button type="button" onClick={() => selectCockpitSection('client-portal')} style={{ ...styles.ghostButton, fontSize: 12, padding: '7px 10px', display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-start', gap: 6, margin: 0 }} aria-label="View client communication and portal options">
-                    <IconMail size={14} stroke={1.75} /> Client communication
-                  </button>
-                </div>
-              </div>
               <div className="lf-matter-cockpit-nav" style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 10 }}>
                 {cockpitSections.map(s => {
                   const active = cockpitSection === s.id;
