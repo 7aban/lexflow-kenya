@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote, IconMail, IconPaperclip, IconExternalLink, IconLayoutDashboard, IconUsers, IconSignature } from '@tabler/icons-react';
+import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote, IconMail, IconExternalLink, IconLayoutDashboard, IconUsers, IconSignature } from '@tabler/icons-react';
 import { api, applyChecklistTemplate, approveHrLeaveRequest, cancelHrLeaveRequestAdmin, changePassword, clearSession, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, cancelOffboardingCase, completeOffboardingCase, createHrContract, createHrLeaveBalanceAdjustment, createHrStaffProfile, createMatterChecklistItem, createOffboardingCase, deleteChecklistTemplate, deleteClientAvatar, deleteHrDocument, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadHrDocumentContent, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getConnectedAccountAvailability, getHrContracts, getHrDashboard, getHrDocuments, getHrLeaveBalances, getHrLeaveRequests, getHrStaff, getHrStaffProfile, getOffboardingAssignedMatters, getOffboardingCase, getOffboardingCases, getClientSnapshot, getInvoiceDetails, getMatterTimeline, getAppearanceDocuments, linkAppearanceDocument, unlinkAppearanceDocument, getMatterWorkMetadataLinks, getRetainers, getRetainer, createRetainer, updateRetainer, deleteRetainer, generateRetainerDocument, listDocumentTemplates, getMatterFeePlans, getMatterFeePlan, createMatterFeePlan, updateMatterFeePlan, deleteMatterFeePlan, getRetainerLedger, getRetainerLedgerSummary, createRetainerLedgerEntry, voidRetainerLedgerEntry, getClientKyc, getClientKycRecord, createClientKyc, updateClientKyc, deleteClientKyc, getClientAuthorities, getClientAuthorityRecord, createClientAuthority, updateClientAuthority, deleteClientAuthority, getRetainerLifecycleEvents, getRetainerLifecycleEvent, createRetainerLifecycleEvent, updateRetainerLifecycleEvent, deleteRetainerLifecycleEvent, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, rejectHrLeaveRequest, setHrLeaveEntitlement, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrContract, updateHrDocument, updateHrStaffProfile, updateMatterChecklistItem, updateOffboardingCase, updateOffboardingChecklistItem, uploadClientAvatar, uploadHrDocument, uploadUserAvatar } from '../lib/apiClient.js';
 import { appendBrandingModeToPath, defaultFirmSettings, defaultOutputBrandingMode, hasFirmLetterhead, letterheadPdfOutputWarning, outputBrandingModes, styles, theme, applyFirmTheme, clearFirmTheme, resolveReadableTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
@@ -3388,13 +3388,9 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
                       </div>
                       <div className="lf-matter-document-actions" aria-label="Matter document actions" style={{ marginBottom: 14 }}>
                         {(canManage ? [
-                          { id: 'upload', label: 'Upload document', description: 'Add a matter file.', icon: IconUpload },
-                          { id: 'manage', label: 'Manage files', description: 'Review matter files.', icon: IconPaperclip },
                           { id: 'sign', label: 'Sign or send', description: 'Sign or share files.', icon: IconSignature },
                           { id: 'request', label: 'Request document', description: 'Request a client upload.', icon: IconMail },
-                        ] : [
-                          { id: 'manage', label: 'Manage files', description: 'Review matter files.', icon: IconPaperclip },
-                        ]).map(action => {
+                        ] : []).map(action => {
                           const ActionIcon = action.icon;
                           const active = documentWorkspaceAction === action.id;
                           return (
@@ -3477,12 +3473,11 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
                           )}
                         </div>
                       )}
-                      <div id={['upload', 'manage'].includes(documentWorkspaceAction) ? `matter-document-action-${documentWorkspaceAction}` : undefined}>
+                      <div id="matter-document-action-upload">
                         <MatterDocuments
                           matterId={detail.id}
                           canManage={canManage}
                           notify={notify}
-                          activeAction={documentWorkspaceAction}
                           onChooseAction={chooseDocumentWorkspaceAction}
                           onOpenDocumentStudio={openDocumentStudio}
                         />

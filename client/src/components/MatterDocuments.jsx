@@ -74,12 +74,16 @@ function previewMimeType(doc, kind) {
   }[extension] || 'application/octet-stream';
 }
 
-export default function MatterDocuments({ matterId, clientMode = false, canManage = false, notify, activeAction = '', onChooseAction, onOpenDocumentStudio }) {
+export default function MatterDocuments({ matterId, clientMode = false, canManage = false, notify, onChooseAction, onOpenDocumentStudio }) {
   const [folders, setFolders] = useState([]);
-  const [documents, setDocuments] = useState([]);
+  const [activeDocuments, setActiveDocuments] = useState([]);
+  const [archivedDocuments, setArchivedDocuments] = useState([]);
   const [selectedFolder, setSelectedFolder] = useState('all');
   const [newFolderName, setNewFolderName] = useState('');
-  const [uploadFolderInput, setUploadFolderInput] = useState('');
+  const [renameFolderId, setRenameFolderId] = useState('');
+  const [renameFolderName, setRenameFolderName] = useState('');
+  const [renameError, setRenameError] = useState('');
+  const [renameSaving, setRenameSaving] = useState(false);
   const [confirm, setConfirm] = useState(null);
   const [loading, setLoading] = useState(false);
   const [templates, setTemplates] = useState([]);
@@ -96,10 +100,27 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const previewRequestRef = useRef(0);
 
   const showGenerateControls = canManage === true && clientMode === false && Boolean(matterId);
+  const documents = useMemo(() => {
+    if (selectedFolder === 'archived') return archivedDocuments;
+    if (selectedFolder === 'all') return activeDocuments;
+    return activeDocuments.filter(doc => {
+      if (selectedFolder === 'uncategorised') {
+        return !doc.folderId || doc.folderId === 'uncategorised';
+      }
+      return String(doc.folderId || '') === String(selectedFolder);
+    });
+  }, [activeDocuments, archivedDocuments, selectedFolder]);
 
   useEffect(() => {
     if (matterId) load();
-  }, [matterId, selectedFolder]);
+  }, [matterId]);
+
+  useEffect(() => {
+    setRenameFolderId('');
+    setRenameFolderName('');
+    setRenameError('');
+    setRenameSaving(false);
+  }, [selectedFolder]);
 
   useEffect(() => {
     if (!showGenerateControls) {
@@ -115,15 +136,6 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     loadTemplates();
   }, [showGenerateControls]);
 
-  useEffect(() => {
-    if (!clientMode && selectedFolder && selectedFolder !== 'all') {
-      const folder = folders.find(f => f.id === selectedFolder);
-      if (folder) setUploadFolderInput(folder.name);
-    } else if (!clientMode && selectedFolder === 'all') {
-      setUploadFolderInput('');
-    }
-  }, [clientMode, selectedFolder, folders]);
-
   useEffect(() => () => {
     previewRequestRef.current += 1;
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
@@ -132,13 +144,14 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   async function load() {
     setLoading(true);
     try {
-      const archivedView = selectedFolder === 'archived';
-      const [nextFolders, docs] = await Promise.all([
+      const [nextFolders, activeDocs, archivedDocs] = await Promise.all([
         getMatterFolders(matterId),
-        getMatterDocuments(matterId, archivedView ? 'all' : selectedFolder, archivedView ? 'archived' : 'active'),
+        getMatterDocuments(matterId, 'all', 'active'),
+        clientMode ? Promise.resolve([]) : getMatterDocuments(matterId, 'all', 'archived'),
       ]);
       setFolders(nextFolders);
-      setDocuments(docs);
+      setActiveDocuments(activeDocs);
+      setArchivedDocuments(archivedDocs);
     } catch (err) { notify?.({ type: 'danger', message: err.message }); }
     finally { setLoading(false); }
   }
@@ -194,14 +207,47 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     } catch (err) { notify?.({ type: 'danger', message: err.message }); }
   }
 
-  async function renameFolder(folder) {
-    const name = window.prompt('Rename folder', folder.name);
-    if (!name || name === folder.name) return;
+  function beginRenameFolder(folder) {
+    if (!folder?.id) return;
+    setRenameFolderId(folder.id);
+    setRenameFolderName(folder.name || '');
+    setRenameError('');
+  }
+
+  function cancelRenameFolder() {
+    setRenameFolderId('');
+    setRenameFolderName('');
+    setRenameError('');
+    setRenameSaving(false);
+  }
+
+  async function saveRenamedFolder(event) {
+    event.preventDefault();
+    const folder = realFolders.find(item => item.id === renameFolderId);
+    const name = renameFolderName.trim();
+    if (!folder) {
+      setRenameError('Select a custom folder to rename.');
+      return;
+    }
+    if (!name) {
+      setRenameError('Folder name is required.');
+      return;
+    }
+    if (name === folder.name) {
+      cancelRenameFolder();
+      return;
+    }
+    setRenameSaving(true);
+    setRenameError('');
     try {
       await updateFolder(folder.id, { name });
       notify?.({ type: 'success', message: 'Folder renamed.' });
       await load();
-    } catch (err) { notify?.({ type: 'danger', message: err.message }); }
+      cancelRenameFolder();
+    } catch (err) {
+      setRenameError(err.message || 'Unable to rename this folder.');
+      setRenameSaving(false);
+    }
   }
 
   async function removeFolder(folder) {
@@ -210,7 +256,12 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       setSelectedFolder('all');
       notify?.({ type: 'success', message: 'Folder deleted.' });
       await load();
-    } catch (err) { notify?.({ type: 'danger', message: err.message }); }
+    } catch (err) {
+      const message = /not empty|contains documents|documents in this folder/i.test(String(err.message || ''))
+        ? 'Move or archive documents in this folder before deleting it.'
+        : err.message;
+      notify?.({ type: 'danger', message });
+    }
   }
 
   async function uploadDoc(event) {
@@ -221,16 +272,9 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     }
     setUploadStatus({ fileName: file.name, state: 'Uploading' });
     try {
-      let targetFolderId = 'uncategorised';
-      if (uploadFolderInput.trim()) {
-        const existing = realFolders.find(f => f.name.toLowerCase() === uploadFolderInput.trim().toLowerCase());
-        if (existing) {
-          targetFolderId = existing.id;
-        } else {
-          const newFolder = await createFolder(matterId, { name: uploadFolderInput.trim() });
-          targetFolderId = newFolder.id;
-        }
-      }
+      const targetFolderId = realFolders.some(folder => folder.id === selectedFolder)
+        ? selectedFolder
+        : 'uncategorised';
       await api(`/matters/${matterId}/documents`, {
         method: 'POST',
         body: {
@@ -241,7 +285,6 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
         },
       });
       event.target.value = '';
-      setUploadFolderInput(clientMode || selectedFolder === 'all' ? '' : selectedName);
       setUploadStatus({ fileName: file.name, state: 'Uploaded' });
       notify?.({ type: 'success', message: clientMode ? 'Document shared with the firm.' : 'Document uploaded.' });
       await load();
@@ -382,7 +425,18 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     return [all, uncategorised, ...(clientUploadsFolder ? [clientUploadsFolder] : []), ...customFolders, ...(canManage && !clientMode ? [archived] : [])];
   }, [folders, clientUploadsFolder, customFolders, selectedFolder, documents.length, canManage, clientMode]);
   const folderOptions = useMemo(() => [{ id: 'uncategorised', name: 'Uncategorised' }, ...realFolders], [realFolders]);
-  const selectedName = explorerFolders.find(folder => folder.id === selectedFolder)?.name || 'All documents';
+  const selectedFolderInfo = explorerFolders.find(folder => folder.id === selectedFolder) || explorerFolders[0];
+  const selectedName = selectedFolderInfo?.name || 'All documents';
+  const folderCount = folder => {
+    if (folder?.id === 'all') return activeDocuments.length;
+    if (folder?.id === 'archived') return archivedDocuments.length;
+    if (folder?.id === 'uncategorised') return activeDocuments.filter(doc => !doc.folderId || doc.folderId === 'uncategorised').length;
+    return activeDocuments.filter(doc => String(doc.folderId || '') === String(folder?.id || '')).length;
+  };
+  const selectedCount = folderCount(selectedFolderInfo);
+  const selectedIsClientUploads = selectedFolder === clientUploadsFolder?.id;
+  const selectedIsCustom = Boolean(selectedFolderInfo && !selectedFolderInfo.virtual && !selectedIsClientUploads);
+  const selectedCustomCount = selectedIsCustom ? folderCount(selectedFolderInfo) : 0;
 
   const filteredTemplates = useMemo(() => {
     const q = templateSearch.trim().toLowerCase();
@@ -398,15 +452,23 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     return sel ? [sel, ...filteredTemplates] : filteredTemplates;
   }, [filteredTemplates, templates, selectedTemplateId, templateSearch]);
   const archivedView = selectedFolder === 'archived';
-  const showUploadControls = !archivedView && (clientMode || (canManage && activeAction === 'upload'));
+  const showUploadControls = !archivedView && (clientMode || canManage);
   const showFolderControls = true;
-  const showAdvancedFolderControls = canManage && activeAction === 'manage';
   const documentCardHint = clientMode
     ? 'Client uploads are placed in Client Uploads automatically.'
-    : canManage ? 'Upload, move and manage matter documents.' : 'View matter documents.';
+    : archivedView ? 'Restore archived files to active matter documents.' : 'Browse, upload, move, and manage matter files.';
   const uploadDestination = clientMode
     ? 'Client Uploads'
-    : uploadFolderInput.trim() || (selectedFolder === 'all' ? 'Uncategorised' : selectedName);
+    : selectedFolder === 'all' ? 'Uncategorised' : selectedName;
+  const folderDescription = archivedView
+    ? 'Archived records are retained safely and can be restored.'
+    : selectedFolder === 'all'
+      ? 'Every active document linked to this matter.'
+      : selectedFolder === 'uncategorised'
+        ? 'Active documents that have not been assigned to a custom folder.'
+        : selectedIsClientUploads
+          ? 'Documents supplied through the client upload workflow.'
+          : 'Documents filed in this custom matter folder.';
 
   return (
     <>
@@ -419,25 +481,27 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       .lf-doc-secondary-tools > summary { cursor: pointer; color: #234936; font-size: 13px; font-weight: 700; padding: 11px 0; }
       .lf-doc-secondary-tools[open] > summary { margin-bottom: 8px; }
       .lf-doc-folder-button { width: 100%; text-align: left; }
+      .lf-doc-explorer { align-items: start; }
+      .lf-doc-folder-pane { position: sticky; top: 12px; }
+      .lf-doc-file-toolbar { background: #F7F5F0; border: 1px solid #DDD8CE; border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; }
       @media (max-width: 640px) {
         .lf-doc-grid { grid-template-columns: minmax(0, 1fr) !important; }
+        .lf-doc-folder-pane { position: static; }
       }
     `}</style>
-    <div className="lf-doc-grid" style={{ display: 'grid', gridTemplateColumns: showFolderControls ? '220px minmax(0,1fr)' : 'minmax(0,1fr)', gap: 16 }}>
-      {showFolderControls && <Card title="Folders" hint="Filter and organise matter files">
+    <div className="lf-doc-grid lf-doc-explorer" style={{ display: 'grid', gridTemplateColumns: showFolderControls ? '240px minmax(0,1fr)' : 'minmax(0,1fr)', gap: 16 }}>
+      {showFolderControls && <div className="lf-doc-folder-pane"><Card title="Folders" hint="Matter file cabinet">
         <div style={{ display: 'grid', gap: 6 }}>
           {explorerFolders.map(folder => (
-            <div key={folder.id} style={{ display: 'grid', gridTemplateColumns: showAdvancedFolderControls && !folder.virtual ? '1fr auto' : '1fr', gap: 6, alignItems: 'center' }}>
+            <div key={folder.id}>
               <button className="lf-doc-folder-button" type="button" aria-pressed={selectedFolder === folder.id} style={{ ...styles.matterButton, ...(selectedFolder === folder.id ? styles.matterActive : {}), padding: '9px 8px' }} onClick={() => setSelectedFolder(folder.id)}>
-                <strong>{folderIcon(folder)} {folder.name}</strong>
-                {folder.documentCount !== undefined && <small>{folder.documentCount} document(s)</small>}
+                <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                  <strong>{folderIcon(folder)} {folder.name}</strong>
+                  <span style={{ ...styles.badge, minWidth: 24, justifyContent: 'center', background: selectedFolder === folder.id ? '#fff' : '#F1EEE7', color: theme.ink }}>
+                    {folderCount(folder)}
+                  </span>
+                </span>
               </button>
-              {showAdvancedFolderControls && !folder.virtual && (
-                <ActionGroup actions={[
-                  ['Rename', () => renameFolder(folder)],
-                  ['Delete', () => setConfirm({ title: 'Delete folder?', message: 'Delete this folder? It must be empty.', onConfirm: () => removeFolder(folder) })],
-                ]} />
-              )}
             </div>
           ))}
           {!customFolders.length && (
@@ -452,9 +516,78 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
             <button style={styles.ghostButton}>+ New Folder</button>
           </form>
         )}
-      </Card>}
+        {canManage && !clientMode && (
+          <div style={{ borderTop: `1px solid ${theme.line}`, marginTop: 12, paddingTop: 12, display: 'grid', gap: 8 }}>
+            <strong style={{ fontSize: 12, color: theme.ink }}>Selected folder actions</strong>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+              <button type="button" style={styles.ghostButton} disabled={!selectedIsCustom || renameSaving} onClick={() => beginRenameFolder(selectedFolderInfo)}>Rename</button>
+              <button
+                type="button"
+                style={styles.ghostButton}
+                disabled={!selectedIsCustom || selectedCustomCount > 0 || renameSaving}
+                onClick={() => setConfirm({
+                  title: 'Delete empty folder?',
+                  message: 'Delete this empty custom folder?',
+                  onConfirm: () => removeFolder(selectedFolderInfo),
+                })}
+              >
+                Delete
+              </button>
+            </div>
+            {renameFolderId === selectedFolderInfo?.id && (
+              <form onSubmit={saveRenamedFolder} style={{ border: `1px solid ${theme.line}`, borderRadius: 7, background: '#F8FAFC', padding: 8, display: 'grid', gap: 7 }}>
+                <label style={{ display: 'grid', gap: 4, color: theme.ink, fontSize: 11, fontWeight: 700 }}>
+                  Folder name
+                  <input
+                    autoFocus
+                    style={styles.input}
+                    value={renameFolderName}
+                    disabled={renameSaving}
+                    onChange={event => {
+                      setRenameFolderName(event.target.value);
+                      if (renameError) setRenameError('');
+                    }}
+                    onKeyDown={event => {
+                      if (event.key === 'Escape') {
+                        event.preventDefault();
+                        cancelRenameFolder();
+                      }
+                    }}
+                    aria-invalid={Boolean(renameError)}
+                    aria-describedby={renameError ? 'matter-folder-rename-error' : undefined}
+                  />
+                </label>
+                {renameError && <span id="matter-folder-rename-error" role="alert" style={{ color: theme.red, fontSize: 11 }}>{renameError}</span>}
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button type="submit" style={styles.primaryButton} disabled={renameSaving}>{renameSaving ? 'Saving…' : 'Save'}</button>
+                  <button type="button" style={styles.ghostButton} disabled={renameSaving} onClick={cancelRenameFolder}>Cancel</button>
+                </div>
+              </form>
+            )}
+            <span style={{ color: theme.muted, fontSize: 11, lineHeight: 1.4 }}>
+              {!selectedIsCustom
+                ? selectedFolderInfo?.virtual || selectedIsClientUploads ? 'System folder' : 'Select a custom folder to rename'
+                : selectedCustomCount > 0 ? 'Only empty custom folders can be removed' : 'This empty custom folder can be renamed or removed.'}
+            </span>
+          </div>
+        )}
+      </Card></div>}
 
-      <Card title={selectedFolder === 'all' ? 'Matter files' : selectedName} hint={archivedView ? 'Archived records are kept safely and can be restored to active matter documents.' : documentCardHint}>
+      <Card title={selectedName} hint={documentCardHint}>
+        <div className="lf-doc-file-toolbar">
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+              <strong style={{ fontSize: 15, color: theme.ink }}>{selectedName}</strong>
+              <span style={{ fontSize: 12, color: theme.muted, lineHeight: 1.45 }}>{folderDescription}</span>
+            </div>
+            <Badge tone={archivedView ? 'amber' : 'blue'}>{selectedCount} document{selectedCount === 1 ? '' : 's'}</Badge>
+          </div>
+          {!archivedView && (
+            <div style={{ borderTop: `1px solid ${theme.line}`, marginTop: 10, paddingTop: 10, fontSize: 12, color: theme.muted }}>
+              Uploads will be saved to: <strong style={{ color: theme.ink }}>{uploadDestination}</strong>
+            </div>
+          )}
+        </div>
         {showUploadControls && (
           <div className="lf-doc-upload-area">
             <div style={{ display: 'grid', gap: 5, marginBottom: 12 }}>
@@ -474,15 +607,6 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
               </span>
             </div>
             <div style={{ ...styles.formGrid }}>
-              {!clientMode && (
-                <Field label="Folder">
-                  <input style={styles.input} list="folder-suggestions" value={uploadFolderInput} onChange={e => setUploadFolderInput(e.target.value)} placeholder="e.g. Pleadings, Correspondence, Evidence, Authorities, Invoices, Court Orders..." />
-                  <datalist id="folder-suggestions">
-                    {realFolders.map(folder => <option key={folder.id} value={folder.name} />)}
-                    <option value="Pleadings" /><option value="Correspondence" /><option value="Evidence" /><option value="Authorities" /><option value="Invoices" /><option value="Court Orders" /><option value="Drafts" /><option value="Research" /><option value="Financial" /><option value="Discovery" /><option value="Witness Statements" /><option value="Expert Reports" /><option value="Submissions" /><option value="Judgments" /><option value="Client Uploads" />
-                  </datalist>
-                </Field>
-              )}
               <Field label={clientMode ? 'Upload to Client Uploads' : 'Upload Document'}>
                 <input style={styles.input} type="file" accept=".pdf,.doc,.docx,image/*" onChange={uploadDoc} aria-describedby="matter-document-upload-help matter-document-upload-status" />
               </Field>
@@ -497,7 +621,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
             </div>
           </div>
         )}
-        {!archivedView && showGenerateControls && showAdvancedFolderControls && (
+        {!archivedView && showGenerateControls && (
           <details className="lf-doc-secondary-tools" style={{ background: theme.amberBg, border: '1px solid #DDD8CE', borderLeft: `3px solid ${theme.amber}`, borderRadius: 8, padding: '0 14px', marginBottom: 12 }}>
             <summary>Generate a draft from a template</summary>
           <div style={{ paddingBottom: 12 }}>
@@ -562,13 +686,18 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
           <div className={canManage ? "lf-doc-cards-staff" : "lf-doc-cards-client"}>
           <div className="lf-doc-table-wrap">
           <Table
-            columns={archivedView ? ['Name', 'Folder', 'Date', 'Size', 'Source', 'Actions'] : canManage ? ['Name', 'Folder', 'Date', 'Size', 'Source', 'Client Access', 'Move', 'Actions'] : ['Name', 'Folder', 'Date', 'Size', 'Source', 'Actions']}
+            columns={archivedView
+              ? ['Name', 'Type', 'Folder', 'Date', 'Size', 'Source', 'Actions']
+              : canManage
+                ? ['Name', 'Type', ...(selectedFolder === 'all' ? ['Folder'] : []), 'Date', 'Size', 'Source', 'Client Access', 'Move', 'Actions']
+                : ['Name', 'Folder', 'Date', 'Size', 'Source', 'Actions']}
             rows={documents.map(doc => {
               const metaStyle = { color: theme.muted, fontSize: 12 };
               const download = <button key={`${doc.id}-download`} type="button" style={{ ...styles.link, border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }} onClick={() => downloadDoc(doc)}>Download</button>;
               const previewAction = <button key={`${doc.id}-preview`} type="button" style={{ ...styles.link, border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }} onClick={() => openPreview(doc)}>Preview</button>;
               if (archivedView) return [
                 <strong key={`${doc.id}-n`} style={{ fontWeight: 600 }}>{documentLabel(doc)}</strong>,
+                <span key={`${doc.id}-t`} style={metaStyle}>{documentTypeLabel(doc)}</span>,
                 <span key={`${doc.id}-f`} style={metaStyle}>{doc.folderName || 'Uncategorised'}</span>,
                 <span key={`${doc.id}-d`} style={metaStyle}>{doc.date || '-'}</span>,
                 <span key={`${doc.id}-s`} style={metaStyle}>{doc.size || '-'}</span>,
@@ -589,7 +718,8 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
               ];
               return [
                 <strong key={`${doc.id}-n`} style={{ fontWeight: 600 }}>{documentLabel(doc)}</strong>,
-                <span key={`${doc.id}-f`} style={metaStyle}>{doc.folderName || 'Uncategorised'}</span>,
+                <span key={`${doc.id}-t`} style={metaStyle}>{documentTypeLabel(doc)}</span>,
+                ...(selectedFolder === 'all' ? [<span key={`${doc.id}-f`} style={metaStyle}>{doc.folderName || 'Uncategorised'}</span>] : []),
                 <span key={`${doc.id}-d`} style={metaStyle}>{doc.date || '-'}</span>,
                 <span key={`${doc.id}-sz`} style={metaStyle}>{doc.size || '-'}</span>,
                 sourceBadge(doc, clientMode),
@@ -617,17 +747,23 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
               {archivedView
                 ? 'No archived documents.'
                 : selectedFolder === 'all'
-                ? 'No documents have been added to this matter yet.'
+                ? 'No documents uploaded yet.'
+                : selectedFolder === 'uncategorised'
+                  ? 'No uncategorised documents.'
                 : selectedFolder === clientUploadsFolder?.id
-                  ? 'The Client Uploads folder is empty.'
-                  : `No documents in ${selectedName}.`}
+                  ? 'No client uploads yet.'
+                  : 'This folder is empty. Upload or move documents here.'}
             </strong>
             <span>
               {archivedView
                 ? 'Archived documents will appear here and can be restored to active matter documents.'
                 : selectedFolder === 'all'
                 ? 'Upload a file, request one from the client, or use Document Studio. Documents saved here stay linked to this matter.'
-                : 'Choose another folder or upload a document to this folder.'}
+                : selectedFolder === 'uncategorised'
+                  ? 'Choose another folder or upload a document without selecting a custom folder.'
+                  : selectedFolder === clientUploadsFolder?.id
+                    ? 'Documents supplied through the client upload workflow will appear here.'
+                    : 'Upload a new file here or move an existing matter document into this folder.'}
             </span>
             {!archivedView && !clientMode && canManage && (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
