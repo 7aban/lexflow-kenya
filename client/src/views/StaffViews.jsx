@@ -1173,6 +1173,63 @@ function invoiceDueDaysSetting(settings) {
   return [7, 14, 30, 45].includes(days) ? days : 30;
 }
 
+function matterRiskSnapshot(matter = {}) {
+  const notes = Array.isArray(matter.notes) ? matter.notes : [];
+  const tasks = Array.isArray(matter.tasks) ? matter.tasks : [];
+  const deadlines = Array.isArray(matter.deadlines) ? matter.deadlines : [];
+  const checklistItems = Array.isArray(matter.checklistItems) ? matter.checklistItems : [];
+  const appearances = Array.isArray(matter.appearances) ? matter.appearances : [];
+  const riskValues = [
+    matter.priority,
+    matter.risk,
+    matter.riskLevel,
+    matter.riskStatus,
+    matter.riskCategory,
+    matter.riskTags,
+    matter.tags,
+  ].flat(Infinity).filter(Boolean).join(' ');
+  const stageText = String(matter.stage || '');
+  const noteText = notes.map(note => [
+    note?.title,
+    note?.content,
+    note?.summary,
+    note?.text,
+  ].filter(Boolean).join(' ')).join(' ');
+  const unresolvedAppearance = appearance => {
+    const status = String(appearance?.attendanceStatus || appearance?.status || 'scheduled').toLowerCase();
+    return !/(attended|complete|completed|cancelled|canceled|concluded|resolved)/.test(status);
+  };
+
+  const highRisk = /\b(very high|high|critical|severe)\b/i.test(riskValues);
+  const executionRisk = /\b(execution|enforcement)\b/i.test(`${riskValues} ${stageText}`);
+  const urgentNotes = /\b(urgent|immediate|imminent|execution risk|high risk|very high|critical)\b/i.test(noteText);
+  const overdueAppearances = appearances.filter(appearance => (
+    Number.isFinite(daysFromToday(appearance?.date))
+    && daysFromToday(appearance.date) < 0
+    && unresolvedAppearance(appearance)
+  ));
+  const openTasks = tasks.filter(task => !task.completed);
+  const openDeadlines = deadlines.filter(deadline => !deadline.completed && !/(complete|completed|cancelled|canceled|closed)/i.test(String(deadline.status || '')));
+  const openChecklist = checklistItems.filter(item => Number(item?.completed || 0) !== 1);
+
+  return {
+    highRisk,
+    executionRisk,
+    urgentNotes,
+    overdueAppearances,
+    openTasks,
+    openDeadlines,
+    openChecklist,
+    hasRiskSignals: highRisk
+      || executionRisk
+      || urgentNotes
+      || overdueAppearances.length > 0
+      || openTasks.length > 0
+      || openDeadlines.length > 0
+      || openChecklist.length > 0,
+  };
+}
+
 function buildMatterNextActionHints(detail) {
   if (!detail) return [];
 
@@ -1202,6 +1259,22 @@ function buildMatterNextActionHints(detail) {
     });
   };
 
+  const riskSnapshot = matterRiskSnapshot(detail);
+  if (riskSnapshot.highRisk || riskSnapshot.executionRisk || riskSnapshot.urgentNotes) {
+    addHint({
+      title: 'Risk signals require review',
+      category: 'risk',
+      severity: riskSnapshot.highRisk || riskSnapshot.executionRisk ? 'high' : 'medium',
+      why: 'This matter has unresolved risk signals. Review execution exposure, source notes, and open follow-up items.',
+      evidence: [
+        riskSnapshot.executionRisk ? 'Execution or enforcement exposure' : null,
+        riskSnapshot.highRisk ? `${detail.priority || detail.riskLevel || 'High'} risk recorded` : null,
+        riskSnapshot.urgentNotes ? 'Urgent risk wording in matter notes' : null,
+      ],
+      rank: 0,
+    });
+  }
+
   const openTasks = tasks.filter(task => !task.completed);
   const overdueTasks = openTasks
     .map(task => ({ ...task, daysAway: daysFromToday(task.dueDate) }))
@@ -1222,6 +1295,51 @@ function buildMatterNextActionHints(detail) {
         formatDayDistance(oldest.daysAway),
       ],
       rank: 1,
+    });
+  } else if (openTasks.length) {
+    addHint({
+      title: `${openTasks.length} open follow-up item${openTasks.length === 1 ? '' : 's'}`,
+      category: 'workflow',
+      severity: 'medium',
+      why: 'Open matter tasks remain and should be reviewed before treating the file as current.',
+      evidence: [
+        openTasks[0].title || openTasks[0].description || 'Open task',
+        openTasks[0].dueDate ? `Due ${formatTimelineDate(openTasks[0].dueDate)}` : 'No due date recorded',
+        detail.assignedTo ? `Assigned: ${detail.assignedTo}` : null,
+      ],
+      rank: 12,
+    });
+  }
+
+  if (riskSnapshot.overdueAppearances.length) {
+    const oldestAppearance = [...riskSnapshot.overdueAppearances]
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)))[0];
+    addHint({
+      title: `${riskSnapshot.overdueAppearances.length} overdue court appearance${riskSnapshot.overdueAppearances.length === 1 ? '' : 's'} require review`,
+      category: 'urgent',
+      severity: 'high',
+      why: 'A past court appearance remains unresolved in the currently loaded matter data.',
+      evidence: [
+        formatTimelineDate(oldestAppearance.date),
+        oldestAppearance.title || oldestAppearance.type || 'Court appearance',
+        oldestAppearance.location || oldestAppearance.court || null,
+      ],
+      rank: 1,
+    });
+  }
+
+  if (riskSnapshot.openDeadlines.length) {
+    addHint({
+      title: `${riskSnapshot.openDeadlines.length} open deadline${riskSnapshot.openDeadlines.length === 1 ? '' : 's'} require review`,
+      category: 'urgent',
+      severity: 'high',
+      why: 'Open deadline records remain visible on this matter.',
+      evidence: [
+        riskSnapshot.openDeadlines[0].title || riskSnapshot.openDeadlines[0].description || 'Open deadline',
+        riskSnapshot.openDeadlines[0].dueDate ? `Due ${formatTimelineDate(riskSnapshot.openDeadlines[0].dueDate)}` : null,
+        detail.assignedTo ? `Assigned: ${detail.assignedTo}` : null,
+      ],
+      rank: 2,
     });
   }
 
@@ -1463,6 +1581,11 @@ function computeNextStep(detail) {
   const documents = Array.isArray(detail.documents) ? detail.documents : [];
   const timeEntries = Array.isArray(detail.timeEntries) ? detail.timeEntries : [];
   const checklistItems = Array.isArray(detail.checklistItems) ? detail.checklistItems : [];
+  const riskSnapshot = matterRiskSnapshot(detail);
+
+  if (riskSnapshot.highRisk || riskSnapshot.executionRisk || riskSnapshot.urgentNotes || riskSnapshot.overdueAppearances.length) {
+    return { title: 'Review unresolved risk signals', reason: 'Review overdue appearances, execution exposure, and open follow-up items', sectionId: 'matter-section-tasks', actionLabel: 'Review matter' };
+  }
 
   const overdueTasks = tasks.filter(t => !t.completed && t.dueDate && t.dueDate < today);
   if (overdueTasks.length) {
@@ -1558,10 +1681,28 @@ export function Dashboard({ data, user, onNavigate }) {
   const practiceAssistant = useMemo(() => {
     const tasks = Array.isArray(data.tasks) ? data.tasks : [];
     const invoices = Array.isArray(data.invoices) ? data.invoices : [];
+    const matters = Array.isArray(data.matters) ? data.matters : [];
     const events = Array.isArray(data.dashboard?.upcomingEvents) ? data.dashboard.upcomingEvents : [];
     const items = [];
     const sevRank = { high: 0, medium: 1, low: 2 };
     const openTasks = tasks.filter(t => !t.completed).map(t => ({ ...t, daysAway: daysFromToday(t.dueDate) }));
+    const urgentMatters = matters
+      .map(matter => ({ matter, signals: matterRiskSnapshot(matter) }))
+      .filter(({ signals }) => signals.highRisk || signals.executionRisk || signals.urgentNotes || signals.overdueAppearances.length);
+    if (urgentMatters.length) {
+      const first = urgentMatters[0];
+      const signalText = [
+        first.signals.executionRisk ? 'execution or enforcement exposure' : null,
+        first.signals.highRisk ? 'high risk' : null,
+        first.signals.urgentNotes ? 'urgent source note' : null,
+      ].filter(Boolean).join(' · ');
+      items.push({
+        key: 'risk-matters', severity: 'high', rank: 2,
+        label: `Review ${urgentMatters.length} matter${urgentMatters.length === 1 ? '' : 's'} with unresolved risk signals`,
+        detail: [first.matter.title || first.matter.reference || 'Matter', signalText].filter(Boolean).join(' · '),
+        nav: 'Matters', btn: 'View matters',
+      });
+    }
 
     // A. Overdue open tasks.
     const overdueTasks = openTasks
@@ -1603,6 +1744,25 @@ export function Dashboard({ data, user, onNavigate }) {
         key: 'court-soon', severity: urgent ? 'high' : 'medium', rank: urgent ? 2 : 6,
         label: `Review ${soonEvents.length} court appearance${soonEvents.length === 1 ? '' : 's'} within 7 days`,
         detail: [nearest.title || nearest.type || 'Court appearance', formatDayDistance(nearest.daysAway), nearest.matterTitle || nearest.reference || null].filter(Boolean).join(' · '),
+        nav: 'Deadlines', btn: 'Court diary',
+      });
+    }
+
+    const overdueEvents = events
+      .map(e => ({ ...e, daysAway: daysFromToday(e.date) }))
+      .filter(e => {
+        const status = String(e.attendanceStatus || e.status || 'scheduled').toLowerCase();
+        return Number.isFinite(e.daysAway)
+          && e.daysAway < 0
+          && !/(attended|complete|completed|cancelled|canceled|concluded|resolved)/.test(status);
+      })
+      .sort((a, b) => a.daysAway - b.daysAway);
+    if (overdueEvents.length) {
+      const oldest = overdueEvents[0];
+      items.push({
+        key: 'overdue-court', severity: 'high', rank: 0,
+        label: `Review ${overdueEvents.length} overdue court appearance${overdueEvents.length === 1 ? '' : 's'}`,
+        detail: [oldest.title || oldest.type || 'Court appearance', formatDayDistance(oldest.daysAway), oldest.matterTitle || oldest.reference || null].filter(Boolean).join(' · '),
         nav: 'Deadlines', btn: 'Court diary',
       });
     }
@@ -7843,6 +8003,7 @@ function HearingBriefCard({ detail, canManage = false, notify, onChanged, onSect
   const documents = Array.isArray(detail?.documents) ? detail.documents : [];
   const notes = Array.isArray(detail?.notes) ? detail.notes : [];
   const checklistItems = Array.isArray(detail?.checklistItems) ? detail.checklistItems : [];
+  const riskSnapshot = matterRiskSnapshot(detail);
   const today = isoDateOnly();
   const upcoming = appearances.filter(a => a.date && a.date >= today).sort((a, b) => String(a.date).localeCompare(String(b.date)));
   const nextAppearance = upcoming[0];
@@ -8033,7 +8194,12 @@ function HearingBriefCard({ detail, canManage = false, notify, onChanged, onSect
         <span style={sectionLabelStyle}>Open action items</span>
         {openChecklist.length ? openChecklist.map((item, i) => (
           <span key={item.id || i} style={{ fontSize: 12, color: theme.ink }}>{item.title}</span>
-        )) : <span style={emptyStyle}>No open action items.</span>}
+        )) : riskSnapshot.hasRiskSignals ? (
+          <div style={{ border: '1px solid #FDE68A', borderLeft: `4px solid ${theme.amber}`, borderRadius: 8, background: theme.amberBg, color: theme.amber, padding: 10, display: 'grid', gap: 3 }}>
+            <strong style={{ fontSize: 12 }}>Risk signals require review</strong>
+            <span style={{ fontSize: 12 }}>Review overdue appearances, execution exposure, and open follow-up items.</span>
+          </div>
+        ) : <span style={emptyStyle}>No open action items.</span>}
       </div>
       <div style={{ ...sectionStyle, gap: 10 }}>
         <div style={{ display: 'grid', gap: 2 }}>
