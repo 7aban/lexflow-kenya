@@ -2860,6 +2860,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
   const [matterInvoiceBrandingTouched, setMatterInvoiceBrandingTouched] = useState(false);
   const [taskTimer, setTaskTimer] = useState(null);
   const [advocates, setAdvocates] = useState([]);
+  const [matterUsers, setMatterUsers] = useState(null);
   const [reassignTo, setReassignTo] = useState('');
   const [reassigning, setReassigning] = useState(false);
   const emptyChecklistForm = { title: '', notes: '', position: '', dueDate: '', assignee: '' };
@@ -2887,6 +2888,42 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
   const defaultInvoiceDueDate = addDaysIso(defaultInvoiceDueDays);
   const selected = data.matters.find(m => m.id === selectedId) || data.matters[0];
   const nextActionHints = useMemo(() => buildMatterNextActionHints(detail), [detail]);
+  const currentClient = detail?.clientId ? data.clients.find(client => client.id === detail.clientId) : null;
+  const activeClientAccount = useMemo(() => {
+    if (!detail?.clientId || !Array.isArray(matterUsers)) return null;
+    return matterUsers.find(user => user.role === 'client' && user.clientId === detail.clientId && user.isActive);
+  }, [detail?.clientId, matterUsers]);
+  const clientAccountConfirmed = Array.isArray(matterUsers) && Boolean(detail?.clientId);
+  const portalAccessStatus = useMemo(() => {
+    if (detail?.portalAccess === 'active') {
+      return {
+        title: 'Matter portal access active',
+        helper: 'Matter-level portal access is marked active. Confirm visible documents before directing the client to use the portal.',
+      };
+    }
+    if (detail?.portalAccess) {
+      return {
+        title: 'Matter portal access available',
+        helper: 'Matter-level portal access is available. Confirm visible documents before directing the client to use the portal.',
+      };
+    }
+    if (activeClientAccount) {
+      return {
+        title: 'Client account found',
+        helper: 'Portal account exists for this client. Confirm matter-level access and visible documents before directing the client to use the portal.',
+      };
+    }
+    if (clientAccountConfirmed) {
+      return {
+        title: 'Portal access not configured',
+        helper: 'No active client portal account is linked to this client in the current workspace data.',
+      };
+    }
+    return {
+      title: 'Portal status needs review',
+      helper: 'This matter view cannot confirm whether a client portal account is active. Review the client account before relying on portal access.',
+    };
+  }, [detail?.portalAccess, activeClientAccount, clientAccountConfirmed]);
   const cockpitSections = useMemo(() => [
     { id: 'overview', label: 'Overview', icon: IconLayoutDashboard, hint: 'Key details, next actions, and quick links across the matter.', badge: '' },
     { id: 'tasks', label: 'Tasks', icon: IconListCheck, hint: 'Track pending work, mark tasks done, and log billable time.', badge: detail ? `${(detail.tasks || []).filter(t => !t.completed).length} open` : '' },
@@ -2905,7 +2942,20 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
 
   useEffect(() => { if (selected?.id) { setSelectedId(selected.id); loadDetail(selected.id); } else { setDetail(null); setSuggestions([]); } }, [selected?.id]);
   useEffect(() => { setDocumentWorkspaceAction(''); }, [detail?.id]);
-  useEffect(() => { if (detail && isAdmin) getUsers(true).then(users => { setAdvocates((users || []).filter(u => u.role === 'advocate' && u.isActive)); setReassignTo(detail.assignedTo || ''); }).catch(() => {}); }, [detail?.id]);
+  useEffect(() => {
+    if (detail && isAdmin) {
+      getUsers(true).then(users => {
+        const loadedUsers = Array.isArray(users) ? users : [];
+        setMatterUsers(loadedUsers);
+        setAdvocates(loadedUsers.filter(u => u.role === 'advocate' && u.isActive));
+        setReassignTo(detail.assignedTo || '');
+      }).catch(() => {
+        setMatterUsers(null);
+      });
+    } else {
+      setMatterUsers(null);
+    }
+  }, [detail?.id, isAdmin]);
   useEffect(() => { if (CHECKLISTS_UI_ENABLED && ['admin', 'advocate', 'assistant'].includes(userRole)) loadChecklistTemplates(); }, [userRole]);
   useEffect(() => {
     if (!focus?.matterId) return;
@@ -3581,8 +3631,18 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
                         )}
                         <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: '10px 12px', background: '#F9FAFB', flex: '1 1 200px' }}>
                           <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, color: theme.muted, marginBottom: 4 }}>Portal Access</div>
-                          <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>{detail.portalAccess ? (detail.portalAccess === 'active' ? 'Active' : 'Available') : 'Not configured'}</div>
-                          <div style={{ fontSize: 12, color: theme.muted }}>Client portal access status</div>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>{portalAccessStatus.title}</div>
+                          <div style={{ fontSize: 12, color: theme.muted }}>{portalAccessStatus.helper}</div>
+                          {detail.clientId && onNavigate ? (
+                            <button
+                              type="button"
+                              style={{ ...styles.tinyButton, marginTop: 8 }}
+                              onClick={() => onNavigate('Clients', { clientId: detail.clientId })}
+                              aria-label={`Review client account for ${currentClient?.name || detail.clientName || 'this matter'}`}
+                            >
+                              Review client account
+                            </button>
+                          ) : null}
                         </div>
                       </div>
                     </div>
