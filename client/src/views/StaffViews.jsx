@@ -4351,28 +4351,26 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
         </button>
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
-        {canManage && <button type="button" style={styles.primaryButton} onClick={() => setCreateInvoiceOpen(true)}>Create invoice</button>}
+        {canManage && !createInvoiceOpen && <button type="button" style={styles.primaryButton} onClick={() => setCreateInvoiceOpen(true)}>Create invoice</button>}
         <button type="button" style={styles.ghostButton} onClick={() => scrollToSection('invoice-register')}>Record payment</button>
         <button type="button" style={styles.ghostButton} onClick={() => { setPaymentProofOpen(true); scrollToSection('payment-proof-queue'); }}>Review proof</button>
         <button type="button" style={styles.ghostButton} onClick={() => setInvoiceOutputOpen(open => !open)}>Output settings</button>
         <button type="button" style={styles.ghostButton} onClick={exportInvoices} disabled={!registerInvoices.length}>Export / Download</button>
       </div>
     </section>
-    {canManage && (
+    {canManage && createInvoiceOpen && (
       <section aria-label="Create invoice" style={{ marginBottom: 16, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <IconCash size={16} stroke={1.75} style={{ color: '#697386' }} />
             <span style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>Create invoice</span>
           </div>
-          <button type="button" aria-expanded={createInvoiceOpen} onClick={() => createInvoiceOpen ? closeCreateInvoice() : setCreateInvoiceOpen(true)} style={{ ...styles.ghostButton, fontSize: 12, padding: '4px 10px' }}>{createInvoiceOpen ? 'Close' : 'Create invoice'}</button>
+          <button type="button" onClick={closeCreateInvoice} style={{ ...styles.ghostButton, fontSize: 12, padding: '4px 10px' }}>Close</button>
         </div>
-        {createInvoiceOpen && (
-          <p style={{ fontSize: 12, color: '#697386', margin: '6px 0 0' }}>
-            Pick a matter to invoice its unbilled time or fixed fee, or enter an amount manually.
-          </p>
-        )}
-        {createInvoiceOpen && <form onSubmit={createInvoice} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 10 }}>
+        <p style={{ fontSize: 12, color: '#697386', margin: '6px 0 0' }}>
+          Pick a matter to invoice its unbilled time or fixed fee, or enter an amount manually.
+        </p>
+        <form onSubmit={createInvoice} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 10 }}>
           <div style={{ flex: '2 1 220px', minWidth: 0 }}>
             <Field label="Matter">
               <select style={styles.input} value={createForm.matterId} onChange={e => setCreateForm(f => ({ ...f, matterId: e.target.value }))}>
@@ -4408,8 +4406,8 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
           )}
           <button type="submit" style={styles.primaryButton} disabled={creating}>{creating ? 'Creating...' : 'Create invoice'}</button>
           <button type="button" style={styles.ghostButton} onClick={closeCreateInvoice}>Cancel</button>
-        </form>}
-        {createInvoiceOpen && selectedMatterBilling && !createForm.manual && (
+        </form>
+        {selectedMatterBilling && !createForm.manual && (
           <p style={{ fontSize: 12, color: '#697386', margin: '8px 0 0' }}>
             {selectedMatterBilling.isFixed
               ? `Fixed-fee matter - this will invoice ${kes(selectedMatterBilling.fixedFee)}.`
