@@ -12,6 +12,7 @@ const AVATAR_ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp'];
 const AVATAR_MAX_BYTES = 512 * 1024;
 const MATTER_COCKPIT_SECTION_IDS = ['overview', 'tasks', 'court-diary', 'documents', 'billing', 'timeline', 'client-portal', 'notes'];
 const DOCUMENT_STUDIO_SIGNATURE_TARGET_KEY = 'lexflow.documentStudio.signatureTarget';
+const COURT_DIARY_FOCUS_KEY = 'lexflow:courtDiaryFocus';
 
 function staffDocumentLabel(doc = {}) {
   return doc.displayName || doc.friendlyName || doc.name || 'Document';
@@ -2971,6 +2972,31 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
       notify?.({ type: 'info', message: focus.section === 'documents' ? 'Create or open a matter to work with documents.' : 'Create or open a matter to log time or start a task timer.' });
     }
   }, [focus?.section, focus?.ts, detail?.id]);
+  useEffect(() => {
+    if (!detail?.id || cockpitSection !== 'court-diary') return;
+    let payload = null;
+    try {
+      payload = JSON.parse(sessionStorage.getItem(COURT_DIARY_FOCUS_KEY) || 'null');
+    } catch {}
+    if (!payload || payload.matterId !== detail.id) return;
+    const targetId = payload.appearanceId ? `appearance-${payload.appearanceId}` : 'matter-section-court';
+    setTimeout(() => {
+      const target = document.getElementById(targetId) || document.getElementById('matter-section-court');
+      if (!target) return;
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const previousBackground = target.style.background;
+      const previousOutline = target.style.outline;
+      target.style.background = 'rgba(185, 28, 28, 0.08)';
+      target.style.outline = '2px solid rgba(185, 28, 28, 0.22)';
+      setTimeout(() => {
+        target.style.background = previousBackground;
+        target.style.outline = previousOutline;
+      }, 1400);
+    }, 160);
+    try {
+      sessionStorage.removeItem(COURT_DIARY_FOCUS_KEY);
+    } catch {}
+  }, [detail?.id, cockpitSection]);
 
   async function loadDetail(id) {
     setLoading(true);
@@ -7689,6 +7715,13 @@ function TaskEditorList({ tasks, entries = [], matter, matters = null, canManage
 const attendanceStatuses = ['scheduled', 'attended', 'adjourned', 'stood_over', 'heard', 'not_attended', 'cancelled'];
 const attendanceLabels = { scheduled: 'Scheduled', attended: 'Attended', adjourned: 'Adjourned', stood_over: 'Stood over', heard: 'Heard', not_attended: 'Not attended', cancelled: 'Cancelled' };
 
+function isUnresolvedPastAppearance(event) {
+  const status = String(event?.attendanceStatus || event?.status || 'scheduled').toLowerCase();
+  return Number.isFinite(daysFromToday(event?.date))
+    && daysFromToday(event.date) < 0
+    && !/(attended|complete|completed|cancelled|canceled|concluded|resolved|heard)/.test(status);
+}
+
 function AppearanceEditorList({ events, canManage, editingEvent, setEditingEvent, saveEvent, confirmDelete }) {
   if (!events.length) return <Empty title="No court appearances." text="Scheduled appearances will appear here." />;
   return (
@@ -7697,9 +7730,10 @@ function AppearanceEditorList({ events, canManage, editingEvent, setEditingEvent
         <thead><tr>{['Title', 'Date', 'Time', 'Type', 'Location', 'Virtual Court', 'Attendance', 'Appeared By', 'Client', 'Attendance Note', 'Outcome', 'Actions'].map(h => <th key={h}>{h}</th>)}</tr></thead>
         <tbody>{events.map(event => {
           const editing = editingEvent?.id === event.id;
+          const overdue = isUnresolvedPastAppearance(event);
           return (
-            <tr key={event.id}>
-              <td>{editing ? <input style={styles.input} value={editingEvent.title || ''} onChange={e => setEditingEvent({ ...editingEvent, title: e.target.value })} placeholder="e.g. Mention in Civil Suit E001/2025" /> : event.title || '-'}</td>
+            <tr key={event.id} id={`appearance-${event.id}`} style={overdue ? { borderLeft: `4px solid ${theme.red}`, background: 'rgba(185, 28, 28, 0.04)' } : undefined}>
+              <td>{editing ? <input style={styles.input} value={editingEvent.title || ''} onChange={e => setEditingEvent({ ...editingEvent, title: e.target.value })} placeholder="e.g. Mention in Civil Suit E001/2025" /> : <div style={{ display: 'grid', gap: 4 }}><span>{event.title || '-'}</span>{overdue && <Badge tone="red">Past court appearance still marked open</Badge>}</div>}</td>
               <td>{editing ? <input type="date" style={styles.input} value={editingEvent.date || ''} onChange={e => setEditingEvent({ ...editingEvent, date: e.target.value })} /> : event.date || '-'}</td>
               <td>{editing ? <input style={styles.input} value={editingEvent.time || ''} onChange={e => setEditingEvent({ ...editingEvent, time: e.target.value })} /> : event.time || '-'}</td>
               <td>{editing ? <AppearanceTypeSelect value={editingEvent.type || ''} onChange={e => setEditingEvent({ ...editingEvent, type: e.target.value })} /> : event.type || '-'}</td>

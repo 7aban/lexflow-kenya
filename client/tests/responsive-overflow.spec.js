@@ -81,7 +81,9 @@ async function clientNavigate(page, view) {
 async function openStaffMatterTasks(page) {
   await staffNavigate(page, 'Matters');
   const matterWorkspace = page.locator('.lf-matter-detail-workspace');
-  if (!await matterWorkspace.isVisible().catch(() => false)) {
+  if (!await matterWorkspace.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false)) {
+    const showList = page.getByRole('button', { name: /^Show matter list$/ });
+    if (await showList.isVisible().catch(() => false)) await showList.click();
     const matterButton = page.locator('.lf-matter-grid button').filter({ has: page.locator('strong') }).first();
     await expect(matterButton, 'A matter must be available for the read-only matter tasks check').toBeVisible({ timeout: 15000 });
     await matterButton.click();

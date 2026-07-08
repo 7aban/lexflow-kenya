@@ -25,6 +25,7 @@ const triageTabs = [
   { id: 'court', label: 'Court Diary' },
   { id: 'all', label: 'All' },
 ];
+const COURT_DIARY_FOCUS_KEY = 'lexflow:courtDiaryFocus';
 
 function dayDiff(date) {
   if (!date) return null;
@@ -60,6 +61,19 @@ function dueLabel(date) {
   if (days === 0) return 'Today';
   if (days === 1) return 'Tomorrow';
   return `In ${days} days`;
+}
+
+function isOpenCourtAppearance(row) {
+  if (!row || row.type !== 'Court Date') return false;
+  const status = String(row.status || 'Open').toLowerCase();
+  return !['done', 'completed', 'complete', 'resolved', 'attended', 'heard', 'cancelled'].includes(status);
+}
+
+function appearanceIdFromDeadline(row) {
+  if (!row) return '';
+  if (String(row.id || '').startsWith('appearance:')) return String(row.id).slice('appearance:'.length);
+  if (String(row.source || '').toLowerCase().includes('appearance')) return row.sourceId || row.id || '';
+  return row.appearanceId || '';
 }
 
 function csvCell(value) {
@@ -270,6 +284,30 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
     } catch (err) {
       notify?.({ type: 'danger', message: err.message });
     }
+  }
+
+  function findMatterIdForCourtItem(row) {
+    if (!row) return '';
+    if (row.matterId) return row.matterId;
+    const appearanceId = appearanceIdFromDeadline(row);
+    const match = matterOptions.find(matter => (
+      Array.isArray(matter.appearances)
+      && matter.appearances.some(appearance => String(appearance.id) === String(appearanceId))
+    ));
+    return match?.id || '';
+  }
+
+  function openMatterCourtDiary(row) {
+    const matterId = findMatterIdForCourtItem(row);
+    if (!matterId) {
+      notify?.({ type: 'warning', message: 'This court appearance is not linked to a matter.' });
+      return;
+    }
+    const appearanceId = appearanceIdFromDeadline(row);
+    try {
+      sessionStorage.setItem(COURT_DIARY_FOCUS_KEY, JSON.stringify({ matterId, appearanceId, ts: Date.now() }));
+    } catch {}
+    window.location.hash = `#/staff/matters/${encodeURIComponent(matterId)}/court-diary`;
   }
 
   // KENYA-32B: load active legal deadline rules; gracefully detect the module gate.
@@ -522,12 +560,17 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
     <Badge key={`${row.id}-type`} tone={deadlineTone(row)}>{prettyType(row.type)}</Badge>,
     <div key={`${row.id}-title`} style={{ display: 'grid', gap: 3 }}>
       <strong>{row.title}</strong>
+      {isOpenCourtAppearance(row) && dayDiff(row.dueDate) < 0 && <span style={{ color: theme.red, fontSize: 12, fontWeight: 700 }}>Past court appearance still marked open</span>}
       {row.notes && <span style={{ color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))', fontSize: 12 }}>{row.notes}</span>}
     </div>,
     row.matterTitle || row.reference || row.clientName || '-',
     row.owner || '-',
     <Badge key={`${row.id}-status`} tone={row.status === 'Done' ? 'green' : deadlineTone(row)}>{row.status || 'Open'}</Badge>,
-    row.source === 'custom' && canManage ? (
+    isOpenCourtAppearance(row) && dayDiff(row.dueDate) < 0 ? (
+      <div key={`${row.id}-court-actions`} style={styles.actionGroup}>
+        <button type="button" style={styles.tinyButton} onClick={() => openMatterCourtDiary(row)}>Open matter court diary</button>
+      </div>
+    ) : row.source === 'custom' && canManage ? (
       <div key={`${row.id}-actions`} style={styles.actionGroup}>
         <button type="button" style={styles.tinyButton} onClick={() => setStatus(row, row.status === 'Done' ? 'Open' : 'Done')}>
           {row.status === 'Done' ? 'Reopen' : 'Done'}
@@ -578,6 +621,31 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
           </div>
           {courtItems.length > 0 && <button type="button" onClick={() => { setActiveTab('court'); scrollToTimeline(); }} style={styles.ghostButton}>View court diary</button>}
         </div>
+        {overdueCourtItems.length > 0 && (
+          <div style={{ border: `1px solid ${theme.redBg}`, borderRadius: 8, padding: 12, background: 'rgba(185, 28, 28, 0.06)', display: 'grid', gap: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <strong style={{ color: theme.red, fontSize: 14 }}>Past court appearance still marked open</strong>
+              <Badge tone="red">{overdueCourtItems.length} overdue</Badge>
+            </div>
+            <div style={{ display: 'grid', gap: 8 }}>
+              {overdueCourtItems.slice(0, 5).map((item, index) => (
+                <div key={item.id || `${item.dueDate}-${index}`} style={{ border: '1px solid rgba(185, 28, 28, 0.18)', borderRadius: 8, padding: 10, background: 'var(--lf-card, #fff)', display: 'grid', gap: 6 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 13, fontWeight: 700 }}>{item.title || 'Court appearance'}</span>
+                    <Badge tone="red">{dueLabel(item.dueDate)}</Badge>
+                  </div>
+                  <span style={{ fontSize: 12, color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))' }}>
+                    {[item.dueDate, item.matterTitle || item.reference, item.clientName].filter(Boolean).join(' · ')}
+                  </span>
+                  <div>
+                    <button type="button" style={styles.tinyButton} onClick={() => openMatterCourtDiary(item)}>Open matter court diary</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {overdueCourtItems.length > 5 && <span style={{ fontSize: 12, color: theme.red, fontWeight: 700 }}>Review the full overdue list below for {overdueCourtItems.length - 5} more.</span>}
+          </div>
+        )}
         {upcomingCourtItems.length ? (
           <>
             <div style={{ display: 'grid', gap: 8 }}>
