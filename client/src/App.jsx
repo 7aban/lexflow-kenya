@@ -296,6 +296,7 @@ export default function App() {
   const [loginResetNonce, setLoginResetNonce] = useState(0);
   const [myAvatarUrl, setMyAvatarUrl] = useState(null);
   const [themeOverride, setThemeOverride] = useState(null);
+  const [viewportWidth, setViewportWidth] = useState(() => typeof window === 'undefined' ? 1280 : window.innerWidth);
   const myAvatarUrlRef = useRef(null);
 
   const authenticated = Boolean(session?.token);
@@ -357,6 +358,18 @@ export default function App() {
   const visibleViews = visibleGroups.flatMap(group => group.items.map(([label]) => label));
   const visibleViewKey = useMemo(() => visibleViews.join('|'), [visibleViews]);
   const visibleViewSet = useMemo(() => new Set(visibleViews), [visibleViewKey]);
+  const timerTopbarStyle = useMemo(() => ({
+    ...styles.timerBubble,
+    position: 'static',
+    zIndex: 'auto',
+    gap: viewportWidth <= 640 ? 7 : 9,
+    padding: viewportWidth <= 640 ? '8px 10px' : '8px 12px',
+    borderRadius: 10,
+    boxShadow: '0 2px 10px rgba(0,0,0,.16)',
+    minHeight: 36,
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
+  }), [viewportWidth]);
 
   function navigateToView(nextView, options = {}) {
     const safeView = visibleViewSet.has(nextView) ? nextView : 'Dashboard';
@@ -611,6 +624,15 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleEscape);
   }, [mobileMenuOpen]);
 
+  useEffect(() => {
+    function handleResize() {
+      setViewportWidth(window.innerWidth);
+    }
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   async function refresh() {
     setLoading(true);
     try {
@@ -852,6 +874,20 @@ export default function App() {
             )}
           </div>
           <div className="lf-top-actions" style={styles.topActions}>
+            <button
+              type="button"
+              className="lf-topbar-timer"
+              onClick={() => navigateToView('Matters', { section: 'tasks' })}
+              style={timerTopbarStyle}
+              aria-label="Open time logging - log hours or start a task timer"
+              title="Open time logging - log hours or start a task timer"
+            >
+              <span style={styles.liveDot} />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: viewportWidth <= 640 ? 12 : 13 }}>Timekeeper</div>
+                {viewportWidth > 640 && <div style={{ color: 'rgba(255,255,255,.5)', fontSize: 10.5, marginTop: 2 }}>Log billable time</div>}
+              </div>
+            </button>
             <NotificationBell notifications={notifications} open={notificationsOpen} setOpen={setNotificationsOpen} onOpen={openNotification} />
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
               <button type="button" className="lf-topbar-icon-btn" aria-label={loading ? 'Refreshing data' : 'Refresh data'} title="Refresh data" onClick={refresh} disabled={loading} style={styles.iconButton}>
@@ -894,20 +930,6 @@ export default function App() {
           </ViewErrorBoundary>
         </div>
       </main>
-      <button
-        type="button"
-        className="lf-timer-bubble"
-        onClick={() => navigateToView('Matters', { section: 'tasks' })}
-        style={styles.timerBubble}
-        aria-label="Open time logging — log hours or start a task timer"
-        title="Open time logging — log hours or start a task timer"
-      >
-        <span style={styles.liveDot} />
-        <div>
-          <div style={{ fontWeight: 700, fontSize: 13 }}>Timekeeper</div>
-          <div style={{ color: 'rgba(255,255,255,.5)', fontSize: 10.5, marginTop: 2 }}>Log billable time</div>
-        </div>
-      </button>
       <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   );
