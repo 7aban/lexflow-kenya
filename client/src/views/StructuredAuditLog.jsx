@@ -138,7 +138,11 @@ export default function StructuredAuditLog({ notify }) {
 
   return (
     <div style={styles.pageStack}>
-      <Card title="Structured Audit" hint="Detailed event history from firm activity.">
+      <Card title="Audit Events" hint="Current structured event trail for security, access, and operational auditing.">
+        <div style={{ marginBottom: 12, color: theme.muted, fontSize: 12, lineHeight: 1.5 }}>
+          Audit Events is the current structured audit surface. Audit Log (Legacy) remains available for older activity.
+          Login and access events are expected to appear often; use the Action filter to isolate them or review other event types.
+        </div>
         <div style={styles.formGrid}>
           <Field label="Search">
             <input
@@ -151,23 +155,27 @@ export default function StructuredAuditLog({ notify }) {
           <Field label="Action">
             <select value={filters.action} onChange={event => updateFilter('action', event.target.value)} style={styles.input}>
               <option value="">All</option>
-              <option value="client_login_success">Client Login Success</option>
-              <option value="client_login_failure">Client Login Failure</option>
-              <option value="login_success">Login Success</option>
-              <option value="login_failure">Login Failure</option>
-              <option value="user_created">User Created</option>
-              <option value="matter_created">Matter Created</option>
-              <option value="matter_updated">Matter Updated</option>
-              <option value="matter_archived">Matter Archived</option>
-              <option value="client_created">Client Created</option>
-              <option value="client_updated">Client Updated</option>
-              <option value="invoice_generated">Invoice Generated</option>
-              <option value="invoice_status_updated">Invoice Status Updated</option>
-              <option value="payment_proof_uploaded">Payment Proof Uploaded</option>
-              <option value="firm_settings_updated">Firm Settings Updated</option>
-              <option value="export_downloaded">Export Downloaded</option>
-              <option value="document_downloaded">Document Downloaded</option>
-              <option value="document_accessed">Document Accessed</option>
+              <optgroup label="Access events">
+                <option value="client_login_success">Client Login Success</option>
+                <option value="client_login_failure">Client Login Failure</option>
+                <option value="login_success">Login Success</option>
+                <option value="login_failure">Login Failure</option>
+              </optgroup>
+              <optgroup label="Operational events">
+                <option value="user_created">User Created</option>
+                <option value="matter_created">Matter Created</option>
+                <option value="matter_updated">Matter Updated</option>
+                <option value="matter_archived">Matter Archived</option>
+                <option value="client_created">Client Created</option>
+                <option value="client_updated">Client Updated</option>
+                <option value="invoice_generated">Invoice Generated</option>
+                <option value="invoice_status_updated">Invoice Status Updated</option>
+                <option value="payment_proof_uploaded">Payment Proof Uploaded</option>
+                <option value="firm_settings_updated">Firm Settings Updated</option>
+                <option value="export_downloaded">Export Downloaded</option>
+                <option value="document_downloaded">Document Downloaded</option>
+                <option value="document_accessed">Document Accessed</option>
+              </optgroup>
             </select>
           </Field>
           <Field label="Entity Type">
