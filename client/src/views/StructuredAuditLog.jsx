@@ -5,6 +5,14 @@ import { Badge, Card, Empty, Field, Skeleton, Table } from '../components/ui.jsx
 
 const PAGE_SIZE = 50;
 const SENSITIVE_KEYS = ['token', 'authorization', 'bearer', 'password', 'secret', 'key', 'credential', 'rawbody'];
+const ACCESS_ACTIONS = ['client_login_success', 'client_login_failure', 'login_success', 'login_failure'];
+const ACTION_QUICK_FILTERS = [
+  { label: 'All', value: '' },
+  { label: 'Staff login success', value: 'login_success' },
+  { label: 'Staff login failure', value: 'login_failure' },
+  { label: 'Client login success', value: 'client_login_success' },
+  { label: 'Client login failure', value: 'client_login_failure' },
+];
 
 function pretty(value) {
   if (!value) return 'All';
@@ -27,6 +35,10 @@ function actionTone(action) {
   if (action.includes('create') || action.includes('generate') || action.includes('upload') || action.includes('success')) return 'green';
   if (action.includes('update') || action.includes('status') || action.includes('failure') || action.includes('fail')) return 'amber';
   return 'blue';
+}
+
+function isAccessAction(action) {
+  return ACCESS_ACTIONS.includes(action);
 }
 
 function isSensitive(key) {
@@ -104,7 +116,8 @@ export default function StructuredAuditLog({ notify }) {
     return () => { cancelled = true; };
   }, [filters.action, filters.entity_type, filters.matter_id, filters.client_id, notify, page]);
 
-  const rows = (payload.rows || []).filter(row => {
+  const events = payload.rows || [];
+  const rows = events.filter(row => {
     const needle = filters.search.trim().toLowerCase();
     if (!needle) return true;
     return (
@@ -119,11 +132,17 @@ export default function StructuredAuditLog({ notify }) {
     if (key !== 'search') setPage(0);
   }
 
+  const currentPageAccessCount = rows.filter(row => isAccessAction(row.action)).length;
+  const currentPageOperationalCount = rows.length - currentPageAccessCount;
+
   const tableRows = rows.map(row => [
     formatDate(row.timestamp),
     row.actor_email || '-',
     <Badge tone={row.actor_role === 'admin' ? 'green' : row.actor_role === 'client' ? 'amber' : 'blue'}>{row.actor_role || '-'}</Badge>,
-    <Badge tone={actionTone(row.action)}>{pretty(row.action)}</Badge>,
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <Badge tone={actionTone(row.action)}>{pretty(row.action)}</Badge>
+      {isAccessAction(row.action) && <Badge tone="blue">Access</Badge>}
+    </span>,
     pretty(row.entity_type),
     row.entity_id || '-',
     row.matter_id || '-',
@@ -177,6 +196,26 @@ export default function StructuredAuditLog({ notify }) {
                 <option value="document_accessed">Document Accessed</option>
               </optgroup>
             </select>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+              {ACTION_QUICK_FILTERS.map(option => {
+                const selected = filters.action === option.value;
+                return (
+                  <button
+                    key={option.value || 'all'}
+                    type="button"
+                    onClick={() => updateFilter('action', option.value)}
+                    style={{
+                      ...styles.tinyButton,
+                      borderColor: selected ? 'var(--lf-primary, #1A3628)' : 'var(--lf-border, #DDD8CE)',
+                      background: selected ? 'color-mix(in srgb, var(--lf-primary, #1A3628) 10%, var(--lf-card, #fff))' : 'var(--lf-card, #fff)',
+                      color: selected ? 'var(--lf-primary, #1A3628)' : 'var(--lf-link, var(--lf-primary, #1A3628))',
+                    }}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
           </Field>
           <Field label="Entity Type">
             <select value={filters.entity_type} onChange={event => updateFilter('entity_type', event.target.value)} style={styles.input}>
@@ -209,6 +248,11 @@ export default function StructuredAuditLog({ notify }) {
           <div style={{ ...styles.formHelper, alignSelf: 'end' }}>
             Showing {start}-{end} of {total} server records. Text search filters the loaded page.
           </div>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12, color: theme.muted, fontSize: 12 }}>
+          <span>Current page visible: {rows.length} events</span>
+          <span>Access/login events: {currentPageAccessCount}</span>
+          <span>Operational events: {currentPageOperationalCount}</span>
         </div>
       </Card>
 
