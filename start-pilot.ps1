@@ -71,8 +71,8 @@ $BackendProc.Id | Out-File -FilePath $BackendPidFile -Encoding ASCII
 
 Start-Sleep -Seconds 4
 
-Write-Host "Starting pilot frontend at http://localhost:5173..."
-$FrontendProc = Start-Process -FilePath "cmd.exe" -ArgumentList "/k", "cd /d `"$ClientDir`" && npm run dev" -WindowStyle Hidden -PassThru
+Write-Host "Starting pilot frontend at http://127.0.0.1:5173..."
+$FrontendProc = Start-Process -FilePath "cmd.exe" -ArgumentList "/k", "cd /d `"$ClientDir`" && npm run dev:ip" -WindowStyle Hidden -PassThru
 $FrontendProc.Id | Out-File -FilePath $FrontendPidFile -Encoding ASCII
 
 Start-Sleep -Seconds 5
@@ -84,7 +84,7 @@ foreach ($key in $SavedEnv.Keys) {
 
 Write-Host ""
 Write-Host "=== LexFlow Pilot ==="
-Write-Host "Frontend : http://localhost:5173"
+Write-Host "Frontend : http://127.0.0.1:5173"
 Write-Host "Backend  : http://localhost:5000"
 Write-Host "Login    : admin@lexflow.co.ke"
 Write-Host ""

@@ -2453,7 +2453,7 @@ function SnapshotSection({ title, children }) {
   return <div style={{ marginTop: 12 }}><div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, color: theme.muted, marginBottom: 6 }}>{title}</div>{children}</div>;
 }
 function SnapshotStat({ label, value }) {
-  return <div style={{ background: theme.surface || '#F9FAFB', border: `1px solid ${theme.line}`, borderRadius: 8, padding: '8px 10px', minWidth: 96 }}><div style={{ fontSize: 11, color: theme.muted }}>{label}</div><div style={{ fontSize: 15, fontWeight: 600, color: '#111827' }}>{value}</div></div>;
+  return <div style={{ background: theme.surface || '#F9FAFB', border: `1px solid ${theme.line}`, borderRadius: 8, padding: '8px 10px', minWidth: 96, display: 'grid', gap: 3 }}><div style={{ fontSize: 11, color: theme.muted, lineHeight: 1.2 }}>{label}</div><div style={{ fontSize: 15, fontWeight: 600, color: '#111827', lineHeight: 1.25 }}>{value}</div></div>;
 }
 function ClientSnapshotCard({ clientId, onClose }) {
   const [snapshot, setSnapshot] = useState(null);
@@ -4333,21 +4333,21 @@ export function Invoices({ invoices, isAdmin, canManage, reload, notify, firmSet
     <style>{billingMobilePolishCss}</style>
     <section aria-label="Billing position" style={{ marginBottom: 16, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: 14, boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
-        <button type="button" onClick={() => goToInvoiceRegister('all')} style={{ ...styles.ghostButton, justifyContent: 'space-between', padding: '10px 12px' }}>
-          <span>Outstanding</span>
-          <strong style={{ fontSize: 12 }}>{kes(receivableTotals.outstanding)}</strong>
+        <button type="button" onClick={() => goToInvoiceRegister('all')} style={{ ...styles.ghostButton, alignItems: 'flex-start', flexDirection: 'column', gap: 4, padding: '10px 12px' }}>
+          <span style={{ display: 'block', lineHeight: 1.2 }}>Outstanding</span>
+          <strong style={{ display: 'block', marginTop: 4, fontSize: 12, lineHeight: 1.25 }}>{kes(receivableTotals.outstanding)}</strong>
         </button>
-        <button type="button" onClick={() => goToInvoiceRegister('Overdue')} style={{ ...styles.ghostButton, justifyContent: 'space-between', padding: '10px 12px', borderColor: invoiceSummary.overdue ? '#FCA5A5' : '#E5E7EB' }}>
-          <span>Overdue</span>
-          <Badge tone={invoiceSummary.overdue ? 'red' : 'green'}>{invoiceSummary.overdue}</Badge>
+        <button type="button" onClick={() => goToInvoiceRegister('Overdue')} style={{ ...styles.ghostButton, alignItems: 'flex-start', flexDirection: 'column', gap: 4, padding: '10px 12px', borderColor: invoiceSummary.overdue ? '#FCA5A5' : '#E5E7EB' }}>
+          <span style={{ display: 'block', lineHeight: 1.2 }}>Overdue</span>
+          <span style={{ display: 'block', marginTop: 4 }}><Badge tone={invoiceSummary.overdue ? 'red' : 'green'}>{invoiceSummary.overdue}</Badge></span>
         </button>
-        <button type="button" onClick={() => goToInvoiceRegister('Paid')} style={{ ...styles.ghostButton, justifyContent: 'space-between', padding: '10px 12px' }}>
-          <span>Collected</span>
-          <strong style={{ fontSize: 12 }}>{kes(receivableTotals.paid)}</strong>
+        <button type="button" onClick={() => goToInvoiceRegister('Paid')} style={{ ...styles.ghostButton, alignItems: 'flex-start', flexDirection: 'column', gap: 4, padding: '10px 12px' }}>
+          <span style={{ display: 'block', lineHeight: 1.2 }}>Collected</span>
+          <strong style={{ display: 'block', marginTop: 4, fontSize: 12, lineHeight: 1.25 }}>{kes(receivableTotals.paid)}</strong>
         </button>
-        <button type="button" onClick={() => goToInvoiceRegister('Outstanding')} style={{ ...styles.ghostButton, justifyContent: 'space-between', padding: '10px 12px' }}>
-          <span>Unpaid</span>
-          <Badge tone={invoiceSummary.unpaid ? 'amber' : 'green'}>{invoiceSummary.unpaid}</Badge>
+        <button type="button" onClick={() => goToInvoiceRegister('Outstanding')} style={{ ...styles.ghostButton, alignItems: 'flex-start', flexDirection: 'column', gap: 4, padding: '10px 12px' }}>
+          <span style={{ display: 'block', lineHeight: 1.2 }}>Unpaid</span>
+          <span style={{ display: 'block', marginTop: 4 }}><Badge tone={invoiceSummary.unpaid ? 'amber' : 'green'}>{invoiceSummary.unpaid}</Badge></span>
         </button>
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>

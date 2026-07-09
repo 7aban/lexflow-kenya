@@ -587,21 +587,21 @@ export default function DeadlineCenter({ data, canManage, notify, focus }) {
     <div style={styles.pageStack}>
       <div style={{ border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 10, padding: 14, background: 'var(--lf-card, #fff)', color: 'var(--lf-card-text, #101827)', boxShadow: theme.shadow, display: 'grid', gap: 12 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
-          <button type="button" onClick={() => setActiveTab('overdue')} style={{ ...styles.ghostButton, justifyContent: 'space-between', padding: '10px 12px', borderColor: summary.overdue ? theme.redBg : theme.line }}>
-            <span>Overdue</span>
-            <Badge tone={summary.overdue ? 'red' : 'green'}>{summary.overdue}</Badge>
+          <button type="button" onClick={() => setActiveTab('overdue')} style={{ ...styles.ghostButton, alignItems: 'flex-start', flexDirection: 'column', gap: 4, padding: '10px 12px', borderColor: summary.overdue ? theme.redBg : theme.line }}>
+            <span style={{ display: 'block', lineHeight: 1.2 }}>Overdue</span>
+            <span style={{ display: 'block', marginTop: 4 }}><Badge tone={summary.overdue ? 'red' : 'green'}>{summary.overdue}</Badge></span>
           </button>
-          <button type="button" onClick={() => setActiveTab('upcoming')} style={{ ...styles.ghostButton, justifyContent: 'space-between', padding: '10px 12px' }}>
-            <span>Due soon</span>
-            <Badge tone={summary.week ? 'gold' : 'green'}>{summary.week}</Badge>
+          <button type="button" onClick={() => setActiveTab('upcoming')} style={{ ...styles.ghostButton, alignItems: 'flex-start', flexDirection: 'column', gap: 4, padding: '10px 12px' }}>
+            <span style={{ display: 'block', lineHeight: 1.2 }}>Due soon</span>
+            <span style={{ display: 'block', marginTop: 4 }}><Badge tone={summary.week ? 'gold' : 'green'}>{summary.week}</Badge></span>
           </button>
-          <button type="button" onClick={() => { setActiveTab('court'); scrollToTimeline(); }} style={{ ...styles.ghostButton, justifyContent: 'space-between', padding: '10px 12px' }}>
-            <span>Next court</span>
-            <strong style={{ fontSize: 12 }}>{summary.nextCourt?.dueDate || 'None'}</strong>
+          <button type="button" onClick={() => { setActiveTab('court'); scrollToTimeline(); }} style={{ ...styles.ghostButton, alignItems: 'flex-start', flexDirection: 'column', gap: 4, padding: '10px 12px' }}>
+            <span style={{ display: 'block', lineHeight: 1.2 }}>Next court</span>
+            <strong style={{ display: 'block', marginTop: 4, fontSize: 12, lineHeight: 1.25 }}>{summary.nextCourt?.dueDate || 'None'}</strong>
           </button>
-          <button type="button" onClick={() => setActiveTab('all')} style={{ ...styles.ghostButton, justifyContent: 'space-between', padding: '10px 12px' }}>
-            <span>Active items</span>
-            <Badge tone="blue">{summary.open}</Badge>
+          <button type="button" onClick={() => setActiveTab('all')} style={{ ...styles.ghostButton, alignItems: 'flex-start', flexDirection: 'column', gap: 4, padding: '10px 12px' }}>
+            <span style={{ display: 'block', lineHeight: 1.2 }}>Active items</span>
+            <span style={{ display: 'block', marginTop: 4 }}><Badge tone="blue">{summary.open}</Badge></span>
           </button>
         </div>
         {canManage && (
