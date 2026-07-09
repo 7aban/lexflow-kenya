@@ -544,6 +544,11 @@ export default function App() {
   }, [user?.role, view]);
 
   useEffect(() => {
+    if (!authenticated || user?.role === 'client') return;
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [authenticated, user?.role, view]);
+
+  useEffect(() => {
     if (!authenticated || !user || user.role === 'client') return undefined;
     function handleHashChange() {
       applyStaffHash();

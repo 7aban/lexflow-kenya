@@ -38,6 +38,10 @@ function lastFromLabel(item) {
   return 'Firm';
 }
 
+function conversationHasMessages(item) {
+  return Number(item?.messageCount) > 0 || Boolean(item?.lastMessageAt);
+}
+
 function MessageAvatar({ conversationId, messageId, hasAvatar, name, size = 28 }) {
   const [src, setSrc] = useState(null);
   const srcRef = useRef(null);
@@ -162,6 +166,15 @@ const commStyles = {
     border: `1px solid ${commPalette.border}`,
     fontWeight: 800,
   },
+  notice: {
+    border: `1px solid ${commPalette.border}`,
+    borderRadius: 8,
+    background: commPalette.warm,
+    padding: 12,
+    display: 'grid',
+    gap: 8,
+    color: theme.ink,
+  },
   skeleton: {
     height: 120,
     borderRadius: 10,
@@ -238,6 +251,19 @@ export default function Communications({ clients = [], matters = [], focus, noti
       return matchesStatus && matchesSearch;
     });
   }, [conversations, search, statusFilter]);
+
+  const matterThreadCounts = useMemo(() => conversations.reduce((counts, item) => {
+    if (!item.matterId) return counts;
+    counts[item.matterId] = (counts[item.matterId] || 0) + 1;
+    return counts;
+  }, {}), [conversations]);
+
+  const relatedMatterThreads = useMemo(() => {
+    if (!selected?.matterId) return [];
+    return conversations.filter(item => item.id !== selected.id && item.matterId === selected.matterId && conversationHasMessages(item));
+  }, [conversations, selected?.id, selected?.matterId]);
+
+  const relatedMatterThread = relatedMatterThreads[0];
 
   const matterOptions = useMemo(() => {
     if (!newThread.clientId) return matters;
@@ -425,6 +451,12 @@ export default function Communications({ clients = [], matters = [], focus, noti
                     </span>
                   </span>
                   <span>{item.clientName || 'Client'}{item.matterTitle ? ` / ${item.matterTitle}` : ''}</span>
+                  {item.matterId && matterThreadCounts[item.matterId] > 1 && (
+                    <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <Badge tone="amber">{matterThreadCounts[item.matterId]} matter threads</Badge>
+                      {!conversationHasMessages(item) && <Badge tone="blue">empty</Badge>}
+                    </span>
+                  )}
                   <small>{[messageCountLabel(item.messageCount), lastFromLabel(item) ? `Last from ${lastFromLabel(item)}` : '', previewTime(item.lastMessageAt || item.createdAt)].filter(Boolean).join(' · ')}</small>
                 </button>
               )) : <CommunicationsEmpty title="No conversations" text="Start a conversation or wait for a client message." />}
@@ -472,8 +504,34 @@ export default function Communications({ clients = [], matters = [], focus, noti
                         </div>
                       </div>
                     );
-                  }) : <CommunicationsEmpty title="No messages yet" text="Send the first note in this thread." />}
+                  }) : (
+                    <div style={commStyles.empty}>
+                      <div style={commStyles.emptyIcon}>LF</div>
+                      <strong>No messages in this conversation yet.</strong>
+                      <span>
+                        {selected.matterTitle
+                          ? `This thread is linked to ${selected.matterTitle} but has no messages yet.`
+                          : 'This conversation has no messages yet.'}
+                      </span>
+                    </div>
+                  )}
                 </div>
+
+                {!messages.length && selected.matterId && relatedMatterThreads.length > 0 && (
+                  <div style={commStyles.notice}>
+                    <strong>Other conversations for this matter contain messages.</strong>
+                    <span style={{ color: theme.muted }}>
+                      {relatedMatterThreads.length === 1
+                        ? `${titleFor(relatedMatterThread)} has ${messageCountLabel(relatedMatterThread.messageCount).toLowerCase()}.`
+                        : `${relatedMatterThreads.length} related conversations have message history.`}
+                    </span>
+                    <div>
+                      <button type="button" style={commStyles.tinyButton} onClick={() => setSelectedId(relatedMatterThread.id)}>
+                        Open related thread
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {showReply ? (
                   <form onSubmit={sendReply} style={{ display: 'grid', gap: 10, borderTop: `1px solid ${theme.line}`, paddingTop: 12 }}>
@@ -488,11 +546,7 @@ export default function Communications({ clients = [], matters = [], focus, noti
                       <button type="button" style={commStyles.tinyButton} onClick={() => { setReply({ body: '', file: null }); setShowReply(false); }}>Cancel</button>
                     </div>
                   </form>
-                ) : (
-                  <div style={{ borderTop: `1px solid ${theme.line}`, paddingTop: 12 }}>
-                    <button type="button" style={commStyles.primaryButton} onClick={() => setShowReply(true)}>Reply</button>
-                  </div>
-                )}
+                ) : null}
               </div>
             )}
           </Card>
