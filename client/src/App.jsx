@@ -62,7 +62,7 @@ const navGroups = [
     ['eCitizen', ['admin', 'advocate', 'assistant'], 'https://www.ecitizen.go.ke'],
     ['Ardhi Sasa', ['admin', 'advocate', 'assistant'], 'https://ardhisasa.lands.go.ke/home'],
   ] },
-  { title: 'Admin', collapsible: true, items: [['Users', ['admin']], ['HR', ['admin']], ['Firm Settings', ['admin']], ['Audit Log', ['admin']], ['Structured Audit', ['admin']], ['Performance', ['admin']], ['Invitations', ['admin']]] },
+  { title: 'Admin', collapsible: true, items: [['Users', ['admin']], ['HR', ['admin']], ['Firm Settings', ['admin']], ['Structured Audit', ['admin']], ['Audit Log', ['admin']], ['Performance', ['admin']], ['Invitations', ['admin']]] },
 ];
 
 const staffViewSlugs = {
