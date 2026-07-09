@@ -111,7 +111,11 @@ export default function AuditLog({ notify, navigate }) {
 
   return (
     <div style={styles.pageStack}>
-      <Card title="Audit Log" hint="System activity and user actions.">
+      <Card title="Audit Log (Legacy)" hint="System activity and user actions.">
+        <div style={{ marginBottom: 12, color: theme.muted, fontSize: 12, lineHeight: 1.5 }}>
+          This page shows the legacy/basic audit log retained for historical and admin review.
+          Audit Events is the current structured audit surface for newer security, access, and activity review.
+        </div>
         <div style={styles.formGrid}>
           <Field label="Search">
             <input
