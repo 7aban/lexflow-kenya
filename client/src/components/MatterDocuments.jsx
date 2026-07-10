@@ -94,6 +94,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const [generationMessage, setGenerationMessage] = useState('');
   const [generationWarning, setGenerationWarning] = useState('');
   const [templateSearch, setTemplateSearch] = useState('');
+  const [documentSearch, setDocumentSearch] = useState('');
   const [uploadStatus, setUploadStatus] = useState({ fileName: '', state: '' });
   const [preview, setPreview] = useState(null);
   const previewUrlRef = useRef('');
@@ -437,6 +438,22 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const selectedIsClientUploads = selectedFolder === clientUploadsFolder?.id;
   const selectedIsCustom = Boolean(selectedFolderInfo && !selectedFolderInfo.virtual && !selectedIsClientUploads);
   const selectedCustomCount = selectedIsCustom ? folderCount(selectedFolderInfo) : 0;
+  const visibleDocuments = useMemo(() => {
+    const query = documentSearch.trim().toLowerCase();
+    if (!query) return documents;
+    return documents.filter(doc => [
+      doc.displayName,
+      doc.friendlyName,
+      doc.name,
+      doc.mimeType,
+      doc.type,
+      documentTypeLabel(doc),
+      doc.folderName || 'Uncategorised',
+      doc.source,
+      documentSourceLabel(doc, clientMode),
+      doc.date,
+    ].some(value => String(value || '').toLowerCase().includes(query)));
+  }, [documents, documentSearch, clientMode]);
 
   const filteredTemplates = useMemo(() => {
     const q = templateSearch.trim().toLowerCase();
@@ -587,6 +604,24 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
               Uploads will be saved to: <strong style={{ color: theme.ink }}>{uploadDestination}</strong>
             </div>
           )}
+          <div style={{ borderTop: `1px solid ${theme.line}`, marginTop: 10, paddingTop: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <input
+              type="search"
+              value={documentSearch}
+              onChange={event => setDocumentSearch(event.target.value)}
+              placeholder="Search documents…"
+              aria-label="Search documents in the current view"
+              style={{ ...styles.input, flex: '1 1 220px', minWidth: 0 }}
+            />
+            {documentSearch.trim() && (
+              <>
+                <span style={{ color: theme.muted, fontSize: 11, whiteSpace: 'nowrap' }}>
+                  Showing {visibleDocuments.length} of {documents.length}
+                </span>
+                <button type="button" style={styles.ghostButton} onClick={() => setDocumentSearch('')}>Clear search</button>
+              </>
+            )}
+          </div>
         </div>
         {showUploadControls && (
           <div className="lf-doc-upload-area">
@@ -682,7 +717,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
           </div>
           </details>
         )}
-        {loading ? <Skeleton rows={2} /> : documents.length ? (
+        {loading ? <Skeleton rows={2} /> : visibleDocuments.length ? (
           <div className={canManage ? "lf-doc-cards-staff" : "lf-doc-cards-client"}>
           <div className="lf-doc-table-wrap">
           <Table
@@ -691,7 +726,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
               : canManage
                 ? ['Name', 'Type', ...(selectedFolder === 'all' ? ['Folder'] : []), 'Date', 'Size', 'Source', 'Client Access', 'Move', 'Actions']
                 : ['Name', 'Folder', 'Date', 'Size', 'Source', 'Actions']}
-            rows={documents.map(doc => {
+            rows={visibleDocuments.map(doc => {
               const metaStyle = { color: theme.muted, fontSize: 12 };
               const download = <button key={`${doc.id}-download`} type="button" style={{ ...styles.link, border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }} onClick={() => downloadDoc(doc)}>Download</button>;
               const previewAction = <button key={`${doc.id}-preview`} type="button" style={{ ...styles.link, border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }} onClick={() => openPreview(doc)}>Preview</button>;
@@ -739,6 +774,13 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
             empty="No documents."
           />
           </div>
+          </div>
+        ) : documents.length && documentSearch.trim() ? (
+          <div style={{ ...styles.empty, alignItems: 'flex-start', textAlign: 'left' }}>
+            <div style={styles.emptyIcon}>LF</div>
+            <strong>No documents match this search in the current view.</strong>
+            <span>Try a different name, file type, folder, source, or date.</span>
+            <button type="button" style={styles.ghostButton} onClick={() => setDocumentSearch('')}>Clear search</button>
           </div>
         ) : (
           <div style={{ ...styles.empty, alignItems: 'flex-start', textAlign: 'left' }}>
