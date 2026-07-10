@@ -3,6 +3,9 @@ import { api, createFolder, deleteFolder, downloadWithAuth, fetchDocumentArrayBu
 import { styles, theme } from '../theme.jsx';
 import { ActionGroup, Badge, Card, ConfirmModal, Field, Skeleton, Table } from './ui.jsx';
 
+const DOCUMENT_DRAG_TYPE = 'application/x-lexflow-document-id';
+const INTERACTIVE_DRAG_SELECTOR = 'a, button, input, select, textarea, [contenteditable="true"], [role="button"]';
+
 function folderIcon(folder) {
   if (folder.id === 'all') return 'ALL';
   if (folder.id === 'uncategorised') return 'UNC';
@@ -138,6 +141,9 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const [bulkMoving, setBulkMoving] = useState(false);
   const [bulkMoveProgress, setBulkMoveProgress] = useState({ current: 0, total: 0 });
   const [bulkMoveResult, setBulkMoveResult] = useState(null);
+  const [nativeDragEnabled, setNativeDragEnabled] = useState(false);
+  const [draggedDocumentId, setDraggedDocumentId] = useState('');
+  const [dragOverFolderId, setDragOverFolderId] = useState('');
   const previewUrlRef = useRef('');
   const previewRequestRef = useRef(0);
 
@@ -154,6 +160,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   useEffect(() => {
     setSelectedDocumentIds([]);
     setBulkMoveResult(null);
+    clearDocumentDrag();
   }, [matterId, selectedFolder, documentSearch]);
 
   useEffect(() => {
@@ -165,7 +172,20 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       setSelectedDocumentIds([]);
       setBulkMoveResult(null);
     }
+    clearDocumentDrag();
   }, [canManage, clientMode]);
+
+  useEffect(() => {
+    const dragMedia = window.matchMedia('(min-width: 641px) and (pointer: fine) and (hover: hover)');
+    const updateNativeDragEnabled = () => {
+      const touchContext = Number(navigator.maxTouchPoints || 0) > 0;
+      setNativeDragEnabled(dragMedia.matches && !touchContext);
+      if (!dragMedia.matches || touchContext) clearDocumentDrag();
+    };
+    updateNativeDragEnabled();
+    dragMedia.addEventListener?.('change', updateNativeDragEnabled);
+    return () => dragMedia.removeEventListener?.('change', updateNativeDragEnabled);
+  }, []);
 
   useEffect(() => {
     setRenameFolderId('');
@@ -466,19 +486,34 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     setBulkMoveResult(null);
   }
 
-  async function moveSelectedDocuments(event) {
-    event.preventDefault();
-    if (bulkMoving || selectedFolder === 'archived' || canManage !== true || clientMode !== false) return;
+  function clearDocumentDrag() {
+    setDraggedDocumentId('');
+    setDragOverFolderId('');
+  }
+
+  function visibleDragDocuments(documentId) {
+    if (selectedFolder === 'archived' || canManage !== true || clientMode !== false) return [];
+    const id = String(documentId || '');
+    const draggedDocument = visibleDocuments.find(doc => String(doc.id) === id);
+    if (!draggedDocument) return [];
+    const selectedIds = new Set(selectedDocumentIds.map(String));
+    return selectedIds.has(id)
+      ? visibleDocuments.filter(doc => selectedIds.has(String(doc.id)))
+      : [draggedDocument];
+  }
+
+  function supportedDropFolder(folder) {
+    if (!folder || folder.id === 'all' || folder.id === 'archived') return false;
+    return folder.id === 'uncategorised'
+      || realFolders.some(realFolder => String(realFolder.id) === String(folder.id));
+  }
+
+  async function moveDocumentSnapshot(documentSnapshot, destinationFolderId) {
+    if (bulkMoving || selectedFolder === 'archived' || canManage !== true || clientMode !== false || !documentSnapshot.length) return;
 
     const visibleActiveIds = new Set(visibleDocuments.map(doc => String(doc.id)));
-    const selectedIds = new Set(selectedDocumentIds.map(String));
-    const selectedSnapshot = visibleDocuments.filter(doc => selectedIds.has(String(doc.id)) && visibleActiveIds.has(String(doc.id)));
-    if (!selectedSnapshot.length) {
-      setSelectedDocumentIds([]);
-      return;
-    }
-
-    const destinationFolderId = bulkMoveDestination || 'uncategorised';
+    const safeSnapshot = documentSnapshot.filter(doc => visibleActiveIds.has(String(doc.id)));
+    if (!safeSnapshot.length) return;
     const destinationLabel = folderOptions.find(folder => String(folder.id) === String(destinationFolderId))?.name || 'Uncategorised';
     const failures = [];
     let movedCount = 0;
@@ -486,12 +521,12 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
 
     setBulkMoving(true);
     setBulkMoveResult(null);
-    setBulkMoveProgress({ current: 0, total: selectedSnapshot.length });
+    setBulkMoveProgress({ current: 0, total: safeSnapshot.length });
 
     try {
-      for (let index = 0; index < selectedSnapshot.length; index += 1) {
-        const doc = selectedSnapshot[index];
-        setBulkMoveProgress({ current: index + 1, total: selectedSnapshot.length });
+      for (let index = 0; index < safeSnapshot.length; index += 1) {
+        const doc = safeSnapshot[index];
+        setBulkMoveProgress({ current: index + 1, total: safeSnapshot.length });
         const currentFolderId = doc.folderId || 'uncategorised';
         if (String(currentFolderId) === String(destinationFolderId)) {
           skippedCount += 1;
@@ -533,6 +568,76 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     } finally {
       setBulkMoving(false);
     }
+  }
+
+  async function moveSelectedDocuments(event) {
+    event.preventDefault();
+    if (bulkMoving || selectedFolder === 'archived' || canManage !== true || clientMode !== false) return;
+
+    const selectedIds = new Set(selectedDocumentIds.map(String));
+    const selectedSnapshot = visibleDocuments.filter(doc => selectedIds.has(String(doc.id)));
+    if (!selectedSnapshot.length) {
+      setSelectedDocumentIds([]);
+      return;
+    }
+
+    await moveDocumentSnapshot(selectedSnapshot, bulkMoveDestination || 'uncategorised');
+  }
+
+  function startDocumentDrag(event, doc) {
+    if (!nativeDragEnabled || bulkMoving || selectedFolder === 'archived' || canManage !== true || clientMode !== false) {
+      event.preventDefault();
+      clearDocumentDrag();
+      return;
+    }
+    if (event.target instanceof Element && event.target.closest(INTERACTIVE_DRAG_SELECTOR)) {
+      event.preventDefault();
+      clearDocumentDrag();
+      return;
+    }
+    const documentId = String(doc.id);
+    if (!visibleDragDocuments(documentId).length) {
+      event.preventDefault();
+      clearDocumentDrag();
+      return;
+    }
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData(DOCUMENT_DRAG_TYPE, documentId);
+    setDraggedDocumentId(documentId);
+    setDragOverFolderId('');
+    setBulkMoveResult(null);
+  }
+
+  function dragOverFolder(event, folder) {
+    if (!nativeDragEnabled || bulkMoving || !draggedDocumentId || !supportedDropFolder(folder)) return;
+    if (!visibleDragDocuments(draggedDocumentId).length) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setDragOverFolderId(String(folder.id));
+  }
+
+  function leaveDropFolder(event, folder) {
+    if (String(dragOverFolderId) !== String(folder.id)) return;
+    if (event.currentTarget.contains(event.relatedTarget)) return;
+    setDragOverFolderId('');
+  }
+
+  async function dropDocumentsOnFolder(event, folder) {
+    const transferredDocumentId = event.dataTransfer.getData(DOCUMENT_DRAG_TYPE);
+    const documentSnapshot = visibleDragDocuments(transferredDocumentId);
+    const validDrop = nativeDragEnabled
+      && !bulkMoving
+      && supportedDropFolder(folder)
+      && transferredDocumentId
+      && String(transferredDocumentId) === String(draggedDocumentId)
+      && documentSnapshot.length > 0;
+    if (validDrop) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    clearDocumentDrag();
+    if (!validDrop) return;
+    await moveDocumentSnapshot(documentSnapshot, folder.id || 'uncategorised');
   }
 
   async function restoreDoc(doc) {
@@ -685,6 +790,10 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       .lf-doc-secondary-tools > summary { cursor: pointer; color: #234936; font-size: 13px; font-weight: 700; padding: 11px 0; }
       .lf-doc-secondary-tools[open] > summary { margin-bottom: 8px; }
       .lf-doc-folder-button { width: 100%; text-align: left; }
+      .lf-doc-folder-button[data-document-drop-target="true"] { outline: 1px dashed #C5973C; outline-offset: 2px; }
+      .lf-doc-folder-button[data-document-drop-active="true"] { background: #FFF7E6 !important; border-color: #C5973C !important; box-shadow: 0 0 0 3px rgba(197,151,60,.18); }
+      .lf-doc-draggable-row { cursor: grab; }
+      .lf-doc-dragging-row { opacity: .58; }
       .lf-doc-explorer { align-items: start; }
       .lf-doc-folder-pane { position: sticky; top: 12px; }
       .lf-doc-file-toolbar { background: #F7F5F0; border: 1px solid #DDD8CE; border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; }
@@ -699,7 +808,19 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
         <div style={{ display: 'grid', gap: 6 }}>
           {explorerFolders.map(folder => (
             <div key={folder.id}>
-              <button className="lf-doc-folder-button" type="button" aria-pressed={selectedFolder === folder.id} style={{ ...styles.matterButton, ...(selectedFolder === folder.id ? styles.matterActive : {}), padding: '9px 8px' }} onClick={() => setSelectedFolder(folder.id)}>
+              <button
+                className="lf-doc-folder-button"
+                type="button"
+                aria-pressed={selectedFolder === folder.id}
+                data-document-drop-target={draggedDocumentId && supportedDropFolder(folder) ? 'true' : undefined}
+                data-document-drop-active={String(dragOverFolderId) === String(folder.id) ? 'true' : undefined}
+                style={{ ...styles.matterButton, ...(selectedFolder === folder.id ? styles.matterActive : {}), padding: '9px 8px' }}
+                onClick={() => setSelectedFolder(folder.id)}
+                onDragEnter={event => dragOverFolder(event, folder)}
+                onDragOver={event => dragOverFolder(event, folder)}
+                onDragLeave={event => leaveDropFolder(event, folder)}
+                onDrop={event => dropDocumentsOnFolder(event, folder)}
+              >
                 <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
                   <strong>{folderIcon(folder)} {folder.name}</strong>
                   <span style={{ ...styles.badge, minWidth: 24, justifyContent: 'center', background: selectedFolder === folder.id ? '#fff' : '#F1EEE7', color: theme.ink }}>
@@ -822,6 +943,9 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
                 {selectedVisibleCount} selected
               </strong>
             </div>
+            {nativeDragEnabled && (
+              <span style={{ color: theme.muted, fontSize: 11 }}>You can also drag an active document row to Uncategorised, Client Uploads, or a custom folder.</span>
+            )}
             {selectedVisibleCount > 0 && (
               <form onSubmit={moveSelectedDocuments} style={{ display: 'flex', alignItems: 'end', gap: 8, flexWrap: 'wrap' }}>
                 <label style={{ display: 'grid', gap: 4, flex: '1 1 180px', minWidth: 0, color: theme.muted, fontSize: 11, fontWeight: 700 }}>
@@ -1014,6 +1138,18 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
                   onConfirm: () => archiveDoc(doc),
                 })]]} />,
               ];
+            })}
+            rowProps={visibleDocuments.map(doc => {
+              const draggable = nativeDragEnabled && showBulkControls && !bulkMoving;
+              const dragging = String(draggedDocumentId) === String(doc.id);
+              return {
+                draggable,
+                className: draggable ? `lf-doc-draggable-row${dragging ? ' lf-doc-dragging-row' : ''}` : undefined,
+                onDragStart: draggable ? event => startDocumentDrag(event, doc) : undefined,
+                onDragEnd: draggable ? clearDocumentDrag : undefined,
+                'data-document-id': String(doc.id),
+                'data-document-draggable': draggable ? 'true' : undefined,
+              };
             })}
             empty="No documents."
           />

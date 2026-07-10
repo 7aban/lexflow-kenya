@@ -153,7 +153,7 @@ export function Toast({ toast, onClose }) {
 }
 export function Empty({ title, text }) { return <div style={styles.empty}><div style={styles.emptyIcon}>LF</div><strong>{title}</strong><span>{text}</span></div>; }
 export function Skeleton({ rows = 4 }) { return <div style={styles.skeletonGrid}>{Array.from({ length: rows }).map((_, index) => <div key={index} style={styles.skeleton}><span style={styles.skeletonLineLarge} /><span style={styles.skeletonLine} /><span style={styles.skeletonLineShort} /></div>)}</div>; }
-export function Table({ columns, rows, empty, rowIds }) { if (!rows.length) return <Empty title={empty} text="Once records exist, they will appear here." />; return <div style={styles.tableWrap}><table style={styles.table}><thead><tr>{columns.map(c => <th key={c}>{c}</th>)}</tr></thead><tbody>{rows.map((row, i) => <tr key={i} id={rowIds?.[i]}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>)}</tbody></table></div>; }
+export function Table({ columns, rows, empty, rowIds, rowProps }) { if (!rows.length) return <Empty title={empty} text="Once records exist, they will appear here." />; return <div style={styles.tableWrap}><table style={styles.table}><thead><tr>{columns.map(c => <th key={c}>{c}</th>)}</tr></thead><tbody>{rows.map((row, i) => <tr key={i} id={rowIds?.[i]} {...(rowProps?.[i] || {})}>{row.map((cell, j) => <td key={j}>{cell}</td>)}</tr>)}</tbody></table></div>; }
 export function statusTone(status) { return status === 'Paid' ? 'green' : status === 'Overdue' ? 'red' : 'amber'; }
 // PRODUCT-15F display-only overdue helpers. These never mutate invoice.status and
 // must not be used to build admin status PATCH payloads; they exist purely for
