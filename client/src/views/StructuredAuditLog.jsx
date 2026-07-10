@@ -157,7 +157,7 @@ export default function StructuredAuditLog({ notify }) {
 
   return (
     <div style={styles.pageStack}>
-      <Card title="Audit Events" hint="Current structured event trail for security, access, and operational auditing.">
+      <Card title="Event filters" hint="Current structured event trail for security, access, and operational auditing.">
         <div style={{ marginBottom: 12, color: theme.muted, fontSize: 12, lineHeight: 1.5 }}>
           Audit Events is the current structured audit surface. Audit Log (Legacy) remains available for older activity.
           Login and access events are expected to appear often; use the Action filter to isolate them or review other event types.
@@ -257,7 +257,7 @@ export default function StructuredAuditLog({ notify }) {
       </Card>
 
       <Card
-        title="Audit Events"
+        title="Audit event list"
         action={(
           <div style={styles.actionGroup}>
             <button type="button" style={styles.ghostButton} disabled={page === 0 || loading} onClick={() => setPage(current => Math.max(0, current - 1))}>Previous</button>
