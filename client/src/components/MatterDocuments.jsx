@@ -78,6 +78,34 @@ function previewMimeType(doc, kind) {
   }[extension] || 'application/octet-stream';
 }
 
+function documentsForView(activeDocuments, archivedDocuments, selectedFolder) {
+  if (selectedFolder === 'archived') return archivedDocuments;
+  if (selectedFolder === 'all') return activeDocuments;
+  return activeDocuments.filter(doc => {
+    if (selectedFolder === 'uncategorised') {
+      return !doc.folderId || doc.folderId === 'uncategorised';
+    }
+    return String(doc.folderId || '') === String(selectedFolder);
+  });
+}
+
+function filterDocumentsBySearch(documents, documentSearch, clientMode) {
+  const query = documentSearch.trim().toLowerCase();
+  if (!query) return documents;
+  return documents.filter(doc => [
+    doc.displayName,
+    doc.friendlyName,
+    doc.name,
+    doc.mimeType,
+    doc.type,
+    documentTypeLabel(doc),
+    doc.folderName || 'Uncategorised',
+    doc.source,
+    documentSourceLabel(doc, clientMode),
+    doc.date,
+  ].some(value => String(value || '').toLowerCase().includes(query)));
+}
+
 export default function MatterDocuments({ matterId, clientMode = false, canManage = false, notify, onChooseAction, onOpenDocumentStudio }) {
   const [folders, setFolders] = useState([]);
   const [activeDocuments, setActiveDocuments] = useState([]);
@@ -105,24 +133,39 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const [documentSearch, setDocumentSearch] = useState('');
   const [uploadStatus, setUploadStatus] = useState({ fileName: '', state: '' });
   const [preview, setPreview] = useState(null);
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState([]);
+  const [bulkMoveDestination, setBulkMoveDestination] = useState('uncategorised');
+  const [bulkMoving, setBulkMoving] = useState(false);
+  const [bulkMoveProgress, setBulkMoveProgress] = useState({ current: 0, total: 0 });
+  const [bulkMoveResult, setBulkMoveResult] = useState(null);
   const previewUrlRef = useRef('');
   const previewRequestRef = useRef(0);
 
   const showGenerateControls = canManage === true && clientMode === false && Boolean(matterId);
-  const documents = useMemo(() => {
-    if (selectedFolder === 'archived') return archivedDocuments;
-    if (selectedFolder === 'all') return activeDocuments;
-    return activeDocuments.filter(doc => {
-      if (selectedFolder === 'uncategorised') {
-        return !doc.folderId || doc.folderId === 'uncategorised';
-      }
-      return String(doc.folderId || '') === String(selectedFolder);
-    });
-  }, [activeDocuments, archivedDocuments, selectedFolder]);
+  const documents = useMemo(
+    () => documentsForView(activeDocuments, archivedDocuments, selectedFolder),
+    [activeDocuments, archivedDocuments, selectedFolder],
+  );
 
   useEffect(() => {
     if (matterId) load();
   }, [matterId]);
+
+  useEffect(() => {
+    setSelectedDocumentIds([]);
+    setBulkMoveResult(null);
+  }, [matterId, selectedFolder, documentSearch]);
+
+  useEffect(() => {
+    setBulkMoveDestination('uncategorised');
+  }, [matterId]);
+
+  useEffect(() => {
+    if (canManage !== true || clientMode !== false) {
+      setSelectedDocumentIds([]);
+      setBulkMoveResult(null);
+    }
+  }, [canManage, clientMode]);
 
   useEffect(() => {
     setRenameFolderId('');
@@ -161,6 +204,17 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       setFolders(nextFolders);
       setActiveDocuments(activeDocs);
       setArchivedDocuments(archivedDocs);
+      const nextVisibleIds = new Set(
+        selectedFolder === 'archived'
+          ? []
+          : filterDocumentsBySearch(
+            documentsForView(activeDocs, [], selectedFolder),
+            documentSearch,
+            clientMode,
+          ).map(doc => String(doc.id)),
+      );
+      setSelectedDocumentIds(current => current.filter(id => nextVisibleIds.has(String(id))));
+      return { folders: nextFolders, activeDocuments: activeDocs, archivedDocuments: archivedDocs };
     } catch (err) { notify?.({ type: 'danger', message: err.message }); }
     finally { setLoading(false); }
   }
@@ -391,6 +445,96 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     }
   }
 
+  function toggleDocumentSelection(documentId) {
+    if (bulkMoving) return;
+    const id = String(documentId);
+    setSelectedDocumentIds(current => current.includes(id)
+      ? current.filter(item => item !== id)
+      : [...current, id]);
+    setBulkMoveResult(null);
+  }
+
+  function selectVisibleDocuments() {
+    if (bulkMoving) return;
+    setSelectedDocumentIds(visibleDocuments.map(doc => String(doc.id)));
+    setBulkMoveResult(null);
+  }
+
+  function clearDocumentSelection() {
+    if (bulkMoving) return;
+    setSelectedDocumentIds([]);
+    setBulkMoveResult(null);
+  }
+
+  async function moveSelectedDocuments(event) {
+    event.preventDefault();
+    if (bulkMoving || selectedFolder === 'archived' || canManage !== true || clientMode !== false) return;
+
+    const visibleActiveIds = new Set(visibleDocuments.map(doc => String(doc.id)));
+    const selectedIds = new Set(selectedDocumentIds.map(String));
+    const selectedSnapshot = visibleDocuments.filter(doc => selectedIds.has(String(doc.id)) && visibleActiveIds.has(String(doc.id)));
+    if (!selectedSnapshot.length) {
+      setSelectedDocumentIds([]);
+      return;
+    }
+
+    const destinationFolderId = bulkMoveDestination || 'uncategorised';
+    const destinationLabel = folderOptions.find(folder => String(folder.id) === String(destinationFolderId))?.name || 'Uncategorised';
+    const failures = [];
+    let movedCount = 0;
+    let skippedCount = 0;
+
+    setBulkMoving(true);
+    setBulkMoveResult(null);
+    setBulkMoveProgress({ current: 0, total: selectedSnapshot.length });
+
+    try {
+      for (let index = 0; index < selectedSnapshot.length; index += 1) {
+        const doc = selectedSnapshot[index];
+        setBulkMoveProgress({ current: index + 1, total: selectedSnapshot.length });
+        const currentFolderId = doc.folderId || 'uncategorised';
+        if (String(currentFolderId) === String(destinationFolderId)) {
+          skippedCount += 1;
+          continue;
+        }
+        try {
+          await moveDocument(doc.id, destinationFolderId);
+          movedCount += 1;
+        } catch (err) {
+          failures.push({
+            id: String(doc.id),
+            name: documentLabel(doc),
+            message: err.message || 'Unable to move this document.',
+          });
+        }
+      }
+
+      const reloaded = await load();
+      const reloadedVisibleIds = new Set(
+        reloaded
+          ? filterDocumentsBySearch(
+            documentsForView(reloaded.activeDocuments, [], selectedFolder),
+            documentSearch,
+            clientMode,
+          ).map(doc => String(doc.id))
+          : visibleActiveIds,
+      );
+      setSelectedDocumentIds(
+        failures.length
+          ? failures.map(failure => failure.id).filter(id => reloadedVisibleIds.has(id))
+          : [],
+      );
+      setBulkMoveResult({
+        destinationLabel,
+        movedCount,
+        skippedCount,
+        failures,
+      });
+    } finally {
+      setBulkMoving(false);
+    }
+  }
+
   async function restoreDoc(doc) {
     try {
       await restoreDocument(doc.id);
@@ -490,22 +634,10 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const selectedIsClientUploads = selectedFolder === clientUploadsFolder?.id;
   const selectedIsCustom = Boolean(selectedFolderInfo && !selectedFolderInfo.virtual && !selectedIsClientUploads);
   const selectedCustomCount = selectedIsCustom ? folderCount(selectedFolderInfo) : 0;
-  const visibleDocuments = useMemo(() => {
-    const query = documentSearch.trim().toLowerCase();
-    if (!query) return documents;
-    return documents.filter(doc => [
-      doc.displayName,
-      doc.friendlyName,
-      doc.name,
-      doc.mimeType,
-      doc.type,
-      documentTypeLabel(doc),
-      doc.folderName || 'Uncategorised',
-      doc.source,
-      documentSourceLabel(doc, clientMode),
-      doc.date,
-    ].some(value => String(value || '').toLowerCase().includes(query)));
-  }, [documents, documentSearch, clientMode]);
+  const visibleDocuments = useMemo(
+    () => filterDocumentsBySearch(documents, documentSearch, clientMode),
+    [documents, documentSearch, clientMode],
+  );
 
   const filteredTemplates = useMemo(() => {
     const q = templateSearch.trim().toLowerCase();
@@ -521,6 +653,9 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     return sel ? [sel, ...filteredTemplates] : filteredTemplates;
   }, [filteredTemplates, templates, selectedTemplateId, templateSearch]);
   const archivedView = selectedFolder === 'archived';
+  const showBulkControls = canManage === true && clientMode === false && !archivedView;
+  const visibleDocumentIds = useMemo(() => new Set(visibleDocuments.map(doc => String(doc.id))), [visibleDocuments]);
+  const selectedVisibleCount = selectedDocumentIds.filter(id => visibleDocumentIds.has(String(id))).length;
   const showUploadControls = !archivedView && (clientMode || canManage);
   const showFolderControls = true;
   const documentCardHint = clientMode
@@ -553,6 +688,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       .lf-doc-explorer { align-items: start; }
       .lf-doc-folder-pane { position: sticky; top: 12px; }
       .lf-doc-file-toolbar { background: #F7F5F0; border: 1px solid #DDD8CE; border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; }
+      .lf-doc-bulk-toolbar { background: #FFFCF5; border: 1px solid #E4D7B8; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; display: grid; gap: 8px; }
       @media (max-width: 640px) {
         .lf-doc-grid { grid-template-columns: minmax(0, 1fr) !important; }
         .lf-doc-folder-pane { position: static; }
@@ -675,6 +811,52 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
             )}
           </div>
         </div>
+        {showBulkControls && (
+          <div className="lf-doc-bulk-toolbar" aria-busy={bulkMoving}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" style={styles.ghostButton} disabled={bulkMoving || visibleDocuments.length === 0} onClick={selectVisibleDocuments}>Select visible</button>
+              {selectedDocumentIds.length > 0 && (
+                <button type="button" style={styles.ghostButton} disabled={bulkMoving} onClick={clearDocumentSelection}>Clear selection</button>
+              )}
+              <strong style={{ color: theme.ink, fontSize: 12 }} aria-live="polite">
+                {selectedVisibleCount} selected
+              </strong>
+            </div>
+            {selectedVisibleCount > 0 && (
+              <form onSubmit={moveSelectedDocuments} style={{ display: 'flex', alignItems: 'end', gap: 8, flexWrap: 'wrap' }}>
+                <label style={{ display: 'grid', gap: 4, flex: '1 1 180px', minWidth: 0, color: theme.muted, fontSize: 11, fontWeight: 700 }}>
+                  Move selected to
+                  <select
+                    style={{ ...styles.tableSelect, width: '100%', minWidth: 0 }}
+                    value={bulkMoveDestination}
+                    onChange={event => setBulkMoveDestination(event.target.value)}
+                    disabled={bulkMoving}
+                  >
+                    {folderOptions.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+                  </select>
+                </label>
+                <button type="submit" style={styles.primaryButton} disabled={bulkMoving || selectedVisibleCount === 0}>
+                  {bulkMoving ? `Moving ${bulkMoveProgress.current} of ${bulkMoveProgress.total}` : 'Move selected'}
+                </button>
+              </form>
+            )}
+            {bulkMoving && (
+              <span role="status" style={{ color: theme.muted, fontSize: 12 }}>
+                Moving {bulkMoveProgress.current} of {bulkMoveProgress.total}. Completed moves will be kept if another document fails.
+              </span>
+            )}
+            {bulkMoveResult && (
+              <div role="status" style={{ display: 'grid', gap: 5, color: theme.ink, fontSize: 12 }}>
+                <strong>Move to {bulkMoveResult.destinationLabel}: {bulkMoveResult.movedCount} moved, {bulkMoveResult.skippedCount} already in destination, {bulkMoveResult.failures.length} failed.</strong>
+                {bulkMoveResult.failures.length > 0 && (
+                  <ul style={{ margin: 0, paddingLeft: 18, color: theme.red }}>
+                    {bulkMoveResult.failures.map(failure => <li key={failure.id}>{failure.name}: {failure.message}</li>)}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         {showUploadControls && (
           <div className="lf-doc-upload-area">
             <div style={{ display: 'grid', gap: 5, marginBottom: 12 }}>
@@ -776,7 +958,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
             columns={archivedView
               ? ['Name', 'Type', 'Folder', 'Date', 'Size', 'Source', 'Actions']
               : canManage
-                ? ['Name', 'Type', ...(selectedFolder === 'all' ? ['Folder'] : []), 'Date', 'Size', 'Source', 'Client Access', 'Move', 'Actions']
+                ? [...(showBulkControls ? ['Select'] : []), 'Name', 'Type', ...(selectedFolder === 'all' ? ['Folder'] : []), 'Date', 'Size', 'Source', 'Client Access', 'Move', 'Actions']
                 : ['Name', 'Folder', 'Date', 'Size', 'Source', 'Actions']}
             rows={visibleDocuments.map(doc => {
               const metaStyle = { color: theme.muted, fontSize: 12 };
@@ -804,6 +986,16 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
                 <span key={`${doc.id}-file-actions`} style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>{previewAction}{download}</span>,
               ];
               return [
+                ...(showBulkControls ? [
+                  <input
+                    key={`${doc.id}-select`}
+                    type="checkbox"
+                    checked={selectedDocumentIds.includes(String(doc.id))}
+                    disabled={bulkMoving}
+                    onChange={() => toggleDocumentSelection(doc.id)}
+                    aria-label={`Select ${documentLabel(doc)}`}
+                  />,
+                ] : []),
                 <strong key={`${doc.id}-n`} style={{ fontWeight: 600 }}>{documentLabel(doc)}</strong>,
                 <span key={`${doc.id}-t`} style={metaStyle}>{documentTypeLabel(doc)}</span>,
                 ...(selectedFolder === 'all' ? [<span key={`${doc.id}-f`} style={metaStyle}>{doc.folderName || 'Uncategorised'}</span>] : []),
