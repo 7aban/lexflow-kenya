@@ -42,6 +42,10 @@ function documentLabel(doc) {
   return doc.displayName || doc.friendlyName || doc.name || 'Document';
 }
 
+function documentExtension(name = '') {
+  return String(name).trim().match(/\.([^.\s]+)$/)?.[1]?.toLowerCase() || '';
+}
+
 function documentPreviewKind(doc) {
   const mimeType = String(doc.mimeType || doc.type || '').toLowerCase();
   const name = documentLabel(doc).toLowerCase();
@@ -84,6 +88,10 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const [renameFolderName, setRenameFolderName] = useState('');
   const [renameError, setRenameError] = useState('');
   const [renameSaving, setRenameSaving] = useState(false);
+  const [renameDocument, setRenameDocument] = useState(null);
+  const [renameDocumentName, setRenameDocumentName] = useState('');
+  const [renameDocumentError, setRenameDocumentError] = useState('');
+  const [renameDocumentSaving, setRenameDocumentSaving] = useState(false);
   const [confirm, setConfirm] = useState(null);
   const [loading, setLoading] = useState(false);
   const [templates, setTemplates] = useState([]);
@@ -337,6 +345,50 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       notify?.({ type: 'success', message: 'Document archived.' });
       await load();
     } catch (err) { notify?.({ type: 'danger', message: err.message }); }
+  }
+
+  function beginRenameDocument(doc) {
+    if (!doc?.id || !canManage || clientMode) return;
+    setRenameDocument(doc);
+    setRenameDocumentName(documentLabel(doc));
+    setRenameDocumentError('');
+    setRenameDocumentSaving(false);
+  }
+
+  function cancelRenameDocument() {
+    setRenameDocument(null);
+    setRenameDocumentName('');
+    setRenameDocumentError('');
+    setRenameDocumentSaving(false);
+  }
+
+  async function saveRenamedDocument(event) {
+    event.preventDefault();
+    if (!renameDocument || renameDocumentSaving) return;
+    const displayName = renameDocumentName.trim();
+    if (!displayName) {
+      setRenameDocumentError('Document name is required.');
+      return;
+    }
+    if (displayName.length > 180) {
+      setRenameDocumentError('Document name must be 180 characters or fewer.');
+      return;
+    }
+    if (displayName === documentLabel(renameDocument).trim()) {
+      cancelRenameDocument();
+      return;
+    }
+    setRenameDocumentSaving(true);
+    setRenameDocumentError('');
+    try {
+      await updateDocument(renameDocument.id, { displayName });
+      await load();
+      notify?.({ type: 'success', message: 'Document renamed.' });
+      cancelRenameDocument();
+    } catch (err) {
+      setRenameDocumentError(err.message || 'Unable to rename this document.');
+      setRenameDocumentSaving(false);
+    }
   }
 
   async function restoreDoc(doc) {
@@ -764,7 +816,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
                 <select key={`${doc.id}-move`} style={styles.tableSelect} value={doc.folderId || 'uncategorised'} onChange={e => moveDoc(doc, e.target.value)}>
                   {folderOptions.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
                 </select>,
-                <ActionGroup key={`${doc.id}-actions`} actions={[['Preview', () => openPreview(doc)], ['Download', () => downloadDoc(doc)], ['Archive', () => setConfirm({
+                <ActionGroup key={`${doc.id}-actions`} actions={[['Preview', () => openPreview(doc)], ['Download', () => downloadDoc(doc)], ['Rename', () => beginRenameDocument(doc)], ['Archive', () => setConfirm({
                   title: 'Archive document?',
                   message: 'Archive removes this document from active matter documents. It does not permanently delete the record, and you can restore it later from Archived documents.',
                   onConfirm: () => archiveDoc(doc),
@@ -817,6 +869,54 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
           </div>
         )}
       </Card>
+      {renameDocument && canManage && !clientMode && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="matter-document-rename-title"
+          style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(17, 34, 25, 0.62)', padding: 16, display: 'grid', placeItems: 'center' }}
+          onMouseDown={event => {
+            if (event.target === event.currentTarget && !renameDocumentSaving) cancelRenameDocument();
+          }}
+        >
+          <form onSubmit={saveRenamedDocument} style={{ width: 'min(100%, 420px)', background: theme.paper || '#fff', borderRadius: 10, boxShadow: '0 24px 64px rgba(0,0,0,.28)', padding: 16, display: 'grid', gap: 12 }}>
+            <div>
+              <strong id="matter-document-rename-title" style={{ display: 'block', color: theme.ink }}>Rename document</strong>
+              <small style={{ color: theme.muted }}>This changes the display name only.</small>
+            </div>
+            <label style={{ display: 'grid', gap: 6, minWidth: 0 }}>
+              <span style={{ fontSize: 12, color: theme.muted }}>Document name</span>
+              <input
+                autoFocus
+                style={{ ...styles.input, width: '100%', minWidth: 0, boxSizing: 'border-box' }}
+                value={renameDocumentName}
+                disabled={renameDocumentSaving}
+                onChange={event => {
+                  setRenameDocumentName(event.target.value);
+                  if (renameDocumentError) setRenameDocumentError('');
+                }}
+                onKeyDown={event => {
+                  if (event.key === 'Escape' && !renameDocumentSaving) cancelRenameDocument();
+                }}
+                aria-invalid={Boolean(renameDocumentError)}
+                aria-describedby={renameDocumentError ? 'matter-document-rename-error' : 'matter-document-rename-help'}
+              />
+            </label>
+            {renameDocumentError && <span id="matter-document-rename-error" role="alert" style={{ color: theme.red, fontSize: 12 }}>{renameDocumentError}</span>}
+            {!renameDocumentError && (
+              <span id="matter-document-rename-help" style={{ color: documentExtension(documentLabel(renameDocument)) && documentExtension(renameDocumentName) !== documentExtension(documentLabel(renameDocument)) ? theme.amber : theme.muted, fontSize: 12 }}>
+                {documentExtension(documentLabel(renameDocument)) && documentExtension(renameDocumentName) !== documentExtension(documentLabel(renameDocument))
+                  ? 'The file extension will appear to change. The stored file and file type will not be changed.'
+                  : 'Maximum 180 characters.'}
+              </span>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" style={styles.ghostButton} disabled={renameDocumentSaving} onClick={cancelRenameDocument}>Cancel</button>
+              <button type="submit" style={styles.primaryButton} disabled={renameDocumentSaving}>{renameDocumentSaving ? 'Saving…' : 'Save'}</button>
+            </div>
+          </form>
+        </div>
+      )}
       {preview && (
         <div
           role="dialog"
