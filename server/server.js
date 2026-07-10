@@ -9197,6 +9197,7 @@ app.post('/api/matters/:id/folders', requireAdvocateOrAdmin, async (req, res) =>
   const id = genId('FOL');
   await run('INSERT INTO folders (id,matterId,name,createdBy,createdAt) VALUES (?,?,?,?,?)', [id, req.params.id, name, req.user.userId || '', new Date().toISOString()]);
   await logAudit(req, 'create', 'folder', id, `Created folder ${name}`);
+  await recordAuditEvent(req, { action: 'folder_created', entityType: 'folder', entityId: id, matterId: req.params.id, metadata: { folderName: name, matterId: req.params.id } }).catch(() => {});
   res.json(await get('SELECT * FROM folders WHERE id=?', [id]));
 });
 app.patch('/api/folders/:id', requireAdvocateOrAdmin, async (req, res) => {
@@ -9212,6 +9213,7 @@ app.patch('/api/folders/:id', requireAdvocateOrAdmin, async (req, res) => {
   if (existing) return res.status(400).json({ error: 'Folder already exists for this matter' });
   await run('UPDATE folders SET name=? WHERE id=?', [name, req.params.id]);
   await logAudit(req, 'update', 'folder', req.params.id, `Renamed folder ${folder.name} to ${name}`);
+  await recordAuditEvent(req, { action: 'folder_renamed', entityType: 'folder', entityId: req.params.id, matterId: folder.matterId, metadata: { previousName: folder.name, newName: name, matterId: folder.matterId } }).catch(() => {});
   res.json(await get('SELECT * FROM folders WHERE id=?', [req.params.id]));
 });
 app.delete('/api/folders/:id', requireAdvocateOrAdmin, async (req, res) => {
@@ -9225,6 +9227,7 @@ app.delete('/api/folders/:id', requireAdvocateOrAdmin, async (req, res) => {
   if (count.count) return res.status(400).json({ error: 'Folder must be empty before it can be deleted' });
   await run('DELETE FROM folders WHERE id=?', [req.params.id]);
   await logAudit(req, 'delete', 'folder', req.params.id, `Deleted folder ${folder.name}`);
+  await recordAuditEvent(req, { action: 'folder_deleted', entityType: 'folder', entityId: req.params.id, matterId: folder.matterId, metadata: { folderName: folder.name, matterId: folder.matterId } }).catch(() => {});
   res.json({ id: req.params.id, deleted: true });
 });
 app.get('/api/matters/:id/documents', async (req, res) => {
