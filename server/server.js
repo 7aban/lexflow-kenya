@@ -1760,6 +1760,10 @@ createdAt TEXT NOT NULL
 
 
 
+function isClientUploadsFolderName(name) {
+  return String(name || '').trim().toLowerCase() === 'client uploads';
+}
+
 async function clientUploadsFolder(matterId, userId = '') {
   let folder = await get('SELECT * FROM folders WHERE matterId=? AND lower(name)=lower(?)', [matterId, 'Client Uploads']);
   if (!folder) {
@@ -9207,6 +9211,7 @@ app.patch('/api/folders/:id', requireAdvocateOrAdmin, async (req, res) => {
     await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: folder.matterId, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
     return res.status(403).json({ error: 'Matter access denied' });
   }
+  if (isClientUploadsFolderName(folder.name)) return res.status(400).json({ error: 'System folders cannot be renamed' });
   const name = String(req.body.name || '').trim();
   if (!name) return res.status(400).json({ error: 'Folder name is required' });
   const existing = await get('SELECT id FROM folders WHERE matterId=? AND lower(name)=lower(?) AND id<>?', [folder.matterId, name, req.params.id]);
@@ -9223,6 +9228,7 @@ app.delete('/api/folders/:id', requireAdvocateOrAdmin, async (req, res) => {
     await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: folder.matterId, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
     return res.status(403).json({ error: 'Matter access denied' });
   }
+  if (isClientUploadsFolderName(folder.name)) return res.status(400).json({ error: 'System folders cannot be deleted' });
   const count = await get('SELECT COUNT(*) count FROM documents WHERE folderId=?', [req.params.id]);
   if (count.count) return res.status(400).json({ error: 'Folder must be empty before it can be deleted' });
   await run('DELETE FROM folders WHERE id=?', [req.params.id]);

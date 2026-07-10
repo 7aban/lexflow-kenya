@@ -198,6 +198,41 @@ describe('LOCAL-PILOT folder lifecycle structured audit', () => {
     expect(events.every(event => event.entity_id === created.body.id && event.matter_id === accessibleMatterId)).toBe(true);
   });
 
+  test('admin and assigned advocate cannot rename or delete an empty Client Uploads folder', async () => {
+    const folder = await createFolder(adminToken, accessibleMatterId, 'cLiEnT UpLoAdS');
+    expect(folder.statusCode).toBe(200);
+    expect((await dbGet('SELECT COUNT(*) count FROM documents WHERE folderId=?', [folder.body.id])).count).toBe(0);
+
+    for (const token of [adminToken, assignedAdvocateToken]) {
+      let boundary = await auditBoundary();
+      const renamed = await request(app)
+        .patch(`/api/folders/${folder.body.id}`)
+        .set(auth(token))
+        .send({ name: `Renamed System Folder ${suffix}` });
+      expect(renamed.statusCode).toBe(400);
+      expect(renamed.body).toEqual({ error: 'System folders cannot be renamed' });
+      expect(await dbGet('SELECT id, matterId, name FROM folders WHERE id=?', [folder.body.id])).toEqual({
+        id: folder.body.id,
+        matterId: accessibleMatterId,
+        name: 'cLiEnT UpLoAdS',
+      });
+      expect(await lifecycleEventsSince(boundary)).toEqual([]);
+
+      boundary = await auditBoundary();
+      const deleted = await request(app)
+        .delete(`/api/folders/${folder.body.id}`)
+        .set(auth(token));
+      expect(deleted.statusCode).toBe(400);
+      expect(deleted.body).toEqual({ error: 'System folders cannot be deleted' });
+      expect(await dbGet('SELECT id, matterId, name FROM folders WHERE id=?', [folder.body.id])).toEqual({
+        id: folder.body.id,
+        matterId: accessibleMatterId,
+        name: 'cLiEnT UpLoAdS',
+      });
+      expect(await lifecycleEventsSince(boundary)).toEqual([]);
+    }
+  });
+
   test('assistant, client, and cross-matter advocate rejection emit no lifecycle success event', async () => {
     for (const [token, matterId, expectedStatus] of [
       [assistantToken, accessibleMatterId, 403],
