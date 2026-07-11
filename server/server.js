@@ -1359,7 +1359,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS appearances (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT, date TEXT, time TEXT, type TEXT, location TEXT, meetingLink TEXT, attorney TEXT, prepNote TEXT, outcome TEXT DEFAULT '', attendanceStatus TEXT DEFAULT 'scheduled', appearedBy TEXT DEFAULT '', clientAttended INTEGER NOT NULL DEFAULT 0, attendanceNote TEXT DEFAULT '', attendanceUpdatedBy TEXT, attendanceUpdatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS appearance_prep_items (id TEXT PRIMARY KEY, appearanceId TEXT NOT NULL, matterId TEXT NOT NULL, title TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'general', status TEXT NOT NULL DEFAULT 'open', notes TEXT DEFAULT '', createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, completedBy TEXT, completedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS appearance_documents (id TEXT PRIMARY KEY, appearanceId TEXT NOT NULL, documentId TEXT NOT NULL, matterId TEXT NOT NULL, label TEXT DEFAULT '', notes TEXT DEFAULT '', createdBy TEXT NOT NULL, createdAt TEXT NOT NULL)`);
-  await run(`CREATE TABLE IF NOT EXISTS folders (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT NOT NULL, createdBy TEXT, createdAt TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS folders (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT NOT NULL, createdBy TEXT, createdAt TEXT, archivedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT, displayName TEXT, type TEXT, mimeType TEXT, date TEXT, size TEXT, content BLOB, source TEXT DEFAULT 'firm', folderId TEXT, messageId TEXT, noticeId TEXT, clientVisible INTEGER DEFAULT 0, uploadedBy TEXT, templateId TEXT, templateName TEXT, generatedBy TEXT, generatedAt TEXT, version INTEGER DEFAULT 1)`);
   await run(`CREATE TABLE IF NOT EXISTS case_notes (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, content TEXT NOT NULL, author TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS invoices (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, clientId TEXT, number TEXT, date TEXT, amount REAL DEFAULT 0, status TEXT DEFAULT 'Outstanding', dueDate TEXT, description TEXT, source TEXT DEFAULT 'time')`);
@@ -1568,6 +1568,7 @@ createdAt TEXT NOT NULL
   await ensureColumn('appearances', 'attendanceNote', "TEXT DEFAULT ''");
   await ensureColumn('appearances', 'attendanceUpdatedBy', 'TEXT');
   await ensureColumn('appearances', 'attendanceUpdatedAt', 'TEXT');
+  await ensureColumn('folders', 'archivedAt', 'TEXT');
   await ensureColumn('documents', 'source', "TEXT DEFAULT 'firm'");
   await ensureColumn('documents', 'folderId', 'TEXT');
   await ensureColumn('documents', 'messageId', 'TEXT');
@@ -1964,13 +1965,13 @@ function parsePageOrder(input, pageCount) {
 async function matterFolders(matterId, req = null) {
   if (req?.user?.role === 'client') {
     const visibleCount = await get(`SELECT COUNT(*) documentCount FROM documents d WHERE d.matterId=? AND d.deletedAt IS NULL AND ${clientDocumentVisibilitySql('d')}`, [matterId, req.user.clientId || '']);
-    const clientFolder = await get(`SELECT f.*, (SELECT COUNT(*) FROM documents d WHERE d.folderId=f.id AND d.deletedAt IS NULL AND ${clientDocumentVisibilitySql('d')}) documentCount
+    const clientFolder = await get(`SELECT f.id, f.matterId, f.name, f.createdBy, f.createdAt, (SELECT COUNT(*) FROM documents d WHERE d.folderId=f.id AND d.deletedAt IS NULL AND ${clientDocumentVisibilitySql('d')}) documentCount
       FROM folders f
-      WHERE f.matterId=? AND lower(f.name)=lower('Client Uploads')`, [req.user.clientId || '', matterId]);
+      WHERE f.matterId=? AND lower(f.name)=lower('Client Uploads') AND f.archivedAt IS NULL`, [req.user.clientId || '', matterId]);
     const folders = clientFolder ? [{ ...clientFolder, name: 'Client Uploads' }] : [];
     return [{ id: 'all', matterId, name: 'All Documents', virtual: true, documentCount: visibleCount?.documentCount || 0 }, ...folders];
   }
-  const folders = await all(`SELECT f.*, (SELECT COUNT(*) FROM documents d WHERE d.folderId=f.id AND d.deletedAt IS NULL) documentCount FROM folders f WHERE f.matterId=? ORDER BY CASE WHEN lower(f.name)=lower('Client Uploads') THEN 0 ELSE 1 END, lower(f.name)`, [matterId]);
+  const folders = await all(`SELECT f.id, f.matterId, f.name, f.createdBy, f.createdAt, (SELECT COUNT(*) FROM documents d WHERE d.folderId=f.id AND d.deletedAt IS NULL) documentCount FROM folders f WHERE f.matterId=? AND f.archivedAt IS NULL ORDER BY CASE WHEN lower(f.name)=lower('Client Uploads') THEN 0 ELSE 1 END, lower(f.name)`, [matterId]);
   const uncategorised = await get('SELECT COUNT(*) documentCount FROM documents WHERE matterId=? AND deletedAt IS NULL AND (folderId IS NULL OR folderId="")', [matterId]);
   return [{ id: 'all', matterId, name: 'All Documents', virtual: true }, { id: 'uncategorised', matterId, name: 'Uncategorised', virtual: true, documentCount: uncategorised.documentCount || 0 }, ...folders];
 }
@@ -9184,7 +9185,16 @@ app.patch('/api/document-requests/:id', requireStaff, async (req, res) => {
 });
 
 app.get('/api/matters/:id/folders', async (req, res) => {
+  const archived = String(req.query.status || '').toLowerCase() === 'archived';
+  if (archived && !['advocate', 'admin'].includes(req.user.role)) return res.status(403).json({ error: 'Advocate or admin access required' });
   if (!(await canAccessMatter(req, req.params.id))) return res.status(403).json({ error: 'Matter access denied' });
+  if (archived) {
+    const folders = await all(`SELECT id, matterId, name, createdBy, createdAt, archivedAt
+      FROM folders
+      WHERE matterId=? AND archivedAt IS NOT NULL
+      ORDER BY lower(name)`, [req.params.id]);
+    return res.json(folders);
+  }
   res.json(await matterFolders(req.params.id, req));
 });
 app.post('/api/matters/:id/folders', requireAdvocateOrAdmin, async (req, res) => {
@@ -9202,7 +9212,7 @@ app.post('/api/matters/:id/folders', requireAdvocateOrAdmin, async (req, res) =>
   await run('INSERT INTO folders (id,matterId,name,createdBy,createdAt) VALUES (?,?,?,?,?)', [id, req.params.id, name, req.user.userId || '', new Date().toISOString()]);
   await logAudit(req, 'create', 'folder', id, `Created folder ${name}`);
   await recordAuditEvent(req, { action: 'folder_created', entityType: 'folder', entityId: id, matterId: req.params.id, metadata: { folderName: name, matterId: req.params.id } }).catch(() => {});
-  res.json(await get('SELECT * FROM folders WHERE id=?', [id]));
+  res.json(await get('SELECT id,matterId,name,createdBy,createdAt FROM folders WHERE id=?', [id]));
 });
 app.patch('/api/folders/:id', requireAdvocateOrAdmin, async (req, res) => {
   const folder = await get('SELECT * FROM folders WHERE id=?', [req.params.id]);
@@ -9212,6 +9222,7 @@ app.patch('/api/folders/:id', requireAdvocateOrAdmin, async (req, res) => {
     return res.status(403).json({ error: 'Matter access denied' });
   }
   if (isClientUploadsFolderName(folder.name)) return res.status(400).json({ error: 'System folders cannot be renamed' });
+  if (folder.archivedAt) return res.status(400).json({ error: 'Archived folders cannot be renamed' });
   const name = String(req.body.name || '').trim();
   if (!name) return res.status(400).json({ error: 'Folder name is required' });
   const existing = await get('SELECT id FROM folders WHERE matterId=? AND lower(name)=lower(?) AND id<>?', [folder.matterId, name, req.params.id]);
@@ -9219,7 +9230,34 @@ app.patch('/api/folders/:id', requireAdvocateOrAdmin, async (req, res) => {
   await run('UPDATE folders SET name=? WHERE id=?', [name, req.params.id]);
   await logAudit(req, 'update', 'folder', req.params.id, `Renamed folder ${folder.name} to ${name}`);
   await recordAuditEvent(req, { action: 'folder_renamed', entityType: 'folder', entityId: req.params.id, matterId: folder.matterId, metadata: { previousName: folder.name, newName: name, matterId: folder.matterId } }).catch(() => {});
-  res.json(await get('SELECT * FROM folders WHERE id=?', [req.params.id]));
+  res.json(await get('SELECT id,matterId,name,createdBy,createdAt FROM folders WHERE id=?', [req.params.id]));
+});
+app.patch('/api/folders/:id/archive', requireAdvocateOrAdmin, async (req, res) => {
+  const folder = await get('SELECT id,matterId,name,createdBy,createdAt,archivedAt FROM folders WHERE id=?', [req.params.id]);
+  if (!folder) return res.status(404).json({ error: 'Folder not found' });
+  if (!(await canAccessMatter(req, folder.matterId))) {
+    await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: folder.matterId, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Matter access denied' });
+  }
+  if (isClientUploadsFolderName(folder.name)) return res.status(400).json({ error: 'System folders cannot be archived' });
+  if (folder.archivedAt) return res.status(400).json({ error: 'Folder is already archived' });
+  const archivedAt = new Date().toISOString();
+  await run('UPDATE folders SET archivedAt=? WHERE id=?', [archivedAt, req.params.id]);
+  await recordAuditEvent(req, { action: 'folder_archived', entityType: 'folder', entityId: req.params.id, matterId: folder.matterId, metadata: { folderName: folder.name, matterId: folder.matterId } }).catch(() => {});
+  res.json(await get('SELECT id,matterId,name,createdBy,createdAt,archivedAt FROM folders WHERE id=?', [req.params.id]));
+});
+app.patch('/api/folders/:id/restore', requireAdvocateOrAdmin, async (req, res) => {
+  const folder = await get('SELECT id,matterId,name,createdBy,createdAt,archivedAt FROM folders WHERE id=?', [req.params.id]);
+  if (!folder) return res.status(404).json({ error: 'Folder not found' });
+  if (!(await canAccessMatter(req, folder.matterId))) {
+    await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: folder.matterId, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Matter access denied' });
+  }
+  if (isClientUploadsFolderName(folder.name)) return res.status(400).json({ error: 'System folders cannot be restored' });
+  if (!folder.archivedAt) return res.status(400).json({ error: 'Folder is not archived' });
+  await run('UPDATE folders SET archivedAt=NULL WHERE id=?', [req.params.id]);
+  await recordAuditEvent(req, { action: 'folder_restored', entityType: 'folder', entityId: req.params.id, matterId: folder.matterId, metadata: { folderName: folder.name, matterId: folder.matterId } }).catch(() => {});
+  res.json(await get('SELECT id,matterId,name,createdBy,createdAt,archivedAt FROM folders WHERE id=?', [req.params.id]));
 });
 app.delete('/api/folders/:id', requireAdvocateOrAdmin, async (req, res) => {
   const folder = await get('SELECT * FROM folders WHERE id=?', [req.params.id]);
@@ -9229,6 +9267,7 @@ app.delete('/api/folders/:id', requireAdvocateOrAdmin, async (req, res) => {
     return res.status(403).json({ error: 'Matter access denied' });
   }
   if (isClientUploadsFolderName(folder.name)) return res.status(400).json({ error: 'System folders cannot be deleted' });
+  if (folder.archivedAt) return res.status(400).json({ error: 'Archived folders must be restored before deletion' });
   const count = await get('SELECT COUNT(*) count FROM documents WHERE folderId=?', [req.params.id]);
   if (count.count) return res.status(400).json({ error: 'Folder must be empty before it can be deleted' });
   await run('DELETE FROM folders WHERE id=?', [req.params.id]);
@@ -9279,7 +9318,7 @@ app.post('/api/matters/:id/documents', async (req, res) => {
     const folder = await clientUploadsFolder(req.params.id, req.user.userId || '');
     folderId = folder.id;
   } else if (req.body.folderId && req.body.folderId !== 'uncategorised' && req.body.folderId !== 'all') {
-    const folder = await get('SELECT id FROM folders WHERE id=? AND matterId=?', [req.body.folderId, req.params.id]);
+    const folder = await get('SELECT id FROM folders WHERE id=? AND matterId=? AND archivedAt IS NULL', [req.body.folderId, req.params.id]);
     if (!folder) return res.status(400).json({ error: 'Folder not found for this matter' });
     folderId = folder.id;
   }
@@ -9423,6 +9462,13 @@ app.post('/api/document-tools/merge-pdfs/save', requireAdvocateOrAdmin, async (r
       return res.status(403).json({ error: 'Matter access denied' });
     }
 
+    let folderId = null;
+    if (rawFolderId && rawFolderId !== 'uncategorised' && rawFolderId !== 'all') {
+      const folder = await get('SELECT id FROM folders WHERE id=? AND matterId=? AND archivedAt IS NULL', [rawFolderId, matterId]);
+      if (!folder) return res.status(400).json({ error: 'Folder not found for this matter' });
+      folderId = folder.id;
+    }
+
     const documentIds = Array.isArray(rawDocumentIds)
       ? rawDocumentIds.map(id => String(id || '').trim()).filter(Boolean)
       : null;
@@ -9484,7 +9530,7 @@ app.post('/api/document-tools/merge-pdfs/save', requireAdvocateOrAdmin, async (r
       size,
       mergedBuffer,
       'document_tool',
-      rawFolderId || null,
+      folderId,
       null,
       null,
       0,
@@ -12135,7 +12181,7 @@ app.patch('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
   if (req.body.folderId !== undefined) {
     let folderId = req.body.folderId || '';
     if (folderId && folderId !== 'uncategorised' && folderId !== 'all') {
-      const folder = await get('SELECT id FROM folders WHERE id=? AND matterId=?', [folderId, doc.matterId]);
+      const folder = await get('SELECT id FROM folders WHERE id=? AND matterId=? AND archivedAt IS NULL', [folderId, doc.matterId]);
       if (!folder) return res.status(400).json({ error: 'Folder not found for this matter' });
     } else folderId = null;
     updates.push('folderId=?');
