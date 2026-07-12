@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { api, createFolder, deleteFolder, downloadWithAuth, fetchDocumentArrayBuffer, fileToDataUrl, generateDocumentFromTemplate, getMatterDocuments, getMatterFolders, listDocumentTemplates, moveDocument, restoreDocument, updateDocument, updateFolder } from '../lib/apiClient.js';
+import { api, archiveFolder, createFolder, deleteFolder, downloadWithAuth, fetchDocumentArrayBuffer, fileToDataUrl, generateDocumentFromTemplate, getArchivedMatterFolders, getMatterDocuments, getMatterFolders, listDocumentTemplates, moveDocument, restoreDocument, restoreFolder, updateDocument, updateFolder } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { ActionGroup, Badge, Card, ConfirmModal, Field, Skeleton, Table } from './ui.jsx';
 
@@ -47,6 +47,17 @@ function documentLabel(doc) {
 
 function documentExtension(name = '') {
   return String(name).trim().match(/\.([^.\s]+)$/)?.[1]?.toLowerCase() || '';
+}
+
+function isClientUploadsFolder(folder) {
+  return (folder?.name || '').trim().toLowerCase() === 'client uploads';
+}
+
+function formatArchivedFolderDate(value) {
+  if (!value) return 'Date unavailable';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat('en-KE', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
 }
 
 function documentPreviewKind(doc) {
@@ -111,6 +122,15 @@ function filterDocumentsBySearch(documents, documentSearch, clientMode) {
 
 export default function MatterDocuments({ matterId, clientMode = false, canManage = false, notify, onChooseAction, onOpenDocumentStudio }) {
   const [folders, setFolders] = useState([]);
+  const [archivedFolders, setArchivedFolders] = useState([]);
+  const [archivedFoldersOpen, setArchivedFoldersOpen] = useState(false);
+  const [archivedFoldersRequested, setArchivedFoldersRequested] = useState(false);
+  const [archivedFoldersLoading, setArchivedFoldersLoading] = useState(false);
+  const [archivedFoldersError, setArchivedFoldersError] = useState('');
+  const [archiveConfirmTarget, setArchiveConfirmTarget] = useState(null);
+  const [archiveRequestPending, setArchiveRequestPending] = useState(false);
+  const [restoreRequestPendingFolderId, setRestoreRequestPendingFolderId] = useState('');
+  const [folderMutationError, setFolderMutationError] = useState(null);
   const [activeDocuments, setActiveDocuments] = useState([]);
   const [archivedDocuments, setArchivedDocuments] = useState([]);
   const [selectedFolder, setSelectedFolder] = useState('all');
@@ -146,6 +166,10 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const [dragOverFolderId, setDragOverFolderId] = useState('');
   const previewUrlRef = useRef('');
   const previewRequestRef = useRef(0);
+  const archivedFoldersRequestRef = useRef(0);
+  const archivedFoldersLoadingRef = useRef(false);
+  const archiveFolderRequestRef = useRef(false);
+  const restoreFolderRequestRef = useRef('');
 
   const showGenerateControls = canManage === true && clientMode === false && Boolean(matterId);
   const documents = useMemo(
@@ -156,6 +180,22 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   useEffect(() => {
     if (matterId) load();
   }, [matterId]);
+
+  useEffect(() => {
+    archivedFoldersRequestRef.current += 1;
+    archivedFoldersLoadingRef.current = false;
+    archiveFolderRequestRef.current = false;
+    restoreFolderRequestRef.current = '';
+    setArchivedFolders([]);
+    setArchivedFoldersOpen(false);
+    setArchivedFoldersRequested(false);
+    setArchivedFoldersLoading(false);
+    setArchivedFoldersError('');
+    setArchiveConfirmTarget(null);
+    setArchiveRequestPending(false);
+    setRestoreRequestPendingFolderId('');
+    setFolderMutationError(null);
+  }, [matterId, canManage, clientMode]);
 
   useEffect(() => {
     setSelectedDocumentIds([]);
@@ -237,6 +277,37 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       return { folders: nextFolders, activeDocuments: activeDocs, archivedDocuments: archivedDocs };
     } catch (err) { notify?.({ type: 'danger', message: err.message }); }
     finally { setLoading(false); }
+  }
+
+  async function loadArchivedFolders({ force = false } = {}) {
+    if (!matterId || canManage !== true || clientMode !== false) return;
+    if (archivedFoldersLoadingRef.current && !force) return;
+
+    const requestId = archivedFoldersRequestRef.current + 1;
+    archivedFoldersRequestRef.current = requestId;
+    archivedFoldersLoadingRef.current = true;
+    setArchivedFoldersRequested(true);
+    setArchivedFoldersLoading(true);
+    setArchivedFoldersError('');
+    try {
+      const rows = await getArchivedMatterFolders(matterId);
+      if (archivedFoldersRequestRef.current !== requestId) return;
+      setArchivedFolders(Array.isArray(rows) ? rows : []);
+    } catch (err) {
+      if (archivedFoldersRequestRef.current !== requestId) return;
+      setArchivedFoldersError(err.message || 'Unable to load archived folders.');
+    } finally {
+      if (archivedFoldersRequestRef.current === requestId) {
+        archivedFoldersLoadingRef.current = false;
+        setArchivedFoldersLoading(false);
+      }
+    }
+  }
+
+  function toggleArchivedFolders(event) {
+    const open = event.currentTarget.open;
+    setArchivedFoldersOpen(open);
+    if (open && !archivedFoldersRequested) loadArchivedFolders();
   }
 
   async function loadTemplates() {
@@ -345,6 +416,102 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
         : err.message;
       notify?.({ type: 'danger', message });
     }
+  }
+
+  function beginArchiveFolder(folder) {
+    const activeFolder = realFolders.find(item => String(item.id) === String(folder?.id || ''));
+    if (
+      canManage !== true
+      || clientMode !== false
+      || selectedFolder === 'archived'
+      || !activeFolder
+      || activeFolder.virtual
+      || isClientUploadsFolder(activeFolder)
+      || archiveFolderRequestRef.current
+      || restoreFolderRequestRef.current
+      || renameSaving
+    ) return;
+    setFolderMutationError(null);
+    setArchiveConfirmTarget(activeFolder);
+  }
+
+  async function submitArchiveFolder() {
+    const folder = archiveConfirmTarget;
+    const activeFolder = realFolders.find(item => String(item.id) === String(folder?.id || ''));
+    if (
+      archiveFolderRequestRef.current
+      || canManage !== true
+      || clientMode !== false
+      || selectedFolder === 'archived'
+      || !activeFolder
+      || activeFolder.virtual
+      || isClientUploadsFolder(activeFolder)
+    ) return;
+
+    archiveFolderRequestRef.current = true;
+    setArchiveRequestPending(true);
+    setFolderMutationError(null);
+    try {
+      await archiveFolder(activeFolder.id);
+      setFolders(current => current.filter(item => String(item.id) !== String(activeFolder.id)));
+      setSelectedFolder(current => String(current) === String(activeFolder.id) ? 'all' : current);
+      setSelectedDocumentIds([]);
+      setBulkMoveProgress({ current: 0, total: 0 });
+      setBulkMoveResult(null);
+      if (String(renameFolderId) === String(activeFolder.id)) cancelRenameFolder();
+      if (String(renameDocument?.folderId || '') === String(activeFolder.id)) cancelRenameDocument();
+      clearDocumentDrag();
+      setArchiveConfirmTarget(null);
+      notify?.({ type: 'success', message: 'Folder archived. Its documents remain active in All Documents.' });
+      await load();
+      if (archivedFoldersRequested || archivedFoldersOpen) await loadArchivedFolders({ force: true });
+    } catch (err) {
+      const message = err.message || 'Unable to archive this folder.';
+      setFolderMutationError({ action: 'archive', folderId: String(activeFolder.id), message });
+      notify?.({ type: 'danger', message });
+    } finally {
+      archiveFolderRequestRef.current = false;
+      setArchiveRequestPending(false);
+    }
+  }
+
+  async function submitRestoreFolder(folder) {
+    const folderId = String(folder?.id || '');
+    if (
+      !folderId
+      || restoreFolderRequestRef.current
+      || archiveFolderRequestRef.current
+      || canManage !== true
+      || clientMode !== false
+      || !archivedFolders.some(item => String(item.id) === folderId)
+    ) return;
+
+    restoreFolderRequestRef.current = folderId;
+    setRestoreRequestPendingFolderId(folderId);
+    setFolderMutationError(null);
+    try {
+      await restoreFolder(folder.id);
+      setArchivedFolders(current => current.filter(item => String(item.id) !== folderId));
+      notify?.({ type: 'success', message: 'Folder restored to active folders.' });
+      await load();
+      await loadArchivedFolders({ force: true });
+    } catch (err) {
+      const message = err.message || 'Unable to restore this folder.';
+      setFolderMutationError({ action: 'restore', folderId, message });
+      notify?.({ type: 'danger', message });
+    } finally {
+      restoreFolderRequestRef.current = '';
+      setRestoreRequestPendingFolderId('');
+    }
+  }
+
+  function closeConfirm() {
+    if (archiveConfirmTarget) {
+      if (archiveFolderRequestRef.current) return;
+      setArchiveConfirmTarget(null);
+      return;
+    }
+    setConfirm(null);
   }
 
   async function uploadDoc(event) {
@@ -703,7 +870,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   }
 
   const realFolders = folders.filter(folder => !folder.virtual);
-  const clientUploadsFolder = realFolders.find(folder => (folder.name || '').trim().toLowerCase() === 'client uploads');
+  const clientUploadsFolder = realFolders.find(isClientUploadsFolder);
   const customFolders = realFolders.filter(folder => folder.id !== clientUploadsFolder?.id);
   const explorerFolders = useMemo(() => {
     const all = folders.find(folder => folder.id === 'all') || {
@@ -736,8 +903,13 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     return activeDocuments.filter(doc => String(doc.folderId || '') === String(folder?.id || '')).length;
   };
   const selectedCount = folderCount(selectedFolderInfo);
-  const selectedIsClientUploads = selectedFolder === clientUploadsFolder?.id;
-  const selectedIsCustom = Boolean(selectedFolderInfo && !selectedFolderInfo.virtual && !selectedIsClientUploads);
+  const selectedIsClientUploads = isClientUploadsFolder(selectedFolderInfo);
+  const selectedIsCustom = Boolean(
+    selectedFolderInfo
+    && !selectedFolderInfo.virtual
+    && !selectedIsClientUploads
+    && realFolders.some(folder => String(folder.id) === String(selectedFolderInfo.id)),
+  );
   const selectedCustomCount = selectedIsCustom ? folderCount(selectedFolderInfo) : 0;
   const visibleDocuments = useMemo(
     () => filterDocumentsBySearch(documents, documentSearch, clientMode),
@@ -758,6 +930,13 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     return sel ? [sel, ...filteredTemplates] : filteredTemplates;
   }, [filteredTemplates, templates, selectedTemplateId, templateSearch]);
   const archivedView = selectedFolder === 'archived';
+  const folderLifecycleMutationPending = archiveRequestPending || Boolean(restoreRequestPendingFolderId);
+  const showArchiveFolderAction = canManage === true
+    && clientMode === false
+    && selectedIsCustom
+    && !archivedView
+    && !renameSaving
+    && !folderLifecycleMutationPending;
   const showBulkControls = canManage === true && clientMode === false && !archivedView;
   const visibleDocumentIds = useMemo(() => new Set(visibleDocuments.map(doc => String(doc.id))), [visibleDocuments]);
   const selectedVisibleCount = selectedDocumentIds.filter(id => visibleDocumentIds.has(String(id))).length;
@@ -778,6 +957,16 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
         : selectedIsClientUploads
           ? 'Documents supplied through the client upload workflow.'
           : 'Documents filed in this custom matter folder.';
+  const archiveConfirmation = archiveConfirmTarget ? {
+    title: 'Archive folder',
+    message: (
+      <span>
+        Archive “{archiveConfirmTarget.name}”? The folder will leave the active folder list. Its documents will not be archived, moved, or deleted and will remain visible in All Documents under this folder name. Document access and client visibility remain unchanged. You can restore the folder later from Archived folders.
+        {archiveRequestPending && <strong style={{ display: 'block', marginTop: 8 }}>Archiving…</strong>}
+      </span>
+    ),
+    onConfirm: submitArchiveFolder,
+  } : null;
 
   return (
     <>
@@ -798,9 +987,12 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       .lf-doc-folder-pane { position: sticky; top: 12px; }
       .lf-doc-file-toolbar { background: #F7F5F0; border: 1px solid #DDD8CE; border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; }
       .lf-doc-bulk-toolbar { background: #FFFCF5; border: 1px solid #E4D7B8; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; display: grid; gap: 8px; }
+      .lf-doc-archived-folders > summary { cursor: pointer; color: #234936; font-size: 12px; font-weight: 700; line-height: 1.4; padding: 10px 2px; overflow-wrap: anywhere; }
+      .lf-doc-archived-folder-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; min-width: 0; }
       @media (max-width: 640px) {
         .lf-doc-grid { grid-template-columns: minmax(0, 1fr) !important; }
         .lf-doc-folder-pane { position: static; }
+        .lf-doc-folder-archive-action, .lf-doc-archived-folder-restore { min-height: 44px; }
       }
     `}</style>
     <div className="lf-doc-grid lf-doc-explorer" style={{ display: 'grid', gridTemplateColumns: showFolderControls ? '240px minmax(0,1fr)' : 'minmax(0,1fr)', gap: 16 }}>
@@ -836,6 +1028,57 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
             </span>
           )}
         </div>
+        {canManage === true && clientMode === false && (
+          <details
+            className="lf-doc-archived-folders"
+            open={archivedFoldersOpen}
+            onToggle={toggleArchivedFolders}
+            style={{ borderTop: `1px solid ${theme.line}`, marginTop: 10, minWidth: 0 }}
+          >
+            <summary>Archived folders</summary>
+            <div style={{ display: 'grid', gap: 8, padding: '0 2px 4px', minWidth: 0 }}>
+              {archivedFoldersLoading && <span role="status" style={{ color: theme.muted, fontSize: 12 }}>Loading archived folders…</span>}
+              {!archivedFoldersLoading && archivedFoldersError && (
+                <div role="alert" style={{ display: 'grid', gap: 7, color: theme.red, fontSize: 12 }}>
+                  <span>Unable to load archived folders: {archivedFoldersError}</span>
+                  <button type="button" style={styles.ghostButton} onClick={() => loadArchivedFolders({ force: true })}>Retry</button>
+                </div>
+              )}
+              {!archivedFoldersLoading && !archivedFoldersError && archivedFoldersRequested && !archivedFolders.length && (
+                <span style={{ color: theme.muted, fontSize: 12, lineHeight: 1.45 }}>No archived folders.</span>
+              )}
+              {!archivedFoldersLoading && !archivedFoldersError && archivedFolders.map(folder => {
+                const activeDocumentCount = activeDocuments.filter(doc => doc.folderId === folder.id).length;
+                const restorePending = restoreRequestPendingFolderId === String(folder.id);
+                const restoreError = folderMutationError?.action === 'restore' && folderMutationError.folderId === String(folder.id);
+                return (
+                  <div
+                    className="lf-doc-archived-folder-row"
+                    key={folder.id}
+                    data-archived-folder-id={String(folder.id)}
+                    style={{ border: `1px solid ${theme.line}`, borderRadius: 7, padding: 8 }}
+                  >
+                    <div style={{ display: 'grid', gap: 3, minWidth: 0, overflowWrap: 'anywhere' }}>
+                      <strong style={{ color: theme.ink, fontSize: 12 }}>{folder.name}</strong>
+                      <span style={{ color: theme.muted, fontSize: 11 }}>Archived {formatArchivedFolderDate(folder.archivedAt)}</span>
+                      <span style={{ color: theme.muted, fontSize: 11 }}>{activeDocumentCount} active document{activeDocumentCount === 1 ? '' : 's'}</span>
+                    </div>
+                    <button
+                      className="lf-doc-archived-folder-restore"
+                      type="button"
+                      style={{ ...styles.ghostButton, minHeight: 44 }}
+                      disabled={Boolean(restoreRequestPendingFolderId) || archiveRequestPending}
+                      onClick={() => submitRestoreFolder(folder)}
+                    >
+                      {restorePending ? 'Restoring…' : 'Restore'}
+                    </button>
+                    {restoreError && <span role="alert" style={{ gridColumn: '1 / -1', color: theme.red, fontSize: 11 }}>{folderMutationError.message}</span>}
+                  </div>
+                );
+              })}
+            </div>
+          </details>
+        )}
         {canManage && (
           <form onSubmit={addFolder} style={{ display: 'grid', gap: 8, marginTop: 12 }}>
             <Field label="New Folder"><input style={styles.input} value={newFolderName} onChange={e => setNewFolderName(e.target.value)} placeholder="Pleadings" /></Field>
@@ -846,11 +1089,11 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
           <div style={{ borderTop: `1px solid ${theme.line}`, marginTop: 12, paddingTop: 12, display: 'grid', gap: 8 }}>
             <strong style={{ fontSize: 12, color: theme.ink }}>Selected folder actions</strong>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-              <button type="button" style={styles.ghostButton} disabled={!selectedIsCustom || renameSaving} onClick={() => beginRenameFolder(selectedFolderInfo)}>Rename</button>
+              <button type="button" style={styles.ghostButton} disabled={!selectedIsCustom || renameSaving || folderLifecycleMutationPending} onClick={() => beginRenameFolder(selectedFolderInfo)}>Rename</button>
               <button
                 type="button"
                 style={styles.ghostButton}
-                disabled={!selectedIsCustom || selectedCustomCount > 0 || renameSaving}
+                disabled={!selectedIsCustom || selectedCustomCount > 0 || renameSaving || folderLifecycleMutationPending}
                 onClick={() => setConfirm({
                   title: 'Delete empty folder?',
                   message: 'Delete this empty custom folder?',
@@ -859,7 +1102,20 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
               >
                 Delete
               </button>
+              {showArchiveFolderAction && (
+                <button
+                  className="lf-doc-folder-archive-action"
+                  type="button"
+                  style={{ ...styles.dangerButton, gridColumn: '1 / -1' }}
+                  onClick={() => beginArchiveFolder(selectedFolderInfo)}
+                >
+                  Archive
+                </button>
+              )}
             </div>
+            {folderMutationError?.action === 'archive' && (
+              <span role="alert" style={{ color: theme.red, fontSize: 11 }}>{folderMutationError.message}</span>
+            )}
             {renameFolderId === selectedFolderInfo?.id && (
               <form onSubmit={saveRenamedFolder} style={{ border: `1px solid ${theme.line}`, borderRadius: 7, background: '#F8FAFC', padding: 8, display: 'grid', gap: 7 }}>
                 <label style={{ display: 'grid', gap: 4, color: theme.ink, fontSize: 11, fontWeight: 700 }}>
@@ -1292,7 +1548,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
           </section>
         </div>
       )}
-      <ConfirmModal confirm={confirm} onClose={() => setConfirm(null)} />
+      <ConfirmModal confirm={archiveConfirmation || confirm} onClose={closeConfirm} />
     </div>
     </>
   );

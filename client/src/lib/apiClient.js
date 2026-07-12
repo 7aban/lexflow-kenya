@@ -396,6 +396,19 @@ export const updateChecklistTemplate = (templateId, payload) => api(`/checklist-
 export const deleteChecklistTemplate = templateId => api(`/checklist-templates/${templateId}`, { method: 'DELETE' });
 export const applyChecklistTemplate = (matterId, templateId) => api(`/matters/${matterId}/checklist-template-applications`, { method: 'POST', body: { templateId } });
 export const getMatterFolders = matterId => api(`/matters/${matterId}/folders`);
+export function getArchivedMatterFolders(matterId) {
+  return api(`/matters/${matterId}/folders?status=archived`);
+}
+export function archiveFolder(folderId) {
+  return api(`/folders/${folderId}/archive`, {
+    method: 'PATCH',
+  });
+}
+export function restoreFolder(folderId) {
+  return api(`/folders/${folderId}/restore`, {
+    method: 'PATCH',
+  });
+}
 export const createFolder = (matterId, data) => api(`/matters/${matterId}/folders`, { method: 'POST', body: data });
 export const updateFolder = (folderId, data) => api(`/folders/${folderId}`, { method: 'PATCH', body: data });
 export const deleteFolder = folderId => api(`/folders/${folderId}`, { method: 'DELETE' });
