@@ -1,4 +1,20 @@
 module.exports = ({ get, all }) => {
+  const matterAccessScopeSql = (req, alias = 'm') => {
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(alias)) {
+      throw new Error('Invalid matter table alias');
+    }
+    if (req.user?.role === 'advocate') {
+      return {
+        sql: `${alias}.assignedTo=?`,
+        params: [req.user.fullName || ''],
+      };
+    }
+    if (req.user?.role === 'admin' || req.user?.role === 'assistant') {
+      return { sql: '1=1', params: [] };
+    }
+    return { sql: '1=0', params: [] };
+  };
+
   const canAccessMatter = async (req, matterId) => {
     if (!matterId) return false;
     if (req.user?.role === 'client') {
@@ -131,6 +147,7 @@ module.exports = ({ get, all }) => {
   };
 
   return {
+    matterAccessScopeSql,
     canAccessMatter,
     canAccessNotice,
     canAccessConversation,

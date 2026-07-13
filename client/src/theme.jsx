@@ -916,6 +916,42 @@ export function StyleTag() { return <style>{`
     #root .lf-dash-panel-head { padding: 12px 14px; }
     #root .lf-dash-pipeline-row { padding: 9px 14px; }
   }
+  /* LOCAL-PILOT-GLOBAL-DOCUMENTS-EXPLORER-92 */
+  #root .lf-global-documents-cards table { min-width: 1080px; }
+  #root .lf-global-document-actions button:disabled { cursor: not-allowed; opacity: .55; }
+  @media (max-width: 900px) {
+    #root .lf-global-documents-filter-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)) !important; }
+  }
+  @media (max-width: 640px) {
+    #root .lf-global-documents-search { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+    #root .lf-global-documents-search input { grid-column: 1 / -1; }
+    #root .lf-global-documents-search button { width: 100%; min-width: 0; }
+    #root .lf-global-documents-filter-grid { grid-template-columns: minmax(0, 1fr) !important; }
+    #root .lf-global-documents-cards,
+    #root .lf-global-documents-cards * { box-sizing: border-box !important; }
+    #root .lf-global-documents-cards { width: 100% !important; max-width: 100% !important; overflow: visible !important; }
+    #root .lf-global-documents-cards > div { width: 100% !important; max-width: 100% !important; overflow: visible !important; border: 0 !important; border-radius: 0 !important; }
+    #root .lf-global-documents-cards table,
+    #root .lf-global-documents-cards tbody { display: block !important; width: 100% !important; min-width: 0 !important; max-width: 100% !important; }
+    #root .lf-global-documents-cards thead { display: none !important; }
+    #root .lf-global-documents-cards tbody tr { display: block; width: 100%; min-width: 0; margin-bottom: 12px; padding: 12px 14px; background: var(--lf-card, #fff); border: 1px solid var(--lf-card-border, var(--lf-border, #DDD8CE)); border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    #root .lf-global-documents-cards tbody td { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 4px; width: 100%; min-width: 0; padding: 6px 0; border-top: 0; background: transparent !important; white-space: normal !important; overflow-wrap: anywhere; word-break: break-word; }
+    #root .lf-global-documents-cards tbody td > * { min-width: 0 !important; max-width: 100% !important; }
+    #root .lf-global-documents-cards tbody tr:hover td { background: transparent !important; }
+    #root .lf-global-documents-cards tbody td::before { min-width: 0; color: var(--lf-card-muted, var(--lf-text-muted, #6B7280)); font-size: 10px; font-weight: 800; letter-spacing: .7px; text-transform: uppercase; }
+    #root .lf-global-documents-cards td:nth-child(1)::before { content: "Document"; }
+    #root .lf-global-documents-cards td:nth-child(2)::before { content: "Matter"; }
+    #root .lf-global-documents-cards td:nth-child(3)::before { content: "Client"; }
+    #root .lf-global-documents-cards td:nth-child(4)::before { content: "Folder"; }
+    #root .lf-global-documents-cards td:nth-child(5)::before { content: "Date"; }
+    #root .lf-global-documents-cards td:nth-child(6)::before { content: "Origin"; }
+    #root .lf-global-documents-cards td:nth-child(7)::before { content: "Visibility"; }
+    #root .lf-global-documents-cards td:nth-child(8)::before { content: "Actions"; }
+    #root .lf-global-document-actions { display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    #root .lf-global-document-actions button { width: 100%; min-width: 0; padding-left: 5px !important; padding-right: 5px !important; white-space: normal; }
+    #root .lf-global-document-preview-backdrop { padding: 8px !important; }
+    #root .lf-global-document-preview { height: min(94vh, 820px) !important; }
+  }
   /* UI-5C: Deadline Center guidance card hover */
   .lf-deadline-guidance-card:hover { box-shadow: 0 4px 14px rgba(15,27,51,.10) !important; transform: translateY(-1px); }
   #root .lf-timer-bubble:hover { transform: translateY(-2px); }

@@ -18,6 +18,7 @@ const { generateInvoiceValidation } = require('./validation/invoice.validation')
 const { genId, today, addDays, invoiceNumber, money } = require('./lib/utils');
 const createDb = require('./lib/db');
 const createAccess = require('./lib/access');
+const { createDocumentExplorer, DocumentExplorerError } = require('./lib/documentExplorer');
 const createLogging = require('./lib/logging');
 const createNotifications = require('./lib/notifications');
 const createInvitations = require('./lib/invitations');
@@ -40,7 +41,8 @@ const db = new sqlite3.Database(config.DATABASE_PATH);
 const { run, get, all } = createDb(db);
 const folderHierarchy = createFolderHierarchy({ get });
 const folderMovement = createFolderMovement({ databasePath: config.DATABASE_PATH });
-const { canAccessMatter, canAccessClient, canAccessInvoice, canAccessTask, canAccessTimeEntry, canAccessAppearance, canAccessNotice, canAccessConversation, canAccessDocument, canAccessDocumentRequest, isBillingVisibleFor } = createAccess({ get });
+const { matterAccessScopeSql, canAccessMatter, canAccessClient, canAccessInvoice, canAccessTask, canAccessTimeEntry, canAccessAppearance, canAccessNotice, canAccessConversation, canAccessDocument, canAccessDocumentRequest, isBillingVisibleFor } = createAccess({ get });
+const documentExplorer = createDocumentExplorer({ all, matterAccessScopeSql, cursorSecret: config.JWT_SECRET });
 const { logClientActivity, logAudit } = createLogging({ run });
 const { notifyStaff } = createNotifications({ run, all, genId });
 const { appBaseUrl, invitationUrl, checkInvitationRateLimit } = createInvitations();
@@ -1678,6 +1680,7 @@ createdAt TEXT NOT NULL
   await run('CREATE INDEX IF NOT EXISTS idx_legal_deadline_suggestions_rule_status ON legal_deadline_suggestions(ruleId, status)');
   await run('CREATE INDEX IF NOT EXISTS idx_legal_deadline_suggestions_due_date ON legal_deadline_suggestions(suggestedDueDate)');
   await run('CREATE INDEX IF NOT EXISTS idx_documents_matterId_deletedAt_date ON documents(matterId, deletedAt, date)');
+  await run('CREATE INDEX IF NOT EXISTS idx_documents_deletedAt_date_id ON documents(deletedAt, date, id)');
   await run('CREATE INDEX IF NOT EXISTS idx_documents_folderId_deletedAt ON documents(folderId, deletedAt)');
   await run('CREATE INDEX IF NOT EXISTS idx_folders_matterId_parentId ON folders(matterId, parentId)');
   await run('CREATE INDEX IF NOT EXISTS idx_documents_messageId_deletedAt ON documents(messageId, deletedAt)');
@@ -12304,6 +12307,17 @@ app.delete('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
     metadata: safeDocumentMetadata(doc, documentAuditContext(doc), 'document_delete'),
   }).catch(() => {});
   res.json({ id: req.params.id, deleted: true });
+});
+
+app.get('/api/documents', requireStaff, async (req, res) => {
+  try {
+    res.json(await documentExplorer.list(req, req.query));
+  } catch (err) {
+    if (err instanceof DocumentExplorerError || err?.statusCode === 400) {
+      return res.status(400).json({ error: err.message || 'Invalid document query' });
+    }
+    return res.status(500).json({ error: 'Unable to load documents' });
+  }
 });
 app.patch('/api/documents/:id/restore', requireAdvocateOrAdmin, async (req, res) => {
   const doc = await get(`SELECT ${documentMetadataColumns()} FROM documents WHERE id=? AND deletedAt IS NOT NULL`, [req.params.id]);

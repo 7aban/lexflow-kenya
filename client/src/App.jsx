@@ -14,6 +14,7 @@ import StructuredAuditLog from './views/StructuredAuditLog.jsx';
 import ClientApp from './views/ClientApp.jsx';
 import Communications from './views/Communications.jsx';
 import DeadlineCenter from './views/DeadlineCenter.jsx';
+import DocumentsExplorer from './views/DocumentsExplorer.jsx';
 import Invitations from './views/Invitations.jsx';
 import { Clients, ConnectedAccounts, Dashboard, FirmSettings, HR, Invoices, Matters, Tasks, Users } from './views/StaffViews.jsx';
 import DocumentStudio from './views/DocumentStudio.jsx';
@@ -29,6 +30,7 @@ const navIcons = {
   Matters: IconBriefcase,
   Tasks: IconCheckbox,
   Deadlines: IconCalendarDue,
+  Documents: IconListSearch,
   Invoices: IconFileInvoice,
   Communications: IconMessages,
   Users: IconUsersGroup,
@@ -46,7 +48,6 @@ const navIcons = {
 const navDisplayLabels = {
   Dashboard: 'Workspace',
   'Deadlines': 'Court Diary & Deadlines',
-  'Document Studio': 'Documents',
   Invoices: 'Billing',
   'Audit Log': 'Audit Log (Legacy)',
   'Structured Audit': 'Audit Events',
@@ -54,8 +55,9 @@ const navDisplayLabels = {
 
 const initialData = { dashboard: {}, clients: [], matters: [], tasks: [], invoices: [], firmSettings: defaultFirmSettings };
 const navGroups = [
-  { title: 'Primary', collapsible: false, showTitle: false, items: [['Dashboard', ['admin', 'advocate', 'assistant']], ['Matters', ['admin', 'advocate', 'assistant']], ['Tasks', ['admin', 'advocate', 'assistant']], ['Deadlines', ['admin', 'advocate', 'assistant']], ['Document Studio', ['admin', 'advocate']], ['Invoices', ['admin']], ['Clients', ['admin', 'advocate', 'assistant']], ['Reports', ['admin']], ['Communications', ['admin', 'advocate', 'assistant']]] },
+  { title: 'Primary', collapsible: false, showTitle: false, items: [['Dashboard', ['admin', 'advocate', 'assistant']], ['Matters', ['admin', 'advocate', 'assistant']], ['Tasks', ['admin', 'advocate', 'assistant']], ['Deadlines', ['admin', 'advocate', 'assistant']], ['Documents', ['admin', 'advocate', 'assistant']], ['Invoices', ['admin']], ['Clients', ['admin', 'advocate', 'assistant']], ['Reports', ['admin']], ['Communications', ['admin', 'advocate', 'assistant']]] },
   { title: 'Tools', collapsible: true, items: [
+    ['Document Studio', ['admin', 'advocate']],
     ['Connected Accounts', ['admin', 'advocate', 'assistant']],
     ['My Leave', ['advocate', 'assistant']],
     ['eFiling CTS', ['admin', 'advocate', 'assistant'], 'https://efiling.court.go.ke/auth'],
@@ -71,6 +73,7 @@ const staffViewSlugs = {
   Matters: 'matters',
   Tasks: 'tasks',
   Deadlines: 'court-diary-deadlines',
+  Documents: 'documents',
   Communications: 'communications',
   Invoices: 'invoices',
   Reports: 'reports',
@@ -753,6 +756,7 @@ export default function App() {
     Matters: 'Matter pipeline, billing, documents, notes and invoice actions.',
     Tasks: 'Track pending and completed work across matters — add tasks, mark them done, and log time as you go.',
     Deadlines: 'Track court appearances, limitation dates, filing dates, and urgent action items.',
+    Documents: 'Search and review active matter documents across the work you can access.',
     Communications: 'Client messages, secure attachments and portal activity in one inbox.',
     Invoices: 'Receivables, invoice status and PDF export for client billing.',
     Reports: 'Review billing, collections, matter activity, and workload trends.',
@@ -919,6 +923,7 @@ export default function App() {
             {(!loading || bootstrapped) && view === 'Matters' && <Matters data={data} canManage={canManage} reload={refresh} notify={setToast} focus={matterFocus} onNavigate={navigateToView} onMatterSelected={matterId => navigateToView('Matters', { matterId })} onMatterSectionChange={(matterId, section) => navigateToView('Matters', { matterId, section })} onMatterOpened={async matterId => { setNotifications(current => current.filter(item => item.matterId !== matterId)); try { await markNotificationsRead({ matterId }); } catch {} }} />}
             {(!loading || bootstrapped) && view === 'Tasks' && <Tasks data={data} canManage={canManage} reload={refresh} notify={setToast} focus={taskFocus} />}
             {(!loading || bootstrapped) && view === 'Deadlines' && <DeadlineCenter data={data} canManage={canManage} notify={setToast} focus={appearanceFocus} />}
+            {(!loading || bootstrapped) && view === 'Documents' && <DocumentsExplorer matters={data.matters} clients={data.clients} notify={setToast} onOpenMatter={matterId => navigateToView('Matters', { matterId, section: 'documents' })} />}
             {(!loading || bootstrapped) && view === 'Communications' && <Communications clients={data.clients} matters={data.matters} focus={communicationFocus} notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Invoices' && <Invoices invoices={data.invoices} isAdmin={isAdmin} canManage={canManage} reload={refresh} notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Performance' && isAdmin && <AdvocatePerformance notify={setToast} />}

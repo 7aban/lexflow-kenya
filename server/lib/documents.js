@@ -33,6 +33,26 @@ function clientDocumentVisibilitySql(alias = 'd') {
   )`;
 }
 
+function documentOrigin(row = {}) {
+  if (row.messageId) return 'message';
+  if (row.noticeId) return 'notice';
+  if (String(row.source || '').toLowerCase() === 'client') return 'client';
+  if (String(row.source || '').toLowerCase() === 'generated') return 'generated';
+  return 'firm';
+}
+
+function documentVisibility(row = {}) {
+  return String(row.source || '').toLowerCase() === 'client'
+    || Number(row.clientVisible || 0) === 1
+    || Number(row.messageClientVisible || 0) === 1
+    ? 'client'
+    : 'internal';
+}
+
+function documentUploaderDisplay(row = {}) {
+  return String(row.uploaderUserName || row.generatedBy || '').trim();
+}
+
 function publicDocument(row = {}, options = {}) {
   const displayName = row.displayName || row.name || 'Document';
   if (options.client) {
@@ -167,6 +187,9 @@ module.exports = {
   documentListColumns,
   documentMetadataColumns,
   clientDocumentVisibilitySql,
+  documentOrigin,
+  documentVisibility,
+  documentUploaderDisplay,
   publicDocument,
   publicNotice,
   MAX_NOTICE_ATTACHMENTS,
