@@ -24,9 +24,27 @@ const TYPE_FILTERS = new Map([
   ['text', 'text'],
   ['file', 'file'],
 ]);
+const STATUS_FILTERS = new Set(['active', 'archived', 'all']);
 const SOURCE_FILTERS = new Set(['firm', 'client', 'generated']);
 const ORIGIN_FILTERS = new Set(['firm', 'client', 'generated', 'message', 'notice']);
 const VISIBILITY_FILTERS = new Set(['internal', 'client']);
+
+const TYPE_SQL = `CASE
+  WHEN LOWER(COALESCE(d.type,'')) IN ('pdf','word','image','text','file') THEN LOWER(d.type)
+  ELSE 'file'
+END`;
+const SOURCE_SQL = `CASE
+  WHEN LOWER(COALESCE(d.source,''))='client' THEN 'client'
+  WHEN LOWER(COALESCE(d.source,''))='generated' THEN 'generated'
+  ELSE 'firm'
+END`;
+const ORIGIN_SQL = `CASE
+  WHEN d.messageId IS NOT NULL AND d.messageId<>'' THEN 'message'
+  WHEN d.noticeId IS NOT NULL AND d.noticeId<>'' THEN 'notice'
+  WHEN LOWER(COALESCE(d.source,''))='client' THEN 'client'
+  WHEN LOWER(COALESCE(d.source,''))='generated' THEN 'generated'
+  ELSE 'firm'
+END`;
 
 const CLIENT_VISIBILITY_SQL = `(
   LOWER(COALESCE(d.source,''))='client'
@@ -71,7 +89,7 @@ function parseLimit(value) {
 
 function parseQuery(query = {}) {
   const status = String(query.status || 'active').trim().toLowerCase();
-  if (status !== 'active') throw new DocumentExplorerError('Only active documents are available');
+  if (!STATUS_FILTERS.has(status)) throw new DocumentExplorerError('Invalid status');
 
   const sort = String(query.sort || 'date_desc').trim().toLowerCase();
   if (!Object.hasOwn(SORTS, sort)) throw new DocumentExplorerError('Invalid sort');
@@ -150,15 +168,18 @@ function folderPathSearchSql(role) {
 }
 
 function originSql(origin) {
-  if (origin === 'message') return "d.messageId IS NOT NULL AND d.messageId<>''";
-  if (origin === 'notice') return "d.noticeId IS NOT NULL AND d.noticeId<>''";
-  if (origin === 'client') return "(d.messageId IS NULL OR d.messageId='') AND (d.noticeId IS NULL OR d.noticeId='') AND LOWER(COALESCE(d.source,''))='client'";
-  if (origin === 'generated') return "(d.messageId IS NULL OR d.messageId='') AND (d.noticeId IS NULL OR d.noticeId='') AND LOWER(COALESCE(d.source,''))='generated'";
-  return "(d.messageId IS NULL OR d.messageId='') AND (d.noticeId IS NULL OR d.noticeId='') AND LOWER(COALESCE(NULLIF(d.source,''),'firm')) NOT IN ('client','generated')";
+  return `${ORIGIN_SQL}='${origin}'`;
+}
+
+function statusSql(status) {
+  if (status === 'archived') return 'd.deletedAt IS NOT NULL';
+  if (status === 'all') return '1=1';
+  return 'd.deletedAt IS NULL';
 }
 
 function cursorScopeFingerprint(req, filters) {
   const payload = {
+    userId: req.user?.userId || req.user?.id || '',
     role: req.user?.role || '',
     advocate: req.user?.role === 'advocate' ? req.user.fullName || '' : '',
     q: filters.q,
@@ -324,7 +345,7 @@ function publicExplorerDocument(row, location) {
     mimeType: String(row.mimeType || 'application/octet-stream'),
     date: String(row.date || ''),
     size: String(row.size || ''),
-    source: String(row.source || 'firm').toLowerCase() || 'firm',
+    source: String(row.explorerSource || row.source || 'firm').toLowerCase() || 'firm',
     origin: documentOrigin(row),
     visibility: documentVisibility(row),
     uploaderDisplay: uploader,
@@ -335,8 +356,8 @@ function publicExplorerDocument(row, location) {
       generatedAt: String(row.generatedAt || ''),
       version: Number(row.version || 1),
     } : null,
-    archived: false,
-    archivedAt: null,
+    archived: Boolean(row.deletedAt),
+    archivedAt: row.deletedAt ? String(row.deletedAt) : null,
     matter: {
       id: String(row.matterId),
       reference: String(row.matterReference || ''),
@@ -351,6 +372,61 @@ function publicExplorerDocument(row, location) {
   };
 }
 
+const FILTER_OPTION_LABELS = Object.freeze({
+  types: Object.freeze({ pdf: 'PDF', word: 'Word', image: 'Image', text: 'Text', file: 'Other file' }),
+  sources: Object.freeze({ firm: 'Firm', client: 'Client', generated: 'Generated' }),
+  origins: Object.freeze({ firm: 'Firm upload', client: 'Client upload', generated: 'Generated', message: 'Message attachment', notice: 'Notice attachment' }),
+  visibilities: Object.freeze({ internal: 'Internal', client: 'Client visible' }),
+});
+
+function orderedValueOptions(values, labels) {
+  const available = new Set(values.map(value => String(value || '')).filter(Boolean));
+  return Object.entries(labels)
+    .filter(([value]) => available.has(value))
+    .map(([value, label]) => ({ value, label }));
+}
+
+async function loadFilterOptions(all, access, status) {
+  const where = [statusSql(status), "d.matterId IS NOT NULL", "d.matterId<>''", access.sql];
+  const joinedScope = `FROM documents d
+    INNER JOIN matters m ON m.id=d.matterId
+    LEFT JOIN clients c ON c.id=m.clientId
+    WHERE ${where.join('\n AND ')}`;
+  const params = [...access.params];
+  const [matterRows, clientRows, dimensionRows] = await Promise.all([
+    all(`SELECT DISTINCT m.id,m.reference,m.title,m.clientId
+      ${joinedScope}
+      ORDER BY LOWER(COALESCE(NULLIF(m.reference,''),m.title,'')),m.id`, params),
+    all(`SELECT DISTINCT c.id,c.name
+      ${joinedScope}
+      AND c.id IS NOT NULL AND c.id<>''
+      ORDER BY LOWER(COALESCE(c.name,'')),c.id`, params),
+    all(`SELECT DISTINCT
+        ${TYPE_SQL} typeValue,
+        ${SOURCE_SQL} sourceValue,
+        ${ORIGIN_SQL} originValue,
+        CASE WHEN ${CLIENT_VISIBILITY_SQL} THEN 'client' ELSE 'internal' END visibilityValue
+      ${joinedScope}`, params),
+  ]);
+
+  return {
+    clients: clientRows.map(row => ({
+      id: String(row.id),
+      name: String(row.name || ''),
+    })),
+    matters: matterRows.map(row => ({
+      id: String(row.id),
+      reference: String(row.reference || ''),
+      title: String(row.title || ''),
+      clientId: String(row.clientId || ''),
+    })),
+    types: orderedValueOptions(dimensionRows.map(row => row.typeValue), FILTER_OPTION_LABELS.types),
+    sources: orderedValueOptions(dimensionRows.map(row => row.sourceValue), FILTER_OPTION_LABELS.sources),
+    origins: orderedValueOptions(dimensionRows.map(row => row.originValue), FILTER_OPTION_LABELS.origins),
+    visibilities: orderedValueOptions(dimensionRows.map(row => row.visibilityValue), FILTER_OPTION_LABELS.visibilities),
+  };
+}
+
 function createDocumentExplorer({ all, matterAccessScopeSql, cursorSecret }) {
   if (typeof all !== 'function' || typeof matterAccessScopeSql !== 'function') {
     throw new Error('Document Explorer requires database and access helpers');
@@ -361,11 +437,14 @@ function createDocumentExplorer({ all, matterAccessScopeSql, cursorSecret }) {
   return {
     async list(req, rawQuery = {}) {
       const filters = parseQuery(rawQuery);
+      if (filters.status !== 'active' && !['admin', 'advocate'].includes(req.user?.role)) {
+        throw new DocumentExplorerError('Archived document access denied', 403);
+      }
       const access = matterAccessScopeSql(req, 'm');
       const sort = SORTS[filters.sort];
       const scope = cursorScopeFingerprint(req, filters);
       const cursor = decodeCursor(filters.cursor, { sort: filters.sort, scope, secret });
-      const where = ["d.deletedAt IS NULL", "d.matterId IS NOT NULL", "d.matterId<>''", access.sql];
+      const where = [statusSql(filters.status), "d.matterId IS NOT NULL", "d.matterId<>''", access.sql];
       const params = [...access.params];
 
       if (filters.matterId) {
@@ -385,11 +464,11 @@ function createDocumentExplorer({ all, matterAccessScopeSql, cursorSecret }) {
         }
       }
       if (filters.type) {
-        where.push("LOWER(COALESCE(d.type,''))=?");
+        where.push(`${TYPE_SQL}=?`);
         params.push(TYPE_FILTERS.get(filters.type));
       }
       if (filters.source) {
-        where.push("LOWER(COALESCE(NULLIF(d.source,''),'firm'))=?");
+        where.push(`${SOURCE_SQL}=?`);
         params.push(filters.source);
       }
       if (filters.origin) where.push(originSql(filters.origin));
@@ -414,9 +493,10 @@ function createDocumentExplorer({ all, matterAccessScopeSql, cursorSecret }) {
         params.push(cursor.key, cursor.key, cursor.id);
       }
 
-      const rows = await all(`SELECT
+      const [rows, filterOptions] = await Promise.all([all(`SELECT
           d.id,d.matterId,d.name,d.displayName,d.type,d.mimeType,d.date,d.size,d.source,d.folderId,
           d.messageId,d.noticeId,d.clientVisible,d.templateName,d.generatedBy,d.generatedAt,d.version,
+          d.deletedAt,${SOURCE_SQL} explorerSource,
           m.reference matterReference,m.title matterTitle,m.stage matterStage,m.clientId matterClientId,
           c.name clientName,u.fullName uploaderUserName,
           CASE WHEN EXISTS (
@@ -432,7 +512,7 @@ function createDocumentExplorer({ all, matterAccessScopeSql, cursorSecret }) {
         LEFT JOIN users u ON u.id=d.uploadedBy
         WHERE ${where.join('\n AND ')}
         ORDER BY ${sort.expression} ${sort.direction},d.id ${sort.direction}
-        LIMIT ?`, [...params, filters.limit + 1]);
+        LIMIT ?`, [...params, filters.limit + 1]), loadFilterOptions(all, access, filters.status)]);
 
       const hasMore = rows.length > filters.limit;
       const pageRows = hasMore ? rows.slice(0, filters.limit) : rows;
@@ -450,8 +530,10 @@ function createDocumentExplorer({ all, matterAccessScopeSql, cursorSecret }) {
         items,
         limit: filters.limit,
         sort: filters.sort,
+        status: filters.status,
         hasMore,
         nextCursor,
+        filterOptions,
       };
     },
   };

@@ -5,30 +5,6 @@ import { styles } from '../theme.jsx';
 
 const PAGE_LIMIT = 25;
 
-const TYPE_OPTIONS = [
-  ['', 'All file types'],
-  ['pdf', 'PDF'],
-  ['word', 'Word'],
-  ['image', 'Image'],
-  ['text', 'Text'],
-  ['file', 'Other file'],
-];
-
-const ORIGIN_OPTIONS = [
-  ['', 'All origins'],
-  ['firm', 'Firm upload'],
-  ['client', 'Client upload'],
-  ['generated', 'Generated'],
-  ['message', 'Message attachment'],
-  ['notice', 'Notice attachment'],
-];
-
-const VISIBILITY_OPTIONS = [
-  ['', 'All visibility'],
-  ['internal', 'Internal'],
-  ['client', 'Client visible'],
-];
-
 const SORT_OPTIONS = [
   ['date_desc', 'Newest first'],
   ['date_asc', 'Oldest first'],
@@ -45,7 +21,17 @@ const initialFilters = {
   matterId: '',
   clientId: '',
   sort: 'date_desc',
+  includeArchived: false,
 };
+
+const emptyFilterOptions = () => ({
+  clients: [],
+  matters: [],
+  types: [],
+  sources: [],
+  origins: [],
+  visibilities: [],
+});
 
 function documentLabel(document) {
   return String(document?.displayName || document?.name || 'Document');
@@ -178,7 +164,7 @@ function PreviewDialog({ preview, onClose, onDownload }) {
   );
 }
 
-export default function DocumentsExplorer({ matters = [], clients = [], notify, onOpenMatter }) {
+export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived = false }) {
   const [searchDraft, setSearchDraft] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
   const [filters, setFilters] = useState(initialFilters);
@@ -190,21 +176,29 @@ export default function DocumentsExplorer({ matters = [], clients = [], notify, 
   const [error, setError] = useState('');
   const [reloadNonce, setReloadNonce] = useState(0);
   const [preview, setPreview] = useState(null);
+  const [filterOptions, setFilterOptions] = useState(emptyFilterOptions);
   const listRequestRef = useRef(0);
   const previewRequestRef = useRef(0);
   const previewUrlRef = useRef('');
 
-  const clientOptions = useMemo(() => [...clients]
+  const clientOptions = useMemo(() => [...filterOptions.clients]
     .filter(client => client?.id)
-    .sort((a, b) => clientLabel(a).localeCompare(clientLabel(b))), [clients]);
-  const matterOptions = useMemo(() => [...matters]
+    .sort((a, b) => clientLabel(a).localeCompare(clientLabel(b))), [filterOptions.clients]);
+  const matterOptions = useMemo(() => [...filterOptions.matters]
     .filter(matter => matter?.id)
-    .sort((a, b) => matterLabel(a).localeCompare(matterLabel(b))), [matters]);
+    .filter(matter => !filters.clientId || String(matter.clientId || '') === String(filters.clientId))
+    .sort((a, b) => matterLabel(a).localeCompare(matterLabel(b))), [filterOptions.matters, filters.clientId]);
   const queryKey = useMemo(() => JSON.stringify({
     q: appliedSearch,
-    ...filters,
+    type: filters.type,
+    origin: filters.origin,
+    visibility: filters.visibility,
+    matterId: filters.matterId,
+    clientId: filters.clientId,
+    sort: filters.sort,
+    status: allowArchived && filters.includeArchived ? 'all' : 'active',
     limit: PAGE_LIMIT,
-  }), [appliedSearch, filters]);
+  }), [allowArchived, appliedSearch, filters]);
 
   useEffect(() => {
     const requestId = listRequestRef.current + 1;
@@ -219,12 +213,14 @@ export default function DocumentsExplorer({ matters = [], clients = [], notify, 
         setItems(Array.isArray(response?.items) ? response.items : []);
         setNextCursor(response?.nextCursor || null);
         setHasMore(Boolean(response?.hasMore));
+        setFilterOptions({ ...emptyFilterOptions(), ...(response?.filterOptions || {}) });
       })
       .catch(caught => {
         if (!active || listRequestRef.current !== requestId) return;
         setItems([]);
         setNextCursor(null);
         setHasMore(false);
+        setFilterOptions(emptyFilterOptions());
         setError(caught.message || 'Unable to load documents.');
       })
       .finally(() => {
@@ -240,6 +236,16 @@ export default function DocumentsExplorer({ matters = [], clients = [], notify, 
 
   function updateFilter(name, value) {
     setFilters(current => ({ ...current, [name]: value }));
+  }
+
+  function updateClientFilter(clientId) {
+    setFilters(current => {
+      const selectedMatter = filterOptions.matters.find(matter => String(matter.id) === String(current.matterId));
+      const keepMatter = !current.matterId
+        || !clientId
+        || String(selectedMatter?.clientId || '') === String(clientId);
+      return { ...current, clientId, matterId: keepMatter ? current.matterId : '' };
+    });
   }
 
   function clearFilters() {
@@ -271,6 +277,10 @@ export default function DocumentsExplorer({ matters = [], clients = [], notify, 
   }
 
   async function downloadDocument(document) {
+    if (document?.archived) {
+      notify?.({ type: 'warning', message: 'Archived documents cannot be downloaded until restored from the matter Explorer.' });
+      return;
+    }
     try {
       await downloadWithAuth(`/api/documents/${encodeURIComponent(document.id)}/download`, documentLabel(document));
     } catch (caught) {
@@ -291,6 +301,10 @@ export default function DocumentsExplorer({ matters = [], clients = [], notify, 
   }
 
   async function openPreview(document) {
+    if (document?.archived) {
+      notify?.({ type: 'warning', message: 'Archived documents cannot be previewed until restored from the matter Explorer.' });
+      return;
+    }
     const kind = previewKind(document);
     const requestId = previewRequestRef.current + 1;
     previewRequestRef.current = requestId;
@@ -321,7 +335,8 @@ export default function DocumentsExplorer({ matters = [], clients = [], notify, 
     || filters.visibility
     || filters.matterId
     || filters.clientId
-    || filters.sort !== initialFilters.sort);
+    || filters.sort !== initialFilters.sort
+    || filters.includeArchived);
 
   const rows = items.map(document => {
     const label = documentLabel(document);
@@ -329,7 +344,10 @@ export default function DocumentsExplorer({ matters = [], clients = [], notify, 
     const folderLabel = String(document?.folderPathLabel || 'Uncategorised');
     return [
       <div key={`${document.id}-document`} style={{ display: 'grid', gap: 3, minWidth: 0 }}>
-        <strong style={{ fontWeight: 700, overflowWrap: 'anywhere' }}>{label}</strong>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', minWidth: 0 }}>
+          <strong style={{ fontWeight: 700, overflowWrap: 'anywhere' }}>{label}</strong>
+          {document.archived && <Badge tone="amber">Archived</Badge>}
+        </div>
         <small style={styles.mutedText}>{typeLabel(document)}{document.size ? ` · ${document.size}` : ''}{document.uploaderDisplay ? ` · ${document.uploaderDisplay}` : ''}</small>
       </div>,
       <div key={`${document.id}-matter`} style={{ display: 'grid', gap: 3, minWidth: 0 }}>
@@ -345,9 +363,17 @@ export default function DocumentsExplorer({ matters = [], clients = [], notify, 
       <Badge key={`${document.id}-origin`} tone={originTone(document.origin)}>{originLabel(document.origin)}</Badge>,
       <Badge key={`${document.id}-visibility`} tone={document.visibility === 'client' ? 'green' : 'blue'}>{document.visibility === 'client' ? 'Client visible' : 'Internal'}</Badge>,
       <div key={`${document.id}-actions`} className="lf-global-document-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button type="button" style={styles.tinyButton} onClick={() => openPreview(document)}>Preview</button>
-        <button type="button" style={styles.tinyButton} onClick={() => downloadDocument(document)}>Download</button>
-        <button type="button" style={styles.tinyButton} onClick={() => onOpenMatter?.(document.matter?.id)} disabled={!document.matter?.id}>Open matter</button>
+        <button type="button" style={styles.tinyButton} onClick={() => openPreview(document)} disabled={Boolean(document.archived)} title={document.archived ? 'Restore this document in its matter before previewing.' : undefined}>Preview</button>
+        <button type="button" style={styles.tinyButton} onClick={() => downloadDocument(document)} disabled={Boolean(document.archived)} title={document.archived ? 'Restore this document in its matter before downloading.' : undefined}>Download</button>
+        <button
+          type="button"
+          style={styles.tinyButton}
+          onClick={() => onOpenMatter?.(document.matter?.id, {
+            folderId: document.folder?.id || (document.location?.status === 'uncategorised' ? 'uncategorised' : ''),
+            documentId: document.id,
+          })}
+          disabled={!document.matter?.id}
+        >Open matter</button>
       </div>,
     ];
   });
@@ -359,7 +385,7 @@ export default function DocumentsExplorer({ matters = [], clients = [], notify, 
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
             <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
               <h2 style={{ margin: 0, fontSize: 17 }}>Document register</h2>
-              <p style={{ margin: 0, color: 'var(--lf-card-muted, var(--lf-text-muted, #6B6B66))', lineHeight: 1.5 }}>Read-only workspace for active documents linked to accessible matters. File content is loaded only when you preview or download.</p>
+              <p style={{ margin: 0, color: 'var(--lf-card-muted, var(--lf-text-muted, #6B6B66))', lineHeight: 1.5 }}>Read-only workspace for documents linked to accessible matters. Archived records are shown only when an authorized staff member opts in, and remain unavailable for preview or download.</p>
             </div>
             <Badge tone="blue">Read only</Badge>
           </div>
@@ -391,19 +417,22 @@ export default function DocumentsExplorer({ matters = [], clients = [], notify, 
             <label style={styles.field}>
               <span>File type</span>
               <select aria-label="Filter by file type" style={styles.input} value={filters.type} onChange={event => updateFilter('type', event.target.value)}>
-                {TYPE_OPTIONS.map(([value, label]) => <option key={value || 'all'} value={value}>{label}</option>)}
+                <option value="">All available file types</option>
+                {filterOptions.types.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </label>
             <label style={styles.field}>
-              <span>Origin</span>
+              <span>Source / origin</span>
               <select aria-label="Filter by origin" style={styles.input} value={filters.origin} onChange={event => updateFilter('origin', event.target.value)}>
-                {ORIGIN_OPTIONS.map(([value, label]) => <option key={value || 'all'} value={value}>{label}</option>)}
+                <option value="">All available origins</option>
+                {filterOptions.origins.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </label>
             <label style={styles.field}>
               <span>Visibility</span>
               <select aria-label="Filter by visibility" style={styles.input} value={filters.visibility} onChange={event => updateFilter('visibility', event.target.value)}>
-                {VISIBILITY_OPTIONS.map(([value, label]) => <option key={value || 'all'} value={value}>{label}</option>)}
+                <option value="">All available visibility</option>
+                {filterOptions.visibilities.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </label>
             <label style={styles.field}>
@@ -415,7 +444,7 @@ export default function DocumentsExplorer({ matters = [], clients = [], notify, 
             </label>
             <label style={styles.field}>
               <span>Client</span>
-              <select aria-label="Filter by client" style={styles.input} value={filters.clientId} onChange={event => updateFilter('clientId', event.target.value)}>
+              <select aria-label="Filter by client" style={styles.input} value={filters.clientId} onChange={event => updateClientFilter(event.target.value)}>
                 <option value="">All accessible clients</option>
                 {clientOptions.map(client => <option key={client.id} value={client.id}>{clientLabel(client)}</option>)}
               </select>
@@ -426,6 +455,20 @@ export default function DocumentsExplorer({ matters = [], clients = [], notify, 
                 {SORT_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
             </label>
+            {allowArchived && (
+              <label style={{ ...styles.field, alignContent: 'end' }}>
+                <span>Document status</span>
+                <span style={{ ...styles.input, display: 'flex', alignItems: 'center', gap: 8, minHeight: 42, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    aria-label="Include archived documents"
+                    checked={filters.includeArchived}
+                    onChange={event => updateFilter('includeArchived', event.target.checked)}
+                  />
+                  Include archived documents
+                </span>
+              </label>
+            )}
           </div>
         </div>
 

@@ -8,7 +8,7 @@ localStorage.setItem('lexflowSession', JSON.stringify({ token: 'mock-token', use
 const root = createRoot(document.getElementById('root'));
 
 window.__matterNotices = [];
-window.renderMatterDocuments = ({ matterId, canManage, clientMode }) => {
+window.renderMatterDocuments = ({ matterId, canManage, clientMode, focusTarget = null }) => {
   root.render(React.createElement(
     React.Fragment,
     null,
@@ -18,6 +18,7 @@ window.renderMatterDocuments = ({ matterId, canManage, clientMode }) => {
       matterId,
       canManage,
       clientMode,
+      focusTarget,
       notify: notice => window.__matterNotices.push(notice),
       onChooseAction: () => {},
       onOpenDocumentStudio: () => {},

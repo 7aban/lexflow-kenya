@@ -41,6 +41,7 @@ async function installMockApi(page, overrides = {}) {
     documentUpdates: [],
     downloads: [],
     archivedFolderLists: 0,
+    archivedDocumentLists: 0,
   };
   const unexpected = [];
 
@@ -86,6 +87,7 @@ async function installMockApi(page, overrides = {}) {
     }
 
     if (method === 'GET' && /^\/api\/matters\/[^/]+\/documents$/.test(path)) {
+      if (url.searchParams.get('status') === 'archived') calls.archivedDocumentLists += 1;
       await fulfillJson(route, 200, url.searchParams.get('status') === 'archived' ? state.archivedDocuments : state.activeDocuments);
       return;
     }
@@ -156,6 +158,7 @@ async function mountMatterDocuments(page, props = {}) {
     matterId: props.matterId || 'MAT-NESTED',
     canManage: props.canManage ?? true,
     clientMode: props.clientMode ?? false,
+    focusTarget: props.focusTarget ?? null,
   });
   await expect(page.getByRole('heading', { name: 'Folders', exact: true })).toBeVisible();
 }
@@ -386,6 +389,57 @@ test.describe('LOCAL-PILOT-NESTED-FOLDER-UI-89', () => {
     await expect(page.getByText('Upload to Client Uploads', { exact: true })).toBeVisible();
     await expect(page.locator('select[aria-label^="Move "]')).toHaveCount(0);
     expect(calls.archivedFolderLists).toBe(0);
+    expect(calls.archivedDocumentLists).toBe(0);
+    expect(unexpected).toEqual([]);
+  });
+
+  test('PHASE-2 focuses active folder ancestry and safely falls back for stale, archived, or inaccessible targets', async ({ page }) => {
+    const { unexpected } = await installMockApi(page, {
+      archivedDocuments: [
+        { id: 'DOC-ARCHIVED', displayName: 'Archived pleading.pdf', name: 'archived-pleading.pdf', mimeType: 'application/pdf', folderId: 'F-GRAND', folderName: 'Evidence', date: '2026-07-01', size: '9 KB', source: 'firm', deletedAt: '2026-07-12T10:00:00.000Z' },
+      ],
+    });
+    await mountMatterDocuments(page, {
+      focusTarget: { folderId: 'F-GRAND', documentId: 'DOC-GRAND', ts: 1 },
+    });
+
+    await expect(treeItem(page, 'F-ROOT')).toHaveAttribute('aria-expanded', 'true');
+    await expect(treeItem(page, 'F-CHILD')).toHaveAttribute('aria-expanded', 'true');
+    await expect(treeItem(page, 'F-GRAND')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('[data-document-id="DOC-GRAND"]')).toHaveAttribute('data-document-focused', 'true');
+    await expect(page.locator('[data-document-focus-status="focused"]')).toContainText('Focused Grand evidence.pdf in Case Files / 2026 / Evidence.');
+    await expect(page.getByText('Other letter.pdf', { exact: true })).toHaveCount(0);
+
+    await page.evaluate(() => window.renderMatterDocuments({
+      matterId: 'MAT-NESTED',
+      canManage: true,
+      clientMode: false,
+      focusTarget: { folderId: 'F-OTHER', documentId: 'DOC-GRAND', ts: 2 },
+    }));
+    await expect(virtualFolderButton(page, 'All Documents')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('[data-document-focus-status="fallback"]')).toContainText('archived, unavailable, or stale');
+    await expect(page.locator('[data-document-id="DOC-GRAND"]')).toHaveAttribute('data-document-focused', 'true');
+    await expect(page.getByText('Other letter.pdf', { exact: true })).toBeVisible();
+
+    await page.evaluate(() => window.renderMatterDocuments({
+      matterId: 'MAT-NESTED',
+      canManage: true,
+      clientMode: false,
+      focusTarget: { folderId: 'F-GRAND', documentId: 'DOC-ARCHIVED', ts: 3 },
+    }));
+    await expect(virtualFolderButton(page, 'All Documents')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('[data-document-focus-status="fallback"]')).toContainText('requested document is archived');
+    await expect(page.locator('[data-document-focused="true"]')).toHaveCount(0);
+
+    await page.evaluate(() => window.renderMatterDocuments({
+      matterId: 'MAT-NESTED',
+      canManage: true,
+      clientMode: false,
+      focusTarget: { folderId: 'F-NOT-RETURNED', documentId: 'DOC-NOT-ACCESSIBLE', ts: 4 },
+    }));
+    await expect(virtualFolderButton(page, 'All Documents')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('[data-document-focus-status="fallback"]')).toContainText('unavailable or no longer accessible');
+    await expect(treeItem(page, 'F-ARCHIVED-LEAK')).toHaveCount(0);
     expect(unexpected).toEqual([]);
   });
 

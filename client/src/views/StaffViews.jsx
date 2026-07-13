@@ -3556,6 +3556,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
                           notify={notify}
                           onChooseAction={chooseDocumentWorkspaceAction}
                           onOpenDocumentStudio={openDocumentStudio}
+                          focusTarget={focus?.matterId === detail.id && focus?.section === 'documents' ? focus : null}
                         />
                       </div>
                     </Sub>

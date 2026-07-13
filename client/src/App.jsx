@@ -94,6 +94,7 @@ const validMatterSections = new Set(['overview', 'tasks', 'court-diary', 'docume
 
 function readHashParts(hash = window.location.hash) {
   return String(hash || '')
+    .split('?')[0]
     .replace(/^#\/?/, '')
     .split('/')
     .filter(Boolean)
@@ -101,6 +102,11 @@ function readHashParts(hash = window.location.hash) {
       try { return decodeURIComponent(part); }
       catch { return part; }
     });
+}
+
+function readHashSearch(hash = window.location.hash) {
+  const query = String(hash || '').split('?').slice(1).join('?');
+  return new URLSearchParams(query);
 }
 
 function replaceHash(hash) {
@@ -124,13 +130,21 @@ function staffHashFor(view, options = {}) {
   if (clientId) return `#/staff/matters/client/${clientId}${options.mode === 'create' ? '/create' : ''}`;
   const matterId = options.matterId ? encodeURIComponent(options.matterId) : '';
   const section = options.section && validMatterSections.has(options.section) ? encodeURIComponent(options.section) : '';
-  if (matterId && section) return `#/staff/matters/${matterId}/${section}`;
+  if (matterId && section) {
+    const base = `#/staff/matters/${matterId}/${section}`;
+    if (options.section !== 'documents') return base;
+    const focus = new URLSearchParams();
+    if (options.folderId) focus.set('folderId', String(options.folderId));
+    if (options.documentId) focus.set('documentId', String(options.documentId));
+    return focus.size ? `${base}?${focus.toString()}` : base;
+  }
   if (matterId) return `#/staff/matters/${matterId}`;
   return '#/staff/matters';
 }
 
 function parseStaffRoute(hash = window.location.hash) {
   const [area, slug, matterId, section, action] = readHashParts(hash);
+  const focus = readHashSearch(hash);
   if (area !== 'staff') return null;
   if (slug === 'matters') {
     if (matterId === 'client' && section) {
@@ -140,10 +154,13 @@ function parseStaffRoute(hash = window.location.hash) {
         mode: action === 'create' ? 'create' : 'view',
       };
     }
+    const safeSection = validMatterSections.has(section) ? section : '';
     return {
       view: 'Matters',
       matterId: matterId || '',
-      section: validMatterSections.has(section) ? section : '',
+      section: safeSection,
+      folderId: safeSection === 'documents' ? String(focus.get('folderId') || '').slice(0, 180) : '',
+      documentId: safeSection === 'documents' ? String(focus.get('documentId') || '').slice(0, 180) : '',
     };
   }
   const view = staffSlugViews[slug || 'dashboard'];
@@ -378,7 +395,7 @@ export default function App() {
     const safeView = visibleViewSet.has(nextView) ? nextView : 'Dashboard';
     setView(safeView);
     if (safeView === 'Matters' && (options.matterId || options.section || options.clientId)) {
-      setMatterFocus({ matterId: options.matterId || '', section: options.section || '', clientId: options.clientId || '', mode: options.mode || '', ts: Date.now() });
+      setMatterFocus({ matterId: options.matterId || '', section: options.section || '', clientId: options.clientId || '', mode: options.mode || '', folderId: options.folderId || '', documentId: options.documentId || '', ts: Date.now() });
     }
     if (safeView === 'Clients' && options.clientId) setClientFocus({ clientId: options.clientId, ts: Date.now() });
     if (safeView === 'Tasks' && options.taskId) setTaskFocus({ taskId: options.taskId, ts: Date.now() });
@@ -396,7 +413,7 @@ export default function App() {
     const safeView = visibleViewSet.has(route.view) ? route.view : 'Dashboard';
     setView(safeView);
     if (safeView === 'Matters') {
-      setMatterFocus({ matterId: route.matterId || '', section: route.section || '', clientId: route.clientId || '', mode: route.mode || '', ts: Date.now() });
+      setMatterFocus({ matterId: route.matterId || '', section: route.section || '', clientId: route.clientId || '', mode: route.mode || '', folderId: route.folderId || '', documentId: route.documentId || '', ts: Date.now() });
     }
     if (replace || route.replace || safeView !== route.view) {
       setAppHash(staffHashFor(safeView, safeView === 'Matters' ? route : {}), { replace: true });
@@ -756,7 +773,7 @@ export default function App() {
     Matters: 'Matter pipeline, billing, documents, notes and invoice actions.',
     Tasks: 'Track pending and completed work across matters — add tasks, mark them done, and log time as you go.',
     Deadlines: 'Track court appearances, limitation dates, filing dates, and urgent action items.',
-    Documents: 'Search and review active matter documents across the work you can access.',
+    Documents: 'Search and review accessible matter documents in a read-only workspace.',
     Communications: 'Client messages, secure attachments and portal activity in one inbox.',
     Invoices: 'Receivables, invoice status and PDF export for client billing.',
     Reports: 'Review billing, collections, matter activity, and workload trends.',
@@ -923,7 +940,7 @@ export default function App() {
             {(!loading || bootstrapped) && view === 'Matters' && <Matters data={data} canManage={canManage} reload={refresh} notify={setToast} focus={matterFocus} onNavigate={navigateToView} onMatterSelected={matterId => navigateToView('Matters', { matterId })} onMatterSectionChange={(matterId, section) => navigateToView('Matters', { matterId, section })} onMatterOpened={async matterId => { setNotifications(current => current.filter(item => item.matterId !== matterId)); try { await markNotificationsRead({ matterId }); } catch {} }} />}
             {(!loading || bootstrapped) && view === 'Tasks' && <Tasks data={data} canManage={canManage} reload={refresh} notify={setToast} focus={taskFocus} />}
             {(!loading || bootstrapped) && view === 'Deadlines' && <DeadlineCenter data={data} canManage={canManage} notify={setToast} focus={appearanceFocus} />}
-            {(!loading || bootstrapped) && view === 'Documents' && <DocumentsExplorer matters={data.matters} clients={data.clients} notify={setToast} onOpenMatter={matterId => navigateToView('Matters', { matterId, section: 'documents' })} />}
+            {(!loading || bootstrapped) && view === 'Documents' && <DocumentsExplorer notify={setToast} allowArchived={isAdmin || user?.role === 'advocate'} onOpenMatter={(matterId, documentFocus = {}) => navigateToView('Matters', { matterId, section: 'documents', ...documentFocus })} />}
             {(!loading || bootstrapped) && view === 'Communications' && <Communications clients={data.clients} matters={data.matters} focus={communicationFocus} notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Invoices' && <Invoices invoices={data.invoices} isAdmin={isAdmin} canManage={canManage} reload={refresh} notify={setToast} />}
             {(!loading || bootstrapped) && view === 'Performance' && isAdmin && <AdvocatePerformance notify={setToast} />}

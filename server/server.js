@@ -9334,7 +9334,7 @@ app.delete('/api/folders/:id', requireAdvocateOrAdmin, async (req, res) => {
 app.get('/api/matters/:id/documents', async (req, res) => {
   if (!(await canAccessMatter(req, req.params.id))) return res.status(403).json({ error: 'Matter access denied' });
   const archived = String(req.query.status || '').toLowerCase() === 'archived';
-  if (archived && req.user.role === 'client') return res.status(403).json({ error: 'Archived document access denied' });
+  if (archived && !['admin', 'advocate'].includes(req.user.role)) return res.status(403).json({ error: 'Archived document access denied' });
   const folderId = req.query.folderId || '';
   const params = [req.params.id];
   let where = `d.matterId=? AND d.deletedAt IS ${archived ? 'NOT ' : ''}NULL`;
@@ -12314,7 +12314,8 @@ app.get('/api/documents', requireStaff, async (req, res) => {
     res.json(await documentExplorer.list(req, req.query));
   } catch (err) {
     if (err instanceof DocumentExplorerError || err?.statusCode === 400) {
-      return res.status(400).json({ error: err.message || 'Invalid document query' });
+      const statusCode = Number(err?.statusCode) === 403 ? 403 : 400;
+      return res.status(statusCode).json({ error: err.message || 'Invalid document query' });
     }
     return res.status(500).json({ error: 'Unable to load documents' });
   }

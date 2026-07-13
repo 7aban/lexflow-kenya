@@ -90,6 +90,15 @@ const firmSettings = {
 
 const tinyPdf = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF');
 
+const filterOptions = {
+  clients,
+  matters,
+  types: [{ value: 'pdf', label: 'PDF' }, { value: 'image', label: 'Image' }],
+  sources: [{ value: 'firm', label: 'Firm' }, { value: 'client', label: 'Client' }, { value: 'generated', label: 'Generated' }],
+  origins: [{ value: 'firm', label: 'Firm upload' }, { value: 'client', label: 'Client upload' }, { value: 'generated', label: 'Generated' }],
+  visibilities: [{ value: 'internal', label: 'Internal' }, { value: 'client', label: 'Client visible' }],
+};
+
 function documentMatches(document, url) {
   const query = (url.searchParams.get('q') || '').toLowerCase();
   const haystack = [
@@ -133,15 +142,17 @@ async function installMockWorkspace(page) {
       documentCalls.push({ method, search: url.search, params: Object.fromEntries(url.searchParams) });
       const matching = documents.filter(document => documentMatches(document, url));
       if (url.searchParams.get('cursor') === 'cursor-page-2') {
-        return json({ items: matching.slice(2), limit: 25, sort: url.searchParams.get('sort') || 'date_desc', hasMore: false, nextCursor: null });
+        return json({ items: matching.slice(2), limit: 25, sort: url.searchParams.get('sort') || 'date_desc', status: 'active', hasMore: false, nextCursor: null, filterOptions });
       }
       const paginated = matching.length === documents.length;
       return json({
         items: paginated ? matching.slice(0, 2) : matching,
         limit: 25,
         sort: url.searchParams.get('sort') || 'date_desc',
+        status: 'active',
         hasMore: paginated,
         nextCursor: paginated ? 'cursor-page-2' : null,
+        filterOptions,
       });
     }
 
@@ -188,6 +199,7 @@ test.describe('LOCAL-PILOT-GLOBAL-DOCUMENTS-EXPLORER-92 UI', () => {
     await expect(table.locator('tbody tr')).toHaveCount(2);
     await expect(page.locator('[data-document-id="DOC-1"]')).toContainText('Case Files / Evidence');
     await expect(page.getByText('Read only', { exact: true })).toBeVisible();
+    await expect(page.getByLabel('Include archived documents')).toHaveCount(0);
 
     await page.locator('[data-document-id="DOC-1"]').getByRole('button', { name: 'Preview', exact: true }).click();
     const preview = page.getByRole('dialog', { name: 'chronology.pdf' });
@@ -222,7 +234,7 @@ test.describe('LOCAL-PILOT-GLOBAL-DOCUMENTS-EXPLORER-92 UI', () => {
     expect(documentCalls.every(call => call.method === 'GET')).toBe(true);
 
     await page.locator('[data-document-id="DOC-1"]').getByRole('button', { name: 'Open matter', exact: true }).click();
-    await expect(page).toHaveURL(/#\/staff\/matters\/MATTER-1\/documents$/);
+    await expect(page).toHaveURL(/#\/staff\/matters\/MATTER-1\/documents\?folderId=FOLDER-EVIDENCE&documentId=DOC-1$/);
   });
 
   test('390px renders accessible document cards without horizontal overflow', async ({ page }) => {

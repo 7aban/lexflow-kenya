@@ -318,7 +318,7 @@ function filterDocumentsBySearch(documents, documentSearch, clientMode) {
   ].some(value => String(value || '').toLowerCase().includes(query)));
 }
 
-export default function MatterDocuments({ matterId, clientMode = false, canManage = false, notify, onChooseAction, onOpenDocumentStudio }) {
+export default function MatterDocuments({ matterId, clientMode = false, canManage = false, notify, onChooseAction, onOpenDocumentStudio, focusTarget = null }) {
   const [folders, setFolders] = useState([]);
   const [archivedFolders, setArchivedFolders] = useState([]);
   const [archivedFoldersOpen, setArchivedFoldersOpen] = useState(false);
@@ -331,6 +331,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const [folderMutationError, setFolderMutationError] = useState(null);
   const [activeDocuments, setActiveDocuments] = useState([]);
   const [archivedDocuments, setArchivedDocuments] = useState([]);
+  const [loadedMatterId, setLoadedMatterId] = useState('');
   const [selectedFolder, setSelectedFolder] = useState('all');
   const [newFolderName, setNewFolderName] = useState('');
   const [newFolderParentId, setNewFolderParentId] = useState('');
@@ -375,6 +376,8 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const [folderDropTarget, setFolderDropTarget] = useState({ key: '', status: '', reason: '' });
   const [folderMovePendingId, setFolderMovePendingId] = useState('');
   const [folderDragFeedback, setFolderDragFeedback] = useState(null);
+  const [focusedDocumentId, setFocusedDocumentId] = useState('');
+  const [focusAnnouncement, setFocusAnnouncement] = useState(null);
   const previewUrlRef = useRef('');
   const previewRequestRef = useRef(0);
   const archivedFoldersRequestRef = useRef(0);
@@ -389,6 +392,8 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const folderDragExpandTimerRef = useRef(null);
   const folderDragExpandTargetRef = useRef('');
   const folderTreeRef = useRef(null);
+  const loadRequestRef = useRef(0);
+  const focusHandledRef = useRef('');
 
   const showGenerateControls = canManage === true && clientMode === false && Boolean(matterId);
   const documents = useMemo(
@@ -397,7 +402,9 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   );
 
   useEffect(() => {
+    setLoadedMatterId('');
     if (matterId) load();
+    else loadRequestRef.current += 1;
   }, [matterId]);
 
   useEffect(() => {
@@ -427,9 +434,13 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     setFolderDragFeedback(null);
     setNewFolderName('');
     setNewFolderParentId('');
+    setSelectedFolder('all');
     setExpandedFolderIds(new Set());
     setTreeFocusId('');
     setMobileBrowseParentId('');
+    setFocusedDocumentId('');
+    setFocusAnnouncement(null);
+    focusHandledRef.current = '';
   }, [matterId, canManage, clientMode]);
 
   useEffect(() => {
@@ -518,16 +529,20 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   }, [moveFolderTarget]);
 
   async function load() {
+    const requestId = loadRequestRef.current + 1;
+    loadRequestRef.current = requestId;
     setLoading(true);
     try {
       const [nextFolders, activeDocs, archivedDocs] = await Promise.all([
         getMatterFolders(matterId),
         getMatterDocuments(matterId, 'all', 'active'),
-        clientMode ? Promise.resolve([]) : getMatterDocuments(matterId, 'all', 'archived'),
+        canManage === true && clientMode === false ? getMatterDocuments(matterId, 'all', 'archived') : Promise.resolve([]),
       ]);
+      if (loadRequestRef.current !== requestId) return undefined;
       setFolders(nextFolders);
       setActiveDocuments(activeDocs);
       setArchivedDocuments(archivedDocs);
+      setLoadedMatterId(matterId);
       const nextVisibleIds = new Set(
         selectedFolder === 'archived'
           ? []
@@ -539,8 +554,12 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       );
       setSelectedDocumentIds(current => current.filter(id => nextVisibleIds.has(String(id))));
       return { folders: nextFolders, activeDocuments: activeDocs, archivedDocuments: archivedDocs };
-    } catch (err) { notify?.({ type: 'danger', message: err.message }); }
-    finally { setLoading(false); }
+    } catch (err) {
+      if (loadRequestRef.current === requestId) notify?.({ type: 'danger', message: err.message });
+      return undefined;
+    } finally {
+      if (loadRequestRef.current === requestId) setLoading(false);
+    }
   }
 
   async function loadArchivedFolders({ force = false } = {}) {
@@ -1554,6 +1573,71 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const mobileLevelFolders = folderHierarchy.childrenByParentId.get(normalizeFolderId(mobileBrowseParentId)) || [];
 
   useEffect(() => {
+    const requestedDocumentId = String(focusTarget?.documentId || '').trim();
+    const requestedFolderId = normalizeFolderId(focusTarget?.folderId);
+    if (loadedMatterId !== matterId || (!requestedDocumentId && !requestedFolderId)) return;
+
+    const focusKey = [matterId, focusTarget?.ts || '', requestedFolderId, requestedDocumentId].join('|');
+    if (focusHandledRef.current === focusKey) return;
+    focusHandledRef.current = focusKey;
+    setDocumentSearch('');
+
+    const activeDocument = requestedDocumentId
+      ? activeDocuments.find(doc => String(doc.id) === requestedDocumentId)
+      : null;
+    const archivedDocument = requestedDocumentId
+      ? archivedDocuments.find(doc => String(doc.id) === requestedDocumentId)
+      : null;
+
+    if (requestedDocumentId && !activeDocument) {
+      const message = archivedDocument
+        ? 'The requested document is archived. Showing All Documents.'
+        : 'The requested document is unavailable or no longer accessible. Showing All Documents.';
+      setSelectedFolder('all');
+      setFocusedDocumentId('');
+      setFocusAnnouncement({ status: 'fallback', message });
+      notify?.({ type: 'warning', message });
+      return;
+    }
+
+    const actualFolderId = activeDocument
+      ? (normalizeFolderId(activeDocument.folderId) || 'uncategorised')
+      : requestedFolderId;
+    const folderMatches = !requestedFolderId || requestedFolderId === actualFolderId;
+    const folderAccessible = actualFolderId === 'uncategorised'
+      || folderHierarchy.folderById.has(actualFolderId);
+
+    if (!folderMatches || !folderAccessible) {
+      const message = 'The requested document location is archived, unavailable, or stale. Showing All Documents.';
+      setSelectedFolder('all');
+      setFocusedDocumentId(activeDocument ? String(activeDocument.id) : '');
+      setFocusAnnouncement({ status: 'fallback', message });
+      notify?.({ type: 'warning', message });
+      return;
+    }
+
+    setSelectedFolder(actualFolderId);
+    setFocusedDocumentId(activeDocument ? String(activeDocument.id) : '');
+    const locationLabel = actualFolderId === 'uncategorised'
+      ? 'Uncategorised'
+      : (folderPathLabel(folderHierarchy, actualFolderId) || 'the requested folder');
+    const message = activeDocument
+      ? `Focused ${documentLabel(activeDocument)} in ${locationLabel}.`
+      : `Opened ${locationLabel}.`;
+    setFocusAnnouncement({ status: 'focused', message });
+  }, [
+    activeDocuments,
+    archivedDocuments,
+    focusTarget?.documentId,
+    focusTarget?.folderId,
+    focusTarget?.ts,
+    folderHierarchy,
+    loadedMatterId,
+    matterId,
+    notify,
+  ]);
+
+  useEffect(() => {
     const allowedVirtual = new Set(virtualFolders.map(folder => String(folder.id)));
     if (!allowedVirtual.has(String(selectedFolder)) && !folderHierarchy.folderById.has(normalizeFolderId(selectedFolder))) {
       setSelectedFolder('all');
@@ -1655,6 +1739,17 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     () => filterDocumentsBySearch(documents, documentSearch, clientMode),
     [documents, documentSearch, clientMode],
   );
+
+  useEffect(() => {
+    if (!focusedDocumentId || !visibleDocuments.some(doc => String(doc.id) === focusedDocumentId)) return undefined;
+    const frame = requestAnimationFrame(() => {
+      const row = Array.from(document.querySelectorAll('[data-document-id]'))
+        .find(node => node.dataset.documentId === focusedDocumentId);
+      row?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+      row?.focus?.({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusedDocumentId, selectedFolder, visibleDocuments]);
 
   const filteredTemplates = useMemo(() => {
     const q = templateSearch.trim().toLowerCase();
@@ -1766,6 +1861,8 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       .lf-doc-breadcrumb [aria-current="page"] { color: #111827; font-weight: 700; overflow-wrap: anywhere; }
       .lf-doc-draggable-row { cursor: grab; }
       .lf-doc-dragging-row { opacity: .58; }
+      .lf-doc-focus-highlight { background: #FFF7E6 !important; box-shadow: inset 4px 0 0 #C5973C, 0 0 0 2px rgba(197,151,60,.22); }
+      .lf-doc-focus-highlight:focus { outline: 2px solid #8A641E; outline-offset: 2px; }
       .lf-doc-explorer { align-items: start; }
       .lf-doc-folder-pane { position: sticky; top: 12px; }
       .lf-doc-file-toolbar { background: #F7F5F0; border: 1px solid #DDD8CE; border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; }
@@ -2142,6 +2239,23 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       </Card></div>}
 
       <Card title={selectedName} hint={documentCardHint}>
+        {focusAnnouncement && (
+          <div
+            role="status"
+            aria-live="polite"
+            data-document-focus-status={focusAnnouncement.status}
+            style={{
+              border: `1px solid ${focusAnnouncement.status === 'fallback' ? '#E4C48C' : '#A8C8B5'}`,
+              borderRadius: 8,
+              background: focusAnnouncement.status === 'fallback' ? '#FFF7E6' : '#EEF7F1',
+              color: focusAnnouncement.status === 'fallback' ? '#744D0B' : '#234936',
+              fontSize: 12,
+              lineHeight: 1.45,
+              marginBottom: 12,
+              padding: '9px 11px',
+            }}
+          >{focusAnnouncement.message}</div>
+        )}
         <div className="lf-doc-file-toolbar">
           <nav className="lf-doc-breadcrumb" aria-label="Folder breadcrumb">
             {selectedBreadcrumb.map((folder, index) => {
@@ -2409,13 +2523,21 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
             rowProps={visibleDocuments.map(doc => {
               const draggable = nativeDragEnabled && showBulkControls && !bulkMoving && !draggedFolderId && !folderMovePendingId;
               const dragging = String(draggedDocumentId) === String(doc.id);
+              const focused = focusedDocumentId === String(doc.id);
+              const rowClasses = [
+                draggable ? 'lf-doc-draggable-row' : '',
+                dragging ? 'lf-doc-dragging-row' : '',
+                focused ? 'lf-doc-focus-highlight' : '',
+              ].filter(Boolean).join(' ');
               return {
                 draggable,
-                className: draggable ? `lf-doc-draggable-row${dragging ? ' lf-doc-dragging-row' : ''}` : undefined,
+                className: rowClasses || undefined,
+                tabIndex: focused ? -1 : undefined,
                 onDragStart: draggable ? event => startDocumentDrag(event, doc) : undefined,
                 onDragEnd: draggable ? clearDocumentDrag : undefined,
                 'data-document-id': String(doc.id),
                 'data-document-draggable': draggable ? 'true' : undefined,
+                'data-document-focused': focused ? 'true' : undefined,
               };
             })}
             empty="No documents."

@@ -82,6 +82,9 @@ describe('LOCAL-PILOT-GLOBAL-DOCUMENTS-EXPLORER-92', () => {
   let archivedLocationDocumentId;
   let hiddenDocumentId;
   let archivedDocumentId;
+  let archivedNestedDocumentId;
+  let tieDocumentOneId;
+  let tieDocumentTwoId;
   let matterlessNoticeDocumentId;
   let matterlessMessageDocumentId;
   let orphanDocumentId;
@@ -216,6 +219,7 @@ describe('LOCAL-PILOT-GLOBAL-DOCUMENTS-EXPLORER-92', () => {
     archivedLocationDocumentId = await uploadDocument({ matterId: assignedMatterId, name: 'historical-record.pdf', folderId: archivedChildId });
     hiddenDocumentId = await uploadDocument({ matterId: hiddenMatterId, name: 'zzzz-hidden-strategy.pdf', folderId: hiddenFolderId });
     archivedDocumentId = await uploadDocument({ matterId: assignedMatterId, name: 'archived-document.pdf' });
+    archivedNestedDocumentId = await uploadDocument({ matterId: assignedMatterId, name: 'archived-nested-document.pdf', folderId: archivedChildId });
     clientUploadDocumentId = await uploadDocument({ matterId: assignedMatterId, name: 'client-upload.pdf', token: clientUser.token });
 
     const archiveFolder = await request(app)
@@ -227,6 +231,10 @@ describe('LOCAL-PILOT-GLOBAL-DOCUMENTS-EXPLORER-92', () => {
       .delete(`/api/documents/${archivedDocumentId}`)
       .set(auth(admin.token));
     expect(archiveDocument.statusCode).toBe(200);
+    const archiveNestedDocument = await request(app)
+      .delete(`/api/documents/${archivedNestedDocumentId}`)
+      .set(auth(admin.token));
+    expect(archiveNestedDocument.statusCode).toBe(200);
 
     await dbRun(`UPDATE documents SET date=CASE id
       WHEN ? THEN '2026-07-10'
@@ -246,8 +254,13 @@ describe('LOCAL-PILOT-GLOBAL-DOCUMENTS-EXPLORER-92', () => {
       archivedDocumentId,
     ]);
     await dbRun(`UPDATE documents
-      SET source='generated',templateName='Opinion Template',generatedBy='Explorer Admin',generatedAt='2026-07-08T12:00:00.000Z',version=2
+      SET source='generated',type='Word',mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document',templateName='Opinion Template',generatedBy='Explorer Admin',generatedAt='2026-07-08T12:00:00.000Z',version=2
       WHERE id=?`, [generatedDocumentId]);
+
+    tieDocumentOneId = `DOC-TIE-A-${suffix}`;
+    tieDocumentTwoId = `DOC-TIE-B-${suffix}`;
+    await insertDocument({ id: tieDocumentOneId, matterId: assignedMatterId, name: 'same-name.pdf', uploadedBy: admin.user.id, date: '2026-07-02' });
+    await insertDocument({ id: tieDocumentTwoId, matterId: assignedMatterId, name: 'same-name.pdf', uploadedBy: admin.user.id, date: '2026-07-02' });
 
     const conversationId = `CONV-EXPLORER-${suffix}`;
     const messageId = `MSG-EXPLORER-${suffix}`;
@@ -379,6 +392,151 @@ describe('LOCAL-PILOT-GLOBAL-DOCUMENTS-EXPLORER-92', () => {
     expect(tamperedCursor.body).toEqual({ error: 'Invalid cursor' });
   });
 
+  test('returns count-free filter options from the same document and role scope', async () => {
+    const assignedOptions = await request(app)
+      .get('/api/documents?limit=1')
+      .set(auth(advocateOne.token));
+    expect(assignedOptions.statusCode).toBe(200);
+    expect(assignedOptions.body.filterOptions.clients).toEqual([
+      expect.objectContaining({ id: assignedClientId }),
+    ]);
+    expect(assignedOptions.body.filterOptions.matters).toEqual([
+      expect.objectContaining({ id: assignedMatterId, clientId: assignedClientId }),
+    ]);
+    expect(assignedOptions.body.filterOptions.types).toEqual(expect.arrayContaining([
+      { value: 'pdf', label: 'PDF' },
+      { value: 'word', label: 'Word' },
+    ]));
+    expect(assignedOptions.body.filterOptions.origins).toEqual(expect.arrayContaining([
+      { value: 'firm', label: 'Firm upload' },
+      { value: 'client', label: 'Client upload' },
+      { value: 'generated', label: 'Generated' },
+      { value: 'message', label: 'Message attachment' },
+    ]));
+    const assignedMetadata = JSON.stringify(assignedOptions.body.filterOptions);
+    expect(assignedMetadata).not.toContain(hiddenMatterId);
+    expect(assignedMetadata).not.toContain(hiddenClientId);
+    expect(assignedMetadata).not.toContain('Hidden Explorer');
+    expect(assignedMetadata).not.toContain(hiddenFolderId);
+    expect(assignedOptions.body.filterOptions).not.toHaveProperty('folders');
+    expect(assignedOptions.body.filterOptions).not.toHaveProperty('counts');
+
+    const hiddenOptions = await request(app)
+      .get('/api/documents?limit=1')
+      .set(auth(advocateTwo.token));
+    expect(hiddenOptions.statusCode).toBe(200);
+    expect(hiddenOptions.body.filterOptions.clients.map(option => option.id)).toEqual([hiddenClientId]);
+    expect(hiddenOptions.body.filterOptions.matters.map(option => option.id)).toEqual([hiddenMatterId]);
+    expect(JSON.stringify(hiddenOptions.body.filterOptions)).not.toContain(assignedMatterId);
+
+    const assistantOptions = await request(app)
+      .get('/api/documents?limit=1')
+      .set(auth(assistant.token));
+    expect(assistantOptions.statusCode).toBe(200);
+    expect(assistantOptions.body.filterOptions.clients.map(option => option.id)).toEqual(expect.arrayContaining([assignedClientId, hiddenClientId]));
+    expect(assistantOptions.body.filterOptions.matters.map(option => option.id)).toEqual(expect.arrayContaining([assignedMatterId, hiddenMatterId]));
+    expect(JSON.stringify(assistantOptions.body.filterOptions)).not.toContain('Old Evidence');
+    expect(JSON.stringify(assistantOptions.body.filterOptions)).not.toContain(archivedChildId);
+  });
+
+  test('applies client, matter, type, source, origin, and visibility filters within scope', async () => {
+    const byClient = await request(app)
+      .get(`/api/documents?clientId=${encodeURIComponent(assignedClientId)}&limit=100`)
+      .set(auth(admin.token));
+    expect(byClient.statusCode).toBe(200);
+    expect(byClient.body.items.length).toBeGreaterThan(0);
+    expect(byClient.body.items.every(item => item.client?.id === assignedClientId)).toBe(true);
+    expect(byClient.body.items.map(item => item.id)).not.toContain(hiddenDocumentId);
+
+    const byMatter = await request(app)
+      .get(`/api/documents?matterId=${encodeURIComponent(assignedMatterId)}&limit=100`)
+      .set(auth(admin.token));
+    expect(byMatter.statusCode).toBe(200);
+    expect(byMatter.body.items.every(item => item.matter.id === assignedMatterId)).toBe(true);
+
+    const byType = await request(app).get('/api/documents?type=word&limit=100').set(auth(admin.token));
+    expect(byType.statusCode).toBe(200);
+    expect(byType.body.items.map(item => item.id)).toEqual([generatedDocumentId]);
+
+    const bySource = await request(app).get('/api/documents?source=generated&limit=100').set(auth(admin.token));
+    expect(bySource.statusCode).toBe(200);
+    expect(bySource.body.items.map(item => item.id)).toEqual([generatedDocumentId]);
+
+    const byOrigin = await request(app).get('/api/documents?origin=message&limit=100').set(auth(admin.token));
+    expect(byOrigin.statusCode).toBe(200);
+    expect(byOrigin.body.items.map(item => item.id)).toEqual([messageDocumentId]);
+
+    const clientVisible = await request(app).get('/api/documents?visibility=client&limit=100').set(auth(admin.token));
+    expect(clientVisible.statusCode).toBe(200);
+    expect(clientVisible.body.items.map(item => item.id)).toEqual(expect.arrayContaining([sharedDocumentId, clientUploadDocumentId, messageDocumentId]));
+    expect(clientVisible.body.items.every(item => item.visibility === 'client')).toBe(true);
+
+    const internal = await request(app).get('/api/documents?visibility=internal&limit=100').set(auth(admin.token));
+    expect(internal.statusCode).toBe(200);
+    expect(internal.body.items.every(item => item.visibility === 'internal')).toBe(true);
+  });
+
+  test('allows archived opt-in only for admins and assigned advocates without enabling file access', async () => {
+    const adminArchived = await request(app)
+      .get('/api/documents?status=archived&limit=100')
+      .set(auth(admin.token));
+    expect(adminArchived.statusCode).toBe(200);
+    expect(adminArchived.body.status).toBe('archived');
+    expect(adminArchived.body.items.map(item => item.id)).toEqual(expect.arrayContaining([archivedDocumentId, archivedNestedDocumentId]));
+    expect(adminArchived.body.items.every(item => item.archived && item.archivedAt)).toBe(true);
+    const nestedArchived = adminArchived.body.items.find(item => item.id === archivedNestedDocumentId);
+    expect(nestedArchived).toMatchObject({
+      folder: { id: archivedChildId, name: 'Old Evidence', archived: true },
+      folderPathLabel: 'Closed Cabinet / Old Evidence',
+      location: { status: 'archived', folderArchived: true, pathIncomplete: false },
+    });
+
+    const adminAll = await request(app).get('/api/documents?status=all&limit=100').set(auth(admin.token));
+    expect(adminAll.statusCode).toBe(200);
+    expect(adminAll.body.items.map(item => item.id)).toEqual(expect.arrayContaining([nestedDocumentId, archivedDocumentId, archivedNestedDocumentId]));
+    expect(adminAll.body.filterOptions.matters.map(option => option.id)).toEqual(expect.arrayContaining([assignedMatterId, hiddenMatterId]));
+
+    const assignedAdvocateArchived = await request(app)
+      .get('/api/documents?status=archived&limit=100')
+      .set(auth(advocateOne.token));
+    expect(assignedAdvocateArchived.statusCode).toBe(200);
+    expect(assignedAdvocateArchived.body.items.map(item => item.id)).toEqual(expect.arrayContaining([archivedDocumentId, archivedNestedDocumentId]));
+    expect(assignedAdvocateArchived.body.items.every(item => item.matter.id === assignedMatterId)).toBe(true);
+
+    const unassignedAdvocateArchived = await request(app)
+      .get('/api/documents?status=archived&limit=100')
+      .set(auth(advocateTwo.token));
+    expect(unassignedAdvocateArchived.statusCode).toBe(200);
+    expect(unassignedAdvocateArchived.body.items).toEqual([]);
+    expect(unassignedAdvocateArchived.body.filterOptions.matters).toEqual([]);
+
+    for (const status of ['archived', 'all']) {
+      const assistantDenied = await request(app)
+        .get(`/api/documents?status=${status}`)
+        .set(auth(assistant.token));
+      expect(assistantDenied.statusCode).toBe(403);
+      expect(assistantDenied.body).toEqual({ error: 'Archived document access denied' });
+    }
+
+    const assistantMatterDenied = await request(app)
+      .get(`/api/matters/${assignedMatterId}/documents?status=archived`)
+      .set(auth(assistant.token));
+    expect(assistantMatterDenied.statusCode).toBe(403);
+
+    const clientMatterDenied = await request(app)
+      .get(`/api/matters/${assignedMatterId}/documents?status=archived`)
+      .set(auth(clientUser.token));
+    expect(clientMatterDenied.statusCode).toBe(403);
+
+    for (const token of [admin.token, advocateOne.token]) {
+      const archivedDownload = await request(app)
+        .get(`/api/documents/${archivedDocumentId}/download`)
+        .set(auth(token));
+      expect(archivedDownload.statusCode).toBe(404);
+      expect(archivedDownload.body).toEqual({ error: 'Document not found' });
+    }
+  });
+
   test('reconstructs nested paths, classifies origin and visibility, and redacts archived locations for assistants', async () => {
     const nestedSearch = await request(app)
       .get('/api/documents?q=Case%20Files&limit=100')
@@ -445,6 +603,9 @@ describe('LOCAL-PILOT-GLOBAL-DOCUMENTS-EXPLORER-92', () => {
     expect(complete.statusCode).toBe(200);
     const expectedIds = complete.body.items.map(item => item.id);
     expect(expectedIds.length).toBeGreaterThan(3);
+    expect(expectedIds.filter(id => [tieDocumentOneId, tieDocumentTwoId].includes(id))).toEqual(
+      [tieDocumentOneId, tieDocumentTwoId].sort(),
+    );
 
     const pagedIds = [];
     let cursor = '';
@@ -465,6 +626,15 @@ describe('LOCAL-PILOT-GLOBAL-DOCUMENTS-EXPLORER-92', () => {
     expect(pagedIds).toEqual(expectedIds);
     expect(new Set(pagedIds).size).toBe(pagedIds.length);
 
+    const activeCursor = (await request(app)
+      .get('/api/documents?sort=name_asc&limit=1&status=active')
+      .set(auth(admin.token))).body.nextCursor;
+    const cursorAcrossStatus = await request(app)
+      .get(`/api/documents?sort=name_asc&limit=1&status=all&cursor=${encodeURIComponent(activeCursor)}`)
+      .set(auth(admin.token));
+    expect(cursorAcrossStatus.statusCode).toBe(400);
+    expect(cursorAcrossStatus.body).toEqual({ error: 'Invalid cursor' });
+
     const bounded = await request(app).get('/api/documents?limit=999').set(auth(admin.token));
     expect(bounded.statusCode).toBe(200);
     expect(bounded.body.limit).toBe(100);
@@ -475,7 +645,7 @@ describe('LOCAL-PILOT-GLOBAL-DOCUMENTS-EXPLORER-92', () => {
       'source=unknown',
       'origin=unknown',
       'visibility=everyone',
-      'status=archived',
+      'status=deleted',
       'limit=not-a-number',
     ]) {
       const response = await request(app).get(`/api/documents?${query}`).set(auth(admin.token));
