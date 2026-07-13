@@ -243,6 +243,8 @@ test.describe('LOCAL-PILOT-GLOBAL-DOCUMENT-ACTIONS-94 UI', () => {
     const state = await openExplorer(page);
     await page.getByLabel('Filter by client').selectOption(client.id);
     await page.getByLabel('Sort documents').selectOption('name_desc');
+    await page.getByRole('button', { name: 'Load more', exact: true }).click();
+    await expect(page.locator('[data-document-id="DOC-1"]')).toBeVisible();
     state.failNextMutationFor = 'DOC-1';
 
     const row = page.locator('[data-document-id="DOC-1"]');

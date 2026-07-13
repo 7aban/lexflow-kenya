@@ -916,9 +916,15 @@ export function StyleTag() { return <style>{`
     #root .lf-dash-panel-head { padding: 12px 14px; }
     #root .lf-dash-pipeline-row { padding: 9px 14px; }
   }
-  /* LOCAL-PILOT-GLOBAL-DOCUMENTS-EXPLORER-92 / GLOBAL-DOCUMENT-ACTIONS-94 */
+  /* LOCAL-PILOT-GLOBAL-DOCUMENTS-EXPLORER-92 / GLOBAL-DOCUMENT-ACTIONS-94 / GLOBAL-DOCUMENT-BULK-LIFECYCLE-95 */
   #root .lf-global-documents-cards table { min-width: 1080px; }
+  #root .lf-global-documents-selectable table { min-width: 1140px; }
   #root .lf-global-document-actions button:disabled { cursor: not-allowed; opacity: .55; }
+  #root .lf-global-document-selection-control { border-radius: 7px; }
+  #root .lf-global-document-selection-control:focus-within { outline: 2px solid rgba(197,151,60,.35); outline-offset: 1px; }
+  #root .lf-global-document-select-checkbox { width: 18px; height: 18px; min-width: 18px !important; min-height: 18px !important; padding: 0 !important; margin: 0; accent-color: var(--lf-primary, #1A3628); cursor: pointer; }
+  #root .lf-global-document-select-checkbox:disabled { cursor: not-allowed; }
+  #root .lf-global-documents-selectable tr[data-document-selected="true"] td { background: color-mix(in srgb, var(--lf-accent, #C5973C) 10%, var(--lf-card, #fff)); }
   @media (max-width: 900px) {
     #root .lf-global-documents-filter-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)) !important; }
   }
@@ -939,14 +945,26 @@ export function StyleTag() { return <style>{`
     #root .lf-global-documents-cards tbody td > * { min-width: 0 !important; max-width: 100% !important; }
     #root .lf-global-documents-cards tbody tr:hover td { background: transparent !important; }
     #root .lf-global-documents-cards tbody td::before { min-width: 0; color: var(--lf-card-muted, var(--lf-text-muted, #6B7280)); font-size: 10px; font-weight: 800; letter-spacing: .7px; text-transform: uppercase; }
-    #root .lf-global-documents-cards td:nth-child(1)::before { content: "Document"; }
-    #root .lf-global-documents-cards td:nth-child(2)::before { content: "Matter"; }
-    #root .lf-global-documents-cards td:nth-child(3)::before { content: "Client"; }
-    #root .lf-global-documents-cards td:nth-child(4)::before { content: "Folder"; }
-    #root .lf-global-documents-cards td:nth-child(5)::before { content: "Date"; }
-    #root .lf-global-documents-cards td:nth-child(6)::before { content: "Origin"; }
-    #root .lf-global-documents-cards td:nth-child(7)::before { content: "Visibility"; }
-    #root .lf-global-documents-cards td:nth-child(8)::before { content: "Actions"; }
+    #root .lf-global-documents-cards:not(.lf-global-documents-selectable) td:nth-child(1)::before { content: "Document"; }
+    #root .lf-global-documents-cards:not(.lf-global-documents-selectable) td:nth-child(2)::before { content: "Matter"; }
+    #root .lf-global-documents-cards:not(.lf-global-documents-selectable) td:nth-child(3)::before { content: "Client"; }
+    #root .lf-global-documents-cards:not(.lf-global-documents-selectable) td:nth-child(4)::before { content: "Folder"; }
+    #root .lf-global-documents-cards:not(.lf-global-documents-selectable) td:nth-child(5)::before { content: "Date"; }
+    #root .lf-global-documents-cards:not(.lf-global-documents-selectable) td:nth-child(6)::before { content: "Origin"; }
+    #root .lf-global-documents-cards:not(.lf-global-documents-selectable) td:nth-child(7)::before { content: "Visibility"; }
+    #root .lf-global-documents-cards:not(.lf-global-documents-selectable) td:nth-child(8)::before { content: "Actions"; }
+    #root .lf-global-documents-selectable td:nth-child(1)::before { content: "Select"; }
+    #root .lf-global-documents-selectable td:nth-child(2)::before { content: "Document"; }
+    #root .lf-global-documents-selectable td:nth-child(3)::before { content: "Matter"; }
+    #root .lf-global-documents-selectable td:nth-child(4)::before { content: "Client"; }
+    #root .lf-global-documents-selectable td:nth-child(5)::before { content: "Folder"; }
+    #root .lf-global-documents-selectable td:nth-child(6)::before { content: "Date"; }
+    #root .lf-global-documents-selectable td:nth-child(7)::before { content: "Origin"; }
+    #root .lf-global-documents-selectable td:nth-child(8)::before { content: "Visibility"; }
+    #root .lf-global-documents-selectable td:nth-child(9)::before { content: "Actions"; }
+    #root .lf-global-documents-selectable tbody tr[data-document-selected="true"] { border-color: color-mix(in srgb, var(--lf-accent, #C5973C) 72%, var(--lf-card-border, #DDD8CE)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--lf-accent, #C5973C) 26%, transparent); }
+    #root .lf-global-documents-selectable tr[data-document-selected="true"] td { background: transparent; }
+    #root .lf-global-document-selection-control { width: 44px !important; min-height: 44px !important; justify-self: start; }
     #root .lf-global-document-actions { display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); }
     #root .lf-global-document-actions button { width: 100%; min-width: 0; padding-left: 5px !important; padding-right: 5px !important; white-space: normal; }
     #root .lf-global-document-preview-backdrop { padding: 8px !important; }
@@ -955,6 +973,15 @@ export function StyleTag() { return <style>{`
     #root .lf-global-document-action-dialog { max-height: calc(100vh - 16px); overflow-y: auto; }
     #root .lf-global-document-action-dialog > div:last-child { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     #root .lf-global-document-action-dialog > div:last-child button { width: 100%; min-width: 0; }
+    #root .lf-global-document-bulk-dialog > div:last-child { grid-template-columns: minmax(0, 1fr) !important; }
+    #root .lf-global-documents-bulk-toolbar > div:first-child { display: grid !important; grid-template-columns: minmax(0, 1fr); align-items: stretch !important; }
+    #root .lf-global-documents-selection-actions,
+    #root .lf-global-documents-bulk-actions { display: grid !important; grid-template-columns: minmax(0, 1fr) !important; width: 100%; }
+    #root .lf-global-documents-selection-actions button,
+    #root .lf-global-documents-bulk-actions button { width: 100%; min-width: 0; }
+    #root .lf-global-documents-selection-summary { overflow-wrap: anywhere; }
+    #root .lf-global-document-bulk-result { display: grid !important; grid-template-columns: minmax(0, 1fr); align-items: stretch !important; width: 100%; }
+    #root .lf-global-document-bulk-result button { width: 100%; min-width: 0; }
   }
   /* UI-5C: Deadline Center guidance card hover */
   .lf-deadline-guidance-card:hover { box-shadow: 0 4px 14px rgba(15,27,51,.10) !important; transform: translateY(-1px); }

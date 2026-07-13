@@ -4,6 +4,7 @@ import { Alert, Badge, Empty, Skeleton, Table } from '../components/ui.jsx';
 import { styles } from '../theme.jsx';
 
 const PAGE_LIMIT = 25;
+const MAX_BULK_EXECUTION = 50;
 
 const SORT_OPTIONS = [
   ['date_desc', 'Newest first'],
@@ -117,13 +118,29 @@ function safeDocumentActionError(error) {
   return 'Unable to complete the document action. The Explorer has been refreshed.';
 }
 
+function isBulkEligible(document, action) {
+  if (!document?.id) return false;
+  return action === 'archive' ? !document.archived : Boolean(document.archived);
+}
+
+function isSessionExpiry(error) {
+  return Boolean(error?.isAuthExpired || error?.name === 'AuthExpiredError');
+}
+
 async function fetchDocumentWindow(query, targetCount = PAGE_LIMIT) {
   let response = await getGlobalDocuments(query);
   const filterOptions = { ...emptyFilterOptions(), ...(response?.filterOptions || {}) };
-  const items = Array.isArray(response?.items) ? [...response.items] : [];
+  const items = [];
+  const seenIds = new Set();
+  for (const item of Array.isArray(response?.items) ? response.items : []) {
+    const id = String(item.id);
+    if (!seenIds.has(id)) {
+      seenIds.add(id);
+      items.push(item);
+    }
+  }
   let hasMore = Boolean(response?.hasMore);
   let nextCursor = response?.nextCursor || null;
-  const seenIds = new Set(items.map(item => String(item.id)));
   const seenCursors = new Set();
   let pageCount = 1;
 
@@ -294,6 +311,70 @@ function ArchiveDocumentDialog({ document, pending, onCancel, onConfirm }) {
   );
 }
 
+function BulkLifecycleDialog({ intent, progress, onCancel, onConfirm }) {
+  const running = Boolean(progress?.running);
+  useEffect(() => {
+    if (!intent) return undefined;
+    function closeOnEscape(event) {
+      if (event.key === 'Escape' && !running) onCancel();
+    }
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [intent, onCancel, running]);
+
+  if (!intent) return null;
+  const action = intent.action;
+  const eligibleCount = intent.documents.filter(document => isBulkEligible(document, action)).length;
+  const ineligibleCount = intent.documents.length - eligibleCount;
+  const actionLabel = action === 'archive' ? 'archive' : 'restore';
+  const eligibleState = action === 'archive' ? 'active' : 'archived';
+  const ineligibleState = action === 'archive' ? 'archived' : 'active';
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="global-document-bulk-title"
+      className="lf-global-document-action-dialog-backdrop lf-global-document-bulk-dialog-backdrop"
+      style={{ position: 'fixed', inset: 0, zIndex: 3200, background: 'rgba(17, 34, 25, 0.64)', padding: 16, display: 'grid', placeItems: 'center' }}
+      onMouseDown={event => {
+        if (event.target === event.currentTarget && !running) onCancel();
+      }}
+    >
+      <section className="lf-global-document-action-dialog lf-global-document-bulk-dialog" style={{ width: 'min(100%, 520px)', background: 'var(--lf-card, #fff)', color: 'var(--lf-card-text, #1A1A18)', borderRadius: 10, boxShadow: '0 24px 64px rgba(0,0,0,.28)', padding: 16, display: 'grid', gap: 12 }}>
+        <div style={{ display: 'grid', gap: 4 }}>
+          <h2 id="global-document-bulk-title" style={{ margin: 0, fontSize: 18 }}>Bulk {actionLabel} loaded documents?</h2>
+          <small style={styles.mutedText}>{intent.documents.length} selected from the current loaded result window.</small>
+        </div>
+        <p style={{ margin: 0, lineHeight: 1.5 }}>
+          <strong>{eligibleCount} eligible {eligibleState} document{eligibleCount === 1 ? '' : 's'}</strong> will be processed.{' '}
+          <strong>{ineligibleCount} ineligible {ineligibleState} document{ineligibleCount === 1 ? '' : 's'}</strong> will be skipped.
+        </p>
+        <p style={{ margin: 0, lineHeight: 1.5 }}>
+          Requests run sequentially through the existing per-document {actionLabel} action. This operation is not transactional; successful requests are not rolled back if a later request fails.
+        </p>
+        {running && (
+          <div role="status" aria-live="polite" className="lf-global-document-bulk-progress" style={{ display: 'grid', gap: 4, padding: 10, borderRadius: 8, background: 'color-mix(in srgb, var(--lf-card, #fff) 84%, var(--lf-background, #F5F2EB))' }}>
+            <strong>Processing {progress.processed} of {progress.eligible} eligible request{progress.eligible === 1 ? '' : 's'}…</strong>
+            <span>{progress.succeeded} succeeded · {progress.failed} failed · {progress.skipped} skipped</span>
+          </div>
+        )}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+          <button type="button" style={styles.ghostButton} disabled={running} onClick={onCancel}>Cancel</button>
+          <button
+            autoFocus
+            type="button"
+            style={action === 'archive' ? styles.dangerButton : styles.primaryButton}
+            disabled={running || eligibleCount === 0}
+            onClick={onConfirm}
+          >
+            {running ? `${action === 'archive' ? 'Archiving' : 'Restoring'}…` : `${action === 'archive' ? 'Archive' : 'Restore'} ${eligibleCount} document${eligibleCount === 1 ? '' : 's'}`}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived = false, canManage = false }) {
   const [searchDraft, setSearchDraft] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
@@ -313,9 +394,14 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
   const [renameName, setRenameName] = useState('');
   const [renameError, setRenameError] = useState('');
   const [archiveTarget, setArchiveTarget] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [bulkIntent, setBulkIntent] = useState(null);
+  const [bulkProgress, setBulkProgress] = useState(null);
+  const [bulkResult, setBulkResult] = useState(null);
   const listRequestRef = useRef(0);
   const previewRequestRef = useRef(0);
   const previewUrlRef = useRef('');
+  const bulkRunRef = useRef(false);
 
   const clientOptions = useMemo(() => [...filterOptions.clients]
     .filter(client => client?.id)
@@ -335,11 +421,17 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
     status: allowArchived && filters.includeArchived ? 'all' : 'active',
     limit: PAGE_LIMIT,
   }), [allowArchived, appliedSearch, filters]);
+  const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const selectedDocuments = useMemo(() => items.filter(document => selectedIdSet.has(String(document.id))), [items, selectedIdSet]);
+  const selectionLimitExceeded = selectedDocuments.length > MAX_BULK_EXECUTION;
+  const bulkRunning = Boolean(bulkProgress?.running);
+  const actionPending = Boolean(pendingAction) || bulkRunning;
 
   useEffect(() => {
     const requestId = listRequestRef.current + 1;
     listRequestRef.current = requestId;
     let active = true;
+    resetSelectionContext();
     setLoading(true);
     setLoadingMore(false);
     setError('');
@@ -365,17 +457,57 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
     return () => { active = false; };
   }, [queryKey, reloadNonce]);
 
+  useEffect(() => {
+    resetSelectionContext();
+  }, [allowArchived, canManage]);
+
   useEffect(() => () => {
     previewRequestRef.current += 1;
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
   }, []);
 
+  function resetSelectionContext() {
+    setSelectedIds([]);
+    setBulkIntent(null);
+    setBulkResult(null);
+  }
+
+  function toggleDocumentSelection(documentId) {
+    if (!canManage || actionPending) return;
+    const id = String(documentId);
+    setActionFeedback(null);
+    setBulkResult(null);
+    setSelectedIds(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]);
+  }
+
+  function selectLoadedDocuments() {
+    if (!canManage || actionPending || !items.length) return;
+    const ids = items.map(document => String(document.id));
+    setSelectedIds(ids);
+    setBulkResult(null);
+    setActionFeedback(null);
+  }
+
+  function clearLoadedSelection() {
+    if (actionPending) return;
+    resetSelectionContext();
+    setActionFeedback(null);
+  }
+
+  function changeSearchDraft(value) {
+    if (value !== searchDraft) resetSelectionContext();
+    setActionFeedback(null);
+    setSearchDraft(value);
+  }
+
   function updateFilter(name, value) {
+    resetSelectionContext();
     setActionFeedback(null);
     setFilters(current => ({ ...current, [name]: value }));
   }
 
   function updateClientFilter(clientId) {
+    resetSelectionContext();
     setActionFeedback(null);
     setFilters(current => {
       const selectedMatter = filterOptions.matters.find(matter => String(matter.id) === String(current.matterId));
@@ -387,6 +519,7 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
   }
 
   function clearFilters() {
+    resetSelectionContext();
     setActionFeedback(null);
     setSearchDraft('');
     setAppliedSearch('');
@@ -394,8 +527,9 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
   }
 
   async function loadMore() {
-    if (!hasMore || !nextCursor || loadingMore || pendingAction) return;
+    if (!hasMore || !nextCursor || loadingMore || actionPending || selectedIds.length) return;
     const requestId = listRequestRef.current;
+    resetSelectionContext();
     setLoadingMore(true);
     setError('');
     try {
@@ -404,7 +538,15 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
       const page = Array.isArray(response?.items) ? response.items : [];
       setItems(current => {
         const seen = new Set(current.map(item => String(item.id)));
-        return [...current, ...page.filter(item => !seen.has(String(item.id)))];
+        const additions = [];
+        for (const item of page) {
+          const id = String(item.id);
+          if (!seen.has(id)) {
+            seen.add(id);
+            additions.push(item);
+          }
+        }
+        return [...current, ...additions];
       });
       setNextCursor(response?.nextCursor || null);
       setHasMore(Boolean(response?.hasMore));
@@ -468,9 +610,10 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
     }
   }
 
-  async function refreshExplorerWindow(targetCount = PAGE_LIMIT) {
+  async function refreshExplorerWindow(targetCount = PAGE_LIMIT, { clearSelection = true } = {}) {
     const requestId = listRequestRef.current + 1;
     listRequestRef.current = requestId;
+    if (clearSelection) resetSelectionContext();
     setLoadingMore(false);
     setError('');
     const response = await fetchDocumentWindow(JSON.parse(queryKey), targetCount);
@@ -479,11 +622,11 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
     setNextCursor(response.nextCursor);
     setHasMore(response.hasMore);
     setFilterOptions(response.filterOptions);
-    return true;
+    return response;
   }
 
   async function runDocumentAction({ document, action, pendingMessage, successMessage, request }) {
-    if (!canManage || pendingAction || !document?.id) return { ok: false, error: 'Document action unavailable.' };
+    if (!canManage || actionPending || !document?.id) return { ok: false, error: 'Document action unavailable.' };
     const targetCount = Math.max(PAGE_LIMIT, items.length);
     setPendingAction({ documentId: String(document.id), action });
     setActionFeedback({ type: 'pending', message: pendingMessage });
@@ -513,7 +656,7 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
   }
 
   function beginRename(document) {
-    if (!canManage || document?.archived || pendingAction) return;
+    if (!canManage || document?.archived || actionPending) return;
     setActionFeedback(null);
     setRenameTarget(document);
     setRenameName(documentLabel(document));
@@ -529,7 +672,7 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
 
   async function saveRename(event) {
     event.preventDefault();
-    if (!renameTarget || pendingAction) return;
+    if (!renameTarget || actionPending) return;
     const displayName = renameName.trim();
     if (!displayName) {
       setRenameError('Document name is required.');
@@ -568,7 +711,7 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
   }
 
   async function confirmArchive() {
-    if (!archiveTarget || pendingAction) return;
+    if (!archiveTarget || actionPending) return;
     const target = archiveTarget;
     const result = await runDocumentAction({
       document: target,
@@ -592,6 +735,130 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
     });
   }
 
+  function beginBulkAction(action, selection = selectedIds) {
+    if (!canManage || actionPending || !['archive', 'restore'].includes(action)) return;
+    const selectionSet = new Set(selection.map(String));
+    const documents = items.filter(document => selectionSet.has(String(document.id)));
+    if (!documents.length) return;
+    if (documents.length > MAX_BULK_EXECUTION) {
+      setActionFeedback({
+        type: 'error',
+        message: `${documents.length} documents are selected. Bulk actions are limited to ${MAX_BULK_EXECUTION} documents; clear selection and select no more than ${MAX_BULK_EXECUTION}.`,
+      });
+      return;
+    }
+    setActionFeedback(null);
+    setBulkResult(null);
+    setSelectedIds(documents.map(document => String(document.id)));
+    setBulkProgress(null);
+    setBulkIntent({ action, documents });
+  }
+
+  function retryFailedBulkAction() {
+    if (!bulkResult?.retryIds?.length || actionPending) return;
+    beginBulkAction(bulkResult.action, bulkResult.retryIds);
+  }
+
+  async function confirmBulkAction() {
+    if (!canManage || !bulkIntent || bulkRunRef.current || pendingAction) return;
+    const { action, documents } = bulkIntent;
+    if (documents.length > MAX_BULK_EXECUTION) {
+      setActionFeedback({ type: 'error', message: `Bulk actions are limited to ${MAX_BULK_EXECUTION} documents.` });
+      setBulkIntent(null);
+      return;
+    }
+    const eligibleDocuments = documents.filter(document => isBulkEligible(document, action));
+    if (!eligibleDocuments.length) return;
+
+    bulkRunRef.current = true;
+    const targetCount = Math.max(PAGE_LIMIT, items.length);
+    const initialSkipped = documents.length - eligibleDocuments.length;
+    let succeeded = 0;
+    let failed = 0;
+    let skipped = initialSkipped;
+    let aborted = false;
+    let refreshFailed = false;
+    const failedIds = [];
+    setBulkResult(null);
+    setBulkProgress({
+      running: true,
+      action,
+      eligible: eligibleDocuments.length,
+      processed: 0,
+      succeeded: 0,
+      failed: 0,
+      skipped: initialSkipped,
+      currentId: '',
+    });
+
+    try {
+      for (let index = 0; index < eligibleDocuments.length; index += 1) {
+        const document = eligibleDocuments[index];
+        setBulkProgress(current => ({ ...current, currentId: String(document.id) }));
+        try {
+          if (action === 'archive') await archiveDocument(document.id);
+          else await restoreDocument(document.id);
+          succeeded += 1;
+        } catch (caught) {
+          failed += 1;
+          failedIds.push(String(document.id));
+          if (isSessionExpiry(caught)) {
+            aborted = true;
+            skipped += eligibleDocuments.length - index - 1;
+          }
+        }
+        setBulkProgress(current => ({
+          ...current,
+          processed: index + 1,
+          succeeded,
+          failed,
+          skipped,
+        }));
+        if (aborted) break;
+      }
+
+      let rebuiltItems = items;
+      if (!aborted) {
+        try {
+          const response = await refreshExplorerWindow(targetCount, { clearSelection: false });
+          rebuiltItems = response.items;
+        } catch {
+          refreshFailed = true;
+        }
+      }
+
+      const failedIdSet = new Set(failedIds);
+      const retryIds = rebuiltItems
+        .filter(document => failedIdSet.has(String(document.id)) && isBulkEligible(document, action))
+        .map(document => String(document.id));
+      setSelectedIds(retryIds);
+
+      const actionLabel = action === 'archive' ? 'archive' : 'restore';
+      const message = `Bulk ${actionLabel} finished: ${succeeded} succeeded, ${failed} failed, ${skipped} skipped.`
+        + (aborted ? ' Session expired, so the remaining requests were not sent.' : '')
+        + (refreshFailed ? ' The Explorer could not rebuild the loaded window automatically; use Refresh to reload it.' : '')
+        + (failed > 0 && retryIds.length === 0 ? ' No failed documents remain loaded and eligible for retry.' : '');
+      const result = {
+        action,
+        total: documents.length,
+        succeeded,
+        failed,
+        skipped,
+        aborted,
+        refreshFailed,
+        retryIds,
+        message,
+      };
+      setActionFeedback(null);
+      setBulkResult(result);
+      notify?.({ type: aborted ? 'danger' : failed || refreshFailed ? 'warning' : 'success', message });
+    } finally {
+      bulkRunRef.current = false;
+      setBulkProgress(null);
+      setBulkIntent(null);
+    }
+  }
+
   const hasActiveFilters = Boolean(appliedSearch
     || filters.type
     || filters.origin
@@ -600,15 +867,15 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
     || filters.clientId
     || filters.sort !== initialFilters.sort
     || filters.includeArchived);
-  const actionPending = Boolean(pendingAction);
-
   const rows = items.map(document => {
     const label = documentLabel(document);
+    const documentId = String(document.id);
     const folderArchived = Boolean(document?.location?.folderArchived);
     const folderLabel = String(document?.folderPathLabel || 'Uncategorised');
-    const rowPending = pendingAction?.documentId === String(document.id);
+    const rowPending = pendingAction?.documentId === documentId || bulkProgress?.currentId === documentId;
+    const selected = selectedIdSet.has(documentId);
     const visibilityMutable = canManage && canChangeClientVisibility(document);
-    return [
+    const cells = [
       <div key={`${document.id}-document`} style={{ display: 'grid', gap: 3, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', minWidth: 0 }}>
           <strong style={{ fontWeight: 700, overflowWrap: 'anywhere' }}>{label}</strong>
@@ -629,8 +896,8 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
       <Badge key={`${document.id}-origin`} tone={originTone(document.origin)}>{originLabel(document.origin)}</Badge>,
       <Badge key={`${document.id}-visibility`} tone={document.visibility === 'client' ? 'green' : 'blue'}>{document.visibility === 'client' ? 'Client visible' : 'Internal'}</Badge>,
       <div key={`${document.id}-actions`} className="lf-global-document-actions" aria-busy={rowPending || undefined} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button type="button" style={styles.tinyButton} onClick={() => openPreview(document)} disabled={Boolean(document.archived) || rowPending} title={document.archived ? 'Restore this document before previewing.' : undefined}>Preview</button>
-        <button type="button" style={styles.tinyButton} onClick={() => downloadDocument(document)} disabled={Boolean(document.archived) || rowPending} title={document.archived ? 'Restore this document before downloading.' : undefined}>Download</button>
+        <button type="button" style={styles.tinyButton} onClick={() => openPreview(document)} disabled={Boolean(document.archived) || rowPending || bulkRunning} title={document.archived ? 'Restore this document before previewing.' : undefined}>Preview</button>
+        <button type="button" style={styles.tinyButton} onClick={() => downloadDocument(document)} disabled={Boolean(document.archived) || rowPending || bulkRunning} title={document.archived ? 'Restore this document before downloading.' : undefined}>Download</button>
         <button
           type="button"
           style={styles.tinyButton}
@@ -638,24 +905,39 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
             folderId: document.folder?.id || (document.location?.status === 'uncategorised' ? 'uncategorised' : ''),
             documentId: document.id,
           })}
-          disabled={!document.matter?.id || rowPending}
+          disabled={!document.matter?.id || rowPending || bulkRunning}
         >Open matter</button>
         {canManage && !document.archived && (
-          <button type="button" style={styles.tinyButton} onClick={() => beginRename(document)} disabled={rowPending}>{rowPending && pendingAction?.action === 'rename' ? 'Renaming…' : 'Rename'}</button>
+          <button type="button" style={styles.tinyButton} onClick={() => beginRename(document)} disabled={actionPending}>{rowPending && pendingAction?.action === 'rename' ? 'Renaming…' : 'Rename'}</button>
         )}
         {visibilityMutable && (
-          <button type="button" style={styles.tinyButton} onClick={() => changeVisibility(document)} disabled={rowPending}>
+          <button type="button" style={styles.tinyButton} onClick={() => changeVisibility(document)} disabled={actionPending}>
             {rowPending && pendingAction?.action === 'visibility' ? 'Updating…' : document.visibility === 'client' ? 'Make internal' : 'Make client visible'}
           </button>
         )}
         {canManage && !document.archived && (
-          <button type="button" style={styles.dangerTinyButton || styles.tinyButton} onClick={() => { setActionFeedback(null); setArchiveTarget(document); }} disabled={rowPending}>{rowPending && pendingAction?.action === 'archive' ? 'Archiving…' : 'Archive'}</button>
+          <button type="button" style={styles.dangerTinyButton || styles.tinyButton} onClick={() => { setActionFeedback(null); setArchiveTarget(document); }} disabled={actionPending}>{rowPending && pendingAction?.action === 'archive' ? 'Archiving…' : 'Archive'}</button>
         )}
         {canManage && document.archived && (
-          <button type="button" style={styles.primaryButton} onClick={() => restoreArchivedDocument(document)} disabled={rowPending}>{rowPending && pendingAction?.action === 'restore' ? 'Restoring…' : 'Restore'}</button>
+          <button type="button" style={styles.primaryButton} onClick={() => restoreArchivedDocument(document)} disabled={actionPending}>{rowPending && pendingAction?.action === 'restore' ? 'Restoring…' : 'Restore'}</button>
         )}
       </div>,
     ];
+    if (canManage) {
+      cells.unshift(
+        <label key={`${document.id}-selection`} className="lf-global-document-selection-control" title={`Select ${label}`} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 36, minHeight: 36, cursor: actionPending ? 'not-allowed' : 'pointer' }}>
+          <input
+            type="checkbox"
+            className="lf-global-document-select-checkbox"
+            aria-label={`Select ${label}`}
+            checked={selected}
+            disabled={actionPending}
+            onChange={() => toggleDocumentSelection(documentId)}
+          />
+        </label>
+      );
+    }
+    return cells;
   });
 
   return (
@@ -665,7 +947,7 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
             <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
               <h2 style={{ margin: 0, fontSize: 17 }}>Document register</h2>
-              <p style={{ margin: 0, color: 'var(--lf-card-muted, var(--lf-text-muted, #6B6B66))', lineHeight: 1.5 }}>{canManage ? 'Manage individual documents linked to accessible matters. Movement, uploads, and bulk changes remain in the matter Explorer.' : 'Read-only workspace for documents linked to accessible matters.'} Archived records remain unavailable for preview or download.</p>
+              <p style={{ margin: 0, color: 'var(--lf-card-muted, var(--lf-text-muted, #6B6B66))', lineHeight: 1.5 }}>{canManage ? 'Manage documents linked to accessible matters. Bulk archive and restore apply only to the current loaded result window; movement and uploads remain in the matter Explorer.' : 'Read-only workspace for documents linked to accessible matters.'} Archived records remain unavailable for preview or download.</p>
             </div>
             <Badge tone={canManage ? 'green' : 'blue'}>{canManage ? 'Controlled actions' : 'Read only'}</Badge>
           </div>
@@ -678,6 +960,7 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
             onSubmit={event => {
               event.preventDefault();
               if (actionPending) return;
+              resetSelectionContext();
               setActionFeedback(null);
               setAppliedSearch(searchDraft.trim());
             }}
@@ -689,7 +972,7 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
               value={searchDraft}
               maxLength={160}
               disabled={actionPending}
-              onChange={event => setSearchDraft(event.target.value)}
+              onChange={event => changeSearchDraft(event.target.value)}
               style={{ ...styles.input, minWidth: 0 }}
             />
             <button type="submit" style={styles.primaryButton} disabled={actionPending}>Search</button>
@@ -756,6 +1039,17 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
           </div>
         </div>
 
+        {bulkResult && (
+          <Alert tone={bulkResult.aborted ? 'danger' : undefined}>
+            <div className="lf-global-document-bulk-result" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <span role={bulkResult.aborted ? 'alert' : 'status'} aria-live="polite">{bulkResult.message}</span>
+              {bulkResult.retryIds.length > 0 && (
+                <button type="button" style={styles.ghostButton} disabled={actionPending} onClick={retryFailedBulkAction}>Retry failed</button>
+              )}
+            </div>
+          </Alert>
+        )}
+
         {actionFeedback && (
           <Alert tone={actionFeedback.type === 'error' ? 'danger' : undefined}>
             <span role={actionFeedback.type === 'error' ? 'alert' : 'status'} aria-live="polite">{actionFeedback.message}</span>
@@ -766,7 +1060,7 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
           <Alert tone="danger">
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
               <span>{error}</span>
-              <button type="button" style={styles.ghostButton} disabled={actionPending} onClick={() => setReloadNonce(value => value + 1)}>Try again</button>
+              <button type="button" style={styles.ghostButton} disabled={actionPending} onClick={() => { resetSelectionContext(); setActionFeedback(null); setReloadNonce(value => value + 1); }}>Try again</button>
             </div>
           </Alert>
         )}
@@ -775,16 +1069,41 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
           <div style={{ ...styles.card, display: 'grid', gap: 12 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               <div role="status" aria-live="polite" style={styles.mutedText}>{items.length} loaded document{items.length === 1 ? '' : 's'}{hasMore ? ' · more available' : ''}</div>
-              <button type="button" style={styles.ghostButton} disabled={actionPending} onClick={() => { setActionFeedback(null); setReloadNonce(value => value + 1); }}>Refresh</button>
+              <button type="button" style={styles.ghostButton} disabled={actionPending} onClick={() => { resetSelectionContext(); setActionFeedback(null); setReloadNonce(value => value + 1); }}>Refresh</button>
             </div>
+            {canManage && items.length > 0 && (
+              <div className="lf-global-documents-bulk-toolbar" aria-label="Loaded document selection" style={{ display: 'grid', gap: 8, padding: 12, border: '1px solid var(--lf-card-border, var(--lf-border, #DDD8CE))', borderRadius: 9, background: 'color-mix(in srgb, var(--lf-card, #fff) 88%, var(--lf-background, #F5F2EB))' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                  <div className="lf-global-documents-selection-actions" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <button type="button" style={styles.ghostButton} disabled={actionPending || selectedDocuments.length === items.length} onClick={selectLoadedDocuments}>Select loaded</button>
+                    <button type="button" style={styles.ghostButton} disabled={actionPending || selectedDocuments.length === 0} onClick={clearLoadedSelection}>Clear selection</button>
+                    <strong className="lf-global-documents-selection-summary" aria-live="polite">{selectedDocuments.length} selected from {items.length} loaded</strong>
+                  </div>
+                  <div className="lf-global-documents-bulk-actions" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <button type="button" style={styles.dangerButton} disabled={actionPending || selectedDocuments.length === 0 || selectionLimitExceeded} onClick={() => beginBulkAction('archive')}>Bulk archive</button>
+                    <button type="button" style={styles.primaryButton} disabled={actionPending || selectedDocuments.length === 0 || selectionLimitExceeded} onClick={() => beginBulkAction('restore')}>Bulk restore</button>
+                  </div>
+                </div>
+                {selectedDocuments.length > 0 && !selectionLimitExceeded && <small style={styles.mutedText}>Load more is disabled while documents are selected. Clear selection to change the loaded result window.</small>}
+                {selectionLimitExceeded && (
+                  <span role="alert" style={{ color: 'var(--lf-danger, #A61B1B)', fontWeight: 700 }}>
+                    {selectedDocuments.length} documents are selected. Bulk actions are limited to {MAX_BULK_EXECUTION} documents; clear selection and select no more than {MAX_BULK_EXECUTION}.
+                  </span>
+                )}
+              </div>
+            )}
             {items.length ? (
-              <div className="lf-global-documents-cards">
+              <div className={`lf-global-documents-cards${canManage ? ' lf-global-documents-selectable' : ''}`}>
                 <Table
-                  columns={['Document', 'Matter', 'Client', 'Folder', 'Date', 'Origin', 'Visibility', 'Actions']}
+                  columns={canManage ? ['Select', 'Document', 'Matter', 'Client', 'Folder', 'Date', 'Origin', 'Visibility', 'Actions'] : ['Document', 'Matter', 'Client', 'Folder', 'Date', 'Origin', 'Visibility', 'Actions']}
                   rows={rows}
                   rowProps={items.map(document => ({
                     'data-document-id': String(document.id),
-                    'data-document-action-pending': pendingAction?.documentId === String(document.id) ? pendingAction.action : undefined,
+                    'data-document-selected': canManage && selectedIdSet.has(String(document.id)) ? 'true' : undefined,
+                    'aria-selected': canManage ? selectedIdSet.has(String(document.id)) : undefined,
+                    'data-document-action-pending': pendingAction?.documentId === String(document.id)
+                      ? pendingAction.action
+                      : bulkProgress?.currentId === String(document.id) ? `bulk-${bulkProgress.action}` : undefined,
                   }))}
                 />
               </div>
@@ -793,7 +1112,7 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
             )}
             {hasMore && (
               <div style={{ display: 'flex', justifyContent: 'center' }}>
-                <button type="button" style={styles.primaryButton} onClick={loadMore} disabled={loadingMore || actionPending}>{loadingMore ? 'Loading…' : 'Load more'}</button>
+                <button type="button" style={styles.primaryButton} onClick={loadMore} disabled={loadingMore || actionPending || selectedDocuments.length > 0} title={selectedDocuments.length > 0 ? 'Clear selection before loading more documents.' : undefined}>{loadingMore ? 'Loading…' : 'Load more'}</button>
               </div>
             )}
           </div>
@@ -814,6 +1133,12 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
         pending={pendingAction?.action === 'archive'}
         onCancel={() => { if (!pendingAction) setArchiveTarget(null); }}
         onConfirm={confirmArchive}
+      />
+      <BulkLifecycleDialog
+        intent={bulkIntent}
+        progress={bulkProgress}
+        onCancel={() => { if (!bulkRunning) setBulkIntent(null); }}
+        onConfirm={confirmBulkAction}
       />
     </>
   );
