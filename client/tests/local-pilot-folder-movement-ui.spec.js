@@ -132,7 +132,8 @@ test.describe('LOCAL-PILOT-FOLDER-MOVEMENT-UI-90', () => {
     const { calls, originalDocuments, state, unexpected } = await installMockApi(page, { moveDelay: 80 });
     await mountMatterDocuments(page);
     const evidence = await selectEvidenceWithDesktopKeyboard(page);
-    await expect(evidence).not.toHaveAttribute('draggable', 'true');
+    await expect(evidence).toHaveAttribute('data-folder-draggable', 'true');
+    await expect(evidence).toHaveAttribute('draggable', 'true');
 
     const moveAction = page.getByRole('button', { name: 'Move Folder', exact: true });
     await moveAction.focus();

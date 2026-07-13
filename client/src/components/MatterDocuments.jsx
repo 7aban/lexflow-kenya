@@ -4,8 +4,11 @@ import { styles, theme } from '../theme.jsx';
 import { ActionGroup, Badge, Card, ConfirmModal, Field, Skeleton, Table } from './ui.jsx';
 
 const DOCUMENT_DRAG_TYPE = 'application/x-lexflow-document-id';
+const FOLDER_DRAG_TYPE = 'application/x-lexflow-folder-id';
+const ROOT_FOLDER_DROP_TARGET = '__root__';
 const INTERACTIVE_DRAG_SELECTOR = 'a, button, input, select, textarea, [contenteditable="true"], [role="button"]';
 const MAX_FOLDER_DEPTH = 8;
+const FOLDER_DRAG_EXPAND_DELAY_MS = 650;
 
 function folderIcon(folder) {
   if (folder.id === 'all') return 'ALL';
@@ -196,6 +199,58 @@ function folderSubtreeMetrics(hierarchy, rawFolderId) {
   return { descendantIds, height: Math.max(1, height) };
 }
 
+function normalizedFolderName(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function folderMoveDestinationState(hierarchy, rawSourceId, rawDestinationId) {
+  const sourceId = normalizeFolderId(rawSourceId);
+  const destinationId = normalizeFolderId(rawDestinationId);
+  const source = hierarchy.folderById.get(sourceId);
+  if (!source || isClientUploadsFolder(source)) {
+    return { status: 'invalid', reason: 'Only active custom folders can be moved.' };
+  }
+  if (destinationId === sourceId) {
+    return { status: 'invalid', reason: 'A folder cannot be moved into itself.' };
+  }
+
+  const destination = destinationId ? hierarchy.folderById.get(destinationId) : null;
+  if (destinationId && !destination) {
+    return { status: 'invalid', reason: 'The destination folder is not active.' };
+  }
+  if (destination && isClientUploadsFolder(destination)) {
+    return { status: 'invalid', reason: 'Client Uploads cannot contain folders.' };
+  }
+
+  const subtree = folderSubtreeMetrics(hierarchy, sourceId);
+  if (subtree.descendantIds.has(destinationId)) {
+    return { status: 'invalid', reason: 'A folder cannot be moved beneath one of its descendants.' };
+  }
+  if (normalizeFolderId(source.parentId) === destinationId) {
+    return { status: 'noop', reason: 'This folder is already in that location.' };
+  }
+  const destinationDepth = destinationId ? (hierarchy.depthById.get(destinationId) || 1) : 0;
+  if (destinationDepth + subtree.height > MAX_FOLDER_DEPTH) {
+    return { status: 'invalid', reason: `Folder hierarchy cannot exceed ${MAX_FOLDER_DEPTH} levels.` };
+  }
+
+  const collision = hierarchy.folders.some(folder => (
+    normalizeFolderId(folder.id) !== sourceId
+    && normalizeFolderId(folder.parentId) === destinationId
+    && normalizedFolderName(folder.name) === normalizedFolderName(source.name)
+  ));
+  if (collision) {
+    return { status: 'invalid', reason: 'A folder with this name already exists in the destination.' };
+  }
+
+  return { status: 'eligible', reason: 'Move folder here.' };
+}
+
+function dragTransferHasType(dataTransfer, type) {
+  return Array.from(dataTransfer?.types || [])
+    .some(value => String(value).toLowerCase() === type);
+}
+
 function formatArchivedFolderDate(value) {
   if (!value) return 'Date unavailable';
   const date = new Date(value);
@@ -316,6 +371,10 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const [nativeDragEnabled, setNativeDragEnabled] = useState(false);
   const [draggedDocumentId, setDraggedDocumentId] = useState('');
   const [dragOverFolderId, setDragOverFolderId] = useState('');
+  const [draggedFolderId, setDraggedFolderId] = useState('');
+  const [folderDropTarget, setFolderDropTarget] = useState({ key: '', status: '', reason: '' });
+  const [folderMovePendingId, setFolderMovePendingId] = useState('');
+  const [folderDragFeedback, setFolderDragFeedback] = useState(null);
   const previewUrlRef = useRef('');
   const previewRequestRef = useRef(0);
   const archivedFoldersRequestRef = useRef(0);
@@ -326,6 +385,9 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const moveFolderTriggerRef = useRef(null);
   const moveFolderDialogRef = useRef(null);
   const moveFolderSelectRef = useRef(null);
+  const folderDragDropHandledRef = useRef(false);
+  const folderDragExpandTimerRef = useRef(null);
+  const folderDragExpandTargetRef = useRef('');
   const folderTreeRef = useRef(null);
 
   const showGenerateControls = canManage === true && clientMode === false && Boolean(matterId);
@@ -339,11 +401,13 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   }, [matterId]);
 
   useEffect(() => {
+    cancelFolderDragExpansion();
     archivedFoldersRequestRef.current += 1;
     archivedFoldersLoadingRef.current = false;
     archiveFolderRequestRef.current = false;
     restoreFolderRequestRef.current = '';
     moveFolderRequestRef.current = false;
+    folderDragDropHandledRef.current = false;
     setArchivedFolders([]);
     setArchivedFoldersOpen(false);
     setArchivedFoldersRequested(false);
@@ -357,6 +421,10 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     setMoveFolderParentId('');
     setMoveFolderError('');
     setMoveFolderSaving(false);
+    setDraggedFolderId('');
+    setFolderDropTarget({ key: '', status: '', reason: '' });
+    setFolderMovePendingId('');
+    setFolderDragFeedback(null);
     setNewFolderName('');
     setNewFolderParentId('');
     setExpandedFolderIds(new Set());
@@ -376,13 +444,19 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
 
   useEffect(() => {
     if (canManage !== true || clientMode !== false) {
+      cancelFolderDragExpansion();
       setSelectedDocumentIds([]);
       setBulkMoveResult(null);
       moveFolderRequestRef.current = false;
+      folderDragDropHandledRef.current = false;
       setMoveFolderTarget(null);
       setMoveFolderParentId('');
       setMoveFolderError('');
       setMoveFolderSaving(false);
+      setDraggedFolderId('');
+      setFolderDropTarget({ key: '', status: '', reason: '' });
+      setFolderMovePendingId('');
+      setFolderDragFeedback(null);
     }
     clearDocumentDrag();
   }, [canManage, clientMode]);
@@ -392,7 +466,10 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     const updateNativeDragEnabled = () => {
       const touchContext = Number(navigator.maxTouchPoints || 0) > 0;
       setNativeDragEnabled(dragMedia.matches && !touchContext);
-      if (!dragMedia.matches || touchContext) clearDocumentDrag();
+      if (!dragMedia.matches || touchContext) {
+        clearDocumentDrag();
+        clearFolderDrag();
+      }
     };
     updateNativeDragEnabled();
     dragMedia.addEventListener?.('change', updateNativeDragEnabled);
@@ -431,6 +508,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   useEffect(() => () => {
     previewRequestRef.current += 1;
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    if (folderDragExpandTimerRef.current) clearTimeout(folderDragExpandTimerRef.current);
   }, []);
 
   useEffect(() => {
@@ -964,6 +1042,212 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     setDragOverFolderId('');
   }
 
+  function cancelFolderDragExpansion() {
+    if (folderDragExpandTimerRef.current) clearTimeout(folderDragExpandTimerRef.current);
+    folderDragExpandTimerRef.current = null;
+    folderDragExpandTargetRef.current = '';
+  }
+
+  function clearFolderDrag({ clearFeedback = false } = {}) {
+    cancelFolderDragExpansion();
+    setDraggedFolderId('');
+    setFolderDropTarget({ key: '', status: '', reason: '' });
+    if (clearFeedback) setFolderDragFeedback(null);
+  }
+
+  function dragPayloadKind(event) {
+    const hasFolderType = dragTransferHasType(event.dataTransfer, FOLDER_DRAG_TYPE);
+    const hasDocumentType = dragTransferHasType(event.dataTransfer, DOCUMENT_DRAG_TYPE);
+    if (hasFolderType && hasDocumentType) return 'mixed';
+    if (hasFolderType) return 'folder';
+    if (hasDocumentType) return 'document';
+    if (draggedFolderId && draggedDocumentId) return 'mixed';
+    if (draggedFolderId) return 'folder';
+    if (draggedDocumentId) return 'document';
+    return '';
+  }
+
+  function folderIsDraggable(folder) {
+    const folderId = normalizeFolderId(folder?.id);
+    return Boolean(
+      folderDragAvailable
+      && folderId
+      && folderHierarchy.folderById.has(folderId)
+      && !isClientUploadsFolder(folder),
+    );
+  }
+
+  function startFolderDrag(event, folder) {
+    const folderId = normalizeFolderId(folder?.id);
+    if (!folderIsDraggable(folder) || moveFolderRequestRef.current) {
+      event.preventDefault();
+      clearFolderDrag();
+      return;
+    }
+
+    clearDocumentDrag();
+    clearFolderDrag({ clearFeedback: true });
+    folderDragDropHandledRef.current = false;
+    event.dataTransfer.clearData();
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData(FOLDER_DRAG_TYPE, folderId);
+    setDraggedFolderId(folderId);
+    setFolderDragFeedback({ type: 'info', message: `Dragging “${folder.name}”. Choose a highlighted folder or the root area.` });
+  }
+
+  function scheduleFolderDragExpansion(destinationId, destinationState) {
+    const id = normalizeFolderId(destinationId);
+    const children = folderHierarchy.childrenByParentId.get(id) || [];
+    if (!id || destinationState.status !== 'eligible' || !children.length || expandedFolderIds.has(id)) {
+      cancelFolderDragExpansion();
+      return;
+    }
+    if (folderDragExpandTargetRef.current === id && folderDragExpandTimerRef.current) return;
+
+    cancelFolderDragExpansion();
+    folderDragExpandTargetRef.current = id;
+    folderDragExpandTimerRef.current = setTimeout(() => {
+      setExpandedFolderIds(current => new Set([...current, id]));
+      folderDragExpandTimerRef.current = null;
+      folderDragExpandTargetRef.current = '';
+    }, FOLDER_DRAG_EXPAND_DELAY_MS);
+  }
+
+  function dragOverFolderDestination(event, rawDestinationId, targetKey) {
+    event.preventDefault();
+    event.stopPropagation();
+    const sourceId = normalizeFolderId(draggedFolderId || event.dataTransfer.getData(FOLDER_DRAG_TYPE));
+    const destinationId = normalizeFolderId(rawDestinationId);
+    const destinationState = folderMoveDestinationState(folderHierarchy, sourceId, destinationId);
+    event.dataTransfer.dropEffect = destinationState.status === 'eligible' ? 'move' : 'none';
+    setFolderDropTarget(current => (
+      current.key === targetKey && current.status === destinationState.status && current.reason === destinationState.reason
+        ? current
+        : { key: targetKey, ...destinationState }
+    ));
+    scheduleFolderDragExpansion(destinationId, destinationState);
+  }
+
+  function dragOverDocumentFolder(event, folder) {
+    if (!nativeDragEnabled || bulkMoving || !draggedDocumentId || !supportedDropFolder(folder)) return;
+    if (!visibleDragDocuments(draggedDocumentId).length) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setDragOverFolderId(String(folder.id));
+  }
+
+  function dragOverDropTarget(event, folder, targetKey = normalizeFolderId(folder?.id)) {
+    const payloadKind = dragPayloadKind(event);
+    if (payloadKind === 'folder') {
+      dragOverFolderDestination(event, folder?.id, targetKey);
+      return;
+    }
+    if (payloadKind === 'mixed') {
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = 'none';
+      cancelFolderDragExpansion();
+      setFolderDropTarget({ key: targetKey, status: 'invalid', reason: 'Folder and document drag payloads cannot be mixed.' });
+      return;
+    }
+    if (payloadKind === 'document') dragOverDocumentFolder(event, folder);
+  }
+
+  function leaveDropTarget(event, targetKey = '') {
+    if (event.currentTarget.contains(event.relatedTarget)) return;
+    if (folderDropTarget.key === targetKey) {
+      cancelFolderDragExpansion();
+      setFolderDropTarget({ key: '', status: '', reason: '' });
+    }
+    if (String(dragOverFolderId) === String(targetKey)) setDragOverFolderId('');
+  }
+
+  async function dropDraggedFolder(event, rawDestinationId) {
+    event.preventDefault();
+    event.stopPropagation();
+    folderDragDropHandledRef.current = true;
+    const transferredFolderId = normalizeFolderId(event.dataTransfer.getData(FOLDER_DRAG_TYPE));
+    const transferredDocumentId = String(event.dataTransfer.getData(DOCUMENT_DRAG_TYPE) || '');
+    const activeDraggedFolderId = normalizeFolderId(draggedFolderId);
+    const destinationId = normalizeFolderId(rawDestinationId);
+
+    if (transferredDocumentId || !transferredFolderId || transferredFolderId !== activeDraggedFolderId) {
+      clearDocumentDrag();
+      clearFolderDrag();
+      setFolderDragFeedback({ type: 'danger', message: 'The folder drop was ignored because its drag payload was invalid or mixed.' });
+      return;
+    }
+
+    const destinationState = folderMoveDestinationState(folderHierarchy, transferredFolderId, destinationId);
+    const source = folderHierarchy.folderById.get(transferredFolderId);
+    clearFolderDrag();
+    if (!source || destinationState.status === 'invalid') {
+      setFolderDragFeedback({ type: 'danger', message: destinationState.reason || 'This folder cannot be moved there.' });
+      return;
+    }
+    if (destinationState.status === 'noop') {
+      setFolderDragFeedback({ type: 'info', message: 'Folder stayed in its current location; no move was needed.' });
+      return;
+    }
+    if (moveFolderRequestRef.current) {
+      setFolderDragFeedback({ type: 'danger', message: 'Another folder change is still in progress.' });
+      return;
+    }
+
+    const destinationPathIds = destinationId
+      ? (folderHierarchy.pathById.get(destinationId) || []).map(folder => normalizeFolderId(folder.id))
+      : [];
+    moveFolderRequestRef.current = true;
+    setFolderMovePendingId(transferredFolderId);
+    setFolderDragFeedback({ type: 'info', message: `Moving “${source.name}”…` });
+    try {
+      const moved = await moveFolder(transferredFolderId, destinationId || null);
+      await load();
+      setSelectedFolder(moved.id);
+      setTreeFocusId(normalizeFolderId(moved.id));
+      if (destinationPathIds.length) {
+        setExpandedFolderIds(current => new Set([...current, ...destinationPathIds]));
+      }
+      if (compactFolderBrowser) setMobileBrowseParentId(destinationId);
+      setFolderDragFeedback({ type: 'success', message: 'Folder moved. Documents and descendant folders stayed linked.' });
+      notify?.({ type: 'success', message: 'Folder moved. Documents and descendant folders stayed linked.' });
+    } catch (err) {
+      const message = err.message || 'Unable to move this folder.';
+      setFolderDragFeedback({ type: 'danger', message });
+      notify?.({ type: 'danger', message });
+    } finally {
+      moveFolderRequestRef.current = false;
+      setFolderMovePendingId('');
+    }
+  }
+
+  async function dropOnFolderTarget(event, folder) {
+    const transferredFolderId = event.dataTransfer.getData(FOLDER_DRAG_TYPE);
+    const transferredDocumentId = event.dataTransfer.getData(DOCUMENT_DRAG_TYPE);
+    if (transferredFolderId && transferredDocumentId) {
+      event.preventDefault();
+      event.stopPropagation();
+      folderDragDropHandledRef.current = true;
+      clearDocumentDrag();
+      clearFolderDrag();
+      setFolderDragFeedback({ type: 'danger', message: 'Folder and document drag payloads cannot be mixed.' });
+      return;
+    }
+    if (transferredFolderId || dragPayloadKind(event) === 'folder') {
+      await dropDraggedFolder(event, folder?.id);
+      return;
+    }
+    if (transferredDocumentId || dragPayloadKind(event) === 'document') {
+      await dropDocumentsOnFolder(event, folder);
+    }
+  }
+
+  function finishFolderDrag() {
+    const dropHandled = folderDragDropHandledRef.current;
+    folderDragDropHandledRef.current = false;
+    clearFolderDrag({ clearFeedback: !dropHandled });
+  }
+
   function visibleDragDocuments(documentId) {
     if (selectedFolder === 'archived' || canManage !== true || clientMode !== false) return [];
     const id = String(documentId || '');
@@ -1058,7 +1342,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   }
 
   function startDocumentDrag(event, doc) {
-    if (!nativeDragEnabled || bulkMoving || selectedFolder === 'archived' || canManage !== true || clientMode !== false) {
+    if (!nativeDragEnabled || bulkMoving || folderMovePendingId || selectedFolder === 'archived' || canManage !== true || clientMode !== false) {
       event.preventDefault();
       clearDocumentDrag();
       return;
@@ -1074,6 +1358,8 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       clearDocumentDrag();
       return;
     }
+    clearFolderDrag();
+    event.dataTransfer.clearData();
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData(DOCUMENT_DRAG_TYPE, documentId);
     setDraggedDocumentId(documentId);
@@ -1081,27 +1367,15 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     setBulkMoveResult(null);
   }
 
-  function dragOverFolder(event, folder) {
-    if (!nativeDragEnabled || bulkMoving || !draggedDocumentId || !supportedDropFolder(folder)) return;
-    if (!visibleDragDocuments(draggedDocumentId).length) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-    setDragOverFolderId(String(folder.id));
-  }
-
-  function leaveDropFolder(event, folder) {
-    if (String(dragOverFolderId) !== String(folder.id)) return;
-    if (event.currentTarget.contains(event.relatedTarget)) return;
-    setDragOverFolderId('');
-  }
-
   async function dropDocumentsOnFolder(event, folder) {
     const transferredDocumentId = event.dataTransfer.getData(DOCUMENT_DRAG_TYPE);
+    const transferredFolderId = event.dataTransfer.getData(FOLDER_DRAG_TYPE);
     const documentSnapshot = visibleDragDocuments(transferredDocumentId);
     const validDrop = nativeDragEnabled
       && !bulkMoving
       && supportedDropFolder(folder)
       && transferredDocumentId
+      && !transferredFolderId
       && String(transferredDocumentId) === String(draggedDocumentId)
       && documentSnapshot.length > 0;
     if (validDrop) {
@@ -1245,24 +1519,22 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const moveSubtree = folderSubtreeMetrics(folderHierarchy, moveFolderTargetId);
   const currentMoveParentId = normalizeFolderId(currentMoveFolder?.parentId);
   const moveDestinationOptions = currentMoveFolder ? [
-    {
-      id: '',
-      label: 'Root (top level)',
-      disabled: !currentMoveParentId,
-    },
-    ...customFolders
-      .filter(folder => {
-        const folderId = normalizeFolderId(folder.id);
-        return folderId !== moveFolderTargetId
-          && !moveSubtree.descendantIds.has(folderId)
-          && (folderHierarchy.depthById.get(folderId) || 1) + moveSubtree.height <= MAX_FOLDER_DEPTH;
-      })
-      .map(folder => ({
-        id: normalizeFolderId(folder.id),
-        label: folderPathLabel(folderHierarchy, folder),
-        disabled: normalizeFolderId(folder.id) === currentMoveParentId,
-      })),
-  ] : [];
+    { id: '', label: 'Root (top level)' },
+    ...customFolders.map(folder => ({
+      id: normalizeFolderId(folder.id),
+      label: folderPathLabel(folderHierarchy, folder),
+    })),
+  ]
+    .map(option => ({
+      ...option,
+      ...folderMoveDestinationState(folderHierarchy, moveFolderTargetId, option.id),
+    }))
+    .filter(option => option.status !== 'invalid')
+    .map(option => ({ ...option, disabled: option.status === 'noop' })) : [];
+  const folderDragSource = folderHierarchy.folderById.get(normalizeFolderId(draggedFolderId));
+  const rootFolderDropState = folderDragSource
+    ? folderMoveDestinationState(folderHierarchy, folderDragSource.id, '')
+    : null;
   const currentMoveLocationLabel = currentMoveParentId
     ? (folderPathLabel(folderHierarchy, currentMoveParentId) || 'Current folder unavailable')
     : 'Root (top level)';
@@ -1398,7 +1670,20 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     return sel ? [sel, ...filteredTemplates] : filteredTemplates;
   }, [filteredTemplates, templates, selectedTemplateId, templateSearch]);
   const archivedView = selectedFolder === 'archived';
-  const folderLifecycleMutationPending = archiveRequestPending || Boolean(restoreRequestPendingFolderId) || moveFolderSaving;
+  const folderLifecycleMutationPending = archiveRequestPending
+    || Boolean(restoreRequestPendingFolderId)
+    || moveFolderSaving
+    || Boolean(folderMovePendingId);
+  const folderDragAvailable = nativeDragEnabled
+    && canManage === true
+    && clientMode === false
+    && !compactFolderBrowser
+    && !folderLifecycleMutationPending
+    && !bulkMoving
+    && !renameSaving
+    && !renameFolderId
+    && !moveFolderTarget
+    && !archiveConfirmTarget;
   const showArchiveFolderAction = canManage === true
     && clientMode === false
     && selectedIsCustom
@@ -1452,6 +1737,22 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       .lf-doc-folder-button:focus-visible { outline: 2px solid #C5973C; outline-offset: 2px; }
       .lf-doc-folder-button[data-document-drop-target="true"] { outline: 1px dashed #C5973C; outline-offset: 2px; }
       .lf-doc-folder-button[data-document-drop-active="true"] { background: #FFF7E6 !important; border-color: #C5973C !important; box-shadow: 0 0 0 3px rgba(197,151,60,.18); }
+      .lf-doc-folder-root-drop-zone { border: 1px dashed #AFA99E; border-radius: 7px; color: #5F6B63; display: grid; gap: 2px; margin-top: 10px; padding: 9px 10px; }
+      .lf-doc-folder-root-drop-zone strong { color: #234936; font-size: 12px; }
+      .lf-doc-folder-root-drop-zone span { font-size: 11px; line-height: 1.35; }
+      .lf-doc-tree-item[data-folder-draggable="true"] { cursor: grab; }
+      .lf-doc-tree-item[data-folder-drag-source="true"] { border-color: #356D50 !important; box-shadow: inset 3px 0 0 #356D50; opacity: .58; }
+      .lf-doc-tree-item[data-folder-move-pending="true"] { background: #EEF6F1 !important; border-color: #356D50 !important; cursor: wait; box-shadow: inset 3px 0 0 #356D50; }
+      [data-folder-drop-state="eligible"] { outline: 1px dashed #4D8A68; outline-offset: 2px; }
+      [data-folder-drop-state="invalid"] { outline: 1px dotted #B42318; outline-offset: 2px; opacity: .68; }
+      [data-folder-drop-state="noop"] { outline: 1px dashed #B7791F; outline-offset: 2px; }
+      [data-folder-drop-active="eligible"] { background: #EAF5EE !important; border-color: #356D50 !important; box-shadow: 0 0 0 3px rgba(53,109,80,.18); opacity: 1; }
+      [data-folder-drop-active="invalid"] { background: #FEF2F2 !important; border-color: #B42318 !important; box-shadow: 0 0 0 3px rgba(180,35,24,.14); opacity: 1; }
+      [data-folder-drop-active="noop"] { background: #FFF7E6 !important; border-color: #B7791F !important; box-shadow: 0 0 0 3px rgba(183,121,31,.15); opacity: 1; }
+      .lf-doc-folder-drag-feedback { border-radius: 6px; display: block; font-size: 11px; line-height: 1.4; margin-top: 8px; padding: 7px 8px; }
+      .lf-doc-folder-drag-feedback[data-tone="info"] { background: #F1F5F2; color: #365244; }
+      .lf-doc-folder-drag-feedback[data-tone="success"] { background: #ECFDF3; color: #17603A; }
+      .lf-doc-folder-drag-feedback[data-tone="danger"] { background: #FEF2F2; color: #B42318; }
       .lf-doc-system-views { display: grid; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid #DDD8CE; }
       .lf-doc-persistent-tree { display: grid; gap: 4px; margin-top: 10px; }
       .lf-doc-tree-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 7px; min-width: 0; }
@@ -1481,32 +1782,76 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     <div className="lf-doc-grid lf-doc-explorer" style={{ display: 'grid', gridTemplateColumns: showFolderControls ? '240px minmax(0,1fr)' : 'minmax(0,1fr)', gap: 16 }}>
       {showFolderControls && <div className="lf-doc-folder-pane"><Card title="Folders" hint="Matter file cabinet">
         <div className="lf-doc-system-views" aria-label="Document views">
-          {virtualFolders.map(folder => (
-            <div key={folder.id}>
-              <button
-                className="lf-doc-folder-button"
-                type="button"
-                aria-pressed={String(selectedFolder) === String(folder.id)}
-                data-folder-kind="virtual"
-                data-document-drop-target={draggedDocumentId && supportedDropFolder(folder) ? 'true' : undefined}
-                data-document-drop-active={String(dragOverFolderId) === String(folder.id) ? 'true' : undefined}
-                style={{ ...styles.matterButton, ...(String(selectedFolder) === String(folder.id) ? styles.matterActive : {}), padding: '9px 8px' }}
-                onClick={() => setSelectedFolder(folder.id)}
-                onDragEnter={event => dragOverFolder(event, folder)}
-                onDragOver={event => dragOverFolder(event, folder)}
-                onDragLeave={event => leaveDropFolder(event, folder)}
-                onDrop={event => dropDocumentsOnFolder(event, folder)}
-              >
-                <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
-                  <strong>{folderIcon(folder)} {folder.name}</strong>
-                  <span style={{ ...styles.badge, minWidth: 24, justifyContent: 'center', background: String(selectedFolder) === String(folder.id) ? '#fff' : '#F1EEE7', color: theme.ink }}>
-                    {folderCount(folder)}
+          {virtualFolders.map(folder => {
+            const targetKey = normalizeFolderId(folder.id);
+            const folderDestinationState = folderDragSource
+              ? folderMoveDestinationState(folderHierarchy, folderDragSource.id, folder.id)
+              : null;
+            return (
+              <div key={folder.id}>
+                <button
+                  className="lf-doc-folder-button"
+                  type="button"
+                  aria-pressed={String(selectedFolder) === String(folder.id)}
+                  data-folder-kind="virtual"
+                  data-folder-drop-state={folderDestinationState?.status}
+                  data-folder-drop-active={folderDropTarget.key === targetKey ? folderDropTarget.status : undefined}
+                  data-document-drop-target={draggedDocumentId && supportedDropFolder(folder) ? 'true' : undefined}
+                  data-document-drop-active={String(dragOverFolderId) === String(folder.id) ? 'true' : undefined}
+                  style={{ ...styles.matterButton, ...(String(selectedFolder) === String(folder.id) ? styles.matterActive : {}), padding: '9px 8px' }}
+                  onClick={() => setSelectedFolder(folder.id)}
+                  onDragEnter={event => dragOverDropTarget(event, folder, targetKey)}
+                  onDragOver={event => dragOverDropTarget(event, folder, targetKey)}
+                  onDragLeave={event => leaveDropTarget(event, targetKey)}
+                  onDrop={event => dropOnFolderTarget(event, folder)}
+                >
+                  <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+                    <strong>{folderIcon(folder)} {folder.name}</strong>
+                    <span style={{ ...styles.badge, minWidth: 24, justifyContent: 'center', background: String(selectedFolder) === String(folder.id) ? '#fff' : '#F1EEE7', color: theme.ink }}>
+                      {folderCount(folder)}
+                    </span>
                   </span>
-                </span>
-              </button>
-            </div>
-          ))}
+                </button>
+              </div>
+            );
+          })}
         </div>
+        {canManage && !clientMode && (
+          <div className="lf-doc-folder-drag-tools">
+            {folderDragAvailable && (
+              <div
+                className="lf-doc-folder-root-drop-zone"
+                data-folder-root-drop-zone="true"
+                data-folder-drop-state={rootFolderDropState?.status}
+                data-folder-drop-active={folderDropTarget.key === ROOT_FOLDER_DROP_TARGET ? folderDropTarget.status : undefined}
+                onDragEnter={event => dragOverDropTarget(event, null, ROOT_FOLDER_DROP_TARGET)}
+                onDragOver={event => dragOverDropTarget(event, null, ROOT_FOLDER_DROP_TARGET)}
+                onDragLeave={event => leaveDropTarget(event, ROOT_FOLDER_DROP_TARGET)}
+                onDrop={event => dropOnFolderTarget(event, null)}
+              >
+                <strong>Root (top level)</strong>
+                <span>{folderDragSource ? 'Drop here to make this folder top level.' : 'Drag a custom folder here to move it to the top level.'}</span>
+              </div>
+            )}
+            <span
+              className="lf-doc-folder-drag-feedback"
+              data-folder-drag-feedback={folderDragFeedback?.type || 'info'}
+              data-tone={folderDragFeedback?.type === 'danger' ? 'danger' : folderDragFeedback?.type === 'success' ? 'success' : 'info'}
+              role={folderDragFeedback?.type === 'danger' ? 'alert' : 'status'}
+              aria-live={folderDragFeedback?.type === 'danger' ? 'assertive' : 'polite'}
+            >
+              {folderMovePendingId
+                ? 'Moving folder…'
+                : folderDropTarget.reason
+                  ? folderDropTarget.reason
+                  : folderDragFeedback?.message
+                    ? folderDragFeedback.message
+                    : folderDragAvailable
+                      ? 'Drag custom folders between highlighted tree destinations. Use Move Folder for keyboard control.'
+                      : 'Use Move Folder for keyboard, touch, and narrow-screen folder movement.'}
+            </span>
+          </div>
+        )}
         {!compactFolderBrowser ? (
           <div ref={folderTreeRef} className="lf-doc-persistent-tree" role="tree" aria-label="Matter folders">
             {visibleTreeFolders.map(folder => {
@@ -1515,6 +1860,12 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
               const siblings = folderHierarchy.childrenByParentId.get(normalizeFolderId(folder.parentId)) || [];
               const expanded = children.length > 0 && expandedFolderIds.has(folderId);
               const selected = normalizeFolderId(selectedFolder) === folderId;
+              const folderDraggable = folderIsDraggable(folder);
+              const folderDestinationState = folderDragSource
+                ? folderMoveDestinationState(folderHierarchy, folderDragSource.id, folderId)
+                : null;
+              const folderDragSourceActive = normalizeFolderId(draggedFolderId) === folderId;
+              const folderMovePending = normalizeFolderId(folderMovePendingId) === folderId;
               return (
                 <button
                   key={folderId}
@@ -1528,13 +1879,21 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
                   aria-expanded={children.length ? expanded : undefined}
                   data-folder-id={folderId}
                   data-folder-path={folderPathLabel(folderHierarchy, folder)}
+                  data-folder-draggable={folderDraggable ? 'true' : undefined}
+                  data-folder-drag-source={folderDragSourceActive ? 'true' : undefined}
+                  data-folder-move-pending={folderMovePending ? 'true' : undefined}
+                  data-folder-drop-state={folderDestinationState?.status}
+                  data-folder-drop-active={folderDropTarget.key === folderId ? folderDropTarget.status : undefined}
                   data-document-drop-target={draggedDocumentId && supportedDropFolder(folder) ? 'true' : undefined}
                   data-document-drop-active={String(dragOverFolderId) === folderId ? 'true' : undefined}
+                  draggable={folderDraggable || undefined}
                   tabIndex={normalizeFolderId(treeFocusId) === folderId ? 0 : -1}
                   title={folderPathLabel(folderHierarchy, folder)}
                   style={{
                     ...styles.matterButton,
                     ...(selected ? styles.matterActive : {}),
+                    ...(folderDraggable ? { cursor: 'grab' } : {}),
+                    ...(folderMovePending ? { cursor: 'wait' } : {}),
                     padding: `9px 8px 9px ${8 + Math.min((folderHierarchy.depthById.get(folderId) - 1) * 14, 56)}px`,
                   }}
                   onFocus={() => setTreeFocusId(folderId)}
@@ -1546,10 +1905,12 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
                     }
                     setSelectedFolder(folderId);
                   }}
-                  onDragEnter={event => dragOverFolder(event, folder)}
-                  onDragOver={event => dragOverFolder(event, folder)}
-                  onDragLeave={event => leaveDropFolder(event, folder)}
-                  onDrop={event => dropDocumentsOnFolder(event, folder)}
+                  onDragStart={folderDraggable ? event => startFolderDrag(event, folder) : undefined}
+                  onDragEnd={folderDraggable ? finishFolderDrag : undefined}
+                  onDragEnter={event => dragOverDropTarget(event, folder, folderId)}
+                  onDragOver={event => dragOverDropTarget(event, folder, folderId)}
+                  onDragLeave={event => leaveDropTarget(event, folderId)}
+                  onDrop={event => dropOnFolderTarget(event, folder)}
                 >
                   <span style={{ display: 'flex', gap: 4, alignItems: 'center', minWidth: 0 }}>
                     <span className="lf-doc-tree-toggle" data-tree-toggle={children.length ? 'true' : undefined} aria-hidden="true">
@@ -2046,7 +2407,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
               ];
             })}
             rowProps={visibleDocuments.map(doc => {
-              const draggable = nativeDragEnabled && showBulkControls && !bulkMoving;
+              const draggable = nativeDragEnabled && showBulkControls && !bulkMoving && !draggedFolderId && !folderMovePendingId;
               const dragging = String(draggedDocumentId) === String(doc.id);
               return {
                 draggable,
