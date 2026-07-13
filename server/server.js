@@ -23,7 +23,7 @@ const createLogging = require('./lib/logging');
 const createNotifications = require('./lib/notifications');
 const createInvitations = require('./lib/invitations');
 const createAudit = require('./lib/audit');
-const { cleanDocumentName, fileTypeFor, documentListColumns, documentMetadataColumns, clientDocumentVisibilitySql, publicDocument, publicNotice, MAX_NOTICE_ATTACHMENTS, MAX_NOTICE_ATTACHMENT_BYTES, allowedNoticeMimeTypes, noticeMimeTypeFor, decodeAttachmentData, prepareNoticeAttachments } = require('./lib/documents');
+const { cleanDocumentName, fileTypeFor, documentListColumns, documentMetadataColumns, clientDocumentVisibilitySql, documentClientVisibilityCapability, publicDocument, publicNotice, MAX_NOTICE_ATTACHMENTS, MAX_NOTICE_ATTACHMENT_BYTES, allowedNoticeMimeTypes, noticeMimeTypeFor, decodeAttachmentData, prepareNoticeAttachments } = require('./lib/documents');
 const config = require('./lib/config');
 const { signAccessToken } = require('./lib/tokens');
 const { validatePasswordPolicy } = require('./lib/passwordPolicy');
@@ -12251,6 +12251,21 @@ app.patch('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
   if (req.body.clientVisible !== undefined) {
     if (typeof req.body.clientVisible !== 'boolean') {
       return res.status(400).json({ error: 'Client visibility must be true or false' });
+    }
+    const capability = documentClientVisibilityCapability(doc);
+    if (!capability.mutable) {
+      return res.status(409).json({
+        error: 'Client visibility is managed by this document context and cannot be changed',
+        code: 'document_visibility_ineligible',
+        ineligibilityReason: capability.ineligibilityReason,
+      });
+    }
+    const currentClientVisible = Number(doc.clientVisible || 0) === 1;
+    if (req.body.clientVisible === currentClientVisible) {
+      return res.status(409).json({
+        error: currentClientVisible ? 'Document is already client visible' : 'Document is already internal',
+        code: 'document_visibility_unchanged',
+      });
     }
     updates.push('clientVisible=?');
     values.push(req.body.clientVisible ? 1 : 0);

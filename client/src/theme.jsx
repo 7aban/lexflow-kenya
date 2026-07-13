@@ -916,7 +916,7 @@ export function StyleTag() { return <style>{`
     #root .lf-dash-panel-head { padding: 12px 14px; }
     #root .lf-dash-pipeline-row { padding: 9px 14px; }
   }
-  /* LOCAL-PILOT-GLOBAL-DOCUMENTS-EXPLORER-92 / GLOBAL-DOCUMENT-ACTIONS-94 / GLOBAL-DOCUMENT-BULK-LIFECYCLE-95 */
+  /* LOCAL-PILOT-GLOBAL-DOCUMENTS-EXPLORER-92 / GLOBAL-DOCUMENT-ACTIONS-94 / GLOBAL-DOCUMENT-BULK-LIFECYCLE-95 / GLOBAL-DOCUMENT-BULK-VISIBILITY-96 */
   #root .lf-global-documents-cards table { min-width: 1080px; }
   #root .lf-global-documents-selectable table { min-width: 1140px; }
   #root .lf-global-document-actions button:disabled { cursor: not-allowed; opacity: .55; }

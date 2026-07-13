@@ -103,10 +103,42 @@ function clientLabel(client) {
   return String(client?.name || '').trim() || 'Client unavailable';
 }
 
+const CLIENT_VISIBILITY_REASON_LABELS = Object.freeze({
+  archived: 'Restore before changing client visibility.',
+  message_context: 'Client access is managed by the linked conversation.',
+  notice_context: 'Client access is managed by the linked notice.',
+  client_upload: 'Client uploads remain client visible.',
+  outside_matter_context: 'Client access is managed outside matter documents.',
+});
+
+function clientVisibilityCapability(document) {
+  if (!document || document.archived) return { mutable: false, ineligibilityReason: 'archived' };
+  const serverCapability = document?.capabilities?.clientVisibility;
+  if (typeof serverCapability?.mutable === 'boolean') {
+    return {
+      mutable: serverCapability.mutable,
+      ineligibilityReason: serverCapability.mutable ? null : String(serverCapability.ineligibilityReason || 'context_managed'),
+    };
+  }
+
+  // Compatibility for disposable UI fixtures and older cached responses. The
+  // server remains authoritative and revalidates every PATCH request.
+  const origin = String(document.origin || '').toLowerCase();
+  if (origin === 'message') return { mutable: false, ineligibilityReason: 'message_context' };
+  if (origin === 'notice') return { mutable: false, ineligibilityReason: 'notice_context' };
+  if (String(document.source || '').toLowerCase() === 'client' || origin === 'client') {
+    return { mutable: false, ineligibilityReason: 'client_upload' };
+  }
+  return { mutable: true, ineligibilityReason: null };
+}
+
 function canChangeClientVisibility(document) {
-  if (!document || document.archived) return false;
-  if (String(document.source || '').toLowerCase() === 'client') return false;
-  return String(document.origin || '').toLowerCase() !== 'message';
+  return clientVisibilityCapability(document).mutable;
+}
+
+function clientVisibilityReasonLabel(document) {
+  const reason = clientVisibilityCapability(document).ineligibilityReason;
+  return reason ? CLIENT_VISIBILITY_REASON_LABELS[reason] || 'Client access is managed by another document context.' : '';
 }
 
 function safeDocumentActionError(error) {
@@ -120,7 +152,66 @@ function safeDocumentActionError(error) {
 
 function isBulkEligible(document, action) {
   if (!document?.id) return false;
-  return action === 'archive' ? !document.archived : Boolean(document.archived);
+  if (action === 'archive') return !document.archived;
+  if (action === 'restore') return Boolean(document.archived);
+  const capability = clientVisibilityCapability(document);
+  if (!capability.mutable) return false;
+  if (action === 'make_client_visible') return document.visibility !== 'client';
+  if (action === 'make_internal') return document.visibility === 'client';
+  return false;
+}
+
+function bulkIneligibilityReason(document, action) {
+  if (isBulkEligible(document, action)) return '';
+  if (action === 'archive') return 'already archived';
+  if (action === 'restore') return 'already active';
+  const capability = clientVisibilityCapability(document);
+  if (!capability.mutable) return clientVisibilityReasonLabel(document);
+  return action === 'make_client_visible' ? 'Already client visible.' : 'Already internal.';
+}
+
+function bulkActionPresentation(action, eligibleCount) {
+  const suffix = eligibleCount === 1 ? '' : 's';
+  if (action === 'archive') return {
+    title: 'Bulk archive loaded documents?',
+    actionLabel: 'archive',
+    eligibleText: `${eligibleCount} eligible active document${suffix}`,
+    ineligibleText: count => `${count} ineligible archived document${count === 1 ? '' : 's'}`,
+    confirmText: `Archive ${eligibleCount} document${suffix}`,
+    runningText: 'Archiving…',
+    endpointLabel: 'archive',
+    destructive: true,
+  };
+  if (action === 'restore') return {
+    title: 'Bulk restore loaded documents?',
+    actionLabel: 'restore',
+    eligibleText: `${eligibleCount} eligible archived document${suffix}`,
+    ineligibleText: count => `${count} ineligible active document${count === 1 ? '' : 's'}`,
+    confirmText: `Restore ${eligibleCount} document${suffix}`,
+    runningText: 'Restoring…',
+    endpointLabel: 'restore',
+    destructive: false,
+  };
+  if (action === 'make_client_visible') return {
+    title: 'Bulk make client visible?',
+    actionLabel: 'make client visible',
+    eligibleText: `${eligibleCount} eligible internal document${suffix}`,
+    ineligibleText: count => `${count} ineligible or already client-visible document${count === 1 ? '' : 's'}`,
+    confirmText: `Make ${eligibleCount} client visible`,
+    runningText: 'Making client visible…',
+    endpointLabel: 'visibility',
+    destructive: false,
+  };
+  return {
+    title: 'Bulk make internal?',
+    actionLabel: 'make internal',
+    eligibleText: `${eligibleCount} eligible client-visible document${suffix}`,
+    ineligibleText: count => `${count} ineligible or already internal document${count === 1 ? '' : 's'}`,
+    confirmText: `Make ${eligibleCount} internal`,
+    runningText: 'Making internal…',
+    endpointLabel: 'visibility',
+    destructive: false,
+  };
 }
 
 function isSessionExpiry(error) {
@@ -311,7 +402,7 @@ function ArchiveDocumentDialog({ document, pending, onCancel, onConfirm }) {
   );
 }
 
-function BulkLifecycleDialog({ intent, progress, onCancel, onConfirm }) {
+function BulkActionDialog({ intent, progress, onCancel, onConfirm }) {
   const running = Boolean(progress?.running);
   useEffect(() => {
     if (!intent) return undefined;
@@ -326,9 +417,13 @@ function BulkLifecycleDialog({ intent, progress, onCancel, onConfirm }) {
   const action = intent.action;
   const eligibleCount = intent.documents.filter(document => isBulkEligible(document, action)).length;
   const ineligibleCount = intent.documents.length - eligibleCount;
-  const actionLabel = action === 'archive' ? 'archive' : 'restore';
-  const eligibleState = action === 'archive' ? 'active' : 'archived';
-  const ineligibleState = action === 'archive' ? 'archived' : 'active';
+  const presentation = bulkActionPresentation(action, eligibleCount);
+  const visibilityAction = ['make_client_visible', 'make_internal'].includes(action);
+  const reasonCounts = visibilityAction ? intent.documents.reduce((counts, document) => {
+    const reason = bulkIneligibilityReason(document, action);
+    if (reason) counts.set(reason, (counts.get(reason) || 0) + 1);
+    return counts;
+  }, new Map()) : new Map();
   return (
     <div
       role="dialog"
@@ -342,15 +437,28 @@ function BulkLifecycleDialog({ intent, progress, onCancel, onConfirm }) {
     >
       <section className="lf-global-document-action-dialog lf-global-document-bulk-dialog" style={{ width: 'min(100%, 520px)', background: 'var(--lf-card, #fff)', color: 'var(--lf-card-text, #1A1A18)', borderRadius: 10, boxShadow: '0 24px 64px rgba(0,0,0,.28)', padding: 16, display: 'grid', gap: 12 }}>
         <div style={{ display: 'grid', gap: 4 }}>
-          <h2 id="global-document-bulk-title" style={{ margin: 0, fontSize: 18 }}>Bulk {actionLabel} loaded documents?</h2>
+          <h2 id="global-document-bulk-title" style={{ margin: 0, fontSize: 18 }}>{presentation.title}</h2>
           <small style={styles.mutedText}>{intent.documents.length} selected from the current loaded result window.</small>
         </div>
         <p style={{ margin: 0, lineHeight: 1.5 }}>
-          <strong>{eligibleCount} eligible {eligibleState} document{eligibleCount === 1 ? '' : 's'}</strong> will be processed.{' '}
-          <strong>{ineligibleCount} ineligible {ineligibleState} document{ineligibleCount === 1 ? '' : 's'}</strong> will be skipped.
+          <strong>{presentation.eligibleText}</strong> will be processed.{' '}
+          <strong>{presentation.ineligibleText(ineligibleCount)}</strong> will be skipped.
         </p>
+        {visibilityAction && reasonCounts.size > 0 && (
+          <div style={{ display: 'grid', gap: 4, padding: 10, borderRadius: 8, border: '1px solid var(--lf-card-border, var(--lf-border, #DDD8CE))' }}>
+            <strong style={{ fontSize: 12 }}>Skipped selection details</strong>
+            {[...reasonCounts.entries()].map(([reason, count]) => (
+              <span key={reason} style={styles.mutedText}>{count} · {reason}</span>
+            ))}
+          </div>
+        )}
+        {action === 'make_client_visible' && (
+          <p style={{ margin: 0, lineHeight: 1.5, padding: 10, borderRadius: 8, background: 'color-mix(in srgb, var(--lf-accent, #C5973C) 14%, var(--lf-card, #fff))' }}>
+            <strong>Client access disclosure:</strong> These documents will become available through LexFlow’s client-facing matter document access rules.
+          </p>
+        )}
         <p style={{ margin: 0, lineHeight: 1.5 }}>
-          Requests run sequentially through the existing per-document {actionLabel} action. This operation is not transactional; successful requests are not rolled back if a later request fails.
+          Requests run sequentially through the existing per-document {presentation.endpointLabel} action. This operation is not transactional; successful requests are not rolled back if a later request fails.
         </p>
         {running && (
           <div role="status" aria-live="polite" className="lf-global-document-bulk-progress" style={{ display: 'grid', gap: 4, padding: 10, borderRadius: 8, background: 'color-mix(in srgb, var(--lf-card, #fff) 84%, var(--lf-background, #F5F2EB))' }}>
@@ -363,11 +471,11 @@ function BulkLifecycleDialog({ intent, progress, onCancel, onConfirm }) {
           <button
             autoFocus
             type="button"
-            style={action === 'archive' ? styles.dangerButton : styles.primaryButton}
+            style={presentation.destructive ? styles.dangerButton : styles.primaryButton}
             disabled={running || eligibleCount === 0}
             onClick={onConfirm}
           >
-            {running ? `${action === 'archive' ? 'Archiving' : 'Restoring'}…` : `${action === 'archive' ? 'Archive' : 'Restore'} ${eligibleCount} document${eligibleCount === 1 ? '' : 's'}`}
+            {running ? presentation.runningText : presentation.confirmText}
           </button>
         </div>
       </section>
@@ -736,7 +844,7 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
   }
 
   function beginBulkAction(action, selection = selectedIds) {
-    if (!canManage || actionPending || !['archive', 'restore'].includes(action)) return;
+    if (!canManage || actionPending || !['archive', 'restore', 'make_client_visible', 'make_internal'].includes(action)) return;
     const selectionSet = new Set(selection.map(String));
     const documents = items.filter(document => selectionSet.has(String(document.id)));
     if (!documents.length) return;
@@ -797,7 +905,8 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
         setBulkProgress(current => ({ ...current, currentId: String(document.id) }));
         try {
           if (action === 'archive') await archiveDocument(document.id);
-          else await restoreDocument(document.id);
+          else if (action === 'restore') await restoreDocument(document.id);
+          else await updateDocument(document.id, { clientVisible: action === 'make_client_visible' });
           succeeded += 1;
         } catch (caught) {
           failed += 1;
@@ -833,7 +942,7 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
         .map(document => String(document.id));
       setSelectedIds(retryIds);
 
-      const actionLabel = action === 'archive' ? 'archive' : 'restore';
+      const actionLabel = bulkActionPresentation(action, eligibleDocuments.length).actionLabel;
       const message = `Bulk ${actionLabel} finished: ${succeeded} succeeded, ${failed} failed, ${skipped} skipped.`
         + (aborted ? ' Session expired, so the remaining requests were not sent.' : '')
         + (refreshFailed ? ' The Explorer could not rebuild the loaded window automatically; use Refresh to reload it.' : '')
@@ -874,7 +983,8 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
     const folderLabel = String(document?.folderPathLabel || 'Uncategorised');
     const rowPending = pendingAction?.documentId === documentId || bulkProgress?.currentId === documentId;
     const selected = selectedIdSet.has(documentId);
-    const visibilityMutable = canManage && canChangeClientVisibility(document);
+    const visibilityCapability = clientVisibilityCapability(document);
+    const visibilityMutable = canManage && visibilityCapability.mutable;
     const cells = [
       <div key={`${document.id}-document`} style={{ display: 'grid', gap: 3, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', minWidth: 0 }}>
@@ -894,7 +1004,10 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
       </div>,
       <span key={`${document.id}-date`} style={{ whiteSpace: 'nowrap' }}>{formatDate(document.date)}</span>,
       <Badge key={`${document.id}-origin`} tone={originTone(document.origin)}>{originLabel(document.origin)}</Badge>,
-      <Badge key={`${document.id}-visibility`} tone={document.visibility === 'client' ? 'green' : 'blue'}>{document.visibility === 'client' ? 'Client visible' : 'Internal'}</Badge>,
+      <div key={`${document.id}-visibility`} style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+        <Badge tone={document.visibility === 'client' ? 'green' : 'blue'}>{document.visibility === 'client' ? 'Client visible' : 'Internal'}</Badge>
+        {canManage && !visibilityCapability.mutable && <small style={styles.mutedText}>{clientVisibilityReasonLabel(document)}</small>}
+      </div>,
       <div key={`${document.id}-actions`} className="lf-global-document-actions" aria-busy={rowPending || undefined} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button type="button" style={styles.tinyButton} onClick={() => openPreview(document)} disabled={Boolean(document.archived) || rowPending || bulkRunning} title={document.archived ? 'Restore this document before previewing.' : undefined}>Preview</button>
         <button type="button" style={styles.tinyButton} onClick={() => downloadDocument(document)} disabled={Boolean(document.archived) || rowPending || bulkRunning} title={document.archived ? 'Restore this document before downloading.' : undefined}>Download</button>
@@ -947,7 +1060,7 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
             <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
               <h2 style={{ margin: 0, fontSize: 17 }}>Document register</h2>
-              <p style={{ margin: 0, color: 'var(--lf-card-muted, var(--lf-text-muted, #6B6B66))', lineHeight: 1.5 }}>{canManage ? 'Manage documents linked to accessible matters. Bulk archive and restore apply only to the current loaded result window; movement and uploads remain in the matter Explorer.' : 'Read-only workspace for documents linked to accessible matters.'} Archived records remain unavailable for preview or download.</p>
+              <p style={{ margin: 0, color: 'var(--lf-card-muted, var(--lf-text-muted, #6B6B66))', lineHeight: 1.5 }}>{canManage ? 'Manage documents linked to accessible matters. Bulk lifecycle and client-visibility actions apply only to the current loaded result window; movement and uploads remain in the matter Explorer.' : 'Read-only workspace for documents linked to accessible matters.'} Archived records remain unavailable for preview, download, or visibility changes.</p>
             </div>
             <Badge tone={canManage ? 'green' : 'blue'}>{canManage ? 'Controlled actions' : 'Read only'}</Badge>
           </div>
@@ -1080,6 +1193,8 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
                     <strong className="lf-global-documents-selection-summary" aria-live="polite">{selectedDocuments.length} selected from {items.length} loaded</strong>
                   </div>
                   <div className="lf-global-documents-bulk-actions" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <button type="button" style={styles.primaryButton} disabled={actionPending || selectedDocuments.length === 0 || selectionLimitExceeded} onClick={() => beginBulkAction('make_client_visible')}>Bulk make client visible</button>
+                    <button type="button" style={styles.ghostButton} disabled={actionPending || selectedDocuments.length === 0 || selectionLimitExceeded} onClick={() => beginBulkAction('make_internal')}>Bulk make internal</button>
                     <button type="button" style={styles.dangerButton} disabled={actionPending || selectedDocuments.length === 0 || selectionLimitExceeded} onClick={() => beginBulkAction('archive')}>Bulk archive</button>
                     <button type="button" style={styles.primaryButton} disabled={actionPending || selectedDocuments.length === 0 || selectionLimitExceeded} onClick={() => beginBulkAction('restore')}>Bulk restore</button>
                   </div>
@@ -1134,7 +1249,7 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
         onCancel={() => { if (!pendingAction) setArchiveTarget(null); }}
         onConfirm={confirmArchive}
       />
-      <BulkLifecycleDialog
+      <BulkActionDialog
         intent={bulkIntent}
         progress={bulkProgress}
         onCancel={() => { if (!bulkRunning) setBulkIntent(null); }}

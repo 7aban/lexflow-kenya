@@ -49,6 +49,42 @@ function documentVisibility(row = {}) {
     : 'internal';
 }
 
+const CLIENT_VISIBILITY_INELIGIBILITY_REASONS = Object.freeze({
+  ARCHIVED: 'archived',
+  MESSAGE_CONTEXT: 'message_context',
+  NOTICE_CONTEXT: 'notice_context',
+  CLIENT_UPLOAD: 'client_upload',
+  OUTSIDE_MATTER_CONTEXT: 'outside_matter_context',
+});
+
+/**
+ * Authoritative document-level rule for client-visibility mutation.
+ *
+ * A mutable document is an active, matter-linked document whose effective
+ * client access is controlled only by documents.clientVisible. Client uploads
+ * and context attachments are intentionally excluded because changing the
+ * stored flag would not be the authority for their effective access.
+ */
+function documentClientVisibilityCapability(row = {}) {
+  let ineligibilityReason = null;
+  if (row.deletedAt) {
+    ineligibilityReason = CLIENT_VISIBILITY_INELIGIBILITY_REASONS.ARCHIVED;
+  } else if (row.messageId) {
+    ineligibilityReason = CLIENT_VISIBILITY_INELIGIBILITY_REASONS.MESSAGE_CONTEXT;
+  } else if (row.noticeId) {
+    ineligibilityReason = CLIENT_VISIBILITY_INELIGIBILITY_REASONS.NOTICE_CONTEXT;
+  } else if (String(row.source || '').toLowerCase() === 'client') {
+    ineligibilityReason = CLIENT_VISIBILITY_INELIGIBILITY_REASONS.CLIENT_UPLOAD;
+  } else if (!String(row.matterId || '').trim()) {
+    ineligibilityReason = CLIENT_VISIBILITY_INELIGIBILITY_REASONS.OUTSIDE_MATTER_CONTEXT;
+  }
+
+  return {
+    mutable: ineligibilityReason === null,
+    ineligibilityReason,
+  };
+}
+
 function documentUploaderDisplay(row = {}) {
   return String(row.uploaderUserName || row.generatedBy || '').trim();
 }
@@ -189,6 +225,8 @@ module.exports = {
   clientDocumentVisibilitySql,
   documentOrigin,
   documentVisibility,
+  CLIENT_VISIBILITY_INELIGIBILITY_REASONS,
+  documentClientVisibilityCapability,
   documentUploaderDisplay,
   publicDocument,
   publicNotice,

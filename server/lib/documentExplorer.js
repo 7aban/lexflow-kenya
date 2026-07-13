@@ -1,7 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
-const { documentOrigin, documentUploaderDisplay, documentVisibility } = require('./documents');
+const { documentClientVisibilityCapability, documentOrigin, documentUploaderDisplay, documentVisibility } = require('./documents');
 
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 100;
@@ -334,6 +334,7 @@ function reconstructFolderLocation(row, chains, role) {
 function publicExplorerDocument(row, location) {
   const displayName = String(row.displayName || row.name || 'Document');
   const uploader = documentUploaderDisplay(row);
+  const clientVisibilityCapability = documentClientVisibilityCapability(row);
   const generated = String(row.source || '').toLowerCase() === 'generated'
     || row.templateName
     || row.generatedAt;
@@ -348,6 +349,9 @@ function publicExplorerDocument(row, location) {
     source: String(row.explorerSource || row.source || 'firm').toLowerCase() || 'firm',
     origin: documentOrigin(row),
     visibility: documentVisibility(row),
+    capabilities: {
+      clientVisibility: clientVisibilityCapability,
+    },
     uploaderDisplay: uploader,
     generatedAt: String(row.generatedAt || ''),
     generation: generated ? {
