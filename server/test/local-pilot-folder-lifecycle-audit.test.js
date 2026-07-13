@@ -139,13 +139,14 @@ describe('LOCAL-PILOT folder lifecycle structured audit', () => {
 
     const created = await createFolder(adminToken, accessibleMatterId, originalName);
     expect(created.statusCode).toBe(200);
-    expect(Object.keys(created.body).sort()).toEqual(['createdAt', 'createdBy', 'id', 'matterId', 'name']);
+    expect(Object.keys(created.body).sort()).toEqual(['createdAt', 'createdBy', 'id', 'matterId', 'name', 'parentId']);
     expect(created.body).toEqual({
       id: created.body.id,
       matterId: accessibleMatterId,
       name: originalName,
       createdBy: expect.any(String),
       createdAt: expect.any(String),
+      parentId: null,
     });
 
     const renamed = await request(app)
@@ -153,7 +154,7 @@ describe('LOCAL-PILOT folder lifecycle structured audit', () => {
       .set(auth(adminToken))
       .send({ name: renamedName });
     expect(renamed.statusCode).toBe(200);
-    expect(Object.keys(renamed.body).sort()).toEqual(['createdAt', 'createdBy', 'id', 'matterId', 'name']);
+    expect(Object.keys(renamed.body).sort()).toEqual(['createdAt', 'createdBy', 'id', 'matterId', 'name', 'parentId']);
     expect(renamed.body).toEqual({ ...created.body, name: renamedName });
 
     const deleted = await request(app)
@@ -169,9 +170,9 @@ describe('LOCAL-PILOT folder lifecycle structured audit', () => {
       ['folder_renamed', 'folder', created.body.id, accessibleMatterId],
       ['folder_deleted', 'folder', created.body.id, accessibleMatterId],
     ]);
-    expect(JSON.parse(events[0].metadata_json)).toEqual({ folderName: originalName, matterId: accessibleMatterId });
-    expect(JSON.parse(events[1].metadata_json)).toEqual({ previousName: originalName, newName: renamedName, matterId: accessibleMatterId });
-    expect(JSON.parse(events[2].metadata_json)).toEqual({ folderName: renamedName, matterId: accessibleMatterId });
+    expect(JSON.parse(events[0].metadata_json)).toEqual({ folderName: originalName, matterId: accessibleMatterId, parentId: null });
+    expect(JSON.parse(events[1].metadata_json)).toEqual({ previousName: originalName, newName: renamedName, matterId: accessibleMatterId, parentId: null });
+    expect(JSON.parse(events[2].metadata_json)).toEqual({ folderName: renamedName, matterId: accessibleMatterId, parentId: null });
   });
 
   test('assigned advocate can perform the audited lifecycle on an accessible matter', async () => {

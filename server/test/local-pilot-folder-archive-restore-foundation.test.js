@@ -219,7 +219,7 @@ describe('LOCAL-PILOT folder archive/restore foundation', () => {
     expect(active.body.map(folder => folder.id)).toEqual(expect.arrayContaining(['all', 'uncategorised', activeListFolderId, clientUploadsFolderId]));
     expect(active.body.map(folder => folder.id)).not.toContain(archivedListFolderId);
     const activeRealFolder = active.body.find(folder => folder.id === activeListFolderId);
-    expect(Object.keys(activeRealFolder).sort()).toEqual(['createdAt', 'createdBy', 'documentCount', 'id', 'matterId', 'name']);
+    expect(Object.keys(activeRealFolder).sort()).toEqual(['createdAt', 'createdBy', 'documentCount', 'id', 'matterId', 'name', 'parentId']);
     expect(active.body.every(folder => folder.archivedAt === undefined)).toBe(true);
 
     const archived = await request(app)
@@ -231,7 +231,7 @@ describe('LOCAL-PILOT folder archive/restore foundation', () => {
     expect(archivedIds).not.toContain('all');
     expect(archivedIds).not.toContain('uncategorised');
     expect(archivedIds).not.toContain(activeListFolderId);
-    expect(archived.body.every(folder => Object.keys(folder).sort().join(',') === 'archivedAt,createdAt,createdBy,id,matterId,name')).toBe(true);
+    expect(archived.body.every(folder => Object.keys(folder).sort().join(',') === 'archivedAt,createdAt,createdBy,id,matterId,name,parentId')).toBe(true);
     expect(archived.body.every(folder => folder.archivedAt && folder.virtual === undefined)).toBe(true);
 
     const clientActive = await request(app)
@@ -284,7 +284,7 @@ describe('LOCAL-PILOT folder archive/restore foundation', () => {
       .patch(`/api/folders/${folder.body.id}/archive`)
       .set(auth(adminToken));
     expect(archived.statusCode).toBe(200);
-    expect(Object.keys(archived.body).sort()).toEqual(['archivedAt', 'createdAt', 'createdBy', 'id', 'matterId', 'name']);
+    expect(Object.keys(archived.body).sort()).toEqual(['archivedAt', 'createdAt', 'createdBy', 'id', 'matterId', 'name', 'parentId']);
     expect(archived.body).toEqual({ ...folder.body, archivedAt: expect.any(String) });
     expect(Number.isNaN(Date.parse(archived.body.archivedAt))).toBe(false);
     expect(await dbAll(
@@ -298,7 +298,7 @@ describe('LOCAL-PILOT folder archive/restore foundation', () => {
     expect([events[0].action, events[0].entity_type, events[0].entity_id, events[0].matter_id]).toEqual([
       'folder_archived', 'folder', folder.body.id, accessibleMatterId,
     ]);
-    expect(JSON.parse(events[0].metadata_json)).toEqual({ folderName, matterId: accessibleMatterId });
+    expect(JSON.parse(events[0].metadata_json)).toEqual({ folderName, matterId: accessibleMatterId, parentId: null });
 
     const activeFolders = await request(app).get(`/api/matters/${accessibleMatterId}/folders`).set(auth(adminToken));
     const archivedFolders = await request(app).get(`/api/matters/${accessibleMatterId}/folders?status=archived`).set(auth(adminToken));
@@ -331,7 +331,7 @@ describe('LOCAL-PILOT folder archive/restore foundation', () => {
     expect([events[0].action, events[0].entity_type, events[0].entity_id, events[0].matter_id]).toEqual([
       'folder_restored', 'folder', folder.body.id, accessibleMatterId,
     ]);
-    expect(JSON.parse(events[0].metadata_json)).toEqual({ folderName, matterId: accessibleMatterId });
+    expect(JSON.parse(events[0].metadata_json)).toEqual({ folderName, matterId: accessibleMatterId, parentId: null });
   });
 
   test('assigned advocate can archive and restore a custom folder on an accessible matter', async () => {

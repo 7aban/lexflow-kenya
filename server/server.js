@@ -32,10 +32,12 @@ const googleOAuth = require('./lib/oauthGoogle');
 const microsoftOAuth = require('./lib/oauthMicrosoft');
 const themeValidation = require('./lib/themeValidation');
 const { buildTemplateMergeContext, mergeTemplateMarkup } = require('./lib/templateMerge');
+const { MAX_FOLDER_DEPTH, createFolderHierarchy, isClientUploadsFolderName } = require('./lib/folderHierarchy');
 
 const app = express();
 const db = new sqlite3.Database(config.DATABASE_PATH);
 const { run, get, all } = createDb(db);
+const folderHierarchy = createFolderHierarchy({ get });
 const { canAccessMatter, canAccessClient, canAccessInvoice, canAccessTask, canAccessTimeEntry, canAccessAppearance, canAccessNotice, canAccessConversation, canAccessDocument, canAccessDocumentRequest, isBillingVisibleFor } = createAccess({ get });
 const { logClientActivity, logAudit } = createLogging({ run });
 const { notifyStaff } = createNotifications({ run, all, genId });
@@ -1359,7 +1361,7 @@ async function initDb() {
   await run(`CREATE TABLE IF NOT EXISTS appearances (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, title TEXT, date TEXT, time TEXT, type TEXT, location TEXT, meetingLink TEXT, attorney TEXT, prepNote TEXT, outcome TEXT DEFAULT '', attendanceStatus TEXT DEFAULT 'scheduled', appearedBy TEXT DEFAULT '', clientAttended INTEGER NOT NULL DEFAULT 0, attendanceNote TEXT DEFAULT '', attendanceUpdatedBy TEXT, attendanceUpdatedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS appearance_prep_items (id TEXT PRIMARY KEY, appearanceId TEXT NOT NULL, matterId TEXT NOT NULL, title TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'general', status TEXT NOT NULL DEFAULT 'open', notes TEXT DEFAULT '', createdBy TEXT NOT NULL, createdAt TEXT NOT NULL, updatedBy TEXT, updatedAt TEXT, completedBy TEXT, completedAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS appearance_documents (id TEXT PRIMARY KEY, appearanceId TEXT NOT NULL, documentId TEXT NOT NULL, matterId TEXT NOT NULL, label TEXT DEFAULT '', notes TEXT DEFAULT '', createdBy TEXT NOT NULL, createdAt TEXT NOT NULL)`);
-  await run(`CREATE TABLE IF NOT EXISTS folders (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT NOT NULL, createdBy TEXT, createdAt TEXT, archivedAt TEXT)`);
+  await run(`CREATE TABLE IF NOT EXISTS folders (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT NOT NULL, createdBy TEXT, createdAt TEXT, archivedAt TEXT, parentId TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, name TEXT, displayName TEXT, type TEXT, mimeType TEXT, date TEXT, size TEXT, content BLOB, source TEXT DEFAULT 'firm', folderId TEXT, messageId TEXT, noticeId TEXT, clientVisible INTEGER DEFAULT 0, uploadedBy TEXT, templateId TEXT, templateName TEXT, generatedBy TEXT, generatedAt TEXT, version INTEGER DEFAULT 1)`);
   await run(`CREATE TABLE IF NOT EXISTS case_notes (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, content TEXT NOT NULL, author TEXT, createdAt TEXT)`);
   await run(`CREATE TABLE IF NOT EXISTS invoices (id TEXT PRIMARY KEY, matterId TEXT NOT NULL, clientId TEXT, number TEXT, date TEXT, amount REAL DEFAULT 0, status TEXT DEFAULT 'Outstanding', dueDate TEXT, description TEXT, source TEXT DEFAULT 'time')`);
@@ -1569,6 +1571,7 @@ createdAt TEXT NOT NULL
   await ensureColumn('appearances', 'attendanceUpdatedBy', 'TEXT');
   await ensureColumn('appearances', 'attendanceUpdatedAt', 'TEXT');
   await ensureColumn('folders', 'archivedAt', 'TEXT');
+  await ensureColumn('folders', 'parentId', 'TEXT');
   await ensureColumn('documents', 'source', "TEXT DEFAULT 'firm'");
   await ensureColumn('documents', 'folderId', 'TEXT');
   await ensureColumn('documents', 'messageId', 'TEXT');
@@ -1674,6 +1677,7 @@ createdAt TEXT NOT NULL
   await run('CREATE INDEX IF NOT EXISTS idx_legal_deadline_suggestions_due_date ON legal_deadline_suggestions(suggestedDueDate)');
   await run('CREATE INDEX IF NOT EXISTS idx_documents_matterId_deletedAt_date ON documents(matterId, deletedAt, date)');
   await run('CREATE INDEX IF NOT EXISTS idx_documents_folderId_deletedAt ON documents(folderId, deletedAt)');
+  await run('CREATE INDEX IF NOT EXISTS idx_folders_matterId_parentId ON folders(matterId, parentId)');
   await run('CREATE INDEX IF NOT EXISTS idx_documents_messageId_deletedAt ON documents(messageId, deletedAt)');
   await run('CREATE INDEX IF NOT EXISTS idx_signature_assets_scope ON signature_assets(ownerType, ownerId, assetType, deletedAt, isDefault)');
   await run('CREATE INDEX IF NOT EXISTS idx_documents_noticeId_deletedAt ON documents(noticeId, deletedAt)');
@@ -1761,15 +1765,11 @@ createdAt TEXT NOT NULL
 
 
 
-function isClientUploadsFolderName(name) {
-  return String(name || '').trim().toLowerCase() === 'client uploads';
-}
-
 async function clientUploadsFolder(matterId, userId = '') {
-  let folder = await get('SELECT * FROM folders WHERE matterId=? AND lower(name)=lower(?)', [matterId, 'Client Uploads']);
+  let folder = await get('SELECT * FROM folders WHERE matterId=? AND parentId IS NULL AND lower(name)=lower(?)', [matterId, 'Client Uploads']);
   if (!folder) {
     const id = genId('FOL');
-    await run('INSERT INTO folders (id,matterId,name,createdBy,createdAt) VALUES (?,?,?,?,?)', [id, matterId, 'Client Uploads', userId, new Date().toISOString()]);
+    await run('INSERT INTO folders (id,matterId,name,createdBy,createdAt,parentId) VALUES (?,?,?,?,?,NULL)', [id, matterId, 'Client Uploads', userId, new Date().toISOString()]);
     folder = await get('SELECT * FROM folders WHERE id=?', [id]);
   }
   return folder;
@@ -1965,13 +1965,13 @@ function parsePageOrder(input, pageCount) {
 async function matterFolders(matterId, req = null) {
   if (req?.user?.role === 'client') {
     const visibleCount = await get(`SELECT COUNT(*) documentCount FROM documents d WHERE d.matterId=? AND d.deletedAt IS NULL AND ${clientDocumentVisibilitySql('d')}`, [matterId, req.user.clientId || '']);
-    const clientFolder = await get(`SELECT f.id, f.matterId, f.name, f.createdBy, f.createdAt, (SELECT COUNT(*) FROM documents d WHERE d.folderId=f.id AND d.deletedAt IS NULL AND ${clientDocumentVisibilitySql('d')}) documentCount
+    const clientFolder = await get(`SELECT f.id, f.matterId, f.name, f.createdBy, f.createdAt, f.parentId, (SELECT COUNT(*) FROM documents d WHERE d.folderId=f.id AND d.deletedAt IS NULL AND ${clientDocumentVisibilitySql('d')}) documentCount
       FROM folders f
-      WHERE f.matterId=? AND lower(f.name)=lower('Client Uploads') AND f.archivedAt IS NULL`, [req.user.clientId || '', matterId]);
+      WHERE f.matterId=? AND f.parentId IS NULL AND lower(f.name)=lower('Client Uploads') AND f.archivedAt IS NULL`, [req.user.clientId || '', matterId]);
     const folders = clientFolder ? [{ ...clientFolder, name: 'Client Uploads' }] : [];
     return [{ id: 'all', matterId, name: 'All Documents', virtual: true, documentCount: visibleCount?.documentCount || 0 }, ...folders];
   }
-  const folders = await all(`SELECT f.id, f.matterId, f.name, f.createdBy, f.createdAt, (SELECT COUNT(*) FROM documents d WHERE d.folderId=f.id AND d.deletedAt IS NULL) documentCount FROM folders f WHERE f.matterId=? AND f.archivedAt IS NULL ORDER BY CASE WHEN lower(f.name)=lower('Client Uploads') THEN 0 ELSE 1 END, lower(f.name)`, [matterId]);
+  const folders = await all(`SELECT f.id, f.matterId, f.name, f.createdBy, f.createdAt, f.parentId, (SELECT COUNT(*) FROM documents d WHERE d.folderId=f.id AND d.deletedAt IS NULL) documentCount FROM folders f WHERE f.matterId=? AND f.archivedAt IS NULL ORDER BY CASE WHEN lower(f.name)=lower('Client Uploads') THEN 0 ELSE 1 END, lower(f.name)`, [matterId]);
   const uncategorised = await get('SELECT COUNT(*) documentCount FROM documents WHERE matterId=? AND deletedAt IS NULL AND (folderId IS NULL OR folderId="")', [matterId]);
   return [{ id: 'all', matterId, name: 'All Documents', virtual: true }, { id: 'uncategorised', matterId, name: 'Uncategorised', virtual: true, documentCount: uncategorised.documentCount || 0 }, ...folders];
 }
@@ -9151,8 +9151,10 @@ app.post('/api/document-requests/:id/respond', async (req, res) => {
   const cleanDisplayName = cleanDocumentName(name);
   const type = imageAllowed.includes(mimeType) ? 'Image' : mimeType.includes('pdf') ? 'PDF' : 'Word';
   const folder = await clientUploadsFolder(request.matterId, req.user.userId || '');
+  const destination = await folderHierarchy.activeDestination(request.matterId, folder.id);
+  if (!destination) return res.status(400).json({ error: 'Folder not found for this matter' });
   await run(`INSERT INTO documents (id,matterId,name,displayName,type,mimeType,date,size,content,source,folderId,messageId,noticeId,clientVisible,uploadedBy)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [docId, request.matterId, cleanName, cleanDisplayName, type, mimeType, today(), `${Math.max(1, Math.round(buffer.length / 1024))} KB`, buffer, 'client', folder.id, null, null, 0, req.user.userId || '']);
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [docId, request.matterId, cleanName, cleanDisplayName, type, mimeType, today(), `${Math.max(1, Math.round(buffer.length / 1024))} KB`, buffer, 'client', destination.id, null, null, 0, req.user.userId || '']);
   const now = new Date().toISOString();
   await run('UPDATE document_requests SET status=?, respondedAt=?, responseDocumentId=? WHERE id=?', ['fulfilled', now, docId, req.params.id]);
   const updated = await get('SELECT * FROM document_requests WHERE id=?', [req.params.id]);
@@ -9189,7 +9191,7 @@ app.get('/api/matters/:id/folders', async (req, res) => {
   if (archived && !['advocate', 'admin'].includes(req.user.role)) return res.status(403).json({ error: 'Advocate or admin access required' });
   if (!(await canAccessMatter(req, req.params.id))) return res.status(403).json({ error: 'Matter access denied' });
   if (archived) {
-    const folders = await all(`SELECT id, matterId, name, createdBy, createdAt, archivedAt
+    const folders = await all(`SELECT id, matterId, name, createdBy, createdAt, archivedAt, parentId
       FROM folders
       WHERE matterId=? AND archivedAt IS NOT NULL
       ORDER BY lower(name)`, [req.params.id]);
@@ -9206,13 +9208,25 @@ app.post('/api/matters/:id/folders', requireAdvocateOrAdmin, async (req, res) =>
   if (!name) return res.status(400).json({ error: 'Folder name is required' });
   const matter = await get('SELECT id FROM matters WHERE id=?', [req.params.id]);
   if (!matter) return res.status(404).json({ error: 'Matter not found' });
-  const existing = await get('SELECT id FROM folders WHERE matterId=? AND lower(name)=lower(?)', [req.params.id, name]);
+
+  const parent = await folderHierarchy.validateParent(req.params.id, req.body.parentId);
+  if (!parent.ok) {
+    if (parent.reason === 'protected_parent') return res.status(400).json({ error: 'Client Uploads cannot contain child folders' });
+    if (parent.reason === 'max_depth') return res.status(400).json({ error: `Folder hierarchy cannot exceed ${MAX_FOLDER_DEPTH} levels` });
+    return res.status(400).json({ error: 'Parent folder not found for this matter' });
+  }
+  if (parent.parentId && isClientUploadsFolderName(name)) {
+    return res.status(400).json({ error: 'Client Uploads must remain a root folder' });
+  }
+
+  const existing = await get(`SELECT id FROM folders
+    WHERE matterId=? AND COALESCE(parentId,'')=COALESCE(?,'') AND lower(name)=lower(?)`, [req.params.id, parent.parentId, name]);
   if (existing) return res.status(400).json({ error: 'Folder already exists for this matter' });
   const id = genId('FOL');
-  await run('INSERT INTO folders (id,matterId,name,createdBy,createdAt) VALUES (?,?,?,?,?)', [id, req.params.id, name, req.user.userId || '', new Date().toISOString()]);
+  await run('INSERT INTO folders (id,matterId,name,createdBy,createdAt,parentId) VALUES (?,?,?,?,?,?)', [id, req.params.id, name, req.user.userId || '', new Date().toISOString(), parent.parentId]);
   await logAudit(req, 'create', 'folder', id, `Created folder ${name}`);
-  await recordAuditEvent(req, { action: 'folder_created', entityType: 'folder', entityId: id, matterId: req.params.id, metadata: { folderName: name, matterId: req.params.id } }).catch(() => {});
-  res.json(await get('SELECT id,matterId,name,createdBy,createdAt FROM folders WHERE id=?', [id]));
+  await recordAuditEvent(req, { action: 'folder_created', entityType: 'folder', entityId: id, matterId: req.params.id, metadata: { folderName: name, matterId: req.params.id, parentId: parent.parentId } }).catch(() => {});
+  res.json(await get('SELECT id,matterId,name,createdBy,createdAt,parentId FROM folders WHERE id=?', [id]));
 });
 app.patch('/api/folders/:id', requireAdvocateOrAdmin, async (req, res) => {
   const folder = await get('SELECT * FROM folders WHERE id=?', [req.params.id]);
@@ -9225,15 +9239,17 @@ app.patch('/api/folders/:id', requireAdvocateOrAdmin, async (req, res) => {
   if (folder.archivedAt) return res.status(400).json({ error: 'Archived folders cannot be renamed' });
   const name = String(req.body.name || '').trim();
   if (!name) return res.status(400).json({ error: 'Folder name is required' });
-  const existing = await get('SELECT id FROM folders WHERE matterId=? AND lower(name)=lower(?) AND id<>?', [folder.matterId, name, req.params.id]);
+  if (folder.parentId && isClientUploadsFolderName(name)) return res.status(400).json({ error: 'Client Uploads must remain a root folder' });
+  const existing = await get(`SELECT id FROM folders
+    WHERE matterId=? AND COALESCE(parentId,'')=COALESCE(?,'') AND lower(name)=lower(?) AND id<>?`, [folder.matterId, folder.parentId, name, req.params.id]);
   if (existing) return res.status(400).json({ error: 'Folder already exists for this matter' });
   await run('UPDATE folders SET name=? WHERE id=?', [name, req.params.id]);
   await logAudit(req, 'update', 'folder', req.params.id, `Renamed folder ${folder.name} to ${name}`);
-  await recordAuditEvent(req, { action: 'folder_renamed', entityType: 'folder', entityId: req.params.id, matterId: folder.matterId, metadata: { previousName: folder.name, newName: name, matterId: folder.matterId } }).catch(() => {});
-  res.json(await get('SELECT id,matterId,name,createdBy,createdAt FROM folders WHERE id=?', [req.params.id]));
+  await recordAuditEvent(req, { action: 'folder_renamed', entityType: 'folder', entityId: req.params.id, matterId: folder.matterId, metadata: { previousName: folder.name, newName: name, matterId: folder.matterId, parentId: folder.parentId || null } }).catch(() => {});
+  res.json(await get('SELECT id,matterId,name,createdBy,createdAt,parentId FROM folders WHERE id=?', [req.params.id]));
 });
 app.patch('/api/folders/:id/archive', requireAdvocateOrAdmin, async (req, res) => {
-  const folder = await get('SELECT id,matterId,name,createdBy,createdAt,archivedAt FROM folders WHERE id=?', [req.params.id]);
+  const folder = await get('SELECT id,matterId,name,createdBy,createdAt,archivedAt,parentId FROM folders WHERE id=?', [req.params.id]);
   if (!folder) return res.status(404).json({ error: 'Folder not found' });
   if (!(await canAccessMatter(req, folder.matterId))) {
     await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: folder.matterId, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
@@ -9241,13 +9257,15 @@ app.patch('/api/folders/:id/archive', requireAdvocateOrAdmin, async (req, res) =
   }
   if (isClientUploadsFolderName(folder.name)) return res.status(400).json({ error: 'System folders cannot be archived' });
   if (folder.archivedAt) return res.status(400).json({ error: 'Folder is already archived' });
+  const child = await get('SELECT id FROM folders WHERE parentId=? LIMIT 1', [req.params.id]);
+  if (child) return res.status(400).json({ error: 'Folder must not contain child folders before it can be archived' });
   const archivedAt = new Date().toISOString();
   await run('UPDATE folders SET archivedAt=? WHERE id=?', [archivedAt, req.params.id]);
-  await recordAuditEvent(req, { action: 'folder_archived', entityType: 'folder', entityId: req.params.id, matterId: folder.matterId, metadata: { folderName: folder.name, matterId: folder.matterId } }).catch(() => {});
-  res.json(await get('SELECT id,matterId,name,createdBy,createdAt,archivedAt FROM folders WHERE id=?', [req.params.id]));
+  await recordAuditEvent(req, { action: 'folder_archived', entityType: 'folder', entityId: req.params.id, matterId: folder.matterId, metadata: { folderName: folder.name, matterId: folder.matterId, parentId: folder.parentId || null } }).catch(() => {});
+  res.json(await get('SELECT id,matterId,name,createdBy,createdAt,archivedAt,parentId FROM folders WHERE id=?', [req.params.id]));
 });
 app.patch('/api/folders/:id/restore', requireAdvocateOrAdmin, async (req, res) => {
-  const folder = await get('SELECT id,matterId,name,createdBy,createdAt,archivedAt FROM folders WHERE id=?', [req.params.id]);
+  const folder = await get('SELECT id,matterId,name,createdBy,createdAt,archivedAt,parentId FROM folders WHERE id=?', [req.params.id]);
   if (!folder) return res.status(404).json({ error: 'Folder not found' });
   if (!(await canAccessMatter(req, folder.matterId))) {
     await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: folder.matterId, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
@@ -9255,9 +9273,12 @@ app.patch('/api/folders/:id/restore', requireAdvocateOrAdmin, async (req, res) =
   }
   if (isClientUploadsFolderName(folder.name)) return res.status(400).json({ error: 'System folders cannot be restored' });
   if (!folder.archivedAt) return res.status(400).json({ error: 'Folder is not archived' });
+  if (!(await folderHierarchy.canRestore(folder))) {
+    return res.status(400).json({ error: 'Parent folders must be active before this folder can be restored' });
+  }
   await run('UPDATE folders SET archivedAt=NULL WHERE id=?', [req.params.id]);
-  await recordAuditEvent(req, { action: 'folder_restored', entityType: 'folder', entityId: req.params.id, matterId: folder.matterId, metadata: { folderName: folder.name, matterId: folder.matterId } }).catch(() => {});
-  res.json(await get('SELECT id,matterId,name,createdBy,createdAt,archivedAt FROM folders WHERE id=?', [req.params.id]));
+  await recordAuditEvent(req, { action: 'folder_restored', entityType: 'folder', entityId: req.params.id, matterId: folder.matterId, metadata: { folderName: folder.name, matterId: folder.matterId, parentId: folder.parentId || null } }).catch(() => {});
+  res.json(await get('SELECT id,matterId,name,createdBy,createdAt,archivedAt,parentId FROM folders WHERE id=?', [req.params.id]));
 });
 app.delete('/api/folders/:id', requireAdvocateOrAdmin, async (req, res) => {
   const folder = await get('SELECT * FROM folders WHERE id=?', [req.params.id]);
@@ -9268,11 +9289,13 @@ app.delete('/api/folders/:id', requireAdvocateOrAdmin, async (req, res) => {
   }
   if (isClientUploadsFolderName(folder.name)) return res.status(400).json({ error: 'System folders cannot be deleted' });
   if (folder.archivedAt) return res.status(400).json({ error: 'Archived folders must be restored before deletion' });
+  const child = await get('SELECT id FROM folders WHERE parentId=? LIMIT 1', [req.params.id]);
+  if (child) return res.status(400).json({ error: 'Folder must not contain child folders before it can be deleted' });
   const count = await get('SELECT COUNT(*) count FROM documents WHERE folderId=?', [req.params.id]);
   if (count.count) return res.status(400).json({ error: 'Folder must be empty before it can be deleted' });
   await run('DELETE FROM folders WHERE id=?', [req.params.id]);
   await logAudit(req, 'delete', 'folder', req.params.id, `Deleted folder ${folder.name}`);
-  await recordAuditEvent(req, { action: 'folder_deleted', entityType: 'folder', entityId: req.params.id, matterId: folder.matterId, metadata: { folderName: folder.name, matterId: folder.matterId } }).catch(() => {});
+  await recordAuditEvent(req, { action: 'folder_deleted', entityType: 'folder', entityId: req.params.id, matterId: folder.matterId, metadata: { folderName: folder.name, matterId: folder.matterId, parentId: folder.parentId || null } }).catch(() => {});
   res.json({ id: req.params.id, deleted: true });
 });
 app.get('/api/matters/:id/documents', async (req, res) => {
@@ -9316,9 +9339,11 @@ app.post('/api/matters/:id/documents', async (req, res) => {
   let folderId = '';
   if (req.user.role === 'client') {
     const folder = await clientUploadsFolder(req.params.id, req.user.userId || '');
-    folderId = folder.id;
+    const destination = await folderHierarchy.activeDestination(req.params.id, folder.id);
+    if (!destination) return res.status(400).json({ error: 'Folder not found for this matter' });
+    folderId = destination.id;
   } else if (req.body.folderId && req.body.folderId !== 'uncategorised' && req.body.folderId !== 'all') {
-    const folder = await get('SELECT id FROM folders WHERE id=? AND matterId=? AND archivedAt IS NULL', [req.body.folderId, req.params.id]);
+    const folder = await folderHierarchy.activeDestination(req.params.id, req.body.folderId);
     if (!folder) return res.status(400).json({ error: 'Folder not found for this matter' });
     folderId = folder.id;
   }
@@ -9464,7 +9489,7 @@ app.post('/api/document-tools/merge-pdfs/save', requireAdvocateOrAdmin, async (r
 
     let folderId = null;
     if (rawFolderId && rawFolderId !== 'uncategorised' && rawFolderId !== 'all') {
-      const folder = await get('SELECT id FROM folders WHERE id=? AND matterId=? AND archivedAt IS NULL', [rawFolderId, matterId]);
+      const folder = await folderHierarchy.activeDestination(matterId, rawFolderId);
       if (!folder) return res.status(400).json({ error: 'Folder not found for this matter' });
       folderId = folder.id;
     }
@@ -12181,8 +12206,9 @@ app.patch('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
   if (req.body.folderId !== undefined) {
     let folderId = req.body.folderId || '';
     if (folderId && folderId !== 'uncategorised' && folderId !== 'all') {
-      const folder = await get('SELECT id FROM folders WHERE id=? AND matterId=? AND archivedAt IS NULL', [folderId, doc.matterId]);
+      const folder = await folderHierarchy.activeDestination(doc.matterId, folderId);
       if (!folder) return res.status(400).json({ error: 'Folder not found for this matter' });
+      folderId = folder.id;
     } else folderId = null;
     updates.push('folderId=?');
     values.push(folderId);
