@@ -12228,9 +12228,11 @@ app.post('/api/document-tools/court-bundle/save', requireAdvocateOrAdmin, async 
 });
 
 app.patch('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
-  const doc = await get(`SELECT ${documentMetadataColumns()} FROM documents WHERE id=?`, [req.params.id]);
+  const doc = await get(`SELECT ${documentMetadataColumns()} FROM documents WHERE id=? AND deletedAt IS NULL`, [req.params.id]);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
-  if (!(await canAccessDocument(req, doc))) {
+  const documentAccess = await canAccessDocument(req, doc);
+  const matterAccess = !doc.matterId || await canAccessMatter(req, doc.matterId);
+  if (!documentAccess || !matterAccess) {
     await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
     return res.status(403).json({ error: 'Document access denied' });
   }
@@ -12247,15 +12249,22 @@ app.patch('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
     values.push(folderId);
   }
   if (req.body.clientVisible !== undefined) {
+    if (typeof req.body.clientVisible !== 'boolean') {
+      return res.status(400).json({ error: 'Client visibility must be true or false' });
+    }
     updates.push('clientVisible=?');
     values.push(req.body.clientVisible ? 1 : 0);
   }
   if (req.body.displayName !== undefined) {
+    const requestedDisplayName = String(req.body.displayName || '').trim();
+    if (!requestedDisplayName) return res.status(400).json({ error: 'Document name is required' });
+    if (requestedDisplayName.length > 180) return res.status(400).json({ error: 'Document name must be 180 characters or fewer' });
     updates.push('displayName=?');
-    values.push(cleanDocumentName(req.body.displayName || doc.name));
+    values.push(cleanDocumentName(requestedDisplayName));
   }
   if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
-  await run(`UPDATE documents SET ${updates.join(',')} WHERE id=?`, [...values, req.params.id]);
+  const result = await run(`UPDATE documents SET ${updates.join(',')} WHERE id=? AND deletedAt IS NULL`, [...values, req.params.id]);
+  if (!result.changes) return res.status(409).json({ error: 'Document is no longer active' });
   await logAudit(req, 'update', 'document', req.params.id, `Updated document ${doc.name}`);
   const updated = await get(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.id=?`, [req.params.id]);
   const changedFields = [
@@ -12292,11 +12301,14 @@ app.patch('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
 app.delete('/api/documents/:id', requireAdvocateOrAdmin, async (req, res) => {
   const doc = await get(`SELECT ${documentMetadataColumns()} FROM documents WHERE id=? AND deletedAt IS NULL`, [req.params.id]);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
-  if (!(await canAccessDocument(req, doc))) {
+  const documentAccess = await canAccessDocument(req, doc);
+  const matterAccess = !doc.matterId || await canAccessMatter(req, doc.matterId);
+  if (!documentAccess || !matterAccess) {
     await recordAuditEvent(req, { action: 'forbidden_document_access', entityType: 'document', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
     return res.status(403).json({ error: 'Document access denied' });
   }
-  await run("UPDATE documents SET deletedAt=? WHERE id=?", [new Date().toISOString(), req.params.id]);
+  const result = await run("UPDATE documents SET deletedAt=? WHERE id=? AND deletedAt IS NULL", [new Date().toISOString(), req.params.id]);
+  if (!result.changes) return res.status(409).json({ error: 'Document is no longer active' });
   await logAudit(req, 'delete', 'document', req.params.id, `Archived document ${doc?.name || req.params.id}`);
   await recordAuditEvent(req, {
     action: 'document_deleted',

@@ -916,7 +916,7 @@ export function StyleTag() { return <style>{`
     #root .lf-dash-panel-head { padding: 12px 14px; }
     #root .lf-dash-pipeline-row { padding: 9px 14px; }
   }
-  /* LOCAL-PILOT-GLOBAL-DOCUMENTS-EXPLORER-92 */
+  /* LOCAL-PILOT-GLOBAL-DOCUMENTS-EXPLORER-92 / GLOBAL-DOCUMENT-ACTIONS-94 */
   #root .lf-global-documents-cards table { min-width: 1080px; }
   #root .lf-global-document-actions button:disabled { cursor: not-allowed; opacity: .55; }
   @media (max-width: 900px) {
@@ -951,6 +951,10 @@ export function StyleTag() { return <style>{`
     #root .lf-global-document-actions button { width: 100%; min-width: 0; padding-left: 5px !important; padding-right: 5px !important; white-space: normal; }
     #root .lf-global-document-preview-backdrop { padding: 8px !important; }
     #root .lf-global-document-preview { height: min(94vh, 820px) !important; }
+    #root .lf-global-document-action-dialog-backdrop { padding: 8px !important; }
+    #root .lf-global-document-action-dialog { max-height: calc(100vh - 16px); overflow-y: auto; }
+    #root .lf-global-document-action-dialog > div:last-child { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #root .lf-global-document-action-dialog > div:last-child button { width: 100%; min-width: 0; }
   }
   /* UI-5C: Deadline Center guidance card hover */
   .lf-deadline-guidance-card:hover { box-shadow: 0 4px 14px rgba(15,27,51,.10) !important; transform: translateY(-1px); }

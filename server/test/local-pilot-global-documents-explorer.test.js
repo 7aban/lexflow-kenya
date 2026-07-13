@@ -54,7 +54,7 @@ async function login(email, password = staffPassword, route = '/api/auth/login')
   return response.body;
 }
 
-describe('LOCAL-PILOT-GLOBAL-DOCUMENTS-EXPLORER-92', () => {
+describe('LOCAL-PILOT-GLOBAL-DOCUMENTS-EXPLORER-92 / GLOBAL-DOCUMENT-ACTIONS-94', () => {
   const advocateOneEmail = `explorer.advocate.one.${suffix}@example.com`;
   const advocateTwoEmail = `explorer.advocate.two.${suffix}@example.com`;
   const assistantEmail = `explorer.assistant.${suffix}@example.com`;
@@ -679,5 +679,183 @@ describe('LOCAL-PILOT-GLOBAL-DOCUMENTS-EXPLORER-92', () => {
     const actions = await dbAll('SELECT action FROM audit_events WHERE entity_id=?', [nestedDocumentId]);
     expect(actions.filter(row => row.action === 'document_accessed').length).toBeGreaterThanOrEqual(3);
     expect(actions.filter(row => row.action === 'document_downloaded').length).toBeGreaterThanOrEqual(3);
+  });
+
+  test('reuses scoped rename, visibility, archive, restore, and audit contracts for admins and assigned advocates', async () => {
+    const actionDocumentId = await uploadDocument({ matterId: assignedMatterId, name: 'global-action-contract.pdf' });
+
+    const renamed = await request(app)
+      .patch(`/api/documents/${actionDocumentId}`)
+      .set(auth(admin.token))
+      .send({ displayName: 'global-action-renamed.pdf' });
+    expect(renamed.statusCode).toBe(200);
+    expect(renamed.body.displayName).toBe('global-action-renamed.pdf');
+
+    const shared = await request(app)
+      .patch(`/api/documents/${actionDocumentId}`)
+      .set(auth(advocateOne.token))
+      .send({ clientVisible: true });
+    expect(shared.statusCode).toBe(200);
+    expect(Boolean(shared.body.clientVisible)).toBe(true);
+
+    const archived = await request(app)
+      .delete(`/api/documents/${actionDocumentId}`)
+      .set(auth(advocateOne.token));
+    expect(archived.statusCode).toBe(200);
+    expect(archived.body).toEqual({ id: actionDocumentId, deleted: true });
+
+    const archivedList = await request(app)
+      .get(`/api/documents?status=archived&q=${encodeURIComponent('global-action-renamed')}`)
+      .set(auth(admin.token));
+    expect(archivedList.statusCode).toBe(200);
+    expect(archivedList.body.items).toEqual([
+      expect.objectContaining({ id: actionDocumentId, displayName: 'global-action-renamed.pdf', archived: true, visibility: 'client' }),
+    ]);
+
+    const archivedRenameDenied = await request(app)
+      .patch(`/api/documents/${actionDocumentId}`)
+      .set(auth(admin.token))
+      .send({ displayName: 'must-not-change.pdf' });
+    expect(archivedRenameDenied.statusCode).toBe(404);
+    expect(archivedRenameDenied.body).toEqual({ error: 'Document not found' });
+
+    const archivedDownloadDenied = await request(app)
+      .get(`/api/documents/${actionDocumentId}/download`)
+      .set(auth(admin.token));
+    expect(archivedDownloadDenied.statusCode).toBe(404);
+
+    const restored = await request(app)
+      .patch(`/api/documents/${actionDocumentId}/restore`)
+      .set(auth(advocateOne.token));
+    expect(restored.statusCode).toBe(200);
+    expect(restored.body).toMatchObject({ id: actionDocumentId, displayName: 'global-action-renamed.pdf' });
+    expect(Boolean(restored.body.clientVisible)).toBe(true);
+
+    const activeList = await request(app)
+      .get(`/api/documents?q=${encodeURIComponent('global-action-renamed')}&sort=name_asc&limit=1`)
+      .set(auth(advocateOne.token));
+    expect(activeList.statusCode).toBe(200);
+    expect(activeList.body.items).toEqual([
+      expect.objectContaining({ id: actionDocumentId, archived: false, visibility: 'client' }),
+    ]);
+
+    const auditRows = await dbAll(
+      'SELECT action,metadata_json FROM audit_events WHERE entity_id=? ORDER BY rowid',
+      [actionDocumentId],
+    );
+    expect(auditRows.map(row => row.action)).toEqual(expect.arrayContaining([
+      'document_updated',
+      'document_visibility_updated',
+      'document_deleted',
+      'document_restored',
+    ]));
+    const visibilityAudit = auditRows.find(row => row.action === 'document_visibility_updated');
+    const visibilityMetadata = JSON.parse(visibilityAudit.metadata_json || '{}');
+    expect(visibilityMetadata.oldClientVisible).toBe(false);
+    expect(visibilityMetadata.newClientVisible).toBe(true);
+    expect(JSON.stringify(visibilityMetadata)).not.toContain('GLOBAL-EXPLORER-CONTENT');
+  });
+
+  test('denies unassigned advocates, assistants, clients, inaccessible rows, and stale document mutations safely', async () => {
+    const beforeRows = await dbAll('SELECT displayName,clientVisible,deletedAt FROM documents WHERE id=?', [nestedDocumentId]);
+    expect(beforeRows).toHaveLength(1);
+
+    for (const [token, expectedStatus] of [
+      [advocateTwo.token, 403],
+      [assistant.token, 403],
+      [clientUser.token, 403],
+    ]) {
+      const renameDenied = await request(app)
+        .patch(`/api/documents/${nestedDocumentId}`)
+        .set(auth(token))
+        .send({ displayName: 'forbidden-name.pdf' });
+      expect(renameDenied.statusCode).toBe(expectedStatus);
+      expect(renameDenied.body.error).toMatch(/access denied|Advocate or admin access required/);
+
+      const archiveDenied = await request(app)
+        .delete(`/api/documents/${nestedDocumentId}`)
+        .set(auth(token));
+      expect(archiveDenied.statusCode).toBe(expectedStatus);
+      expect(archiveDenied.body.error).toMatch(/access denied|Advocate or admin access required/);
+    }
+
+    const inaccessibleDenied = await request(app)
+      .patch(`/api/documents/${hiddenDocumentId}`)
+      .set(auth(advocateOne.token))
+      .send({ clientVisible: true });
+    expect(inaccessibleDenied.statusCode).toBe(403);
+    expect(inaccessibleDenied.body).toEqual({ error: 'Document access denied' });
+
+    for (const token of [advocateTwo.token, assistant.token, clientUser.token]) {
+      const restoreDenied = await request(app)
+        .patch(`/api/documents/${archivedDocumentId}/restore`)
+        .set(auth(token));
+      expect(restoreDenied.statusCode).toBe(403);
+      expect(restoreDenied.body.error).toMatch(/access denied|Advocate or admin access required/);
+    }
+
+    const staleId = `DOC-STALE-${suffix}`;
+    const staleRename = await request(app)
+      .patch(`/api/documents/${staleId}`)
+      .set(auth(admin.token))
+      .send({ displayName: 'missing.pdf' });
+    const staleArchive = await request(app)
+      .delete(`/api/documents/${staleId}`)
+      .set(auth(admin.token));
+    const staleRestore = await request(app)
+      .patch(`/api/documents/${staleId}/restore`)
+      .set(auth(admin.token));
+    expect(staleRename.statusCode).toBe(404);
+    expect(staleArchive.statusCode).toBe(404);
+    expect(staleRestore.statusCode).toBe(404);
+    expect(staleRename.body).toEqual({ error: 'Document not found' });
+    expect(staleArchive.body).toEqual({ error: 'Document not found' });
+    expect(staleRestore.body).toEqual({ error: 'Archived document not found' });
+
+    const afterRows = await dbAll('SELECT displayName,clientVisible,deletedAt FROM documents WHERE id=?', [nestedDocumentId]);
+    expect(afterRows).toEqual(beforeRows);
+  });
+
+  test('validates rename and visibility payloads and keeps archived documents mutation-restricted', async () => {
+    const validationDocumentId = await uploadDocument({ matterId: assignedMatterId, name: 'global-action-validation.pdf' });
+
+    const blank = await request(app)
+      .patch(`/api/documents/${validationDocumentId}`)
+      .set(auth(admin.token))
+      .send({ displayName: '   ' });
+    expect(blank.statusCode).toBe(400);
+    expect(blank.body).toEqual({ error: 'Document name is required' });
+
+    const tooLong = await request(app)
+      .patch(`/api/documents/${validationDocumentId}`)
+      .set(auth(admin.token))
+      .send({ displayName: `${'a'.repeat(177)}.pdf` });
+    expect(tooLong.statusCode).toBe(400);
+    expect(tooLong.body).toEqual({ error: 'Document name must be 180 characters or fewer' });
+
+    const invalidVisibility = await request(app)
+      .patch(`/api/documents/${validationDocumentId}`)
+      .set(auth(admin.token))
+      .send({ clientVisible: 'true' });
+    expect(invalidVisibility.statusCode).toBe(400);
+    expect(invalidVisibility.body).toEqual({ error: 'Client visibility must be true or false' });
+
+    const unchanged = await dbAll('SELECT displayName,clientVisible,deletedAt FROM documents WHERE id=?', [validationDocumentId]);
+    expect(unchanged).toEqual([{ displayName: 'global-action-validation.pdf', clientVisible: 0, deletedAt: null }]);
+
+    const archived = await request(app)
+      .delete(`/api/documents/${validationDocumentId}`)
+      .set(auth(admin.token));
+    expect(archived.statusCode).toBe(200);
+
+    const archivedVisibility = await request(app)
+      .patch(`/api/documents/${validationDocumentId}`)
+      .set(auth(admin.token))
+      .send({ clientVisible: true });
+    const archivedAgain = await request(app)
+      .delete(`/api/documents/${validationDocumentId}`)
+      .set(auth(admin.token));
+    expect(archivedVisibility.statusCode).toBe(404);
+    expect(archivedAgain.statusCode).toBe(404);
   });
 });

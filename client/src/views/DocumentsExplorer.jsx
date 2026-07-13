@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { downloadWithAuth, fetchDocumentArrayBuffer, getGlobalDocuments } from '../lib/apiClient.js';
+import { archiveDocument, downloadWithAuth, fetchDocumentArrayBuffer, getGlobalDocuments, restoreDocument, updateDocument } from '../lib/apiClient.js';
 import { Alert, Badge, Empty, Skeleton, Table } from '../components/ui.jsx';
 import { styles } from '../theme.jsx';
 
@@ -102,6 +102,49 @@ function clientLabel(client) {
   return String(client?.name || '').trim() || 'Client unavailable';
 }
 
+function canChangeClientVisibility(document) {
+  if (!document || document.archived) return false;
+  if (String(document.source || '').toLowerCase() === 'client') return false;
+  return String(document.origin || '').toLowerCase() !== 'message';
+}
+
+function safeDocumentActionError(error) {
+  const message = String(error?.message || '');
+  if (/document name|180 characters|client visibility/i.test(message)) return message;
+  if (/not found|access denied|no longer active|archived/i.test(message)) {
+    return 'This document is no longer available for that action. The Explorer has been refreshed.';
+  }
+  return 'Unable to complete the document action. The Explorer has been refreshed.';
+}
+
+async function fetchDocumentWindow(query, targetCount = PAGE_LIMIT) {
+  let response = await getGlobalDocuments(query);
+  const filterOptions = { ...emptyFilterOptions(), ...(response?.filterOptions || {}) };
+  const items = Array.isArray(response?.items) ? [...response.items] : [];
+  let hasMore = Boolean(response?.hasMore);
+  let nextCursor = response?.nextCursor || null;
+  const seenIds = new Set(items.map(item => String(item.id)));
+  const seenCursors = new Set();
+  let pageCount = 1;
+
+  while (hasMore && nextCursor && items.length < targetCount && pageCount < 50 && !seenCursors.has(nextCursor)) {
+    seenCursors.add(nextCursor);
+    response = await getGlobalDocuments({ ...query, cursor: nextCursor });
+    for (const item of Array.isArray(response?.items) ? response.items : []) {
+      const id = String(item.id);
+      if (!seenIds.has(id)) {
+        seenIds.add(id);
+        items.push(item);
+      }
+    }
+    hasMore = Boolean(response?.hasMore);
+    nextCursor = response?.nextCursor || null;
+    pageCount += 1;
+  }
+
+  return { items, hasMore, nextCursor, filterOptions };
+}
+
 function PreviewDialog({ preview, onClose, onDownload }) {
   useEffect(() => {
     if (!preview) return undefined;
@@ -164,7 +207,94 @@ function PreviewDialog({ preview, onClose, onDownload }) {
   );
 }
 
-export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived = false }) {
+function RenameDocumentDialog({ document, value, error, pending, onChange, onCancel, onSubmit }) {
+  useEffect(() => {
+    if (!document) return undefined;
+    function closeOnEscape(event) {
+      if (event.key === 'Escape' && !pending) onCancel();
+    }
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [document, onCancel, pending]);
+
+  if (!document) return null;
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="global-document-rename-title"
+      className="lf-global-document-action-dialog-backdrop"
+      style={{ position: 'fixed', inset: 0, zIndex: 3200, background: 'rgba(17, 34, 25, 0.64)', padding: 16, display: 'grid', placeItems: 'center' }}
+      onMouseDown={event => {
+        if (event.target === event.currentTarget && !pending) onCancel();
+      }}
+    >
+      <form className="lf-global-document-action-dialog" onSubmit={onSubmit} style={{ width: 'min(100%, 430px)', background: 'var(--lf-card, #fff)', color: 'var(--lf-card-text, #1A1A18)', borderRadius: 10, boxShadow: '0 24px 64px rgba(0,0,0,.28)', padding: 16, display: 'grid', gap: 12 }}>
+        <div>
+          <h2 id="global-document-rename-title" style={{ margin: 0, fontSize: 18 }}>Rename document</h2>
+          <small style={styles.mutedText}>This changes the display name only.</small>
+        </div>
+        <label style={styles.field}>
+          <span>Document name</span>
+          <input
+            autoFocus
+            aria-label="Document name"
+            aria-invalid={Boolean(error)}
+            aria-describedby={error ? 'global-document-rename-error' : 'global-document-rename-help'}
+            style={{ ...styles.input, minWidth: 0 }}
+            value={value}
+            maxLength={181}
+            disabled={pending}
+            onChange={event => onChange(event.target.value)}
+          />
+        </label>
+        {error
+          ? <span id="global-document-rename-error" role="alert" style={{ color: 'var(--lf-danger, #A61B1B)', fontSize: 12 }}>{error}</span>
+          : <span id="global-document-rename-help" style={styles.mutedText}>Maximum 180 characters.</span>}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+          <button type="button" style={styles.ghostButton} disabled={pending} onClick={onCancel}>Cancel</button>
+          <button type="submit" style={styles.primaryButton} disabled={pending}>{pending ? 'Saving…' : 'Save'}</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function ArchiveDocumentDialog({ document, pending, onCancel, onConfirm }) {
+  useEffect(() => {
+    if (!document) return undefined;
+    function closeOnEscape(event) {
+      if (event.key === 'Escape' && !pending) onCancel();
+    }
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [document, onCancel, pending]);
+
+  if (!document) return null;
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="global-document-archive-title"
+      className="lf-global-document-action-dialog-backdrop"
+      style={{ position: 'fixed', inset: 0, zIndex: 3200, background: 'rgba(17, 34, 25, 0.64)', padding: 16, display: 'grid', placeItems: 'center' }}
+      onMouseDown={event => {
+        if (event.target === event.currentTarget && !pending) onCancel();
+      }}
+    >
+      <section className="lf-global-document-action-dialog" style={{ width: 'min(100%, 430px)', background: 'var(--lf-card, #fff)', color: 'var(--lf-card-text, #1A1A18)', borderRadius: 10, boxShadow: '0 24px 64px rgba(0,0,0,.28)', padding: 16, display: 'grid', gap: 12 }}>
+        <h2 id="global-document-archive-title" style={{ margin: 0, fontSize: 18 }}>Archive document?</h2>
+        <p style={{ margin: 0, lineHeight: 1.5 }}>Archive “{documentLabel(document)}”? It will leave active documents and remain read-only until restored.</p>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+          <button type="button" style={styles.ghostButton} disabled={pending} onClick={onCancel}>Cancel</button>
+          <button type="button" style={styles.dangerButton} disabled={pending} onClick={onConfirm}>{pending ? 'Archiving…' : 'Archive'}</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived = false, canManage = false }) {
   const [searchDraft, setSearchDraft] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
   const [filters, setFilters] = useState(initialFilters);
@@ -177,6 +307,12 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
   const [reloadNonce, setReloadNonce] = useState(0);
   const [preview, setPreview] = useState(null);
   const [filterOptions, setFilterOptions] = useState(emptyFilterOptions);
+  const [pendingAction, setPendingAction] = useState(null);
+  const [actionFeedback, setActionFeedback] = useState(null);
+  const [renameTarget, setRenameTarget] = useState(null);
+  const [renameName, setRenameName] = useState('');
+  const [renameError, setRenameError] = useState('');
+  const [archiveTarget, setArchiveTarget] = useState(null);
   const listRequestRef = useRef(0);
   const previewRequestRef = useRef(0);
   const previewUrlRef = useRef('');
@@ -235,10 +371,12 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
   }, []);
 
   function updateFilter(name, value) {
+    setActionFeedback(null);
     setFilters(current => ({ ...current, [name]: value }));
   }
 
   function updateClientFilter(clientId) {
+    setActionFeedback(null);
     setFilters(current => {
       const selectedMatter = filterOptions.matters.find(matter => String(matter.id) === String(current.matterId));
       const keepMatter = !current.matterId
@@ -249,13 +387,14 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
   }
 
   function clearFilters() {
+    setActionFeedback(null);
     setSearchDraft('');
     setAppliedSearch('');
     setFilters(initialFilters);
   }
 
   async function loadMore() {
-    if (!hasMore || !nextCursor || loadingMore) return;
+    if (!hasMore || !nextCursor || loadingMore || pendingAction) return;
     const requestId = listRequestRef.current;
     setLoadingMore(true);
     setError('');
@@ -329,6 +468,130 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
     }
   }
 
+  async function refreshExplorerWindow(targetCount = PAGE_LIMIT) {
+    const requestId = listRequestRef.current + 1;
+    listRequestRef.current = requestId;
+    setLoadingMore(false);
+    setError('');
+    const response = await fetchDocumentWindow(JSON.parse(queryKey), targetCount);
+    if (listRequestRef.current !== requestId) return false;
+    setItems(response.items);
+    setNextCursor(response.nextCursor);
+    setHasMore(response.hasMore);
+    setFilterOptions(response.filterOptions);
+    return true;
+  }
+
+  async function runDocumentAction({ document, action, pendingMessage, successMessage, request }) {
+    if (!canManage || pendingAction || !document?.id) return { ok: false, error: 'Document action unavailable.' };
+    const targetCount = Math.max(PAGE_LIMIT, items.length);
+    setPendingAction({ documentId: String(document.id), action });
+    setActionFeedback({ type: 'pending', message: pendingMessage });
+    try {
+      await request();
+    } catch (caught) {
+      const message = safeDocumentActionError(caught);
+      try { await refreshExplorerWindow(targetCount); } catch {}
+      setActionFeedback({ type: 'error', message });
+      notify?.({ type: 'danger', message });
+      setPendingAction(null);
+      return { ok: false, error: message };
+    }
+
+    try {
+      await refreshExplorerWindow(targetCount);
+      setActionFeedback({ type: 'success', message: successMessage });
+      notify?.({ type: 'success', message: successMessage });
+    } catch {
+      const message = `${successMessage} The Explorer could not refresh automatically; use Refresh to reload it.`;
+      setActionFeedback({ type: 'warning', message });
+      notify?.({ type: 'warning', message });
+    } finally {
+      setPendingAction(null);
+    }
+    return { ok: true };
+  }
+
+  function beginRename(document) {
+    if (!canManage || document?.archived || pendingAction) return;
+    setActionFeedback(null);
+    setRenameTarget(document);
+    setRenameName(documentLabel(document));
+    setRenameError('');
+  }
+
+  function closeRename() {
+    if (pendingAction?.action === 'rename') return;
+    setRenameTarget(null);
+    setRenameName('');
+    setRenameError('');
+  }
+
+  async function saveRename(event) {
+    event.preventDefault();
+    if (!renameTarget || pendingAction) return;
+    const displayName = renameName.trim();
+    if (!displayName) {
+      setRenameError('Document name is required.');
+      return;
+    }
+    if (displayName.length > 180) {
+      setRenameError('Document name must be 180 characters or fewer.');
+      return;
+    }
+    if (displayName === documentLabel(renameTarget).trim()) {
+      closeRename();
+      return;
+    }
+    setRenameError('');
+    const result = await runDocumentAction({
+      document: renameTarget,
+      action: 'rename',
+      pendingMessage: 'Renaming document…',
+      successMessage: 'Document renamed.',
+      request: () => updateDocument(renameTarget.id, { displayName }),
+    });
+    if (result.ok) closeRename();
+    else setRenameError(result.error);
+  }
+
+  async function changeVisibility(document) {
+    if (!canChangeClientVisibility(document)) return;
+    const makeVisible = document.visibility !== 'client';
+    await runDocumentAction({
+      document,
+      action: 'visibility',
+      pendingMessage: 'Updating client visibility…',
+      successMessage: makeVisible ? 'Document is now visible to the client.' : 'Document is now internal.',
+      request: () => updateDocument(document.id, { clientVisible: makeVisible }),
+    });
+  }
+
+  async function confirmArchive() {
+    if (!archiveTarget || pendingAction) return;
+    const target = archiveTarget;
+    const result = await runDocumentAction({
+      document: target,
+      action: 'archive',
+      pendingMessage: 'Archiving document…',
+      successMessage: 'Document archived.',
+      request: () => archiveDocument(target.id),
+    });
+    setArchiveTarget(null);
+    return result;
+  }
+
+  async function restoreArchivedDocument(document) {
+    if (!document?.archived) return;
+    await runDocumentAction({
+      document,
+      action: 'restore',
+      pendingMessage: 'Restoring document…',
+      successMessage: 'Document restored.',
+      request: () => restoreDocument(document.id),
+    });
+  }
+
   const hasActiveFilters = Boolean(appliedSearch
     || filters.type
     || filters.origin
@@ -337,11 +600,14 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
     || filters.clientId
     || filters.sort !== initialFilters.sort
     || filters.includeArchived);
+  const actionPending = Boolean(pendingAction);
 
   const rows = items.map(document => {
     const label = documentLabel(document);
     const folderArchived = Boolean(document?.location?.folderArchived);
     const folderLabel = String(document?.folderPathLabel || 'Uncategorised');
+    const rowPending = pendingAction?.documentId === String(document.id);
+    const visibilityMutable = canManage && canChangeClientVisibility(document);
     return [
       <div key={`${document.id}-document`} style={{ display: 'grid', gap: 3, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', minWidth: 0 }}>
@@ -362,9 +628,9 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
       <span key={`${document.id}-date`} style={{ whiteSpace: 'nowrap' }}>{formatDate(document.date)}</span>,
       <Badge key={`${document.id}-origin`} tone={originTone(document.origin)}>{originLabel(document.origin)}</Badge>,
       <Badge key={`${document.id}-visibility`} tone={document.visibility === 'client' ? 'green' : 'blue'}>{document.visibility === 'client' ? 'Client visible' : 'Internal'}</Badge>,
-      <div key={`${document.id}-actions`} className="lf-global-document-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button type="button" style={styles.tinyButton} onClick={() => openPreview(document)} disabled={Boolean(document.archived)} title={document.archived ? 'Restore this document in its matter before previewing.' : undefined}>Preview</button>
-        <button type="button" style={styles.tinyButton} onClick={() => downloadDocument(document)} disabled={Boolean(document.archived)} title={document.archived ? 'Restore this document in its matter before downloading.' : undefined}>Download</button>
+      <div key={`${document.id}-actions`} className="lf-global-document-actions" aria-busy={rowPending || undefined} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button type="button" style={styles.tinyButton} onClick={() => openPreview(document)} disabled={Boolean(document.archived) || rowPending} title={document.archived ? 'Restore this document before previewing.' : undefined}>Preview</button>
+        <button type="button" style={styles.tinyButton} onClick={() => downloadDocument(document)} disabled={Boolean(document.archived) || rowPending} title={document.archived ? 'Restore this document before downloading.' : undefined}>Download</button>
         <button
           type="button"
           style={styles.tinyButton}
@@ -372,8 +638,22 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
             folderId: document.folder?.id || (document.location?.status === 'uncategorised' ? 'uncategorised' : ''),
             documentId: document.id,
           })}
-          disabled={!document.matter?.id}
+          disabled={!document.matter?.id || rowPending}
         >Open matter</button>
+        {canManage && !document.archived && (
+          <button type="button" style={styles.tinyButton} onClick={() => beginRename(document)} disabled={rowPending}>{rowPending && pendingAction?.action === 'rename' ? 'Renaming…' : 'Rename'}</button>
+        )}
+        {visibilityMutable && (
+          <button type="button" style={styles.tinyButton} onClick={() => changeVisibility(document)} disabled={rowPending}>
+            {rowPending && pendingAction?.action === 'visibility' ? 'Updating…' : document.visibility === 'client' ? 'Make internal' : 'Make client visible'}
+          </button>
+        )}
+        {canManage && !document.archived && (
+          <button type="button" style={styles.dangerTinyButton || styles.tinyButton} onClick={() => { setActionFeedback(null); setArchiveTarget(document); }} disabled={rowPending}>{rowPending && pendingAction?.action === 'archive' ? 'Archiving…' : 'Archive'}</button>
+        )}
+        {canManage && document.archived && (
+          <button type="button" style={styles.primaryButton} onClick={() => restoreArchivedDocument(document)} disabled={rowPending}>{rowPending && pendingAction?.action === 'restore' ? 'Restoring…' : 'Restore'}</button>
+        )}
       </div>,
     ];
   });
@@ -385,9 +665,9 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
             <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
               <h2 style={{ margin: 0, fontSize: 17 }}>Document register</h2>
-              <p style={{ margin: 0, color: 'var(--lf-card-muted, var(--lf-text-muted, #6B6B66))', lineHeight: 1.5 }}>Read-only workspace for documents linked to accessible matters. Archived records are shown only when an authorized staff member opts in, and remain unavailable for preview or download.</p>
+              <p style={{ margin: 0, color: 'var(--lf-card-muted, var(--lf-text-muted, #6B6B66))', lineHeight: 1.5 }}>{canManage ? 'Manage individual documents linked to accessible matters. Movement, uploads, and bulk changes remain in the matter Explorer.' : 'Read-only workspace for documents linked to accessible matters.'} Archived records remain unavailable for preview or download.</p>
             </div>
-            <Badge tone="blue">Read only</Badge>
+            <Badge tone={canManage ? 'green' : 'blue'}>{canManage ? 'Controlled actions' : 'Read only'}</Badge>
           </div>
 
           <form
@@ -397,6 +677,8 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
             style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto', gap: 8, minWidth: 0 }}
             onSubmit={event => {
               event.preventDefault();
+              if (actionPending) return;
+              setActionFeedback(null);
               setAppliedSearch(searchDraft.trim());
             }}
           >
@@ -406,52 +688,53 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
               placeholder="Search name, matter, client, or folder"
               value={searchDraft}
               maxLength={160}
+              disabled={actionPending}
               onChange={event => setSearchDraft(event.target.value)}
               style={{ ...styles.input, minWidth: 0 }}
             />
-            <button type="submit" style={styles.primaryButton}>Search</button>
-            <button type="button" style={styles.ghostButton} onClick={clearFilters} disabled={!hasActiveFilters && !searchDraft}>Clear</button>
+            <button type="submit" style={styles.primaryButton} disabled={actionPending}>Search</button>
+            <button type="button" style={styles.ghostButton} onClick={clearFilters} disabled={actionPending || (!hasActiveFilters && !searchDraft)}>Clear</button>
           </form>
 
           <div className="lf-global-documents-filter-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(140px, 1fr))', gap: 10 }}>
             <label style={styles.field}>
               <span>File type</span>
-              <select aria-label="Filter by file type" style={styles.input} value={filters.type} onChange={event => updateFilter('type', event.target.value)}>
+              <select aria-label="Filter by file type" style={styles.input} value={filters.type} disabled={actionPending} onChange={event => updateFilter('type', event.target.value)}>
                 <option value="">All available file types</option>
                 {filterOptions.types.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </label>
             <label style={styles.field}>
               <span>Source / origin</span>
-              <select aria-label="Filter by origin" style={styles.input} value={filters.origin} onChange={event => updateFilter('origin', event.target.value)}>
+              <select aria-label="Filter by origin" style={styles.input} value={filters.origin} disabled={actionPending} onChange={event => updateFilter('origin', event.target.value)}>
                 <option value="">All available origins</option>
                 {filterOptions.origins.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </label>
             <label style={styles.field}>
               <span>Visibility</span>
-              <select aria-label="Filter by visibility" style={styles.input} value={filters.visibility} onChange={event => updateFilter('visibility', event.target.value)}>
+              <select aria-label="Filter by visibility" style={styles.input} value={filters.visibility} disabled={actionPending} onChange={event => updateFilter('visibility', event.target.value)}>
                 <option value="">All available visibility</option>
                 {filterOptions.visibilities.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </label>
             <label style={styles.field}>
               <span>Matter</span>
-              <select aria-label="Filter by matter" style={styles.input} value={filters.matterId} onChange={event => updateFilter('matterId', event.target.value)}>
+              <select aria-label="Filter by matter" style={styles.input} value={filters.matterId} disabled={actionPending} onChange={event => updateFilter('matterId', event.target.value)}>
                 <option value="">All accessible matters</option>
                 {matterOptions.map(matter => <option key={matter.id} value={matter.id}>{matterLabel(matter)}</option>)}
               </select>
             </label>
             <label style={styles.field}>
               <span>Client</span>
-              <select aria-label="Filter by client" style={styles.input} value={filters.clientId} onChange={event => updateClientFilter(event.target.value)}>
+              <select aria-label="Filter by client" style={styles.input} value={filters.clientId} disabled={actionPending} onChange={event => updateClientFilter(event.target.value)}>
                 <option value="">All accessible clients</option>
                 {clientOptions.map(client => <option key={client.id} value={client.id}>{clientLabel(client)}</option>)}
               </select>
             </label>
             <label style={styles.field}>
               <span>Sort</span>
-              <select aria-label="Sort documents" style={styles.input} value={filters.sort} onChange={event => updateFilter('sort', event.target.value)}>
+              <select aria-label="Sort documents" style={styles.input} value={filters.sort} disabled={actionPending} onChange={event => updateFilter('sort', event.target.value)}>
                 {SORT_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
             </label>
@@ -463,6 +746,7 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
                     type="checkbox"
                     aria-label="Include archived documents"
                     checked={filters.includeArchived}
+                    disabled={actionPending}
                     onChange={event => updateFilter('includeArchived', event.target.checked)}
                   />
                   Include archived documents
@@ -472,11 +756,17 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
           </div>
         </div>
 
+        {actionFeedback && (
+          <Alert tone={actionFeedback.type === 'error' ? 'danger' : undefined}>
+            <span role={actionFeedback.type === 'error' ? 'alert' : 'status'} aria-live="polite">{actionFeedback.message}</span>
+          </Alert>
+        )}
+
         {error && (
           <Alert tone="danger">
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
               <span>{error}</span>
-              <button type="button" style={styles.ghostButton} onClick={() => setReloadNonce(value => value + 1)}>Try again</button>
+              <button type="button" style={styles.ghostButton} disabled={actionPending} onClick={() => setReloadNonce(value => value + 1)}>Try again</button>
             </div>
           </Alert>
         )}
@@ -485,14 +775,17 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
           <div style={{ ...styles.card, display: 'grid', gap: 12 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               <div role="status" aria-live="polite" style={styles.mutedText}>{items.length} loaded document{items.length === 1 ? '' : 's'}{hasMore ? ' · more available' : ''}</div>
-              <button type="button" style={styles.ghostButton} onClick={() => setReloadNonce(value => value + 1)}>Refresh</button>
+              <button type="button" style={styles.ghostButton} disabled={actionPending} onClick={() => { setActionFeedback(null); setReloadNonce(value => value + 1); }}>Refresh</button>
             </div>
             {items.length ? (
               <div className="lf-global-documents-cards">
                 <Table
                   columns={['Document', 'Matter', 'Client', 'Folder', 'Date', 'Origin', 'Visibility', 'Actions']}
                   rows={rows}
-                  rowProps={items.map(document => ({ 'data-document-id': String(document.id) }))}
+                  rowProps={items.map(document => ({
+                    'data-document-id': String(document.id),
+                    'data-document-action-pending': pendingAction?.documentId === String(document.id) ? pendingAction.action : undefined,
+                  }))}
                 />
               </div>
             ) : (
@@ -500,13 +793,28 @@ export default function DocumentsExplorer({ notify, onOpenMatter, allowArchived 
             )}
             {hasMore && (
               <div style={{ display: 'flex', justifyContent: 'center' }}>
-                <button type="button" style={styles.primaryButton} onClick={loadMore} disabled={loadingMore}>{loadingMore ? 'Loading…' : 'Load more'}</button>
+                <button type="button" style={styles.primaryButton} onClick={loadMore} disabled={loadingMore || actionPending}>{loadingMore ? 'Loading…' : 'Load more'}</button>
               </div>
             )}
           </div>
         )}
       </section>
       <PreviewDialog preview={preview} onClose={closePreview} onDownload={downloadDocument} />
+      <RenameDocumentDialog
+        document={renameTarget}
+        value={renameName}
+        error={renameError}
+        pending={pendingAction?.action === 'rename'}
+        onChange={value => { setRenameName(value); if (renameError) setRenameError(''); }}
+        onCancel={closeRename}
+        onSubmit={saveRename}
+      />
+      <ArchiveDocumentDialog
+        document={archiveTarget}
+        pending={pendingAction?.action === 'archive'}
+        onCancel={() => { if (!pendingAction) setArchiveTarget(null); }}
+        onConfirm={confirmArchive}
+      />
     </>
   );
 }
