@@ -10,7 +10,7 @@ function folderIcon(folder) {
   if (folder.id === 'all') return 'ALL';
   if (folder.id === 'uncategorised') return 'UNC';
   if (folder.id === 'archived') return 'ARC';
-  if ((folder.name || '').toLowerCase() === 'client uploads') return 'UP';
+  if (isClientUploadsFolder(folder)) return 'UP';
   return 'DIR';
 }
 
@@ -51,6 +51,126 @@ function documentExtension(name = '') {
 
 function isClientUploadsFolder(folder) {
   return (folder?.name || '').trim().toLowerCase() === 'client uploads';
+}
+
+function normalizeFolderId(value) {
+  if (value === undefined || value === null) return '';
+  return String(value).trim();
+}
+
+function isFolderRecordActive(folder) {
+  const status = String(folder?.status || '').trim().toLowerCase();
+  return Boolean(folder)
+    && !folder.archivedAt
+    && folder.active !== false
+    && folder.isActive !== false
+    && status !== 'archived'
+    && status !== 'inactive';
+}
+
+function compareFolders(left, right) {
+  if (isClientUploadsFolder(left) !== isClientUploadsFolder(right)) {
+    return isClientUploadsFolder(left) ? -1 : 1;
+  }
+  const byName = String(left?.name || '').localeCompare(String(right?.name || ''), undefined, { sensitivity: 'base' });
+  return byName || normalizeFolderId(left?.id).localeCompare(normalizeFolderId(right?.id));
+}
+
+function deriveActiveFolderHierarchy(folders) {
+  const persistentFolders = (Array.isArray(folders) ? folders : [])
+    .filter(folder => folder && !folder.virtual && normalizeFolderId(folder.id));
+  const folderById = new Map();
+  persistentFolders.forEach(folder => {
+    const id = normalizeFolderId(folder.id);
+    if (!folderById.has(id)) folderById.set(id, folder);
+  });
+
+  const activeMemo = new Map();
+  const visiting = new Set();
+  function isEffectivelyActive(folderId) {
+    const id = normalizeFolderId(folderId);
+    if (activeMemo.has(id)) return activeMemo.get(id);
+    const folder = folderById.get(id);
+    if (!isFolderRecordActive(folder) || visiting.has(id)) {
+      activeMemo.set(id, false);
+      return false;
+    }
+
+    visiting.add(id);
+    const parentId = normalizeFolderId(folder.parentId);
+    let active = true;
+    if (isClientUploadsFolder(folder)) {
+      active = !parentId;
+    } else if (parentId) {
+      const parent = folderById.get(parentId);
+      active = Boolean(parent)
+        && !isClientUploadsFolder(parent)
+        && isEffectivelyActive(parentId);
+    }
+    visiting.delete(id);
+    activeMemo.set(id, active);
+    return active;
+  }
+
+  const activeFolders = persistentFolders.filter(folder => isEffectivelyActive(folder.id));
+  const activeFolderById = new Map(activeFolders.map(folder => [normalizeFolderId(folder.id), folder]));
+  const childrenByParentId = new Map([['', []]]);
+  activeFolders.forEach(folder => {
+    const parentId = normalizeFolderId(folder.parentId);
+    if (!childrenByParentId.has(parentId)) childrenByParentId.set(parentId, []);
+    childrenByParentId.get(parentId).push(folder);
+    if (!childrenByParentId.has(normalizeFolderId(folder.id))) {
+      childrenByParentId.set(normalizeFolderId(folder.id), []);
+    }
+  });
+  childrenByParentId.forEach(children => children.sort(compareFolders));
+
+  const orderedFolders = [];
+  const pathById = new Map();
+  const depthById = new Map();
+  function visit(parentId, ancestors) {
+    (childrenByParentId.get(parentId) || []).forEach(folder => {
+      const id = normalizeFolderId(folder.id);
+      const path = [...ancestors, folder];
+      orderedFolders.push(folder);
+      pathById.set(id, path);
+      depthById.set(id, path.length);
+      visit(id, path);
+    });
+  }
+  visit('', []);
+
+  return {
+    folders: orderedFolders,
+    folderById: activeFolderById,
+    childrenByParentId,
+    pathById,
+    depthById,
+    inactiveFolderIds: new Set(
+      persistentFolders
+        .map(folder => normalizeFolderId(folder.id))
+        .filter(id => !activeFolderById.has(id)),
+    ),
+  };
+}
+
+function folderPathLabel(hierarchy, folderOrId) {
+  const id = normalizeFolderId(typeof folderOrId === 'object' ? folderOrId?.id : folderOrId);
+  const path = hierarchy.pathById.get(id);
+  return path?.length ? path.map(folder => folder.name).join(' / ') : '';
+}
+
+function visibleHierarchyFolders(hierarchy, expandedFolderIds) {
+  const visible = [];
+  function visit(parentId) {
+    (hierarchy.childrenByParentId.get(parentId) || []).forEach(folder => {
+      const id = normalizeFolderId(folder.id);
+      visible.push(folder);
+      if (expandedFolderIds.has(id)) visit(id);
+    });
+  }
+  visit('');
+  return visible;
 }
 
 function formatArchivedFolderDate(value) {
@@ -135,6 +255,11 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const [archivedDocuments, setArchivedDocuments] = useState([]);
   const [selectedFolder, setSelectedFolder] = useState('all');
   const [newFolderName, setNewFolderName] = useState('');
+  const [newFolderParentId, setNewFolderParentId] = useState('');
+  const [expandedFolderIds, setExpandedFolderIds] = useState(() => new Set());
+  const [treeFocusId, setTreeFocusId] = useState('');
+  const [compactFolderBrowser, setCompactFolderBrowser] = useState(false);
+  const [mobileBrowseParentId, setMobileBrowseParentId] = useState('');
   const [renameFolderId, setRenameFolderId] = useState('');
   const [renameFolderName, setRenameFolderName] = useState('');
   const [renameError, setRenameError] = useState('');
@@ -170,6 +295,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const archivedFoldersLoadingRef = useRef(false);
   const archiveFolderRequestRef = useRef(false);
   const restoreFolderRequestRef = useRef('');
+  const folderTreeRef = useRef(null);
 
   const showGenerateControls = canManage === true && clientMode === false && Boolean(matterId);
   const documents = useMemo(
@@ -195,6 +321,11 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     setArchiveRequestPending(false);
     setRestoreRequestPendingFolderId('');
     setFolderMutationError(null);
+    setNewFolderName('');
+    setNewFolderParentId('');
+    setExpandedFolderIds(new Set());
+    setTreeFocusId('');
+    setMobileBrowseParentId('');
   }, [matterId, canManage, clientMode]);
 
   useEffect(() => {
@@ -225,6 +356,14 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     updateNativeDragEnabled();
     dragMedia.addEventListener?.('change', updateNativeDragEnabled);
     return () => dragMedia.removeEventListener?.('change', updateNativeDragEnabled);
+  }, []);
+
+  useEffect(() => {
+    const compactMedia = window.matchMedia('(max-width: 640px)');
+    const updateCompactFolderBrowser = () => setCompactFolderBrowser(compactMedia.matches);
+    updateCompactFolderBrowser();
+    compactMedia.addEventListener?.('change', updateCompactFolderBrowser);
+    return () => compactMedia.removeEventListener?.('change', updateCompactFolderBrowser);
   }, []);
 
   useEffect(() => {
@@ -351,13 +490,23 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
 
   async function addFolder(event) {
     event.preventDefault();
-    if (!newFolderName.trim()) return;
+    const name = newFolderName.trim();
+    const parentId = normalizeFolderId(newFolderParentId);
+    if (!name || canManage !== true || clientMode !== false) return;
+    const parent = parentId ? folderHierarchy.folderById.get(parentId) : null;
+    if (parentId && (!parent || isClientUploadsFolder(parent))) {
+      notify?.({ type: 'danger', message: 'Choose an active custom parent folder.' });
+      return;
+    }
     try {
-      const folder = await createFolder(matterId, { name: newFolderName });
+      const folder = await createFolder(matterId, { name, parentId: parentId || null });
       setNewFolderName('');
-      setSelectedFolder(folder.id);
       notify?.({ type: 'success', message: 'Folder created.' });
       await load();
+      setSelectedFolder(folder.id);
+      if (parentId) {
+        setExpandedFolderIds(current => new Set([...current, parentId]));
+      }
     } catch (err) { notify?.({ type: 'danger', message: err.message }); }
   }
 
@@ -405,6 +554,10 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   }
 
   async function removeFolder(folder) {
+    if ((folderHierarchy.childrenByParentId.get(normalizeFolderId(folder?.id)) || []).length) {
+      notify?.({ type: 'danger', message: 'Remove child folders before deleting this folder.' });
+      return;
+    }
     try {
       await deleteFolder(folder.id);
       setSelectedFolder('all');
@@ -427,6 +580,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       || !activeFolder
       || activeFolder.virtual
       || isClientUploadsFolder(activeFolder)
+      || (folderHierarchy.childrenByParentId.get(normalizeFolderId(activeFolder.id)) || []).length > 0
       || archiveFolderRequestRef.current
       || restoreFolderRequestRef.current
       || renameSaving
@@ -446,6 +600,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       || !activeFolder
       || activeFolder.virtual
       || isClientUploadsFolder(activeFolder)
+      || (folderHierarchy.childrenByParentId.get(normalizeFolderId(activeFolder.id)) || []).length > 0
     ) return;
 
     archiveFolderRequestRef.current = true;
@@ -522,8 +677,8 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     }
     setUploadStatus({ fileName: file.name, state: 'Uploading' });
     try {
-      const targetFolderId = realFolders.some(folder => folder.id === selectedFolder)
-        ? selectedFolder
+      const targetFolderId = folderHierarchy.folderById.has(normalizeFolderId(selectedFolder))
+        ? normalizeFolderId(selectedFolder)
         : 'uncategorised';
       await api(`/matters/${matterId}/documents`, {
         method: 'POST',
@@ -681,7 +836,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     const visibleActiveIds = new Set(visibleDocuments.map(doc => String(doc.id)));
     const safeSnapshot = documentSnapshot.filter(doc => visibleActiveIds.has(String(doc.id)));
     if (!safeSnapshot.length) return;
-    const destinationLabel = folderOptions.find(folder => String(folder.id) === String(destinationFolderId))?.name || 'Uncategorised';
+    const destinationLabel = folderOptions.find(folder => String(folder.id) === String(destinationFolderId))?.label || 'Uncategorised';
     const failures = [];
     let movedCount = 0;
     let skippedCount = 0;
@@ -869,32 +1024,53 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     }
   }
 
-  const realFolders = folders.filter(folder => !folder.virtual);
+  const folderHierarchy = useMemo(
+    () => deriveActiveFolderHierarchy(folders),
+    [folders],
+  );
+  const realFolders = folderHierarchy.folders;
   const clientUploadsFolder = realFolders.find(isClientUploadsFolder);
-  const customFolders = realFolders.filter(folder => folder.id !== clientUploadsFolder?.id);
-  const explorerFolders = useMemo(() => {
-    const all = folders.find(folder => folder.id === 'all') || {
-      id: 'all',
-      name: 'All documents',
-      virtual: true,
-      ...(selectedFolder === 'all' ? { documentCount: documents.length } : {}),
-    };
-    const uncategorised = folders.find(folder => folder.id === 'uncategorised') || {
-      id: 'uncategorised',
-      name: 'Uncategorised',
-      virtual: true,
-      ...(selectedFolder === 'uncategorised' ? { documentCount: documents.length } : {}),
-    };
-    const archived = {
-      id: 'archived',
-      name: 'Archived documents',
-      virtual: true,
-      ...(selectedFolder === 'archived' ? { documentCount: documents.length } : {}),
-    };
-    return [all, uncategorised, ...(clientUploadsFolder ? [clientUploadsFolder] : []), ...customFolders, ...(canManage && !clientMode ? [archived] : [])];
-  }, [folders, clientUploadsFolder, customFolders, selectedFolder, documents.length, canManage, clientMode]);
-  const folderOptions = useMemo(() => [{ id: 'uncategorised', name: 'Uncategorised' }, ...realFolders], [realFolders]);
-  const selectedFolderInfo = explorerFolders.find(folder => folder.id === selectedFolder) || explorerFolders[0];
+  const customFolders = realFolders.filter(folder => !isClientUploadsFolder(folder));
+  const allFolder = folders.find(folder => folder.id === 'all') || {
+    id: 'all',
+    name: 'All Documents',
+    virtual: true,
+  };
+  const uncategorisedFolder = folders.find(folder => folder.id === 'uncategorised') || {
+    id: 'uncategorised',
+    name: 'Uncategorised',
+    virtual: true,
+  };
+  const archivedFolder = {
+    id: 'archived',
+    name: 'Archived documents',
+    virtual: true,
+  };
+  const virtualFolders = [
+    allFolder,
+    ...(!clientMode ? [uncategorisedFolder] : []),
+    ...(canManage && !clientMode ? [archivedFolder] : []),
+  ];
+  const explorerFolders = [...virtualFolders, ...realFolders];
+  const folderOptions = useMemo(() => [
+    { id: 'uncategorised', name: 'Uncategorised', label: 'Uncategorised' },
+    ...folderHierarchy.folders.map(folder => ({
+      ...folder,
+      label: folderPathLabel(folderHierarchy, folder),
+    })),
+  ], [folderHierarchy]);
+  const creationParentOptions = useMemo(
+    () => customFolders.map(folder => ({
+      id: normalizeFolderId(folder.id),
+      label: folderPathLabel(folderHierarchy, folder),
+    })),
+    [customFolders, folderHierarchy],
+  );
+  const visibleTreeFolders = useMemo(
+    () => visibleHierarchyFolders(folderHierarchy, expandedFolderIds),
+    [folderHierarchy, expandedFolderIds],
+  );
+  const selectedFolderInfo = explorerFolders.find(folder => String(folder.id) === String(selectedFolder)) || allFolder;
   const selectedName = selectedFolderInfo?.name || 'All documents';
   const folderCount = folder => {
     if (folder?.id === 'all') return activeDocuments.length;
@@ -908,9 +1084,124 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     selectedFolderInfo
     && !selectedFolderInfo.virtual
     && !selectedIsClientUploads
-    && realFolders.some(folder => String(folder.id) === String(selectedFolderInfo.id)),
+    && folderHierarchy.folderById.has(normalizeFolderId(selectedFolderInfo.id)),
   );
   const selectedCustomCount = selectedIsCustom ? folderCount(selectedFolderInfo) : 0;
+  const selectedHasChildren = selectedIsCustom
+    && (folderHierarchy.childrenByParentId.get(normalizeFolderId(selectedFolderInfo.id)) || []).length > 0;
+  const selectedPath = selectedFolderInfo?.virtual
+    ? []
+    : (folderHierarchy.pathById.get(normalizeFolderId(selectedFolderInfo?.id)) || []);
+  const selectedPathLabel = selectedPath.length ? selectedPath.map(folder => folder.name).join(' / ') : selectedName;
+  const selectedBreadcrumb = selectedFolderInfo?.id === 'all'
+    ? [allFolder]
+    : selectedPath.length
+      ? [allFolder, ...selectedPath]
+      : [allFolder, selectedFolderInfo];
+  const mobileBrowseParent = folderHierarchy.folderById.get(normalizeFolderId(mobileBrowseParentId));
+  const mobileBrowsePath = mobileBrowseParent
+    ? (folderHierarchy.pathById.get(normalizeFolderId(mobileBrowseParent.id)) || [])
+    : [];
+  const mobileLevelFolders = folderHierarchy.childrenByParentId.get(normalizeFolderId(mobileBrowseParentId)) || [];
+
+  useEffect(() => {
+    const allowedVirtual = new Set(virtualFolders.map(folder => String(folder.id)));
+    if (!allowedVirtual.has(String(selectedFolder)) && !folderHierarchy.folderById.has(normalizeFolderId(selectedFolder))) {
+      setSelectedFolder('all');
+    }
+  }, [selectedFolder, folderHierarchy, clientMode, canManage]);
+
+  useEffect(() => {
+    const selectedId = normalizeFolderId(selectedFolder);
+    const path = folderHierarchy.pathById.get(selectedId);
+    if (!path?.length) {
+      if (compactFolderBrowser) setMobileBrowseParentId('');
+      return;
+    }
+    const ancestorIds = path.slice(0, -1).map(folder => normalizeFolderId(folder.id));
+    setExpandedFolderIds(current => {
+      if (ancestorIds.every(id => current.has(id))) return current;
+      return new Set([...current, ...ancestorIds]);
+    });
+    setTreeFocusId(selectedId);
+    if (compactFolderBrowser) {
+      setMobileBrowseParentId(normalizeFolderId(path.at(-2)?.id));
+    }
+  }, [selectedFolder, folderHierarchy, compactFolderBrowser]);
+
+  useEffect(() => {
+    const selected = folderHierarchy.folderById.get(normalizeFolderId(selectedFolder));
+    setNewFolderParentId(selected && !isClientUploadsFolder(selected) ? normalizeFolderId(selected.id) : '');
+  }, [selectedFolder, matterId, folderHierarchy]);
+
+  useEffect(() => {
+    if (mobileBrowseParentId && !folderHierarchy.folderById.has(normalizeFolderId(mobileBrowseParentId))) {
+      setMobileBrowseParentId('');
+    }
+  }, [mobileBrowseParentId, folderHierarchy]);
+
+  useEffect(() => {
+    const visibleIds = new Set(visibleTreeFolders.map(folder => normalizeFolderId(folder.id)));
+    if (!treeFocusId || !visibleIds.has(normalizeFolderId(treeFocusId))) {
+      setTreeFocusId(normalizeFolderId(visibleTreeFolders[0]?.id));
+    }
+  }, [treeFocusId, visibleTreeFolders]);
+
+  function toggleFolderExpansion(folderId, force) {
+    const id = normalizeFolderId(folderId);
+    if (!(folderHierarchy.childrenByParentId.get(id) || []).length) return;
+    const shouldExpand = force === undefined ? !expandedFolderIds.has(id) : force;
+    if (!shouldExpand) {
+      const selectedPathIds = selectedPath.map(folder => normalizeFolderId(folder.id));
+      if (normalizeFolderId(selectedFolder) !== id && selectedPathIds.includes(id)) {
+        setSelectedFolder(id);
+      }
+    }
+    setExpandedFolderIds(current => {
+      const next = new Set(current);
+      if (shouldExpand) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  function focusTreeFolder(folderId) {
+    const id = normalizeFolderId(folderId);
+    if (!id) return;
+    setTreeFocusId(id);
+    requestAnimationFrame(() => {
+      const item = Array.from(folderTreeRef.current?.querySelectorAll('[role="treeitem"]') || [])
+        .find(node => node.dataset.folderId === id);
+      item?.focus();
+    });
+  }
+
+  function handleFolderTreeKeyDown(event, folder) {
+    const id = normalizeFolderId(folder.id);
+    const index = visibleTreeFolders.findIndex(item => normalizeFolderId(item.id) === id);
+    const children = folderHierarchy.childrenByParentId.get(id) || [];
+    const parentId = normalizeFolderId(folder.parentId);
+    let target;
+    if (event.key === 'ArrowDown') target = visibleTreeFolders[Math.min(index + 1, visibleTreeFolders.length - 1)];
+    if (event.key === 'ArrowUp') target = visibleTreeFolders[Math.max(index - 1, 0)];
+    if (event.key === 'Home') target = visibleTreeFolders[0];
+    if (event.key === 'End') target = visibleTreeFolders.at(-1);
+    if (event.key === 'ArrowRight' && children.length) {
+      if (!expandedFolderIds.has(id)) toggleFolderExpansion(id, true);
+      else target = children[0];
+    }
+    if (event.key === 'ArrowLeft') {
+      if (children.length && expandedFolderIds.has(id)) toggleFolderExpansion(id, false);
+      else if (parentId) target = folderHierarchy.folderById.get(parentId);
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      setSelectedFolder(id);
+    }
+    if (target || ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter', ' '].includes(event.key)) {
+      event.preventDefault();
+      if (target) focusTreeFolder(target.id);
+    }
+  }
   const visibleDocuments = useMemo(
     () => filterDocumentsBySearch(documents, documentSearch, clientMode),
     [documents, documentSearch, clientMode],
@@ -946,8 +1237,10 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     ? 'Client uploads are placed in Client Uploads automatically.'
     : archivedView ? 'Restore archived files to active matter documents.' : 'Browse, upload, move, and manage matter files.';
   const uploadDestination = clientMode
-    ? 'Client Uploads'
-    : selectedFolder === 'all' ? 'Uncategorised' : selectedName;
+    ? (folderPathLabel(folderHierarchy, clientUploadsFolder) || 'Client Uploads')
+    : selectedFolder === 'all' || selectedFolder === 'archived'
+      ? 'Uncategorised'
+      : selectedFolderInfo?.virtual ? selectedName : selectedPathLabel;
   const folderDescription = archivedView
     ? 'Archived records are retained safely and can be restored.'
     : selectedFolder === 'all'
@@ -979,8 +1272,20 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       .lf-doc-secondary-tools > summary { cursor: pointer; color: #234936; font-size: 13px; font-weight: 700; padding: 11px 0; }
       .lf-doc-secondary-tools[open] > summary { margin-bottom: 8px; }
       .lf-doc-folder-button { width: 100%; text-align: left; }
+      .lf-doc-folder-button:focus-visible { outline: 2px solid #C5973C; outline-offset: 2px; }
       .lf-doc-folder-button[data-document-drop-target="true"] { outline: 1px dashed #C5973C; outline-offset: 2px; }
       .lf-doc-folder-button[data-document-drop-active="true"] { background: #FFF7E6 !important; border-color: #C5973C !important; box-shadow: 0 0 0 3px rgba(197,151,60,.18); }
+      .lf-doc-system-views { display: grid; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid #DDD8CE; }
+      .lf-doc-persistent-tree { display: grid; gap: 4px; margin-top: 10px; }
+      .lf-doc-tree-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 7px; min-width: 0; }
+      .lf-doc-tree-toggle { width: 16px; flex: 0 0 16px; text-align: center; color: #5F6B63; }
+      .lf-doc-tree-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .lf-doc-mobile-browser { display: grid; gap: 8px; margin-top: 10px; }
+      .lf-doc-mobile-location, .lf-doc-breadcrumb { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; min-width: 0; }
+      .lf-doc-mobile-folder-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: stretch; min-width: 0; }
+      .lf-doc-breadcrumb { margin-bottom: 10px; color: #69746C; font-size: 12px; }
+      .lf-doc-breadcrumb button, .lf-doc-mobile-location button { border: 0; background: transparent; color: #234936; cursor: pointer; padding: 3px 2px; font: inherit; text-decoration: underline; text-underline-offset: 2px; }
+      .lf-doc-breadcrumb [aria-current="page"] { color: #111827; font-weight: 700; overflow-wrap: anywhere; }
       .lf-doc-draggable-row { cursor: grab; }
       .lf-doc-dragging-row { opacity: .58; }
       .lf-doc-explorer { align-items: start; }
@@ -992,21 +1297,23 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       @media (max-width: 640px) {
         .lf-doc-grid { grid-template-columns: minmax(0, 1fr) !important; }
         .lf-doc-folder-pane { position: static; }
-        .lf-doc-folder-archive-action, .lf-doc-archived-folder-restore { min-height: 44px; }
+        .lf-doc-folder-archive-action, .lf-doc-archived-folder-restore, .lf-doc-mobile-folder-open, .lf-doc-mobile-back { min-height: 44px; }
+        .lf-doc-breadcrumb button, .lf-doc-mobile-location button { min-height: 36px; }
       }
     `}</style>
     <div className="lf-doc-grid lf-doc-explorer" style={{ display: 'grid', gridTemplateColumns: showFolderControls ? '240px minmax(0,1fr)' : 'minmax(0,1fr)', gap: 16 }}>
       {showFolderControls && <div className="lf-doc-folder-pane"><Card title="Folders" hint="Matter file cabinet">
-        <div style={{ display: 'grid', gap: 6 }}>
-          {explorerFolders.map(folder => (
+        <div className="lf-doc-system-views" aria-label="Document views">
+          {virtualFolders.map(folder => (
             <div key={folder.id}>
               <button
                 className="lf-doc-folder-button"
                 type="button"
-                aria-pressed={selectedFolder === folder.id}
+                aria-pressed={String(selectedFolder) === String(folder.id)}
+                data-folder-kind="virtual"
                 data-document-drop-target={draggedDocumentId && supportedDropFolder(folder) ? 'true' : undefined}
                 data-document-drop-active={String(dragOverFolderId) === String(folder.id) ? 'true' : undefined}
-                style={{ ...styles.matterButton, ...(selectedFolder === folder.id ? styles.matterActive : {}), padding: '9px 8px' }}
+                style={{ ...styles.matterButton, ...(String(selectedFolder) === String(folder.id) ? styles.matterActive : {}), padding: '9px 8px' }}
                 onClick={() => setSelectedFolder(folder.id)}
                 onDragEnter={event => dragOverFolder(event, folder)}
                 onDragOver={event => dragOverFolder(event, folder)}
@@ -1015,19 +1322,141 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
               >
                 <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
                   <strong>{folderIcon(folder)} {folder.name}</strong>
-                  <span style={{ ...styles.badge, minWidth: 24, justifyContent: 'center', background: selectedFolder === folder.id ? '#fff' : '#F1EEE7', color: theme.ink }}>
+                  <span style={{ ...styles.badge, minWidth: 24, justifyContent: 'center', background: String(selectedFolder) === String(folder.id) ? '#fff' : '#F1EEE7', color: theme.ink }}>
                     {folderCount(folder)}
                   </span>
                 </span>
               </button>
             </div>
           ))}
-          {!customFolders.length && (
+        </div>
+        {!compactFolderBrowser ? (
+          <div ref={folderTreeRef} className="lf-doc-persistent-tree" role="tree" aria-label="Matter folders">
+            {visibleTreeFolders.map(folder => {
+              const folderId = normalizeFolderId(folder.id);
+              const children = folderHierarchy.childrenByParentId.get(folderId) || [];
+              const siblings = folderHierarchy.childrenByParentId.get(normalizeFolderId(folder.parentId)) || [];
+              const expanded = children.length > 0 && expandedFolderIds.has(folderId);
+              const selected = normalizeFolderId(selectedFolder) === folderId;
+              return (
+                <button
+                  key={folderId}
+                  className="lf-doc-folder-button lf-doc-tree-item"
+                  type="button"
+                  role="treeitem"
+                  aria-level={folderHierarchy.depthById.get(folderId) || 1}
+                  aria-posinset={siblings.findIndex(item => normalizeFolderId(item.id) === folderId) + 1}
+                  aria-setsize={siblings.length}
+                  aria-selected={selected}
+                  aria-expanded={children.length ? expanded : undefined}
+                  data-folder-id={folderId}
+                  data-folder-path={folderPathLabel(folderHierarchy, folder)}
+                  data-document-drop-target={draggedDocumentId && supportedDropFolder(folder) ? 'true' : undefined}
+                  data-document-drop-active={String(dragOverFolderId) === folderId ? 'true' : undefined}
+                  tabIndex={normalizeFolderId(treeFocusId) === folderId ? 0 : -1}
+                  title={folderPathLabel(folderHierarchy, folder)}
+                  style={{
+                    ...styles.matterButton,
+                    ...(selected ? styles.matterActive : {}),
+                    padding: `9px 8px 9px ${8 + Math.min((folderHierarchy.depthById.get(folderId) - 1) * 14, 56)}px`,
+                  }}
+                  onFocus={() => setTreeFocusId(folderId)}
+                  onKeyDown={event => handleFolderTreeKeyDown(event, folder)}
+                  onClick={event => {
+                    if (event.target.closest?.('[data-tree-toggle="true"]')) {
+                      toggleFolderExpansion(folderId);
+                      return;
+                    }
+                    setSelectedFolder(folderId);
+                  }}
+                  onDragEnter={event => dragOverFolder(event, folder)}
+                  onDragOver={event => dragOverFolder(event, folder)}
+                  onDragLeave={event => leaveDropFolder(event, folder)}
+                  onDrop={event => dropDocumentsOnFolder(event, folder)}
+                >
+                  <span style={{ display: 'flex', gap: 4, alignItems: 'center', minWidth: 0 }}>
+                    <span className="lf-doc-tree-toggle" data-tree-toggle={children.length ? 'true' : undefined} aria-hidden="true">
+                      {children.length ? (expanded ? '▾' : '▸') : ''}
+                    </span>
+                    <strong className="lf-doc-tree-label">{folderIcon(folder)} {folder.name}</strong>
+                  </span>
+                  <span style={{ ...styles.badge, minWidth: 24, justifyContent: 'center', background: selected ? '#fff' : '#F1EEE7', color: theme.ink }}>
+                    {folderCount(folder)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="lf-doc-mobile-browser">
+            <div style={{ display: 'grid', gap: 5 }}>
+              {mobileBrowseParent && (
+                <button
+                  className="lf-doc-mobile-back"
+                  type="button"
+                  style={{ ...styles.ghostButton, justifySelf: 'start' }}
+                  onClick={() => setMobileBrowseParentId(normalizeFolderId(mobileBrowseParent.parentId))}
+                >
+                  ← Back
+                </button>
+              )}
+              <nav className="lf-doc-mobile-location" aria-label="Folder browser location">
+                <button type="button" onClick={() => setMobileBrowseParentId('')}>Root</button>
+                {mobileBrowsePath.map((folder, index) => (
+                  <span key={folder.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+                    <span aria-hidden="true">/</span>
+                    {index === mobileBrowsePath.length - 1
+                      ? <strong aria-current="page" style={{ overflowWrap: 'anywhere' }}>{folder.name}</strong>
+                      : <button type="button" onClick={() => setMobileBrowseParentId(normalizeFolderId(folder.id))}>{folder.name}</button>}
+                  </span>
+                ))}
+              </nav>
+            </div>
+            <div style={{ display: 'grid', gap: 6 }} aria-label={mobileBrowseParent ? `Folders in ${folderPathLabel(folderHierarchy, mobileBrowseParent)}` : 'Top-level folders'}>
+              {mobileLevelFolders.map(folder => {
+                const folderId = normalizeFolderId(folder.id);
+                const children = folderHierarchy.childrenByParentId.get(folderId) || [];
+                const selected = normalizeFolderId(selectedFolder) === folderId;
+                return (
+                  <div className="lf-doc-mobile-folder-row" key={folderId} data-folder-path={folderPathLabel(folderHierarchy, folder)}>
+                    <button
+                      className="lf-doc-folder-button"
+                      type="button"
+                      aria-pressed={selected}
+                      title={folderPathLabel(folderHierarchy, folder)}
+                      style={{ ...styles.matterButton, ...(selected ? styles.matterActive : {}), padding: '9px 8px', minWidth: 0 }}
+                      onClick={() => setSelectedFolder(folderId)}
+                    >
+                      <span style={{ display: 'flex', justifyContent: 'space-between', gap: 7, alignItems: 'center', minWidth: 0 }}>
+                        <strong className="lf-doc-tree-label">{folderIcon(folder)} {folder.name}</strong>
+                        <span style={{ ...styles.badge, minWidth: 24, justifyContent: 'center', background: selected ? '#fff' : '#F1EEE7', color: theme.ink }}>{folderCount(folder)}</span>
+                      </span>
+                    </button>
+                    {children.length > 0 && (
+                      <button
+                        className="lf-doc-mobile-folder-open"
+                        type="button"
+                        style={{ ...styles.ghostButton, minWidth: 44, padding: '8px 10px' }}
+                        aria-label={`Open ${folder.name}`}
+                        onClick={() => setMobileBrowseParentId(folderId)}
+                      >
+                        ›
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              {!mobileLevelFolders.length && <span style={{ color: theme.muted, fontSize: 12 }}>No child folders here.</span>}
+            </div>
+          </div>
+        )}
+        {!clientMode && !customFolders.length && (
+          <div style={{ display: 'grid', gap: 6 }}>
             <span style={{ color: theme.muted, fontSize: 12, lineHeight: 1.45, padding: '4px 2px' }}>
               No custom folders yet.
             </span>
-          )}
-        </div>
+          </div>
+        )}
         {canManage === true && clientMode === false && (
           <details
             className="lf-doc-archived-folders"
@@ -1079,10 +1508,18 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
             </div>
           </details>
         )}
-        {canManage && (
+        {canManage === true && clientMode === false && (
           <form onSubmit={addFolder} style={{ display: 'grid', gap: 8, marginTop: 12 }}>
-            <Field label="New Folder"><input style={styles.input} value={newFolderName} onChange={e => setNewFolderName(e.target.value)} placeholder="Pleadings" /></Field>
-            <button style={styles.ghostButton}>+ New Folder</button>
+            <Field label="Name for new folder">
+              <input style={styles.input} value={newFolderName} onChange={e => setNewFolderName(e.target.value)} placeholder="Pleadings" />
+            </Field>
+            <Field label="Create in">
+              <select style={styles.input} value={newFolderParentId} onChange={event => setNewFolderParentId(event.target.value)}>
+                <option value="">Root (top level)</option>
+                {creationParentOptions.map(folder => <option key={folder.id} value={folder.id}>{folder.label}</option>)}
+              </select>
+            </Field>
+            <button type="submit" style={styles.ghostButton} disabled={!newFolderName.trim()}>+ New Folder</button>
           </form>
         )}
         {canManage && !clientMode && (
@@ -1093,7 +1530,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
               <button
                 type="button"
                 style={styles.ghostButton}
-                disabled={!selectedIsCustom || selectedCustomCount > 0 || renameSaving || folderLifecycleMutationPending}
+                disabled={!selectedIsCustom || selectedCustomCount > 0 || selectedHasChildren || renameSaving || folderLifecycleMutationPending}
                 onClick={() => setConfirm({
                   title: 'Delete empty folder?',
                   message: 'Delete this empty custom folder?',
@@ -1107,6 +1544,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
                   className="lf-doc-folder-archive-action"
                   type="button"
                   style={{ ...styles.dangerButton, gridColumn: '1 / -1' }}
+                  disabled={selectedHasChildren}
                   onClick={() => beginArchiveFolder(selectedFolderInfo)}
                 >
                   Archive
@@ -1149,7 +1587,8 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
             <span style={{ color: theme.muted, fontSize: 11, lineHeight: 1.4 }}>
               {!selectedIsCustom
                 ? selectedFolderInfo?.virtual || selectedIsClientUploads ? 'System folder' : 'Select a custom folder to rename'
-                : selectedCustomCount > 0 ? 'Only empty custom folders can be removed' : 'This empty custom folder can be renamed or removed.'}
+                : selectedHasChildren ? 'Remove child folders before archiving or deleting this folder.'
+                  : selectedCustomCount > 0 ? 'Only empty custom folders can be removed' : 'This empty custom folder can be renamed, archived, or removed.'}
             </span>
           </div>
         )}
@@ -1157,6 +1596,19 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
 
       <Card title={selectedName} hint={documentCardHint}>
         <div className="lf-doc-file-toolbar">
+          <nav className="lf-doc-breadcrumb" aria-label="Folder breadcrumb">
+            {selectedBreadcrumb.map((folder, index) => {
+              const current = index === selectedBreadcrumb.length - 1;
+              return (
+                <span key={`${folder.id}-${index}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+                  {index > 0 && <span aria-hidden="true">/</span>}
+                  {current
+                    ? <span aria-current="page">{folder.name}</span>
+                    : <button type="button" onClick={() => setSelectedFolder(folder.id)}>{folder.name}</button>}
+                </span>
+              );
+            })}
+          </nav>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
             <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
               <strong style={{ fontSize: 15, color: theme.ink }}>{selectedName}</strong>
@@ -1212,7 +1664,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
                     onChange={event => setBulkMoveDestination(event.target.value)}
                     disabled={bulkMoving}
                   >
-                    {folderOptions.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+                    {folderOptions.map(folder => <option key={folder.id} value={folder.id}>{folder.label}</option>)}
                   </select>
                 </label>
                 <button type="submit" style={styles.primaryButton} disabled={bulkMoving || selectedVisibleCount === 0}>
@@ -1342,12 +1794,17 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
                 : ['Name', 'Folder', 'Date', 'Size', 'Source', 'Actions']}
             rows={visibleDocuments.map(doc => {
               const metaStyle = { color: theme.muted, fontSize: 12 };
+              const documentFolderId = normalizeFolderId(doc.folderId) || 'uncategorised';
+              const documentFolderPath = documentFolderId === 'uncategorised'
+                ? 'Uncategorised'
+                : (folderPathLabel(folderHierarchy, documentFolderId) || doc.folderName || 'Unavailable folder');
+              const documentFolderIsDestination = folderOptions.some(folder => String(folder.id) === documentFolderId);
               const download = <button key={`${doc.id}-download`} type="button" style={{ ...styles.link, border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }} onClick={() => downloadDoc(doc)}>Download</button>;
               const previewAction = <button key={`${doc.id}-preview`} type="button" style={{ ...styles.link, border: 0, background: 'transparent', padding: 0, cursor: 'pointer' }} onClick={() => openPreview(doc)}>Preview</button>;
               if (archivedView) return [
                 <strong key={`${doc.id}-n`} style={{ fontWeight: 600 }}>{documentLabel(doc)}</strong>,
                 <span key={`${doc.id}-t`} style={metaStyle}>{documentTypeLabel(doc)}</span>,
-                <span key={`${doc.id}-f`} style={metaStyle}>{doc.folderName || 'Uncategorised'}</span>,
+                <span key={`${doc.id}-f`} style={metaStyle}>{documentFolderPath}</span>,
                 <span key={`${doc.id}-d`} style={metaStyle}>{doc.date || '-'}</span>,
                 <span key={`${doc.id}-s`} style={metaStyle}>{doc.size || '-'}</span>,
                 sourceBadge(doc, clientMode),
@@ -1359,7 +1816,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
               ];
               if (!canManage) return [
                 <strong key={`${doc.id}-n`} style={{ fontWeight: 600 }}>{documentLabel(doc)}</strong>,
-                <span key={`${doc.id}-f`} style={metaStyle}>{doc.folderName || 'Uncategorised'}</span>,
+                <span key={`${doc.id}-f`} style={metaStyle}>{documentFolderPath}</span>,
                 <span key={`${doc.id}-d`} style={metaStyle}>{doc.date || '-'}</span>,
                 <span key={`${doc.id}-s`} style={metaStyle}>{doc.size || '-'}</span>,
                 sourceBadge(doc, clientMode),
@@ -1378,15 +1835,22 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
                 ] : []),
                 <strong key={`${doc.id}-n`} style={{ fontWeight: 600 }}>{documentLabel(doc)}</strong>,
                 <span key={`${doc.id}-t`} style={metaStyle}>{documentTypeLabel(doc)}</span>,
-                ...(selectedFolder === 'all' ? [<span key={`${doc.id}-f`} style={metaStyle}>{doc.folderName || 'Uncategorised'}</span>] : []),
+                ...(selectedFolder === 'all' ? [<span key={`${doc.id}-f`} style={metaStyle}>{documentFolderPath}</span>] : []),
                 <span key={`${doc.id}-d`} style={metaStyle}>{doc.date || '-'}</span>,
                 <span key={`${doc.id}-sz`} style={metaStyle}>{doc.size || '-'}</span>,
                 sourceBadge(doc, clientMode),
                 doc.source === 'client'
                   ? <Badge key={`${doc.id}-own`} tone="green">Client upload</Badge>
                   : <button key={`${doc.id}-share`} type="button" style={styles.tinyButton} onClick={() => toggleClientVisible(doc)}>{doc.clientVisible ? 'Shared' : 'Internal'}</button>,
-                <select key={`${doc.id}-move`} style={styles.tableSelect} value={doc.folderId || 'uncategorised'} onChange={e => moveDoc(doc, e.target.value)}>
-                  {folderOptions.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+                <select
+                  key={`${doc.id}-move`}
+                  style={styles.tableSelect}
+                  value={documentFolderIsDestination ? documentFolderId : ''}
+                  aria-label={`Move ${documentLabel(doc)} to folder`}
+                  onChange={e => moveDoc(doc, e.target.value)}
+                >
+                  {!documentFolderIsDestination && <option value="" disabled>Current folder unavailable</option>}
+                  {folderOptions.map(folder => <option key={folder.id} value={folder.id}>{folder.label}</option>)}
                 </select>,
                 <ActionGroup key={`${doc.id}-actions`} actions={[['Preview', () => openPreview(doc)], ['Download', () => downloadDoc(doc)], ['Rename', () => beginRenameDocument(doc)], ['Archive', () => setConfirm({
                   title: 'Archive document?',
