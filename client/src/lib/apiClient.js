@@ -411,6 +411,7 @@ export function restoreFolder(folderId) {
 }
 export const createFolder = (matterId, data) => api(`/matters/${matterId}/folders`, { method: 'POST', body: data });
 export const updateFolder = (folderId, data) => api(`/folders/${folderId}`, { method: 'PATCH', body: data });
+export const moveFolder = (folderId, parentId) => api(`/folders/${encodeURIComponent(folderId)}/move`, { method: 'PATCH', body: { parentId } });
 export const deleteFolder = folderId => api(`/folders/${folderId}`, { method: 'DELETE' });
 export const getMatterDocuments = (matterId, folderId = 'all', status = 'active') => api(queryPath(`/matters/${matterId}/documents`, {
   ...(folderId && folderId !== 'all' ? { folderId } : {}),

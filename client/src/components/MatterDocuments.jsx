@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { api, archiveFolder, createFolder, deleteFolder, downloadWithAuth, fetchDocumentArrayBuffer, fileToDataUrl, generateDocumentFromTemplate, getArchivedMatterFolders, getMatterDocuments, getMatterFolders, listDocumentTemplates, moveDocument, restoreDocument, restoreFolder, updateDocument, updateFolder } from '../lib/apiClient.js';
+import { api, archiveFolder, createFolder, deleteFolder, downloadWithAuth, fetchDocumentArrayBuffer, fileToDataUrl, generateDocumentFromTemplate, getArchivedMatterFolders, getMatterDocuments, getMatterFolders, listDocumentTemplates, moveDocument, moveFolder, restoreDocument, restoreFolder, updateDocument, updateFolder } from '../lib/apiClient.js';
 import { styles, theme } from '../theme.jsx';
 import { ActionGroup, Badge, Card, ConfirmModal, Field, Skeleton, Table } from './ui.jsx';
 
 const DOCUMENT_DRAG_TYPE = 'application/x-lexflow-document-id';
 const INTERACTIVE_DRAG_SELECTOR = 'a, button, input, select, textarea, [contenteditable="true"], [role="button"]';
+const MAX_FOLDER_DEPTH = 8;
 
 function folderIcon(folder) {
   if (folder.id === 'all') return 'ALL';
@@ -173,6 +174,28 @@ function visibleHierarchyFolders(hierarchy, expandedFolderIds) {
   return visible;
 }
 
+function folderSubtreeMetrics(hierarchy, rawFolderId) {
+  const folderId = normalizeFolderId(rawFolderId);
+  const descendantIds = new Set();
+  const visited = new Set();
+
+  function visit(currentId) {
+    if (!currentId || visited.has(currentId)) return 0;
+    visited.add(currentId);
+    let height = 1;
+    for (const child of hierarchy.childrenByParentId.get(currentId) || []) {
+      const childId = normalizeFolderId(child.id);
+      descendantIds.add(childId);
+      height = Math.max(height, visit(childId) + 1);
+    }
+    return height;
+  }
+
+  const height = visit(folderId);
+  descendantIds.delete(folderId);
+  return { descendantIds, height: Math.max(1, height) };
+}
+
 function formatArchivedFolderDate(value) {
   if (!value) return 'Date unavailable';
   const date = new Date(value);
@@ -264,6 +287,10 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const [renameFolderName, setRenameFolderName] = useState('');
   const [renameError, setRenameError] = useState('');
   const [renameSaving, setRenameSaving] = useState(false);
+  const [moveFolderTarget, setMoveFolderTarget] = useState(null);
+  const [moveFolderParentId, setMoveFolderParentId] = useState('');
+  const [moveFolderError, setMoveFolderError] = useState('');
+  const [moveFolderSaving, setMoveFolderSaving] = useState(false);
   const [renameDocument, setRenameDocument] = useState(null);
   const [renameDocumentName, setRenameDocumentName] = useState('');
   const [renameDocumentError, setRenameDocumentError] = useState('');
@@ -295,6 +322,10 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const archivedFoldersLoadingRef = useRef(false);
   const archiveFolderRequestRef = useRef(false);
   const restoreFolderRequestRef = useRef('');
+  const moveFolderRequestRef = useRef(false);
+  const moveFolderTriggerRef = useRef(null);
+  const moveFolderDialogRef = useRef(null);
+  const moveFolderSelectRef = useRef(null);
   const folderTreeRef = useRef(null);
 
   const showGenerateControls = canManage === true && clientMode === false && Boolean(matterId);
@@ -312,6 +343,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     archivedFoldersLoadingRef.current = false;
     archiveFolderRequestRef.current = false;
     restoreFolderRequestRef.current = '';
+    moveFolderRequestRef.current = false;
     setArchivedFolders([]);
     setArchivedFoldersOpen(false);
     setArchivedFoldersRequested(false);
@@ -321,6 +353,10 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     setArchiveRequestPending(false);
     setRestoreRequestPendingFolderId('');
     setFolderMutationError(null);
+    setMoveFolderTarget(null);
+    setMoveFolderParentId('');
+    setMoveFolderError('');
+    setMoveFolderSaving(false);
     setNewFolderName('');
     setNewFolderParentId('');
     setExpandedFolderIds(new Set());
@@ -342,6 +378,11 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     if (canManage !== true || clientMode !== false) {
       setSelectedDocumentIds([]);
       setBulkMoveResult(null);
+      moveFolderRequestRef.current = false;
+      setMoveFolderTarget(null);
+      setMoveFolderParentId('');
+      setMoveFolderError('');
+      setMoveFolderSaving(false);
     }
     clearDocumentDrag();
   }, [canManage, clientMode]);
@@ -391,6 +432,12 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     previewRequestRef.current += 1;
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
   }, []);
+
+  useEffect(() => {
+    if (!moveFolderTarget) return undefined;
+    const frame = requestAnimationFrame(() => moveFolderSelectRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [moveFolderTarget]);
 
   async function load() {
     setLoading(true);
@@ -553,6 +600,107 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     }
   }
 
+  function beginMoveFolder(folder, trigger) {
+    const activeFolder = realFolders.find(item => String(item.id) === String(folder?.id || ''));
+    if (
+      canManage !== true
+      || clientMode !== false
+      || !activeFolder
+      || activeFolder.virtual
+      || isClientUploadsFolder(activeFolder)
+      || moveFolderRequestRef.current
+      || archiveFolderRequestRef.current
+      || restoreFolderRequestRef.current
+      || renameSaving
+    ) return;
+
+    if (renameFolderId) cancelRenameFolder();
+    moveFolderTriggerRef.current = trigger || document.activeElement;
+    setMoveFolderTarget(activeFolder);
+    setMoveFolderParentId(normalizeFolderId(activeFolder.parentId));
+    setMoveFolderError('');
+    setMoveFolderSaving(false);
+  }
+
+  function closeMoveFolder(returnFocus = true) {
+    if (moveFolderRequestRef.current) return;
+    const trigger = moveFolderTriggerRef.current;
+    setMoveFolderTarget(null);
+    setMoveFolderParentId('');
+    setMoveFolderError('');
+    setMoveFolderSaving(false);
+    if (returnFocus) requestAnimationFrame(() => trigger?.focus?.());
+  }
+
+  function handleMoveDialogKeyDown(event) {
+    if (event.key === 'Escape' && !moveFolderRequestRef.current) {
+      event.preventDefault();
+      closeMoveFolder();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+
+    const focusable = Array.from(moveFolderDialogRef.current?.querySelectorAll('select, button, [href], input, textarea, [tabindex]:not([tabindex="-1"])') || [])
+      .filter(element => !element.disabled && element.getAttribute('aria-hidden') !== 'true');
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (event.shiftKey && (document.activeElement === first || !moveFolderDialogRef.current?.contains(document.activeElement))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  async function submitMoveFolder(event) {
+    event.preventDefault();
+    if (moveFolderRequestRef.current || canManage !== true || clientMode !== false) return;
+
+    const activeFolder = folderHierarchy.folderById.get(normalizeFolderId(moveFolderTarget?.id));
+    if (!activeFolder || isClientUploadsFolder(activeFolder)) {
+      setMoveFolderError('This folder is no longer available to move.');
+      return;
+    }
+
+    const nextParentId = normalizeFolderId(moveFolderParentId);
+    const destination = moveDestinationOptions.find(option => normalizeFolderId(option.id) === nextParentId);
+    if (!destination || destination.disabled) {
+      setMoveFolderError('Choose a different valid destination.');
+      return;
+    }
+    if (normalizeFolderId(activeFolder.parentId) === nextParentId) {
+      setMoveFolderError('Choose a different destination from the current location.');
+      return;
+    }
+
+    moveFolderRequestRef.current = true;
+    setMoveFolderSaving(true);
+    setMoveFolderError('');
+    try {
+      const destinationPathIds = nextParentId
+        ? (folderHierarchy.pathById.get(nextParentId) || []).map(folder => normalizeFolderId(folder.id))
+        : [];
+      const moved = await moveFolder(activeFolder.id, nextParentId || null);
+      await load();
+      setSelectedFolder(moved.id);
+      if (destinationPathIds.length) {
+        setExpandedFolderIds(current => new Set([...current, ...destinationPathIds]));
+      }
+      if (compactFolderBrowser) setMobileBrowseParentId(nextParentId);
+      notify?.({ type: 'success', message: 'Folder moved. Documents and descendant folders stayed linked.' });
+      moveFolderRequestRef.current = false;
+      setMoveFolderSaving(false);
+      closeMoveFolder();
+    } catch (err) {
+      setMoveFolderError(err.message || 'Unable to move this folder.');
+    } finally {
+      moveFolderRequestRef.current = false;
+      setMoveFolderSaving(false);
+    }
+  }
+
   async function removeFolder(folder) {
     if ((folderHierarchy.childrenByParentId.get(normalizeFolderId(folder?.id)) || []).length) {
       notify?.({ type: 'danger', message: 'Remove child folders before deleting this folder.' });
@@ -583,6 +731,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       || (folderHierarchy.childrenByParentId.get(normalizeFolderId(activeFolder.id)) || []).length > 0
       || archiveFolderRequestRef.current
       || restoreFolderRequestRef.current
+      || moveFolderRequestRef.current
       || renameSaving
     ) return;
     setFolderMutationError(null);
@@ -594,6 +743,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     const activeFolder = realFolders.find(item => String(item.id) === String(folder?.id || ''));
     if (
       archiveFolderRequestRef.current
+      || moveFolderRequestRef.current
       || canManage !== true
       || clientMode !== false
       || selectedFolder === 'archived'
@@ -636,6 +786,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       !folderId
       || restoreFolderRequestRef.current
       || archiveFolderRequestRef.current
+      || moveFolderRequestRef.current
       || canManage !== true
       || clientMode !== false
       || !archivedFolders.some(item => String(item.id) === folderId)
@@ -1089,6 +1240,32 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   const selectedCustomCount = selectedIsCustom ? folderCount(selectedFolderInfo) : 0;
   const selectedHasChildren = selectedIsCustom
     && (folderHierarchy.childrenByParentId.get(normalizeFolderId(selectedFolderInfo.id)) || []).length > 0;
+  const moveFolderTargetId = normalizeFolderId(moveFolderTarget?.id);
+  const currentMoveFolder = folderHierarchy.folderById.get(moveFolderTargetId);
+  const moveSubtree = folderSubtreeMetrics(folderHierarchy, moveFolderTargetId);
+  const currentMoveParentId = normalizeFolderId(currentMoveFolder?.parentId);
+  const moveDestinationOptions = currentMoveFolder ? [
+    {
+      id: '',
+      label: 'Root (top level)',
+      disabled: !currentMoveParentId,
+    },
+    ...customFolders
+      .filter(folder => {
+        const folderId = normalizeFolderId(folder.id);
+        return folderId !== moveFolderTargetId
+          && !moveSubtree.descendantIds.has(folderId)
+          && (folderHierarchy.depthById.get(folderId) || 1) + moveSubtree.height <= MAX_FOLDER_DEPTH;
+      })
+      .map(folder => ({
+        id: normalizeFolderId(folder.id),
+        label: folderPathLabel(folderHierarchy, folder),
+        disabled: normalizeFolderId(folder.id) === currentMoveParentId,
+      })),
+  ] : [];
+  const currentMoveLocationLabel = currentMoveParentId
+    ? (folderPathLabel(folderHierarchy, currentMoveParentId) || 'Current folder unavailable')
+    : 'Root (top level)';
   const selectedPath = selectedFolderInfo?.virtual
     ? []
     : (folderHierarchy.pathById.get(normalizeFolderId(selectedFolderInfo?.id)) || []);
@@ -1221,7 +1398,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
     return sel ? [sel, ...filteredTemplates] : filteredTemplates;
   }, [filteredTemplates, templates, selectedTemplateId, templateSearch]);
   const archivedView = selectedFolder === 'archived';
-  const folderLifecycleMutationPending = archiveRequestPending || Boolean(restoreRequestPendingFolderId);
+  const folderLifecycleMutationPending = archiveRequestPending || Boolean(restoreRequestPendingFolderId) || moveFolderSaving;
   const showArchiveFolderAction = canManage === true
     && clientMode === false
     && selectedIsCustom
@@ -1297,7 +1474,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
       @media (max-width: 640px) {
         .lf-doc-grid { grid-template-columns: minmax(0, 1fr) !important; }
         .lf-doc-folder-pane { position: static; }
-        .lf-doc-folder-archive-action, .lf-doc-archived-folder-restore, .lf-doc-mobile-folder-open, .lf-doc-mobile-back { min-height: 44px; }
+        .lf-doc-folder-move-action, .lf-doc-folder-archive-action, .lf-doc-archived-folder-restore, .lf-doc-mobile-folder-open, .lf-doc-mobile-back, .lf-doc-folder-move-dialog button, .lf-doc-folder-move-dialog select { min-height: 44px; }
         .lf-doc-breadcrumb button, .lf-doc-mobile-location button { min-height: 36px; }
       }
     `}</style>
@@ -1539,6 +1716,15 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
               >
                 Delete
               </button>
+              <button
+                className="lf-doc-folder-move-action"
+                type="button"
+                style={{ ...styles.ghostButton, gridColumn: '1 / -1' }}
+                disabled={!selectedIsCustom || renameSaving || folderLifecycleMutationPending}
+                onClick={event => beginMoveFolder(selectedFolderInfo, event.currentTarget)}
+              >
+                Move Folder
+              </button>
               {showArchiveFolderAction && (
                 <button
                   className="lf-doc-folder-archive-action"
@@ -1587,8 +1773,8 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
             <span style={{ color: theme.muted, fontSize: 11, lineHeight: 1.4 }}>
               {!selectedIsCustom
                 ? selectedFolderInfo?.virtual || selectedIsClientUploads ? 'System folder' : 'Select a custom folder to rename'
-                : selectedHasChildren ? 'Remove child folders before archiving or deleting this folder.'
-                  : selectedCustomCount > 0 ? 'Only empty custom folders can be removed' : 'This empty custom folder can be renamed, archived, or removed.'}
+                : selectedHasChildren ? 'Move this folder with its descendants, or remove child folders before archiving or deleting it.'
+                  : selectedCustomCount > 0 ? 'Moving keeps every document linked. Only empty custom folders can be removed.' : 'This empty custom folder can be renamed, moved, archived, or removed.'}
             </span>
           </div>
         )}
@@ -1917,6 +2103,72 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
           </div>
         )}
       </Card>
+      {moveFolderTarget && canManage && !clientMode && (
+        <div
+          className="lf-doc-folder-move-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="matter-folder-move-title"
+          aria-describedby={moveFolderError ? 'matter-folder-move-help matter-folder-move-error' : 'matter-folder-move-help'}
+          style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(17, 34, 25, 0.62)', padding: 12, display: 'grid', placeItems: 'center', overflowY: 'auto' }}
+          onKeyDown={handleMoveDialogKeyDown}
+          onMouseDown={event => {
+            if (event.target === event.currentTarget && !moveFolderRequestRef.current) closeMoveFolder();
+          }}
+        >
+          <form
+            ref={moveFolderDialogRef}
+            onSubmit={submitMoveFolder}
+            style={{ width: 'min(100%, 480px)', maxHeight: 'calc(100vh - 24px)', overflowY: 'auto', boxSizing: 'border-box', background: theme.paper || '#fff', borderRadius: 10, boxShadow: '0 24px 64px rgba(0,0,0,.28)', padding: 16, display: 'grid', gap: 14 }}
+          >
+            <div style={{ display: 'grid', gap: 5, minWidth: 0 }}>
+              <strong id="matter-folder-move-title" style={{ color: theme.ink, fontSize: 17 }}>Move Folder</strong>
+              <span style={{ color: theme.muted, fontSize: 12, lineHeight: 1.5, overflowWrap: 'anywhere' }}>
+                Move “{currentMoveFolder?.name || moveFolderTarget.name}” to a new place in this matter.
+              </span>
+            </div>
+            <div id="matter-folder-move-help" style={{ background: '#F8F6F1', border: `1px solid ${theme.line}`, borderRadius: 7, padding: 10, display: 'grid', gap: 5, color: theme.muted, fontSize: 12, lineHeight: 1.45, overflowWrap: 'anywhere' }}>
+              <span><strong style={{ color: theme.ink }}>Current location:</strong> {currentMoveLocationLabel}</span>
+              <span>
+                Only this folder’s position changes. Its {moveSubtree.descendantIds.size} descendant folder{moveSubtree.descendantIds.size === 1 ? '' : 's'} and all document records keep their existing links.
+              </span>
+            </div>
+            <label style={{ display: 'grid', gap: 6, minWidth: 0 }}>
+              <span style={{ color: theme.ink, fontSize: 12, fontWeight: 700 }}>Destination</span>
+              <select
+                ref={moveFolderSelectRef}
+                style={{ ...styles.input, width: '100%', minWidth: 0, boxSizing: 'border-box' }}
+                value={moveFolderParentId}
+                disabled={moveFolderSaving}
+                onChange={event => {
+                  setMoveFolderParentId(event.target.value);
+                  if (moveFolderError) setMoveFolderError('');
+                }}
+              >
+                {moveDestinationOptions.map(option => (
+                  <option key={option.id || 'root'} value={option.id} disabled={option.disabled}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            {!moveDestinationOptions.some(option => !option.disabled) && (
+              <span style={{ color: theme.muted, fontSize: 12 }}>No alternative valid destinations are available for this folder.</span>
+            )}
+            {moveFolderError && <span id="matter-folder-move-error" role="alert" style={{ color: theme.red, fontSize: 12 }}>{moveFolderError}</span>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" style={styles.ghostButton} disabled={moveFolderSaving} onClick={() => closeMoveFolder()}>
+                Cancel
+              </button>
+              <button
+                type="submit"
+                style={styles.primaryButton}
+                disabled={moveFolderSaving || !moveDestinationOptions.some(option => !option.disabled && normalizeFolderId(option.id) === normalizeFolderId(moveFolderParentId))}
+              >
+                {moveFolderSaving ? 'Moving…' : 'Move Folder'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
       {renameDocument && canManage && !clientMode && (
         <div
           role="dialog"

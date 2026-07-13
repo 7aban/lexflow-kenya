@@ -33,11 +33,13 @@ const microsoftOAuth = require('./lib/oauthMicrosoft');
 const themeValidation = require('./lib/themeValidation');
 const { buildTemplateMergeContext, mergeTemplateMarkup } = require('./lib/templateMerge');
 const { MAX_FOLDER_DEPTH, createFolderHierarchy, isClientUploadsFolderName } = require('./lib/folderHierarchy');
+const { FolderMoveError, createFolderMovement } = require('./lib/folderMovement');
 
 const app = express();
 const db = new sqlite3.Database(config.DATABASE_PATH);
 const { run, get, all } = createDb(db);
 const folderHierarchy = createFolderHierarchy({ get });
+const folderMovement = createFolderMovement({ databasePath: config.DATABASE_PATH });
 const { canAccessMatter, canAccessClient, canAccessInvoice, canAccessTask, canAccessTimeEntry, canAccessAppearance, canAccessNotice, canAccessConversation, canAccessDocument, canAccessDocumentRequest, isBillingVisibleFor } = createAccess({ get });
 const { logClientActivity, logAudit } = createLogging({ run });
 const { notifyStaff } = createNotifications({ run, all, genId });
@@ -9227,6 +9229,34 @@ app.post('/api/matters/:id/folders', requireAdvocateOrAdmin, async (req, res) =>
   await logAudit(req, 'create', 'folder', id, `Created folder ${name}`);
   await recordAuditEvent(req, { action: 'folder_created', entityType: 'folder', entityId: id, matterId: req.params.id, metadata: { folderName: name, matterId: req.params.id, parentId: parent.parentId } }).catch(() => {});
   res.json(await get('SELECT id,matterId,name,createdBy,createdAt,parentId FROM folders WHERE id=?', [id]));
+});
+app.patch('/api/folders/:id/move', requireAdvocateOrAdmin, async (req, res) => {
+  if (!Object.prototype.hasOwnProperty.call(req.body || {}, 'parentId')) {
+    return res.status(400).json({ error: 'parentId is required' });
+  }
+  if (req.body.parentId !== null && typeof req.body.parentId !== 'string') {
+    return res.status(400).json({ error: 'parentId must be a folder ID or null' });
+  }
+
+  const folder = await get('SELECT id,matterId FROM folders WHERE id=?', [req.params.id]);
+  if (!folder) return res.status(404).json({ error: 'Folder not found' });
+  if (!(await canAccessMatter(req, folder.matterId))) {
+    await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: folder.matterId, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
+    return res.status(403).json({ error: 'Matter access denied' });
+  }
+
+  try {
+    return res.json(await folderMovement.moveFolder({
+      folderId: req.params.id,
+      parentId: req.body.parentId,
+      req,
+    }));
+  } catch (error) {
+    if (error instanceof FolderMoveError) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    throw error;
+  }
 });
 app.patch('/api/folders/:id', requireAdvocateOrAdmin, async (req, res) => {
   const folder = await get('SELECT * FROM folders WHERE id=?', [req.params.id]);

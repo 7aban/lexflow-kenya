@@ -45,7 +45,7 @@ module.exports = ({ run, get }) => {
   }
 
   // Main audit event recording function
-  async function recordAuditEvent(req, { action, entityType, entityId, matterId, clientId, metadata = {} }) {
+  async function recordAuditEvent(req, { action, entityType, entityId, matterId, clientId, metadata = {} }, { throwOnError = false } = {}) {
     try {
       // Ensure audit_events table exists (handles test environment where initDb may not run)
       await run(`CREATE TABLE IF NOT EXISTS audit_events (
@@ -88,6 +88,7 @@ module.exports = ({ run, get }) => {
         new Date().toISOString(),
       ]);
     } catch (err) {
+      if (throwOnError) throw err;
       // Audit failure should not crash the main request
       // Table might not exist in test environment - that's OK
       if (!err.message?.includes('no such table')) {
