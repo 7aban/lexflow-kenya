@@ -8,6 +8,7 @@ const sqlite3 = require('sqlite3');
 const {
   CLIENT_VISIBILITY_INELIGIBILITY_REASONS,
   documentClientVisibilityCapability,
+  publicStaffMatterDocument,
 } = require('../lib/documents');
 
 const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -59,7 +60,7 @@ async function login(email, loginPassword = password, route = '/api/auth/login')
   return response.body;
 }
 
-describe('LOCAL-PILOT-GLOBAL-DOCUMENT-BULK-VISIBILITY-96 backend', () => {
+describe('LOCAL-PILOT-GLOBAL-DOCUMENT-BULK-VISIBILITY-96 / DOCUMENT-VISIBILITY-CAPABILITY-COHERENCE-98 backend', () => {
   const advocateEmail = `bulk.visibility.advocate.${suffix}@example.com`;
   const unassignedAdvocateEmail = `bulk.visibility.unassigned.${suffix}@example.com`;
   const assistantEmail = `bulk.visibility.assistant.${suffix}@example.com`;
@@ -219,6 +220,19 @@ describe('LOCAL-PILOT-GLOBAL-DOCUMENT-BULK-VISIBILITY-96 backend', () => {
       mutable: false,
       ineligibilityReason: CLIENT_VISIBILITY_INELIGIBILITY_REASONS.OUTSIDE_MATTER_CONTEXT,
     });
+
+    const matterlessProjection = publicStaffMatterDocument({
+      id: 'DOC-MATTERLESS-CONTEXT',
+      matterId: '',
+      name: 'matterless.pdf',
+      source: 'firm',
+      clientVisible: 0,
+    });
+    expect(matterlessProjection.visibility).toBe('internal');
+    expect(matterlessProjection.capabilities.clientVisibility).toEqual({
+      mutable: false,
+      ineligibilityReason: CLIENT_VISIBILITY_INELIGIBILITY_REASONS.OUTSIDE_MATTER_CONTEXT,
+    });
   });
 
   test('exposes only safe capability metadata from the scoped Global Explorer', async () => {
@@ -251,6 +265,103 @@ describe('LOCAL-PILOT-GLOBAL-DOCUMENT-BULK-VISIBILITY-96 backend', () => {
 
     const clientDenied = await request(app).get('/api/documents').set(auth(clientUser.token));
     expect(clientDenied.statusCode).toBe(403);
+  });
+
+  test('projects effective visibility and the shared capability into staff matter responses only', async () => {
+    const adminDocuments = await request(app)
+      .get(`/api/matters/${assignedMatterId}/documents`)
+      .set(auth(admin.token));
+    expect(adminDocuments.statusCode).toBe(200);
+    const byId = new Map(adminDocuments.body.map(document => [document.id, document]));
+
+    expect(byId.get(documentIds.firmInternal)).toMatchObject({
+      clientVisible: 0,
+      visibility: 'internal',
+      capabilities: { clientVisibility: { mutable: true, ineligibilityReason: null } },
+    });
+    expect(byId.get(documentIds.firmVisible)).toMatchObject({
+      clientVisible: 1,
+      visibility: 'client',
+      capabilities: { clientVisibility: { mutable: true, ineligibilityReason: null } },
+    });
+    expect(byId.get(documentIds.generatedInternal)).toMatchObject({
+      visibility: 'internal',
+      capabilities: { clientVisibility: { mutable: true, ineligibilityReason: null } },
+    });
+    expect(byId.get(documentIds.clientUpload)).toMatchObject({
+      clientVisible: 0,
+      visibility: 'client',
+      capabilities: { clientVisibility: { mutable: false, ineligibilityReason: 'client_upload' } },
+    });
+    expect(byId.get(documentIds.message)).toMatchObject({
+      clientVisible: 0,
+      visibility: 'client',
+      capabilities: { clientVisibility: { mutable: false, ineligibilityReason: 'message_context' } },
+    });
+    expect(byId.get(documentIds.notice)).toMatchObject({
+      clientVisible: 1,
+      visibility: 'client',
+      capabilities: { clientVisibility: { mutable: false, ineligibilityReason: 'notice_context' } },
+    });
+
+    for (const document of adminDocuments.body) {
+      expect(document).not.toHaveProperty('messageClientVisible');
+      expect(document).not.toHaveProperty('visibilityDeletedAt');
+      expect(document).not.toHaveProperty('deletedAt');
+    }
+
+    const advocateMatter = await request(app)
+      .get(`/api/matters/${assignedMatterId}`)
+      .set(auth(advocate.token));
+    expect(advocateMatter.statusCode).toBe(200);
+    expect(advocateMatter.body.documents.find(document => document.id === documentIds.message)).toMatchObject({
+      visibility: 'client',
+      capabilities: { clientVisibility: { mutable: false, ineligibilityReason: 'message_context' } },
+    });
+
+    const assistantDocuments = await request(app)
+      .get(`/api/matters/${assignedMatterId}/documents`)
+      .set(auth(assistant.token));
+    expect(assistantDocuments.statusCode).toBe(200);
+    expect(assistantDocuments.body.find(document => document.id === documentIds.clientUpload)).toMatchObject({
+      visibility: 'client',
+      capabilities: { clientVisibility: { mutable: false, ineligibilityReason: 'client_upload' } },
+    });
+
+    const archivedDocuments = await request(app)
+      .get(`/api/matters/${assignedMatterId}/documents?status=archived`)
+      .set(auth(admin.token));
+    expect(archivedDocuments.statusCode).toBe(200);
+    expect(archivedDocuments.body).toEqual([
+      expect.objectContaining({
+        id: documentIds.archived,
+        visibility: 'internal',
+        capabilities: { clientVisibility: { mutable: false, ineligibilityReason: 'archived' } },
+      }),
+    ]);
+
+    const clientDocuments = await request(app)
+      .get(`/api/matters/${assignedMatterId}/documents`)
+      .set(auth(clientUser.token));
+    expect(clientDocuments.statusCode).toBe(200);
+    expect(clientDocuments.body.map(document => document.id)).toEqual(expect.arrayContaining([
+      documentIds.clientUpload,
+      documentIds.message,
+      documentIds.notice,
+    ]));
+    for (const document of clientDocuments.body) {
+      expect(document).not.toHaveProperty('visibility');
+      expect(document).not.toHaveProperty('capabilities');
+    }
+
+    const clientMatter = await request(app)
+      .get(`/api/matters/${assignedMatterId}`)
+      .set(auth(clientUser.token));
+    expect(clientMatter.statusCode).toBe(200);
+    for (const document of clientMatter.body.documents) {
+      expect(document).not.toHaveProperty('visibility');
+      expect(document).not.toHaveProperty('capabilities');
+    }
   });
 
   test('enforces effective changes for admin and assigned advocate and audits exact old/new values', async () => {

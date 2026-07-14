@@ -20,6 +20,19 @@ function documentMetadataColumns() {
   return `id,matterId,name,displayName,type,mimeType,date,size,source,folderId,messageId,noticeId,clientVisible,uploadedBy,templateId,templateName,generatedBy,generatedAt,version,deletedAt`;
 }
 
+function documentVisibilityProjectionColumns(alias = 'd') {
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(alias)) {
+    throw new Error('Invalid document table alias');
+  }
+  return `${alias}.deletedAt visibilityDeletedAt,
+    CASE WHEN EXISTS (
+      SELECT 1
+      FROM messages visibility_message
+      JOIN conversations visibility_conversation ON visibility_conversation.id=visibility_message.conversationId
+      WHERE visibility_message.id=${alias}.messageId
+    ) THEN 1 ELSE 0 END messageClientVisible`;
+}
+
 function clientDocumentVisibilitySql(alias = 'd') {
   return `(
     ${alias}.source='client'
@@ -109,6 +122,27 @@ function publicDocument(row = {}, options = {}) {
     friendlyName: displayName,
     sharedBy: row.source === 'client' ? 'Uploaded by you' : 'Shared by your advocate',
     content: undefined,
+  };
+}
+
+function publicStaffMatterDocument(row = {}) {
+  const {
+    deletedAt,
+    visibilityDeletedAt,
+    messageClientVisible,
+    ...publicRow
+  } = row;
+  const visibilityRow = {
+    ...row,
+    deletedAt: visibilityDeletedAt ?? deletedAt ?? null,
+    messageClientVisible,
+  };
+  return {
+    ...publicDocument(publicRow),
+    visibility: documentVisibility(visibilityRow),
+    capabilities: {
+      clientVisibility: documentClientVisibilityCapability(visibilityRow),
+    },
   };
 }
 
@@ -222,6 +256,7 @@ module.exports = {
   fileTypeFor,
   documentListColumns,
   documentMetadataColumns,
+  documentVisibilityProjectionColumns,
   clientDocumentVisibilitySql,
   documentOrigin,
   documentVisibility,
@@ -229,6 +264,7 @@ module.exports = {
   documentClientVisibilityCapability,
   documentUploaderDisplay,
   publicDocument,
+  publicStaffMatterDocument,
   publicNotice,
   MAX_NOTICE_ATTACHMENTS,
   MAX_NOTICE_ATTACHMENT_BYTES,

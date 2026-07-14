@@ -8,13 +8,14 @@ localStorage.setItem('lexflowSession', JSON.stringify({ token: 'mock-token', use
 const root = createRoot(document.getElementById('root'));
 
 window.__matterNotices = [];
-window.renderMatterDocuments = ({ matterId, canManage, clientMode, focusTarget = null }) => {
+window.renderMatterDocuments = ({ matterId, canManage, clientMode, focusTarget = null, role = clientMode ? 'client' : canManage ? 'admin' : 'assistant' }) => {
+  localStorage.setItem('lexflowSession', JSON.stringify({ token: 'mock-token', user: { role } }));
   root.render(React.createElement(
     React.Fragment,
     null,
     React.createElement(StyleTag),
     React.createElement(MatterDocuments, {
-      key: [matterId, canManage, clientMode].join(':'),
+      key: [matterId, canManage, clientMode, role].join(':'),
       matterId,
       canManage,
       clientMode,

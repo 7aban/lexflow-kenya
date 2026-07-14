@@ -267,7 +267,7 @@ export function StyleTag() { return <style>{`
     #root .lf-report-cards tbody td::before { display: none !important; content: none !important; }
     #root .lf-report-cell { display: grid; gap: 3px; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
     #root .lf-report-mobile-label { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; line-height: 1.2; }
-    /* R15d-9: MatterDocuments staff mobile cards (8 columns) */
+    /* R15d-9 / LOCAL-PILOT-DOCUMENT-VISIBILITY-CAPABILITY-COHERENCE-98: MatterDocuments staff mobile cards */
     #root .lf-doc-cards-staff > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
     #root .lf-doc-cards-staff table { min-width: 0 !important; }
     #root .lf-doc-cards-staff thead { display: none !important; }
@@ -282,6 +282,8 @@ export function StyleTag() { return <style>{`
     #root .lf-doc-cards-staff td:nth-child(6)::before { content: "Access"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
     #root .lf-doc-cards-staff td:nth-child(7)::before { content: "Move"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
     #root .lf-doc-cards-staff td:nth-child(8)::before { content: "Actions"; min-width: 64px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #6B7280; flex-shrink: 0; }
+    #root .lf-doc-cards-staff tbody td::before { content: attr(data-label) !important; min-width: 78px; }
+    #root .lf-doc-cards-staff .lf-document-client-access { flex: 1 1 auto; max-width: 100% !important; }
     /* R15d-9: MatterDocuments client mobile cards (6 columns) */
     #root .lf-doc-cards-client > div { overflow: visible !important; border: none !important; border-radius: 0 !important; }
     #root .lf-doc-cards-client table { min-width: 0 !important; }

@@ -23,7 +23,7 @@ const createLogging = require('./lib/logging');
 const createNotifications = require('./lib/notifications');
 const createInvitations = require('./lib/invitations');
 const createAudit = require('./lib/audit');
-const { cleanDocumentName, fileTypeFor, documentListColumns, documentMetadataColumns, clientDocumentVisibilitySql, documentClientVisibilityCapability, publicDocument, publicNotice, MAX_NOTICE_ATTACHMENTS, MAX_NOTICE_ATTACHMENT_BYTES, allowedNoticeMimeTypes, noticeMimeTypeFor, decodeAttachmentData, prepareNoticeAttachments } = require('./lib/documents');
+const { cleanDocumentName, fileTypeFor, documentListColumns, documentMetadataColumns, documentVisibilityProjectionColumns, clientDocumentVisibilitySql, documentClientVisibilityCapability, publicDocument, publicStaffMatterDocument, publicNotice, MAX_NOTICE_ATTACHMENTS, MAX_NOTICE_ATTACHMENT_BYTES, allowedNoticeMimeTypes, noticeMimeTypeFor, decodeAttachmentData, prepareNoticeAttachments } = require('./lib/documents');
 const config = require('./lib/config');
 const { signAccessToken } = require('./lib/tokens');
 const { validatePasswordPolicy } = require('./lib/passwordPolicy');
@@ -7873,6 +7873,9 @@ app.get('/api/matters/:id', async (req, res) => {
   }
   const documentParams = [req.params.id];
   let documentWhere = 'd.matterId=? AND d.deletedAt IS NULL';
+  const documentColumns = req.user.role === 'client'
+    ? documentListColumns()
+    : `${documentListColumns()},${documentVisibilityProjectionColumns('d')}`;
   if (req.user.role === 'client') {
     documentWhere += ` AND ${clientDocumentVisibilitySql('d')}`;
     documentParams.push(req.user.clientId || '');
@@ -7880,7 +7883,7 @@ app.get('/api/matters/:id', async (req, res) => {
   const [tasks, timeEntries, documents, notes, invoices, appearances, checklistItems, appearancePrepItems] = await Promise.all([
     req.user.role === 'client' ? Promise.resolve([]) : all('SELECT * FROM tasks WHERE matterId=? ORDER BY dueDate', [req.params.id]),
     req.user.role === 'client' ? Promise.resolve([]) : all('SELECT * FROM time_entries WHERE matterId=? ORDER BY date DESC', [req.params.id]),
-    all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE ${documentWhere} ORDER BY d.date DESC`, documentParams),
+    all(`SELECT ${documentColumns} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE ${documentWhere} ORDER BY d.date DESC`, documentParams),
     req.user.role === 'client' ? Promise.resolve([]) : all('SELECT * FROM case_notes WHERE matterId=? ORDER BY createdAt DESC', [req.params.id]),
     all('SELECT * FROM invoices WHERE matterId=? ORDER BY date DESC', [req.params.id]),
     all('SELECT * FROM appearances WHERE matterId=? ORDER BY date', [req.params.id]),
@@ -7905,7 +7908,10 @@ app.get('/api/matters/:id', async (req, res) => {
     }
     appearances.forEach(a => { a.prepItems = prepByAppearance.get(a.id) || []; });
   }
-  const payload = { ...matter, tasks, timeEntries, documents: documents.map(publicDocument), notes, invoices, appearances };
+  const publicDocuments = req.user.role === 'client'
+    ? documents.map(publicDocument)
+    : documents.map(publicStaffMatterDocument);
+  const payload = { ...matter, tasks, timeEntries, documents: publicDocuments, notes, invoices, appearances };
   if (req.user.role !== 'client') payload.checklistItems = checklistItems;
   res.json(payload);
 });
@@ -9337,6 +9343,9 @@ app.get('/api/matters/:id/documents', async (req, res) => {
   if (archived && !['admin', 'advocate'].includes(req.user.role)) return res.status(403).json({ error: 'Archived document access denied' });
   const folderId = req.query.folderId || '';
   const params = [req.params.id];
+  const documentColumns = req.user.role === 'client'
+    ? documentListColumns()
+    : `${documentListColumns()},${documentVisibilityProjectionColumns('d')}`;
   let where = `d.matterId=? AND d.deletedAt IS ${archived ? 'NOT ' : ''}NULL`;
   if (folderId && folderId !== 'all') {
     if (folderId === 'uncategorised') where += ' AND (d.folderId IS NULL OR d.folderId="")';
@@ -9346,8 +9355,8 @@ app.get('/api/matters/:id/documents', async (req, res) => {
     where += ` AND ${clientDocumentVisibilitySql('d')}`;
     params.push(req.user.clientId || '');
   }
-  const docs = await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE ${where} ORDER BY d.date DESC, COALESCE(d.displayName,d.name)`, params);
-  res.json(docs.map(publicDocument));
+  const docs = await all(`SELECT ${documentColumns} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE ${where} ORDER BY d.date DESC, COALESCE(d.displayName,d.name)`, params);
+  res.json(req.user.role === 'client' ? docs.map(publicDocument) : docs.map(publicStaffMatterDocument));
 });
 app.post('/api/matters/:id/documents', async (req, res) => {
   if (req.user.role === 'client') {

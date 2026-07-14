@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { IconBriefcase, IconAlertTriangle, IconBuilding, IconAlertCircle, IconClockHour4, IconCash, IconX, IconClock, IconListCheck, IconCalendarEvent, IconUpload, IconNote, IconMail, IconExternalLink, IconLayoutDashboard, IconUsers, IconSignature } from '@tabler/icons-react';
 import { api, applyChecklistTemplate, approveHrLeaveRequest, cancelHrLeaveRequestAdmin, changePassword, clearSession, confirmWorkCalendarMatter, confirmWorkEmailMatter, createChecklistTemplate, cancelOffboardingCase, completeOffboardingCase, createHrContract, createHrLeaveBalanceAdjustment, createHrStaffProfile, createMatterChecklistItem, createOffboardingCase, deleteChecklistTemplate, deleteClientAvatar, deleteHrDocument, deleteUserAvatar, deleteMatterChecklistItem, disconnectConnectedAccount, downloadHrDocumentContent, downloadWithAuth, fetchAvatarObjectUrl, fetchClientAvatarObjectUrl, fileToDataUrl, getConnectedAccountAvailability, getHrContracts, getHrDashboard, getHrDocuments, getHrLeaveBalances, getHrLeaveRequests, getHrStaff, getHrStaffProfile, getOffboardingAssignedMatters, getOffboardingCase, getOffboardingCases, getClientSnapshot, getInvoiceDetails, getMatterTimeline, getAppearanceDocuments, linkAppearanceDocument, unlinkAppearanceDocument, getMatterWorkMetadataLinks, getRetainers, getRetainer, createRetainer, updateRetainer, deleteRetainer, generateRetainerDocument, listDocumentTemplates, getMatterFeePlans, getMatterFeePlan, createMatterFeePlan, updateMatterFeePlan, deleteMatterFeePlan, getRetainerLedger, getRetainerLedgerSummary, createRetainerLedgerEntry, voidRetainerLedgerEntry, getClientKyc, getClientKycRecord, createClientKyc, updateClientKyc, deleteClientKyc, getClientAuthorities, getClientAuthorityRecord, createClientAuthority, updateClientAuthority, deleteClientAuthority, getRetainerLifecycleEvents, getRetainerLifecycleEvent, createRetainerLifecycleEvent, updateRetainerLifecycleEvent, deleteRetainerLifecycleEvent, getWorkEmailMessages, getWorkCalendarEvents, listChecklistTemplates, listConnectedAccounts, listInvoicePayments, listMatterChecklistItems, readSession, recordInvoicePayment, rejectHrLeaveRequest, setHrLeaveEntitlement, startConnectedAccountOAuth, syncConnectedAccountEmailMetadata, syncConnectedAccountCalendarMetadata, unlinkWorkCalendarMatter, unlinkWorkEmailMatter, updateChecklistTemplate, updateHrContract, updateHrDocument, updateHrStaffProfile, updateMatterChecklistItem, updateOffboardingCase, updateOffboardingChecklistItem, uploadClientAvatar, uploadHrDocument, uploadUserAvatar } from '../lib/apiClient.js';
+import { isDocumentClientVisible, staffDocumentVisibilityLabel } from '../lib/documentVisibility.js';
 import { appendBrandingModeToPath, defaultFirmSettings, defaultOutputBrandingMode, hasFirmLetterhead, letterheadPdfOutputWarning, outputBrandingModes, styles, theme, applyFirmTheme, clearFirmTheme, resolveReadableTheme } from '../theme.jsx';
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, safeHttpUrl, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText, invoiceDueDistanceDays } from '../components/ui.jsx';
@@ -2939,6 +2940,10 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
     () => (Array.isArray(detail?.documents) ? detail.documents : []).filter(isPdfMatterDocument),
     [detail?.documents],
   );
+  const clientVisibleDocumentCount = useMemo(
+    () => (Array.isArray(detail?.documents) ? detail.documents : []).filter(isDocumentClientVisible).length,
+    [detail?.documents],
+  );
 
   useEffect(() => { if (selected?.id) { setSelectedId(selected.id); loadDetail(selected.id); } else { setDetail(null); setSuggestions([]); } }, [selected?.id]);
   useEffect(() => { setDocumentWorkspaceAction(''); }, [detail?.id]);
@@ -3532,7 +3537,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
                                 <div key={`sign-${doc.id}`} style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#fff', padding: '9px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', minWidth: 0 }}>
                                   <div style={{ display: 'grid', gap: 2, minWidth: 0, flex: '1 1 220px' }}>
                                     <strong style={{ fontSize: 13, color: theme.ink, overflowWrap: 'anywhere' }}>{staffDocumentLabel(doc)}</strong>
-                                    <span style={{ fontSize: 11, color: theme.muted }}>{doc.clientVisible ? 'Client-visible' : 'Staff-only'}{doc.date ? ` / ${doc.date}` : ''}</span>
+                                    <span style={{ fontSize: 11, color: theme.muted }}>{staffDocumentVisibilityLabel(doc)}{doc.date ? ` / ${doc.date}` : ''}</span>
                                   </div>
                                   <button
                                     type="button"
@@ -3617,17 +3622,17 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
                         <strong>Client:</strong> {detail.clientName || 'No client'}
                       </div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                        {detail.documents && detail.documents.filter(d => d.clientVisible).length > 0 ? (
+                        {clientVisibleDocumentCount > 0 ? (
                           <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: '10px 12px', background: '#F9FAFB', flex: '1 1 200px' }}>
                             <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, color: theme.muted, marginBottom: 4 }}>Shared Documents</div>
-                            <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>{detail.documents.filter(d => d.clientVisible).length} shared</div>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>{clientVisibleDocumentCount} shared</div>
                             <div style={{ fontSize: 12, color: theme.muted }}>{detail.documents.length} total documents</div>
                           </div>
                         ) : (
                           <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: '10px 12px', background: '#F9FAFB', flex: '1 1 200px' }}>
                             <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.4, color: theme.muted, marginBottom: 4 }}>Shared Documents</div>
                             <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>None shared</div>
-                            <div style={{ fontSize: 12, color: theme.muted }}>Documents are staff-only until marked client-visible</div>
+                            <div style={{ fontSize: 12, color: theme.muted }}>No documents are currently available through client access rules</div>
                           </div>
                         )}
                         <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: '10px 12px', background: '#F9FAFB', flex: '1 1 200px' }}>
@@ -8333,7 +8338,7 @@ function MatterKeyDocumentsPanel({ detail, onSectionNav }) {
               <span style={{ fontSize: 13, fontWeight: 600, color: theme.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.displayName || doc.friendlyName || doc.name || 'Document'}</span>
               <span style={{ fontSize: 11, color: theme.muted }}>{doc.date || ''}{doc.source ? ` · ${friendlyEnumLabel(doc.source)}` : ''}</span>
             </div>
-            <span style={{ fontSize: 11, color: theme.muted, whiteSpace: 'nowrap', flexShrink: 0 }}>{doc.clientVisible ? 'Shared' : doc.source === 'client' ? 'Client upload' : 'Internal'}</span>
+            <span style={{ fontSize: 11, color: theme.muted, whiteSpace: 'nowrap', flexShrink: 0 }}>{staffDocumentVisibilityLabel(doc)}</span>
           </div>
         ))}
       </div>
@@ -8665,7 +8670,7 @@ function MatterActivityTimeline({ detail }) {
         detail: [
           document.displayName || document.name || 'Document',
           document.source === 'client' ? 'Client upload' : document.source === 'firm' ? 'Firm document' : null,
-          document.clientVisible ? 'Client-visible' : 'Staff-only'
+          staffDocumentVisibilityLabel(document)
         ].filter(Boolean).join(' - ')
       });
     });

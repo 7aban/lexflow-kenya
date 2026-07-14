@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, archiveFolder, createFolder, deleteFolder, downloadWithAuth, fetchDocumentArrayBuffer, fileToDataUrl, generateDocumentFromTemplate, getArchivedMatterFolders, getMatterDocuments, getMatterFolders, listDocumentTemplates, moveDocument, moveFolder, restoreDocument, restoreFolder, updateDocument, updateFolder } from '../lib/apiClient.js';
+import { documentClientVisibilityCapability, documentClientVisibilityReason, effectiveDocumentVisibility } from '../lib/documentVisibility.js';
 import { styles, theme } from '../theme.jsx';
 import { ActionGroup, Badge, Card, ConfirmModal, Field, Skeleton, Table } from './ui.jsx';
 
@@ -43,6 +44,41 @@ function sourceBadge(doc, clientMode) {
     label = 'Firm';
   }
   return <span style={{ ...styles.badge, background: bg, color }}>{label}</span>;
+}
+
+function ClientAccessCell({ document, archived = false, canChange = false, onToggle }) {
+  const capability = documentClientVisibilityCapability(document, { archived });
+  const visibility = effectiveDocumentVisibility(document);
+  if (canChange && capability.mutable) {
+    return (
+      <button
+        type="button"
+        style={styles.tinyButton}
+        data-client-visibility={visibility}
+        data-client-visibility-mutable="true"
+        onClick={() => onToggle?.(document)}
+      >
+        {visibility === 'client' ? 'Shared' : 'Internal'}
+      </button>
+    );
+  }
+
+  const reason = capability.mutable
+    ? 'Read only for your role.'
+    : documentClientVisibilityReason(document, { archived });
+  return (
+    <span
+      className="lf-document-client-access"
+      data-client-visibility={visibility}
+      data-client-visibility-mutable="false"
+      style={{ display: 'grid', gap: 3, minWidth: 0, maxWidth: 240 }}
+    >
+      <Badge tone={archived ? 'amber' : visibility === 'client' ? 'green' : 'blue'}>
+        {visibility === 'client' ? 'Client visible' : 'Internal'}
+      </Badge>
+      {reason && <small style={{ color: theme.muted, lineHeight: 1.35, overflowWrap: 'anywhere' }}>{reason}</small>}
+    </span>
+  );
 }
 
 function documentLabel(doc) {
@@ -958,13 +994,14 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
   async function updateClientVisible(doc, clientVisible) {
     try {
       await updateDocument(doc.id, { clientVisible });
-      notify?.({ type: 'success', message: doc.clientVisible ? 'Document hidden from client.' : 'Document shared with client.' });
+      notify?.({ type: 'success', message: clientVisible ? 'Document shared with client.' : 'Document hidden from client.' });
       await load();
     } catch (err) { notify?.({ type: 'danger', message: err.message }); }
   }
 
   async function toggleClientVisible(doc) {
-    const nextVisible = !doc.clientVisible;
+    if (!documentClientVisibilityCapability(doc).mutable) return;
+    const nextVisible = effectiveDocumentVisibility(doc) !== 'client';
     if (isGeneratedDocument(doc) && nextVisible) {
       setConfirm({
         title: 'Share generated draft with client?',
@@ -2445,14 +2482,16 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
           </details>
         )}
         {loading ? <Skeleton rows={2} /> : visibleDocuments.length ? (
-          <div className={canManage ? "lf-doc-cards-staff" : "lf-doc-cards-client"}>
+          <div className={clientMode ? "lf-doc-cards-client" : "lf-doc-cards-staff"}>
           <div className="lf-doc-table-wrap">
           <Table
             columns={archivedView
-              ? ['Name', 'Type', 'Folder', 'Date', 'Size', 'Source', 'Actions']
+              ? ['Name', 'Type', 'Folder', 'Date', 'Size', 'Source', 'Client Access', 'Actions']
               : canManage
                 ? [...(showBulkControls ? ['Select'] : []), 'Name', 'Type', ...(selectedFolder === 'all' ? ['Folder'] : []), 'Date', 'Size', 'Source', 'Client Access', 'Move', 'Actions']
-                : ['Name', 'Folder', 'Date', 'Size', 'Source', 'Actions']}
+                : clientMode
+                  ? ['Name', 'Folder', 'Date', 'Size', 'Source', 'Actions']
+                  : ['Name', 'Folder', 'Date', 'Size', 'Source', 'Client Access', 'Actions']}
             rows={visibleDocuments.map(doc => {
               const metaStyle = { color: theme.muted, fontSize: 12 };
               const documentFolderId = normalizeFolderId(doc.folderId) || 'uncategorised';
@@ -2469,6 +2508,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
                 <span key={`${doc.id}-d`} style={metaStyle}>{doc.date || '-'}</span>,
                 <span key={`${doc.id}-s`} style={metaStyle}>{doc.size || '-'}</span>,
                 sourceBadge(doc, clientMode),
+                <ClientAccessCell key={`${doc.id}-access`} document={doc} archived />,
                 <ActionGroup key={`${doc.id}-actions`} actions={[['Restore', () => setConfirm({
                   title: 'Restore document?',
                   message: 'Restore this document to active matter documents?',
@@ -2481,6 +2521,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
                 <span key={`${doc.id}-d`} style={metaStyle}>{doc.date || '-'}</span>,
                 <span key={`${doc.id}-s`} style={metaStyle}>{doc.size || '-'}</span>,
                 sourceBadge(doc, clientMode),
+                ...(!clientMode ? [<ClientAccessCell key={`${doc.id}-access`} document={doc} />] : []),
                 <span key={`${doc.id}-file-actions`} style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>{previewAction}{download}</span>,
               ];
               return [
@@ -2500,9 +2541,7 @@ export default function MatterDocuments({ matterId, clientMode = false, canManag
                 <span key={`${doc.id}-d`} style={metaStyle}>{doc.date || '-'}</span>,
                 <span key={`${doc.id}-sz`} style={metaStyle}>{doc.size || '-'}</span>,
                 sourceBadge(doc, clientMode),
-                doc.source === 'client'
-                  ? <Badge key={`${doc.id}-own`} tone="green">Client upload</Badge>
-                  : <button key={`${doc.id}-share`} type="button" style={styles.tinyButton} onClick={() => toggleClientVisible(doc)}>{doc.clientVisible ? 'Shared' : 'Internal'}</button>,
+                <ClientAccessCell key={`${doc.id}-access`} document={doc} canChange onToggle={toggleClientVisible} />,
                 <select
                   key={`${doc.id}-move`}
                   style={styles.tableSelect}
