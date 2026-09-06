@@ -1,6 +1,7 @@
 const nodemailer = require('nodemailer');
 const twilio = require('twilio');
 const cron = require('node-cron');
+const { normalizeReminderSettingsInput } = require('./firmSettingsSerialization');
 
 const defaultReminderSettings = {
   remindersEnabled: true,
@@ -115,7 +116,8 @@ module.exports = ({ run, get, all, genId, money, defaultFirmSettings, today, add
     return { messageId: `stub-${Date.now()}` };
   }
 
-  async function getReminderSettings() {
+  // Private provider configuration. Never serialize this object into an API response.
+  async function getReminderSettingsInternal() {
     const settings = await get('SELECT * FROM reminder_settings WHERE id=?', ['default']).catch(() => null);
     const merged = { ...defaultReminderSettings, ...(settings || {}) };
     return {
@@ -127,7 +129,9 @@ module.exports = ({ run, get, all, genId, money, defaultFirmSettings, today, add
   }
 
   async function saveReminderSettings(settings) {
-    const merged = { ...defaultReminderSettings, ...settings, id: 'default' };
+    const validation = normalizeReminderSettingsInput(settings);
+    if (validation.error) throw new Error(validation.error);
+    const merged = { ...await getReminderSettingsInternal(), ...validation.value, id: 'default' };
     await run(`INSERT INTO reminder_settings (id,remindersEnabled,whatsappEnabled,emailEnabled,twilioSid,twilioToken,twilioFromNumber,smtpHost,smtpPort,smtpUser,smtpPass)
       VALUES (?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET remindersEnabled=excluded.remindersEnabled, whatsappEnabled=excluded.whatsappEnabled, emailEnabled=excluded.emailEnabled, twilioSid=excluded.twilioSid, twilioToken=excluded.twilioToken, twilioFromNumber=excluded.twilioFromNumber, smtpHost=excluded.smtpHost, smtpPort=excluded.smtpPort, smtpUser=excluded.smtpUser, smtpPass=excluded.smtpPass`,
@@ -154,13 +158,19 @@ module.exports = ({ run, get, all, genId, money, defaultFirmSettings, today, add
       else await sendEmail(settings, recipient, renderTemplate(template.subject || 'Reminder from {{firmName}}', values), renderTemplate(template.body, values));
       await logReminderAttempt({ templateId: template.id, clientId: client?.id, matterId: matter?.id, invoiceId: invoice?.id, channel, recipient, status: 'sent' });
     } catch (err) {
-      await logReminderAttempt({ templateId: template.id, clientId: client?.id, matterId: matter?.id, invoiceId: invoice?.id, channel, recipient, status: 'failed', errorMessage: err.message });
+      // Provider errors can echo authentication details. Keep those out of the
+      // persisted log (which is also available through the admin API).
+      let errorMessage = String(err.message || 'Provider request failed');
+      for (const secret of [settings.twilioToken, settings.smtpPass]) {
+        if (secret) errorMessage = errorMessage.split(secret).join('[redacted]');
+      }
+      await logReminderAttempt({ templateId: template.id, clientId: client?.id, matterId: matter?.id, invoiceId: invoice?.id, channel, recipient, status: 'failed', errorMessage });
     }
   }
 
   async function sendReminder(eventType, context, getFirmSettings) {
     const firm = await getFirmSettings();
-    const settings = firm.reminderSettings || defaultReminderSettings;
+    const settings = await getReminderSettingsInternal();
     if (!settings.remindersEnabled) return;
     const matter = context.matter || {};
     const client = context.client || {};
@@ -229,7 +239,7 @@ module.exports = ({ run, get, all, genId, money, defaultFirmSettings, today, add
     defaultTemplateFor,
     seedReminderTemplates,
     renderTemplate,
-    getReminderSettings,
+    getReminderSettingsInternal,
     saveReminderSettings,
     logReminderAttempt,
     sendWhatsApp,

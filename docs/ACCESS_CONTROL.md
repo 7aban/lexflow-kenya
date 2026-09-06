@@ -145,6 +145,46 @@ Any AI assistant, automation, or recommendation system must:
 
 ## Testing
 
+### Firm settings credential boundary (LOCAL-PILOT-SETTINGS-SECRET-BOUNDARY-100A)
+
+`GET /api/firm-settings` requires authentication. `PUT /api/firm-settings`
+remains admin-only. Responses use explicit allowlists; new database columns and
+opaque `themeJson` / `moduleSettingsJson` fields are never serialized.
+
+| Role | Response fields |
+| --- | --- |
+| Public (`GET /api/public/branding`) | Existing name aliases (`name`, `firmName`, `displayName`, `appName`), `productName`, `poweredBy`, `logo`, `primaryColor`, `accentColor`, and the existing public theme allowlist only. |
+| Client | `name`, `logo`, `primaryColor`, `accentColor`, `websiteURL`, `email`, `phone`, `address`, `paymentInstructions`, and resolved allowlisted `theme`. |
+| Advocate / assistant | Client fields plus `letterhead` (also in the resolved theme for compatibility), `kraPin`, `vatNumber`, `invoiceFooterNote`, `defaultInvoiceDueDays`, `advocateBillingVisibility`, and the seven allowlisted `moduleSettings` booleans. |
+| Admin | Staff fields plus `reminderSettings`: `remindersEnabled`, `whatsappEnabled`, `emailEnabled`, `twilioSid`, `twilioFromNumber`, `smtpHost`, `smtpPort`, `smtpUser`, `twilioTokenConfigured`, and `smtpPassConfigured`. |
+
+No settings response, including successful PUT responses, contains saved
+`twilioToken` or `smtpPass`, other credentials, or masked credential values.
+Resolved theme endpoints also filter unknown stored keys. The authenticated
+theme endpoint retains its existing letterhead compatibility.
+
+Credentials are write-only inputs under `reminderSettings`:
+
+- Omitted credential (including omission of the entire reminder object): preserve.
+- Empty string: preserve, so blank password inputs cannot erase saved values.
+- Nonempty replacement string: replace only that credential. Mask-only strings
+  are rejected, as are non-string values other than `null`.
+- Explicit JSON `null`: clear that credential. The admin UI requires Clear and
+  Save, offers Undo clear, and displays configured status separately from inputs.
+- Configured indicators are read-only and cannot set or clear a credential.
+
+Partial reminder updates preserve omitted channel and provider configuration.
+The private `getReminderSettingsInternal()` helper supplies stored credentials
+directly to reminder execution. API serializers never return that object.
+Provider error messages redact the configured credentials before entering
+reminder logs. Storage, provider delivery, OAuth, and reminder schedules are
+unchanged; no database migration is required.
+
+Focused coverage: `server/test/local-pilot-settings-secret-boundary.test.js` and
+`client/tests/local-pilot-settings-secret-boundary-ui.spec.js`. The backend suite
+creates its own disposable database and mocks provider delivery and dotenv;
+browser coverage uses an explicit synthetic settings fixture.
+
 Access control is tested in:
 - `test/access-control.test.js` - Main access control tests
 - `test/roles-search.test.js` - Role scoping and search tests

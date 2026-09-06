@@ -32,6 +32,7 @@ const { signState, verifyState } = require('./lib/oauthState');
 const googleOAuth = require('./lib/oauthGoogle');
 const microsoftOAuth = require('./lib/oauthMicrosoft');
 const themeValidation = require('./lib/themeValidation');
+const { STAFF_FIELDS, pickSettings, serializeTheme, serializeFirmSettings, normalizeReminderSettingsInput } = require('./lib/firmSettingsSerialization');
 const { buildTemplateMergeContext, mergeTemplateMarkup } = require('./lib/templateMerge');
 const { MAX_FOLDER_DEPTH, createFolderHierarchy, isClientUploadsFolderName } = require('./lib/folderHierarchy');
 const { FolderMoveError, createFolderMovement } = require('./lib/folderMovement');
@@ -218,7 +219,7 @@ const {
   defaultTemplateFor,
   seedReminderTemplates,
   renderTemplate,
-  getReminderSettings,
+  getReminderSettingsInternal,
   saveReminderSettings,
   logReminderAttempt,
   sendWhatsApp,
@@ -1200,6 +1201,7 @@ function buildResolvedTheme(themeJson, primaryColor, accentColor) {
   if (themeJson) {
     try { theme = JSON.parse(themeJson); } catch { theme = null; }
   }
+  theme = serializeTheme(theme || {}, { letterhead: true });
   const rawPrimary = theme?.primaryColor || primaryColor || defaultFirmSettings.primaryColor;
   const rawAccent = theme?.accentColor || accentColor || defaultFirmSettings.accentColor;
   const legacyDefaultBase = !themeJson
@@ -1282,7 +1284,6 @@ function mergeLetterheadIntoThemeJson(themeJson, letterhead) {
 
 async function getFirmSettings() {
   const settings = await get('SELECT * FROM firm_settings WHERE id=?', ['default']);
-  const reminderSettings = await getReminderSettings();
   const letterhead = settings ? firmLetterheadFromThemeJson(settings.themeJson) : '';
   const theme = settings
     ? buildResolvedTheme(
@@ -1292,8 +1293,7 @@ async function getFirmSettings() {
       )
     : buildResolvedTheme(null, defaultFirmSettings.primaryColor, defaultFirmSettings.accentColor);
   const moduleSettings = settings ? resolveModuleSettings(settings.moduleSettingsJson) : { ...DEFAULT_MODULE_SETTINGS };
-  const { moduleSettingsJson: _msj, ...safeSettings } = settings || {};
-  const normalized = { ...defaultFirmSettings, ...safeSettings };
+  const normalized = { ...defaultFirmSettings, advocateBillingVisibility: 1, ...pickSettings(settings || {}, STAFF_FIELDS) };
   if (!settings?.themeJson
     && String(normalized.primaryColor || '').toUpperCase() === LEGACY_LEXFLOW_DEFAULT_PRIMARY
     && String(normalized.accentColor || '').toUpperCase() === LEGACY_LEXFLOW_DEFAULT_ACCENT) {
@@ -1302,7 +1302,13 @@ async function getFirmSettings() {
   }
   normalized.letterhead = letterhead;
   normalized.defaultInvoiceDueDays = normalizeDefaultInvoiceDueDays(normalized.defaultInvoiceDueDays);
-  return { ...normalized, reminderSettings, theme, moduleSettings };
+  return { ...normalized, theme, moduleSettings };
+}
+
+async function firmSettingsResponse(role) {
+  const settings = await getFirmSettings();
+  const reminders = role === 'admin' ? await getReminderSettingsInternal() : {};
+  return serializeFirmSettings(settings, role, reminders);
 }
 
 const PUBLIC_THEME_KEYS = [
@@ -2031,7 +2037,7 @@ app.get('/api/public/branding', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/firm-settings', authenticate, async (req, res) => res.json(await getFirmSettings()));
+app.get('/api/firm-settings', authenticate, async (req, res) => res.json(await firmSettingsResponse(req.user.role)));
 app.get('/api/notices', authenticate, async (req, res) => {
   const params = [];
   let where = '';
@@ -2255,6 +2261,10 @@ function drawPdfKitOutputHeader(doc, firm, mode, title, opts = {}) {
 }
 
 app.put('/api/firm-settings', authenticate, requireAdmin, async (req, res) => {
+  if (req.body.reminderSettings !== undefined) {
+    const validation = normalizeReminderSettingsInput(req.body.reminderSettings);
+    if (validation.error) return res.status(400).json({ error: validation.error });
+  }
   const existing = await get('SELECT * FROM firm_settings WHERE id=?', ['default']);
   const oldBillingVisibility = existing ? Number(existing.advocateBillingVisibility) : 1;
   const settings = { ...defaultFirmSettings, ...req.body, id: 'default' };
@@ -2291,7 +2301,7 @@ app.put('/api/firm-settings', authenticate, requireAdmin, async (req, res) => {
     const merged = { ...current, ...validation.value };
     await run('UPDATE firm_settings SET moduleSettingsJson=? WHERE id=?', [JSON.stringify(merged), 'default']);
   }
-  const fieldsUpdated = Object.keys(req.body).filter(k => k !== 'reminderSettings' && k !== 'moduleSettings');
+  const fieldsUpdated = Object.keys(req.body).filter(k => STAFF_FIELDS.includes(k));
   const metadata = { name: settings.name, fieldsUpdated };
   if (req.body.advocateBillingVisibility !== undefined && req.body.advocateBillingVisibility !== oldBillingVisibility) {
     metadata.advocateBillingVisibility = { old: oldBillingVisibility, new: Number(req.body.advocateBillingVisibility) };
@@ -2301,7 +2311,7 @@ app.put('/api/firm-settings', authenticate, requireAdmin, async (req, res) => {
   }
   await logAudit(req, 'update', 'firm_settings', 'default', `Updated firm settings for ${settings.name}`);
   await recordAuditEvent(req, { action: 'firm_settings_updated', entityType: 'firm_settings', entityId: 'default', metadata }).catch(() => {});
-  res.json(await getFirmSettings());
+  res.json(await firmSettingsResponse(req.user.role));
 });
 
 app.get('/api/firm-settings/theme', authenticate, async (req, res) => {

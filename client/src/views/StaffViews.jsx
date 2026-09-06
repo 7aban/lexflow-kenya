@@ -5024,6 +5024,20 @@ function BrandProfilePreview({ draftTheme, firmName, logo }) {
   );
 }
 
+function WriteOnlyCredential({ label, field, reminder, onChange }) {
+  const clearing = reminder[field] === null;
+  return <Field label={label}>
+    <input aria-label={label} type="password" autoComplete="new-password" style={styles.input}
+      value={reminder[field] || ''} disabled={clearing}
+      placeholder="Leave blank to keep saved value"
+      onChange={event => onChange(field, event.target.value)} />
+    <span style={styles.formHelper}>{clearing ? 'Will be cleared when you save.' : reminder[`${field}Configured`] ? 'Configured. Saved value is hidden.' : 'Not configured.'}</span>
+    <button type="button" style={styles.ghostButton} onClick={() => onChange(field, clearing ? '' : null)}>
+      {clearing ? `Undo clear ${label}` : `Clear ${label}`}
+    </button>
+  </Field>;
+}
+
 export function FirmSettings({ settings, clients = [], reload, notify }) {
   const emptyNoticeForm = { title: '', content: '', clientId: '', files: [] };
   const [form, setForm] = useState({ ...defaultFirmSettings, ...settings });
@@ -5077,7 +5091,11 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
   }
 
   function setReminderSetting(key, value) {
-    setForm(current => ({ ...current, reminderSettings: { ...(current.reminderSettings || {}), [key]: value } }));
+    setForm(current => {
+      const reminderSettings = { ...(current.reminderSettings || {}), [key]: value };
+      if (['twilioToken', 'smtpPass'].includes(key) && value === '') delete reminderSettings[key];
+      return { ...current, reminderSettings };
+    });
   }
 
   async function handleLogoFile(file) {
@@ -5411,7 +5429,8 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
   async function submit(event) {
     event.preventDefault();
     try {
-      await api('/firm-settings', { method: 'PUT', body: form });
+      const saved = await api('/firm-settings', { method: 'PUT', body: form });
+      setForm({ ...defaultFirmSettings, ...saved });
       notify({ type: 'success', message: 'Firm settings saved.' });
       await reload();
     } catch (err) { notify({ type: 'danger', message: err.message }); }
@@ -5832,16 +5851,16 @@ export function FirmSettings({ settings, clients = [], reload, notify }) {
             <Field label="Email"><select style={styles.input} value={reminder.emailEnabled ? 'yes' : 'no'} onChange={e => setReminderSetting('emailEnabled', e.target.value === 'yes')}><option value="no">Off</option><option value="yes">On</option></select></Field>
             {reminder.whatsappEnabled && <>
               <Field label="Twilio SID"><input style={styles.input} value={reminder.twilioSid || ''} onChange={e => setReminderSetting('twilioSid', e.target.value)} /></Field>
-              <Field label="Twilio Token"><input type="password" style={styles.input} value={reminder.twilioToken || ''} onChange={e => setReminderSetting('twilioToken', e.target.value)} /></Field>
+              <WriteOnlyCredential label="Twilio Token" field="twilioToken" reminder={reminder} onChange={setReminderSetting} />
               <Field label="WhatsApp From"><input style={styles.input} value={reminder.twilioFromNumber || ''} onChange={e => setReminderSetting('twilioFromNumber', e.target.value)} placeholder="whatsapp:+14155238886" /></Field>
             </>}
             {reminder.emailEnabled && <>
               <Field label="SMTP Host"><input style={styles.input} value={reminder.smtpHost || ''} onChange={e => setReminderSetting('smtpHost', e.target.value)} /></Field>
               <Field label="SMTP Port"><input style={styles.input} value={reminder.smtpPort || ''} onChange={e => setReminderSetting('smtpPort', e.target.value)} /></Field>
               <Field label="SMTP User"><input style={styles.input} value={reminder.smtpUser || ''} onChange={e => setReminderSetting('smtpUser', e.target.value)} /></Field>
-              <Field label="SMTP Password"><input type="password" style={styles.input} value={reminder.smtpPass || ''} onChange={e => setReminderSetting('smtpPass', e.target.value)} /></Field>
+              <WriteOnlyCredential label="SMTP Password" field="smtpPass" reminder={reminder} onChange={setReminderSetting} />
             </>}
-            <div style={styles.formHelper}>When credentials are blank, LexFlow uses console stubs for testing. Real messages send automatically once provider credentials are saved.</div>
+            <div style={styles.formHelper}>Blank credential inputs keep saved values. Use Clear and save to remove a credential. When provider credentials are not configured, LexFlow uses console stubs for testing.</div>
             <button style={styles.primaryButton}>Save automation</button>
           </form>
         </Card>
