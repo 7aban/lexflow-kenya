@@ -1,0 +1,17 @@
+# Client and matter access boundary (100B)
+
+Advocate client access derives from a matter assigned to that advocate. A task or appearance delegated on another advocate's matter grants no general client or matter access. Client lists use the same SQL scope as individual client authorization. Client activity additionally scopes each activity's matter before ordering and limiting.
+
+Client snapshots authorize the client and independently constrain matter-linked children before counting, totaling, choosing the next event, or selecting recent records. This covers matters, appearances, deadlines, document requests, invoice and payment-proof summaries, document metadata, retainers, fee plans, ledger entries, and lifecycle events. An advocate cannot see another advocate's children for a shared client, or matter-optional records without an accessible matter. Payment proofs with an invoice association also require an accessible invoice matter. Admins and assistants retain visibility of unlinked records.
+
+KYC and corporate-authority records have no matter association. Their established explicit client-access rule remains in force through a separate client scope; snapshots retain only their existing metadata projections. Document content remains absent from snapshots, and document-byte authorization is unchanged. Disabled advocate billing visibility also hides fee-plan and ledger monetary summaries.
+
+The `clientId` matter-list filter intersects the advocate's matter scope. Portal users remain restricted to their own client regardless of the query filter. Assistants retain firm-wide client intake/read and existing matter-support access; route policies that prohibit their client or matter edits remain in place.
+
+Advocates can create a self-assigned matter for an accessible client. Creating a new client remains available through existing staff intake. Since intake records have no creator access rule, an admin creates and assigns the first matter to hand off that client; no schema or new broad access grant is introduced. The advocate intake UI explains this handoff and avoids opening an unauthorized snapshot.
+
+Generic matter PATCH authorizes the current matter and client, rejects advocate client reassociation, validates an admin's destination client, and rejects changes to `assignedTo`. Unchanged associations may round-trip with ordinary edits. Advocate assignment changes use the existing admin-only reassignment endpoint and its active-advocate validation and audit. Client cascade deletion is admin-only, and the directory presents Delete only to admins.
+
+Validation uses synthetic, isolated SQLite fixtures. The focused backend contract covers two advocates, shared and separate clients, admin/assistant/portal/anonymous roles, all snapshot collections, intake handoff, reassociation, delegated work, billing/document boundaries, and unchanged business state and success audits after rejected writes. Focused browser checks exercise the actual directory and matter components. Existing snapshot, reassignment, billing, and client/matter lifecycle suites provide regression coverage. Build and startup validation use an isolated archive and the owning Windows user to avoid the known esbuild ancestor-directory access restriction.
+
+No schema, dependency, document Explorer, conversation, notification, deadline, task, or appearance authorization changes are part of this phase.

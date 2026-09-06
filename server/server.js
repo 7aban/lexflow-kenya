@@ -42,7 +42,7 @@ const db = new sqlite3.Database(config.DATABASE_PATH);
 const { run, get, all } = createDb(db);
 const folderHierarchy = createFolderHierarchy({ get });
 const folderMovement = createFolderMovement({ databasePath: config.DATABASE_PATH });
-const { matterAccessScopeSql, canAccessMatter, canAccessClient, canAccessInvoice, canAccessTask, canAccessTimeEntry, canAccessAppearance, canAccessNotice, canAccessConversation, canAccessDocument, canAccessDocumentRequest, isBillingVisibleFor } = createAccess({ get });
+const { matterAccessScopeSql, clientAccessScopeSql, matterRecordAccessScopeSql, canAccessMatter, canAccessClient, canAccessInvoice, canAccessTask, canAccessTimeEntry, canAccessAppearance, canAccessNotice, canAccessConversation, canAccessDocument, canAccessDocumentRequest, isBillingVisibleFor } = createAccess({ get });
 const documentExplorer = createDocumentExplorer({ all, matterAccessScopeSql, cursorSecret: config.JWT_SECRET });
 const { logClientActivity, logAudit } = createLogging({ run });
 const { notifyStaff } = createNotifications({ run, all, genId });
@@ -5819,11 +5819,13 @@ app.get('/api/compliance-guidance', requireStaff, async (req, res) => {
 });
 
 app.get('/api/clients', requireStaff, async (req, res) => {
+  const scope = clientAccessScopeSql(req);
   const rows = await all(`SELECT c.*,
     (SELECT u.id FROM users u WHERE u.role='client' AND u.clientId=c.id ORDER BY u.createdAt LIMIT 1) clientUserId,
     (SELECT CASE WHEN u.avatar IS NOT NULL THEN 1 ELSE 0 END FROM users u WHERE u.role='client' AND u.clientId=c.id ORDER BY u.createdAt LIMIT 1) hasAvatar
     FROM clients c
-    ORDER BY c.name`);
+    WHERE ${scope.sql}
+    ORDER BY c.name`, scope.params);
   res.json(rows.map(row => ({ ...row, hasAvatar: Boolean(row.hasAvatar) })));
 });
 app.post('/api/clients', requireStaff, validate(createClientValidation), async (req, res) => {
@@ -5835,6 +5837,7 @@ app.post('/api/clients', requireStaff, validate(createClientValidation), async (
   res.json(client);
 });
 app.patch('/api/clients/:id', requireAdvocateOrAdmin, async (req, res) => {
+  if (!(await canAccessClient(req, req.params.id))) return res.status(403).json({ error: 'Client access denied' });
   const fields = ['name', 'type', 'contact', 'email', 'phone', 'status', 'conflictCleared', 'retainer', 'remindersEnabled', 'preferredChannel'];
   const updates = fields.filter(f => req.body[f] !== undefined);
   if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
@@ -5849,14 +5852,16 @@ app.patch('/api/clients/:id', requireAdvocateOrAdmin, async (req, res) => {
 app.get('/api/clients/:id/activity', requireStaff, async (req, res) => {
   const client = await get('SELECT id FROM clients WHERE id=?', [req.params.id]);
   if (!client) return res.status(404).json({ error: 'Client not found' });
+  if (!(await canAccessClient(req, req.params.id))) return res.status(403).json({ error: 'Client access denied' });
+  const scope = matterRecordAccessScopeSql(req, 'ca');
   const limit = Math.min(Math.max(Number(req.query.limit || 100), 1), 300);
   res.json(await all(`SELECT ca.*, m.title matterTitle, m.reference, u.fullName userName
     FROM client_activity ca
     LEFT JOIN matters m ON m.id=ca.matterId
     LEFT JOIN users u ON u.id=ca.userId
-    WHERE ca.clientId=?
+    WHERE ca.clientId=? AND ${scope.sql}
     ORDER BY ca.createdAt DESC
-    LIMIT ?`, [req.params.id, limit]));
+    LIMIT ?`, [req.params.id, ...scope.params, limit]));
 });
 // CLIENT-31C: concise, staff-only, READ-ONLY client snapshot aggregated from
 // existing data only (no schema/tables/writes). Advocates are scoped by the
@@ -5871,7 +5876,10 @@ app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
   }
 
   const todayDate = today();
-  const matters = await all('SELECT id, title, stage FROM matters WHERE clientId=?', [clientId]);
+  const matterScope = matterAccessScopeSql(req, 'm');
+  const recordScope = matterRecordAccessScopeSql(req);
+  const clientRecordScope = clientAccessScopeSql(req, 'r', 'clientId');
+  const matters = await all(`SELECT m.id, m.title, m.stage FROM matters m WHERE m.clientId=? AND ${matterScope.sql}`, [clientId, ...matterScope.params]);
   const matterIds = matters.map(m => m.id);
   const matterTitleById = new Map(matters.map(m => [m.id, m.title || '']));
   const matterPlaceholders = matterIds.map(() => '?').join(',');
@@ -5903,9 +5911,9 @@ app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
     ? `(clientId=? OR matterId IN (${matterPlaceholders}))`
     : 'clientId=?';
   const deadlineParams = matterIds.length ? [clientId, ...matterIds] : [clientId];
-  const openDeadlineRows = await all(`SELECT id, matterId, title, dueDate, status FROM deadlines
-    WHERE status != 'Done' AND ${deadlineWhere}
-    ORDER BY dueDate ASC`, deadlineParams);
+  const openDeadlineRows = await all(`SELECT id, matterId, title, dueDate, status FROM deadlines r
+    WHERE status != 'Done' AND ${deadlineWhere} AND ${recordScope.sql}
+    ORDER BY dueDate ASC`, [...deadlineParams, ...recordScope.params]);
   const seenDeadlineIds = new Set();
   const openDeadlines = openDeadlineRows.filter(d => {
     if (seenDeadlineIds.has(d.id)) return false;
@@ -5928,8 +5936,8 @@ app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
   const docReqWhere = matterIds.length
     ? `(clientId=? OR matterId IN (${matterPlaceholders}))`
     : 'clientId=?';
-  const docReqRow = await get(`SELECT COUNT(*) count FROM document_requests
-    WHERE status='pending' AND ${docReqWhere}`, deadlineParams);
+  const docReqRow = await get(`SELECT COUNT(*) count FROM document_requests r
+    WHERE status='pending' AND ${docReqWhere} AND ${recordScope.sql}`, [...deadlineParams, ...recordScope.params]);
   const pendingDocumentRequestsCount = Number(docReqRow?.count || 0);
 
   // Billing rollup (masked for advocates when firm disables billing visibility).
@@ -5937,7 +5945,7 @@ app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
   const invoiceWhere = matterIds.length
     ? `(clientId=? OR matterId IN (${matterPlaceholders}))`
     : 'clientId=?';
-  const invoiceRows = await all(`SELECT id, amount, status, dueDate FROM invoices WHERE ${invoiceWhere}`, deadlineParams);
+  const invoiceRows = await all(`SELECT id, amount, status, dueDate FROM invoices r WHERE ${invoiceWhere} AND ${recordScope.sql}`, [...deadlineParams, ...recordScope.params]);
   const seenInvoiceIds = new Set();
   let outstandingBalance = 0;
   let overdueInvoiceCount = 0;
@@ -5953,8 +5961,12 @@ app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
   }
   outstandingBalance = Math.round(outstandingBalance * 100) / 100;
 
-  const proofRow = await get(`SELECT COUNT(*) count FROM payment_proofs
-    WHERE status='Pending' AND ${invoiceWhere}`, deadlineParams);
+  const proofInvoiceScope = matterRecordAccessScopeSql(req, 'pi');
+  const proofRow = await get(`SELECT COUNT(*) count FROM payment_proofs r
+    WHERE status='Pending' AND ${invoiceWhere} AND ${recordScope.sql}
+    AND (${req.user.role === 'advocate' ? '0' : '1'}=1 OR r.invoiceId IS NULL OR r.invoiceId='' OR EXISTS (
+      SELECT 1 FROM invoices pi WHERE pi.id=r.invoiceId AND ${proofInvoiceScope.sql}
+    ))`, [...deadlineParams, ...recordScope.params, ...proofInvoiceScope.params]);
   const pendingPaymentProofCount = Number(proofRow?.count || 0);
 
   const billing = billingVisible
@@ -6011,7 +6023,7 @@ app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
   let retainerBlock = { visible: false };
   if (await isModuleEnabled('retainerManagement')) {
     const activeRetainers = await all(`SELECT id, matterId, status, engagementType, engagementStartDate, signedDate
-      FROM retainer_records WHERE clientId=? AND isActive=1 ORDER BY createdAt DESC`, [clientId]);
+      FROM retainer_records r WHERE clientId=? AND isActive=1 AND ${recordScope.sql} ORDER BY createdAt DESC`, [clientId, ...recordScope.params]);
     const latest = activeRetainers.length ? activeRetainers[0] : null;
     const retainerFlags = [];
     if (latest && latest.status !== 'signed') {
@@ -6038,9 +6050,9 @@ app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
 
   // RET-31E: matter fee plan snapshot (module-gated, read-only; no billing computation).
   let feePlanBlock = { visible: false };
-  if (await isModuleEnabled('retainerManagement')) {
+  if (billingVisible && await isModuleEnabled('retainerManagement')) {
     const activeFeePlans = await all(`SELECT id, matterId, feeType, status, currency, estimatedAmount, hourlyRate, capAmount, depositRequired, billingFrequency, vatTreatment
-      FROM matter_fee_plans WHERE clientId=? AND isActive=1 ORDER BY createdAt DESC`, [clientId]);
+      FROM matter_fee_plans r WHERE clientId=? AND isActive=1 AND ${recordScope.sql} ORDER BY createdAt DESC`, [clientId, ...recordScope.params]);
     const latestFeePlan = activeFeePlans.length ? activeFeePlans[0] : null;
     feePlanBlock = {
       visible: true,
@@ -6065,8 +6077,8 @@ app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
   // RET-31F: retainer ledger snapshot summary (double module-gated; planning ledger only,
   // computed from entries — never reads/writes matters.retainerBalance).
   let ledgerBlock = { visible: false };
-  if ((await isModuleEnabled('retainerManagement')) && (await isModuleEnabled('retainerLedger'))) {
-    const ledgerRows = await all('SELECT amount, currency, direction, isVoided FROM retainer_ledger_entries WHERE clientId=?', [clientId]);
+  if (billingVisible && (await isModuleEnabled('retainerManagement')) && (await isModuleEnabled('retainerLedger'))) {
+    const ledgerRows = await all(`SELECT amount, currency, direction, isVoided FROM retainer_ledger_entries r WHERE clientId=? AND ${recordScope.sql}`, [clientId, ...recordScope.params]);
     ledgerBlock = { visible: true, ...computeLedgerSummary(ledgerRows) };
   }
 
@@ -6074,7 +6086,7 @@ app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
   let kycBlock = { visible: false };
   if (await isModuleEnabled('kycCdd')) {
     const activeKyc = await all(`SELECT id, status, clientCategory, riskLevel, verificationDate, expiryDate
-      FROM client_kyc_records WHERE clientId=? AND isActive=1 ORDER BY createdAt DESC`, [clientId]);
+      FROM client_kyc_records r WHERE clientId=? AND isActive=1 AND ${clientRecordScope.sql} ORDER BY createdAt DESC`, [clientId, ...clientRecordScope.params]);
     const latestKyc = activeKyc.length ? activeKyc[0] : null;
     kycBlock = {
       visible: true,
@@ -6094,7 +6106,7 @@ app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
   let authorityBlock = { visible: false };
   if (await isModuleEnabled('corporateAuthority')) {
     const activeAuthority = await all(`SELECT id, status, authorityBasis, authorityDate, expiryDate
-      FROM client_authority_records WHERE clientId=? AND isActive=1 ORDER BY createdAt DESC`, [clientId]);
+      FROM client_authority_records r WHERE clientId=? AND isActive=1 AND ${clientRecordScope.sql} ORDER BY createdAt DESC`, [clientId, ...clientRecordScope.params]);
     const latestAuthority = activeAuthority.length ? activeAuthority[0] : null;
     authorityBlock = {
       visible: true,
@@ -6113,7 +6125,7 @@ app.get('/api/clients/:id/snapshot', requireStaff, async (req, res) => {
   let lifecycleBlock = { visible: false };
   if ((await isModuleEnabled('retainerManagement')) && (await isModuleEnabled('scopeVariation'))) {
     const activeEvents = await all(`SELECT id, eventType, status, effectiveDate, noticeDate, title, matterId
-      FROM retainer_lifecycle_events WHERE clientId=? AND isActive=1 ORDER BY createdAt DESC`, [clientId]);
+      FROM retainer_lifecycle_events r WHERE clientId=? AND isActive=1 AND ${recordScope.sql} ORDER BY createdAt DESC`, [clientId, ...recordScope.params]);
     const latestEvent = activeEvents.length ? activeEvents[0] : null;
     const eventCounts = { scope_variation: 0, suspension: 0, resumption: 0, termination: 0, closure: 0, pending: 0 };
     for (const e of activeEvents) {
@@ -7845,7 +7857,7 @@ app.post('/api/legal-deadline-suggestions/:id/confirm', requireAdvocateOrAdmin, 
   res.json({ suggestion: publicLegalDeadlineSuggestion(updatedSuggestion), deadline });
 });
 
-app.delete('/api/clients/:id', requireAdvocateOrAdmin, async (req, res) => {
+app.delete('/api/clients/:id', requireAdmin, async (req, res) => {
   const client = await get('SELECT * FROM clients WHERE id=?', [req.params.id]);
   const matters = await all('SELECT id FROM matters WHERE clientId=?', [req.params.id]);
   await run('BEGIN TRANSACTION');
@@ -7870,9 +7882,11 @@ app.delete('/api/clients/:id', requireAdvocateOrAdmin, async (req, res) => {
 app.get('/api/matters', async (req, res) => {
   const clientId = req.user.role === 'client' ? req.user.clientId : req.query.clientId;
   if (req.user.role === 'client' && !clientId) return res.json([]);
-  if (clientId) return res.json(await all('SELECT m.*, c.name clientName, (SELECT MIN(date) FROM appearances a WHERE a.matterId=m.id AND a.date>=?) nextCourtDate FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.clientId=? ORDER BY openDate DESC', [today(), clientId]));
-  if (req.user.role === 'advocate') return res.json(await all('SELECT m.*, c.name clientName, (SELECT MIN(date) FROM appearances a WHERE a.matterId=m.id AND a.date>=?) nextCourtDate FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.assignedTo=? ORDER BY openDate DESC', [today(), req.user.fullName || '']));
-  res.json(await all('SELECT m.*, c.name clientName, (SELECT MIN(date) FROM appearances a WHERE a.matterId=m.id AND a.date>=?) nextCourtDate FROM matters m LEFT JOIN clients c ON c.id=m.clientId ORDER BY openDate DESC', [today()]));
+  const scope = req.user.role === 'client' ? { sql: 'm.clientId=?', params: [clientId] } : matterAccessScopeSql(req);
+  const filter = clientId && req.user.role !== 'client' ? ' AND m.clientId=?' : '';
+  const params = [today(), ...scope.params, ...(filter ? [clientId] : [])];
+  res.json(await all(`SELECT m.*, c.name clientName, (SELECT MIN(date) FROM appearances a WHERE a.matterId=m.id AND a.date>=?) nextCourtDate
+    FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE ${scope.sql}${filter} ORDER BY openDate DESC`, params));
 });
 app.get('/api/matters/:id', async (req, res) => {
   const matter = await get('SELECT m.*, c.name clientName, c.email clientEmail, c.phone clientPhone FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.id=?', [req.params.id]);
@@ -8147,6 +8161,13 @@ app.get('/api/matters/:id/work-metadata-links', requireStaff, async (req, res) =
   res.json(rows);
 });
 app.post('/api/matters', requireAdvocateOrAdmin, validate(createMatterValidation), async (req, res) => {
+  if (typeof req.body.clientId !== 'string') return res.status(400).json({ error: 'Client is required' });
+  if (!(await canAccessClient(req, req.body.clientId))) return res.status(403).json({ error: 'Client access denied. Ask an admin to create and assign the first matter for an intake client.' });
+  if (!(await get('SELECT id FROM clients WHERE id=?', [req.body.clientId]))) return res.status(404).json({ error: 'Client not found' });
+  if (req.user.role === 'advocate') {
+    if (req.body.assignedTo && req.body.assignedTo !== req.user.fullName) return res.status(403).json({ error: 'Only an admin can assign a matter to another advocate' });
+    req.body.assignedTo = req.user.fullName;
+  }
   const id = genId('M');
   const reference = req.body.reference || `LEX-${new Date().getFullYear()}-${String(Date.now()).slice(-5)}`;
   await run(`INSERT INTO matters (id,reference,clientId,title,practiceArea,stage,assignedTo,paralegal,openDate,description,court,judge,caseNo,opposingCounsel,billingRate,retainerBalance,totalBilled,priority,solDate,billingType,fixedFee,remindersEnabled,courtRemindersEnabled,invoiceRemindersEnabled) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [id, reference, req.body.clientId, req.body.title, req.body.practiceArea || '', req.body.stage || 'Intake', req.body.assignedTo || '', req.body.paralegal || '', req.body.openDate || today(), req.body.description || '', req.body.court || '', req.body.judge || '', req.body.caseNo || '', req.body.opposingCounsel || '', Number(req.body.billingRate || 0), Number(req.body.retainerBalance || 0), 0, req.body.priority || 'Medium', req.body.solDate || '', req.body.billingType || 'hourly', Number(req.body.fixedFee || 0), req.body.remindersEnabled || 'firm_default', req.body.courtRemindersEnabled || 'firm_default', req.body.invoiceRemindersEnabled || 'firm_default']);
@@ -8161,6 +8182,16 @@ app.patch('/api/matters/:id', requireAdvocateOrAdmin, async (req, res) => {
   if (!(await canAccessMatter(req, req.params.id))) {
     await recordAuditEvent(req, { action: 'forbidden_matter_access', entityType: 'matter', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
     return res.status(403).json({ error: 'Matter access denied' });
+  }
+  const current = await get('SELECT id, clientId, assignedTo FROM matters WHERE id=?', [req.params.id]);
+  if (!current) return res.status(404).json({ error: 'Matter not found' });
+  if (req.user.role === 'advocate' && !(await canAccessClient(req, current.clientId))) return res.status(403).json({ error: 'Client access denied' });
+  if (req.body.assignedTo !== undefined && req.body.assignedTo !== current.assignedTo) {
+    return res.status(req.user.role === 'admin' ? 400 : 403).json({ error: 'Use the admin matter reassignment workflow to change the assigned advocate' });
+  }
+  if (req.body.clientId !== undefined && req.body.clientId !== current.clientId) {
+    if (req.user.role !== 'admin' || !(await canAccessClient(req, req.body.clientId))) return res.status(403).json({ error: 'Only an admin can change the client association' });
+    if (typeof req.body.clientId !== 'string' || !(await get('SELECT id FROM clients WHERE id=?', [req.body.clientId]))) return res.status(400).json({ error: 'Destination client not found' });
   }
   const fields = ['reference','clientId','title','practiceArea','stage','assignedTo','paralegal','openDate','description','court','judge','caseNo','opposingCounsel','priority','billingRate','billingType','fixedFee','retainerBalance','totalBilled','solDate','remindersEnabled','courtRemindersEnabled','invoiceRemindersEnabled'];
   const updates = fields.filter(f => req.body[f] !== undefined);

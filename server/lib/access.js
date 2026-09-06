@@ -15,6 +15,31 @@ module.exports = ({ get, all }) => {
     return { sql: '1=0', params: [] };
   };
 
+  // Client access derives from matter ownership, never delegated tasks/appearances.
+  // clientColumn also supports inherently client-level records such as KYC.
+  const clientAccessScopeSql = (req, alias = 'c', clientColumn = 'id') => {
+    if (![alias, clientColumn].every(name => /^[A-Za-z][A-Za-z0-9_]*$/.test(name))) throw new Error('Invalid client scope identifier');
+    if (req.user?.role === 'admin' || req.user?.role === 'assistant') return { sql: '1=1', params: [] };
+    if (req.user?.role === 'client') return { sql: `${alias}.${clientColumn}=?`, params: [req.user.clientId || ''] };
+    const scope = matterAccessScopeSql(req, 'client_scope_m');
+    return {
+      sql: `EXISTS (SELECT 1 FROM matters client_scope_m WHERE client_scope_m.clientId=${alias}.${clientColumn} AND ${scope.sql})`,
+      params: scope.params,
+    };
+  };
+
+  // Apply before ordering, limiting or aggregating child records. An accessible
+  // client does not authorize records from its other matters or unlinked records.
+  const matterRecordAccessScopeSql = (req, alias = 'r') => {
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(alias)) throw new Error('Invalid matter record alias');
+    if (req.user?.role === 'admin' || req.user?.role === 'assistant') return { sql: '1=1', params: [] };
+    const scope = matterAccessScopeSql(req, 'record_scope_m');
+    return {
+      sql: `EXISTS (SELECT 1 FROM matters record_scope_m WHERE record_scope_m.id=${alias}.matterId AND ${scope.sql})`,
+      params: scope.params,
+    };
+  };
+
   const canAccessMatter = async (req, matterId) => {
     if (!matterId) return false;
     if (req.user?.role === 'client') {
@@ -70,8 +95,8 @@ module.exports = ({ get, all }) => {
     if (!clientId) return false;
     if (req.user?.role === 'client') return clientId === req.user.clientId;
     if (req.user?.role === 'advocate') {
-      const matter = await get('SELECT id FROM matters WHERE clientId=? AND assignedTo=?', [clientId, req.user.fullName || '']);
-      return Boolean(matter);
+      const scope = clientAccessScopeSql(req);
+      return Boolean(await get(`SELECT c.id FROM clients c WHERE c.id=? AND ${scope.sql}`, [clientId, ...scope.params]));
     }
     return true; // admin/assistant
   };
@@ -148,6 +173,8 @@ module.exports = ({ get, all }) => {
 
   return {
     matterAccessScopeSql,
+    clientAccessScopeSql,
+    matterRecordAccessScopeSql,
     canAccessMatter,
     canAccessNotice,
     canAccessConversation,
