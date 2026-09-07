@@ -60,11 +60,51 @@ module.exports = ({ get, all }) => {
     return Boolean(notice);
   };
 
+  // Matter-linked communications follow the matter, never another matter for
+  // the same client. Only genuinely matterless records use client access.
+  const communicationAccessScopeSql = (req, alias = 'conv') => {
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(alias)) throw new Error('Invalid communication alias');
+    if (req.user?.role === 'admin' || req.user?.role === 'assistant') return { sql: '1=1', params: [] };
+    if (req.user?.role === 'client') return { sql: `${alias}.clientId=?`, params: [req.user.clientId || ''] };
+    if (req.user?.role !== 'advocate') return { sql: '1=0', params: [] };
+    const matterScope = matterAccessScopeSql(req, 'comm_m');
+    const clientScope = clientAccessScopeSql(req, 'comm_c');
+    return {
+      sql: `((COALESCE(${alias}.matterId,'')<>'' AND EXISTS (
+        SELECT 1 FROM matters comm_m WHERE comm_m.id=${alias}.matterId AND ${matterScope.sql}
+        AND (COALESCE(${alias}.clientId,'')='' OR ${alias}.clientId=comm_m.clientId)
+      )) OR (COALESCE(${alias}.matterId,'')='' AND EXISTS (
+        SELECT 1 FROM clients comm_c WHERE comm_c.id=${alias}.clientId AND ${clientScope.sql}
+      )))`,
+      params: [...matterScope.params, ...clientScope.params],
+    };
+  };
+
+  const canAccessCommunication = async (req, { matterId = '', clientId = '' }) => {
+    const scope = communicationAccessScopeSql(req, 'comm');
+    return Boolean(await get(`SELECT 1 allowed FROM (SELECT ? matterId, ? clientId) comm WHERE ${scope.sql}`, [matterId, clientId, ...scope.params]));
+  };
+
   const canAccessConversation = async (req, conversationId) => {
     if (!conversationId) return false;
-    if (req.user?.role !== 'client') return true;
-    const conversation = await get('SELECT id FROM conversations WHERE id=? AND clientId=?', [conversationId, req.user.clientId || '']);
-    return Boolean(conversation);
+    const scope = communicationAccessScopeSql(req);
+    return Boolean(await get(`SELECT conv.id FROM conversations conv WHERE conv.id=? AND ${scope.sql}`, [conversationId, ...scope.params]));
+  };
+
+  // A message association cannot bypass a document's matter scope (or vice
+  // versa). Portal attachments retain their existing own-conversation policy.
+  const messageAttachmentAccessScopeSql = (req, alias = 'd') => {
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(alias)) throw new Error('Invalid attachment alias');
+    if (['admin', 'assistant', 'client'].includes(req.user?.role)) return { sql: '1=1', params: [] };
+    if (req.user?.role !== 'advocate') return { sql: '1=0', params: [] };
+    const conversationScope = communicationAccessScopeSql(req, 'attachment_conv');
+    const matterScope = matterAccessScopeSql(req, 'attachment_m');
+    return {
+      sql: `EXISTS (SELECT 1 FROM messages attachment_msg JOIN conversations attachment_conv ON attachment_conv.id=attachment_msg.conversationId
+        WHERE attachment_msg.id=${alias}.messageId AND ${conversationScope.sql})
+        AND (COALESCE(${alias}.matterId,'')='' OR EXISTS (SELECT 1 FROM matters attachment_m WHERE attachment_m.id=${alias}.matterId AND ${matterScope.sql}))`,
+      params: [...conversationScope.params, ...matterScope.params],
+    };
   };
 
   const canAccessDocument = async (req, doc) => {
@@ -82,6 +122,10 @@ module.exports = ({ get, all }) => {
       return doc.source === 'client' || Number(doc.clientVisible || 0) === 1;
     }
 
+    if (req.user?.role === 'advocate' && doc.messageId) {
+      const scope = messageAttachmentAccessScopeSql(req, 'attachment');
+      return Boolean(await get(`SELECT 1 allowed FROM (SELECT ? messageId, ? matterId) attachment WHERE ${scope.sql}`, [doc.messageId, doc.matterId || '', ...scope.params]));
+    }
     if (doc.matterId) return canAccessMatter(req, doc.matterId);
     if (doc.noticeId) return canAccessNotice(req, doc.noticeId);
     if (doc.messageId) {
@@ -175,6 +219,9 @@ module.exports = ({ get, all }) => {
     matterAccessScopeSql,
     clientAccessScopeSql,
     matterRecordAccessScopeSql,
+    communicationAccessScopeSql,
+    canAccessCommunication,
+    messageAttachmentAccessScopeSql,
     canAccessMatter,
     canAccessNotice,
     canAccessConversation,

@@ -42,10 +42,10 @@ const db = new sqlite3.Database(config.DATABASE_PATH);
 const { run, get, all } = createDb(db);
 const folderHierarchy = createFolderHierarchy({ get });
 const folderMovement = createFolderMovement({ databasePath: config.DATABASE_PATH });
-const { matterAccessScopeSql, clientAccessScopeSql, matterRecordAccessScopeSql, canAccessMatter, canAccessClient, canAccessInvoice, canAccessTask, canAccessTimeEntry, canAccessAppearance, canAccessNotice, canAccessConversation, canAccessDocument, canAccessDocumentRequest, isBillingVisibleFor } = createAccess({ get });
+const { matterAccessScopeSql, clientAccessScopeSql, matterRecordAccessScopeSql, communicationAccessScopeSql, canAccessCommunication, messageAttachmentAccessScopeSql, canAccessMatter, canAccessClient, canAccessInvoice, canAccessTask, canAccessTimeEntry, canAccessAppearance, canAccessNotice, canAccessConversation, canAccessDocument, canAccessDocumentRequest, isBillingVisibleFor } = createAccess({ get });
 const documentExplorer = createDocumentExplorer({ all, matterAccessScopeSql, cursorSecret: config.JWT_SECRET });
 const { logClientActivity, logAudit } = createLogging({ run });
-const { notifyStaff } = createNotifications({ run, all, genId });
+const { notifyStaff } = createNotifications({ run, get, all, genId, canAccessCommunication });
 const { appBaseUrl, invitationUrl, checkInvitationRateLimit } = createInvitations();
 const { recordAuditEvent } = createAudit({ run, get });
 const oauth = createOAuth({ run, get, all });
@@ -5478,20 +5478,24 @@ app.get('/api/audit-events', requireAdmin, async (req, res) => {
 });
 
 app.get('/api/notifications', requireStaff, async (req, res) => {
+  const scope = communicationAccessScopeSql(req, 'n');
   res.json(await all(`SELECT n.*, m.title matterTitle, m.reference, c.name clientName
     FROM notifications n
     LEFT JOIN matters m ON m.id=n.matterId
-    LEFT JOIN clients c ON c.id=COALESCE(n.clientId,m.clientId)
-    WHERE n.userId=? AND (n.readAt IS NULL OR n.readAt='')
+    LEFT JOIN clients c ON c.id=COALESCE(NULLIF(n.clientId,''),m.clientId)
+    WHERE n.userId=? AND (n.readAt IS NULL OR n.readAt='') AND ${scope.sql}
     ORDER BY n.createdAt DESC
-    LIMIT 50`, [req.user.userId]));
+    LIMIT 50`, [req.user.userId, ...scope.params]));
 });
 app.post('/api/notifications/read', requireStaff, async (req, res) => {
   const now = new Date().toISOString();
+  const scope = communicationAccessScopeSql(req, 'notifications');
   if (req.body.matterId) {
-    await run("UPDATE notifications SET readAt=? WHERE userId=? AND matterId=? AND (readAt IS NULL OR readAt='')", [now, req.user.userId, req.body.matterId]);
+    if (!(await canAccessMatter(req, req.body.matterId))) return res.status(403).json({ error: 'Notification access denied' });
+    await run(`UPDATE notifications SET readAt=? WHERE userId=? AND matterId=? AND (readAt IS NULL OR readAt='') AND ${scope.sql}`, [now, req.user.userId, req.body.matterId, ...scope.params]);
   } else if (req.body.id) {
-    await run("UPDATE notifications SET readAt=? WHERE userId=? AND id=? AND (readAt IS NULL OR readAt='')", [now, req.user.userId, req.body.id]);
+    if (req.user.role === 'advocate' && !(await get(`SELECT id FROM notifications WHERE userId=? AND id=? AND ${scope.sql}`, [req.user.userId, req.body.id, ...scope.params]))) return res.status(403).json({ error: 'Notification access denied' });
+    await run(`UPDATE notifications SET readAt=? WHERE userId=? AND id=? AND (readAt IS NULL OR readAt='') AND ${scope.sql}`, [now, req.user.userId, req.body.id, ...scope.params]);
   } else {
     return res.status(400).json({ error: 'id or matterId is required' });
   }
@@ -5525,17 +5529,16 @@ function publicConversation(row, req) {
 }
 
 async function conversationSummary(conversationId, req) {
-  const row = await get(`${conversationSummarySelect} WHERE conv.id=?`, [conversationId]);
+  const scope = communicationAccessScopeSql(req);
+  const row = await get(`${conversationSummarySelect} WHERE conv.id=? AND ${scope.sql}`, [conversationId, ...scope.params]);
   return publicConversation(row, req);
 }
 
 app.get('/api/conversations', async (req, res) => {
-  const params = [];
-  const filters = [];
-  if (req.user.role === 'client') {
-    filters.push('conv.clientId=?');
-    params.push(req.user.clientId || '');
-  } else if (req.query.clientId) {
+  const scope = communicationAccessScopeSql(req);
+  const params = [...scope.params];
+  const filters = [scope.sql];
+  if (req.user.role !== 'client' && req.query.clientId) {
     filters.push('conv.clientId=?');
     params.push(req.query.clientId);
   }
@@ -5553,10 +5556,11 @@ app.get('/api/conversations', async (req, res) => {
 app.post('/api/conversations', async (req, res) => {
   const matterId = req.body.matterId || '';
   let clientId = req.user.role === 'client' ? (req.user.clientId || '') : (req.body.clientId || '');
+  if (typeof matterId !== 'string' || typeof clientId !== 'string') return res.status(400).json({ error: 'Invalid client or matter identifier' });
   if (matterId) {
     const matter = await get('SELECT id,clientId,title FROM matters WHERE id=?', [matterId]);
     if (!matter) return res.status(404).json({ error: 'Matter not found' });
-    if (req.user.role === 'client' && matter.clientId !== req.user.clientId) return res.status(403).json({ error: 'Matter access denied' });
+    if (!(await canAccessCommunication(req, { matterId: matter.id, clientId: matter.clientId }))) return res.status(403).json({ error: 'Matter access denied' });
     if (clientId && clientId !== matter.clientId) return res.status(400).json({ error: 'Conversation client does not match matter client' });
     clientId = matter.clientId;
   }
@@ -5564,6 +5568,7 @@ app.post('/api/conversations', async (req, res) => {
   if (req.user.role === 'client' && clientId !== req.user.clientId) return res.status(403).json({ error: 'Client access denied' });
   const client = await get('SELECT id,name FROM clients WHERE id=?', [clientId]);
   if (!client) return res.status(404).json({ error: 'Client not found' });
+  if (!matterId && !(await canAccessCommunication(req, { clientId: client.id }))) return res.status(403).json({ error: 'Client access denied' });
   const id = genId('CONV');
   const subject = String(req.body.subject || '').trim() || (matterId ? 'Matter conversation' : 'General enquiry');
   const now = new Date().toISOString();
@@ -5623,7 +5628,8 @@ app.get('/api/conversations/:id/messages', async (req, res) => {
     ORDER BY msg.createdAt`, [req.params.id]);
   if (!messages.length) return res.json([]);
   const ids = messages.map(message => message.id);
-  const attachments = await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.messageId IN (${ids.map(() => '?').join(',')}) AND d.deletedAt IS NULL ORDER BY d.date DESC`, ids);
+  const attachmentScope = messageAttachmentAccessScopeSql(req);
+  const attachments = await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.messageId IN (${ids.map(() => '?').join(',')}) AND d.deletedAt IS NULL AND ${attachmentScope.sql} ORDER BY d.date DESC`, [...ids, ...attachmentScope.params]);
   res.json(messages.map(message => ({
     ...message,
     senderHasAvatar: Boolean(message.senderHasAvatar),
@@ -5669,7 +5675,8 @@ app.post('/api/conversations/:id/messages', async (req, res) => {
   }
   await logAudit(req, 'create', 'message', id, `Added message to conversation ${conversation.subject || req.params.id}`);
   const message = await get('SELECT msg.*, u.fullName senderName FROM messages msg LEFT JOIN users u ON u.id=msg.senderId WHERE msg.id=?', [id]);
-  const messageAttachments = await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.messageId=? AND d.deletedAt IS NULL ORDER BY d.date DESC`, [id]);
+  const attachmentScope = messageAttachmentAccessScopeSql(req);
+  const messageAttachments = await all(`SELECT ${documentListColumns()} FROM documents d LEFT JOIN folders f ON f.id=d.folderId WHERE d.messageId=? AND d.deletedAt IS NULL AND ${attachmentScope.sql} ORDER BY d.date DESC`, [id, ...attachmentScope.params]);
   res.json({ ...message, attachments: messageAttachments.map(publicDocument) });
 });
 
