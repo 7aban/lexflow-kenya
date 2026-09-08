@@ -42,7 +42,7 @@ const db = new sqlite3.Database(config.DATABASE_PATH);
 const { run, get, all } = createDb(db);
 const folderHierarchy = createFolderHierarchy({ get });
 const folderMovement = createFolderMovement({ databasePath: config.DATABASE_PATH });
-const { matterAccessScopeSql, clientAccessScopeSql, matterRecordAccessScopeSql, communicationAccessScopeSql, canAccessCommunication, messageAttachmentAccessScopeSql, canAccessMatter, canAccessClient, canAccessInvoice, canAccessTask, canAccessTimeEntry, canAccessAppearance, canAccessNotice, canAccessConversation, canAccessDocument, canAccessDocumentRequest, isBillingVisibleFor } = createAccess({ get });
+const { deadlineAccessScopeSql, taskAccessScopeSql, appearanceAccessScopeSql, canAccessDeadline, validateWorkflowAssociation, matterAccessScopeSql, clientAccessScopeSql, matterRecordAccessScopeSql, communicationAccessScopeSql, canAccessCommunication, messageAttachmentAccessScopeSql, canAccessMatter, canAccessClient, canAccessInvoice, canAccessTask, canAccessTimeEntry, canAccessAppearance, canAccessNotice, canAccessConversation, canAccessDocument, canAccessDocumentRequest, isBillingVisibleFor } = createAccess({ get });
 const documentExplorer = createDocumentExplorer({ all, matterAccessScopeSql, cursorSecret: config.JWT_SECRET });
 const { logClientActivity, logAudit } = createLogging({ run });
 const { notifyStaff } = createNotifications({ run, get, all, genId, canAccessCommunication });
@@ -5758,30 +5758,35 @@ app.get('/api/performance/advocates/:userId', requireAdmin, async (req, res) => 
   res.json({ ...summary, ...detail });
 });
 
-async function unifiedDeadlines() {
+async function unifiedDeadlines(req) {
+  const taskScope = taskAccessScopeSql(req);
+  const appearanceScope = appearanceAccessScopeSql(req);
+  const matterScope = matterAccessScopeSql(req);
+  const invoiceScope = matterRecordAccessScopeSql(req, 'i');
+  const deadlineScope = deadlineAccessScopeSql(req);
   const rows = [];
   const taskRows = await all(`SELECT t.id, t.title, t.dueDate, t.completed, t.assignee owner, m.id matterId, m.title matterTitle, m.reference, c.id clientId, c.name clientName
-    FROM tasks t LEFT JOIN matters m ON m.id=t.matterId LEFT JOIN clients c ON c.id=m.clientId WHERE t.dueDate<>''`);
+    FROM tasks t LEFT JOIN matters m ON m.id=t.matterId LEFT JOIN clients c ON c.id=m.clientId WHERE t.dueDate<>'' AND ${taskScope.sql}`, taskScope.params);
   rows.push(...taskRows.map(r => ({ id: `task:${r.id}`, sourceId: r.id, source: 'task', type: 'Internal Task', title: r.title, dueDate: r.dueDate, owner: r.owner || '', status: r.completed ? 'Done' : 'Open', matterId: r.matterId, matterTitle: r.matterTitle, reference: r.reference, clientId: r.clientId, clientName: r.clientName, notes: 'Task deadline' })));
 
   const appearanceRows = await all(`SELECT a.id, a.title, a.type appearanceType, a.date dueDate, a.time, a.meetingLink, a.attorney owner, m.id matterId, m.title matterTitle, m.reference, c.id clientId, c.name clientName
-    FROM appearances a LEFT JOIN matters m ON m.id=a.matterId LEFT JOIN clients c ON c.id=m.clientId WHERE a.date<>''`);
+    FROM appearances a LEFT JOIN matters m ON m.id=a.matterId LEFT JOIN clients c ON c.id=m.clientId WHERE a.date<>'' AND ${appearanceScope.sql}`, appearanceScope.params);
   rows.push(...appearanceRows.map(r => ({ id: `appearance:${r.id}`, sourceId: r.id, source: 'appearance', type: 'Court Date', title: r.title || r.appearanceType || 'Court appearance', dueDate: r.dueDate, owner: r.owner || '', status: 'Open', matterId: r.matterId, matterTitle: r.matterTitle, reference: r.reference, clientId: r.clientId, clientName: r.clientName, notes: r.time ? `Time: ${r.time}` : 'Court appearance', meetingLink: r.meetingLink || '' })));
 
-  const solRows = await all(`SELECT m.id matterId, m.title matterTitle, m.reference, m.solDate dueDate, m.assignedTo owner, c.id clientId, c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.solDate<>''`);
+  const solRows = await all(`SELECT m.id matterId, m.title matterTitle, m.reference, m.solDate dueDate, m.assignedTo owner, c.id clientId, c.name clientName FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE m.solDate<>'' AND ${matterScope.sql}`, matterScope.params);
   rows.push(...solRows.map(r => ({ id: `sol:${r.matterId}`, sourceId: r.matterId, source: 'matter', type: 'SOL / Limitation', title: `Limitation date: ${r.matterTitle}`, dueDate: r.dueDate, owner: r.owner || '', status: 'Open', matterId: r.matterId, matterTitle: r.matterTitle, reference: r.reference, clientId: r.clientId, clientName: r.clientName, notes: 'Statute of limitation date. Confirm the applicable law before relying on this date.' })));
 
-  const invoiceRows = await all(`SELECT i.id, i.number, i.dueDate, i.status, i.amount, m.id matterId, m.title matterTitle, m.reference, c.id clientId, c.name clientName FROM invoices i LEFT JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId WHERE i.dueDate<>'' AND i.status<>'Paid'`);
-  rows.push(...invoiceRows.map(r => ({ id: `invoice:${r.id}`, sourceId: r.id, source: 'invoice', type: 'Invoice Due', title: `Invoice ${r.number || r.id}`, dueDate: r.dueDate, owner: 'Accounts', status: r.status || 'Outstanding', matterId: r.matterId, matterTitle: r.matterTitle, reference: r.reference, clientId: r.clientId, clientName: r.clientName, notes: money(r.amount) })));
+  const invoiceRows = await all(`SELECT i.id, i.number, i.dueDate, i.status, i.amount, m.id matterId, m.title matterTitle, m.reference, c.id clientId, c.name clientName FROM invoices i LEFT JOIN matters m ON m.id=i.matterId LEFT JOIN clients c ON c.id=i.clientId WHERE i.dueDate<>'' AND i.status<>'Paid' AND ${invoiceScope.sql}`, invoiceScope.params);
+  if (await isBillingVisibleFor(req)) rows.push(...invoiceRows.map(r => ({ id: `invoice:${r.id}`, sourceId: r.id, source: 'invoice', type: 'Invoice Due', title: `Invoice ${r.number || r.id}`, dueDate: r.dueDate, owner: 'Accounts', status: r.status || 'Outstanding', matterId: r.matterId, matterTitle: r.matterTitle, reference: r.reference, clientId: r.clientId, clientName: r.clientName, notes: money(r.amount) })));
 
-  const customRows = await all(`SELECT d.*, m.title matterTitle, m.reference, c.name clientName FROM deadlines d LEFT JOIN matters m ON m.id=d.matterId LEFT JOIN clients c ON c.id=COALESCE(d.clientId,m.clientId)`);
+  const customRows = await all(`SELECT d.*, m.title matterTitle, m.reference, c.name clientName FROM deadlines d LEFT JOIN matters m ON m.id=d.matterId LEFT JOIN clients c ON c.id=COALESCE(NULLIF(d.clientId,''),m.clientId) WHERE ${deadlineScope.sql}`, deadlineScope.params);
   rows.push(...customRows.map(r => ({ id: `custom:${r.id}`, sourceId: r.id, source: 'custom', type: r.type || 'Internal', title: r.title, dueDate: r.dueDate, owner: r.owner || '', status: r.status || 'Open', matterId: r.matterId, matterTitle: r.matterTitle, reference: r.reference, clientId: r.clientId, clientName: r.clientName, notes: r.notes || '' })));
 
   return rows.sort((a, b) => String(a.dueDate || '').localeCompare(String(b.dueDate || '')));
 }
 
 app.get('/api/deadlines', requireStaff, async (req, res) => {
-  const rows = await unifiedDeadlines();
+  const rows = await unifiedDeadlines(req);
   const type = req.query.type || '';
   const status = req.query.status || '';
   const filtered = rows.filter(row => (!type || row.type === type) && (!status || row.status === status));
@@ -5790,12 +5795,26 @@ app.get('/api/deadlines', requireStaff, async (req, res) => {
 app.post('/api/deadlines', requireAdvocateOrAdmin, async (req, res) => {
   const { title, dueDate, type = 'internal', matterId = '', clientId = '', owner = '', notes = '' } = req.body;
   if (!title || !dueDate) return res.status(400).json({ error: 'title and dueDate are required' });
+  const association = await validateWorkflowAssociation(req, { matterId, clientId });
+  if (association.error) return res.status(association.status).json({ error: association.error });
   const id = genId('DL');
-  await run('INSERT INTO deadlines (id,matterId,clientId,title,type,dueDate,owner,status,notes,createdBy,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [id, matterId, clientId, title, type, dueDate, owner, 'Open', notes, req.user.userId || '', new Date().toISOString()]);
+  await run('INSERT INTO deadlines (id,matterId,clientId,title,type,dueDate,owner,status,notes,createdBy,createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [id, association.matterId, association.clientId, title, type, dueDate, owner, 'Open', notes, req.user.userId || '', new Date().toISOString()]);
   await logAudit(req, 'create', 'deadline', id, `Created ${type} deadline ${title}`);
   res.json(await get('SELECT * FROM deadlines WHERE id=?', [id]));
 });
 app.patch('/api/deadlines/:id', requireAdvocateOrAdmin, async (req, res) => {
+  const existing = await get('SELECT * FROM deadlines WHERE id=?', [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Deadline not found' });
+  if (!(await canAccessDeadline(req, existing.id))) return res.status(403).json({ error: 'Deadline access denied' });
+  const association = await validateWorkflowAssociation(req, {
+    matterId: req.body.matterId === undefined ? (existing.matterId || '') : req.body.matterId,
+    clientId: req.body.clientId === undefined ? (existing.clientId || '') : req.body.clientId,
+  });
+  if (association.error) return res.status(association.status).json({ error: association.error });
+  if (req.body.matterId !== undefined || req.body.clientId !== undefined) {
+    req.body.matterId = association.matterId;
+    req.body.clientId = association.clientId;
+  }
   const fields = ['title', 'type', 'dueDate', 'owner', 'status', 'notes', 'matterId', 'clientId'];
   const updates = fields.filter(f => req.body[f] !== undefined);
   if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
@@ -5806,17 +5825,20 @@ app.patch('/api/deadlines/:id', requireAdvocateOrAdmin, async (req, res) => {
 });
 app.delete('/api/deadlines/:id', requireAdvocateOrAdmin, async (req, res) => {
   const deadline = await get('SELECT * FROM deadlines WHERE id=?', [req.params.id]);
+  if (!deadline) return res.status(404).json({ error: 'Deadline not found' });
+  if (!(await canAccessDeadline(req, deadline.id))) return res.status(403).json({ error: 'Deadline access denied' });
   await run('DELETE FROM deadlines WHERE id=?', [req.params.id]);
   await logAudit(req, 'delete', 'deadline', req.params.id, `Deleted deadline ${deadline?.title || req.params.id}`);
   await recordAuditEvent(req, { action: 'deadline_deleted', entityType: 'deadline', entityId: req.params.id, metadata: { title: deadline?.title || '', type: deadline?.type || '' } }).catch(() => {});
   res.json({ id: req.params.id, deleted: true });
 });
 app.get('/api/compliance-guidance', requireStaff, async (req, res) => {
-  const deadlines = await unifiedDeadlines();
+  const deadlines = await unifiedDeadlines(req);
   const next14 = addDays(14);
   const overdue = deadlines.filter(d => d.status !== 'Done' && d.dueDate && d.dueDate < today()).length;
   const soon = deadlines.filter(d => d.status !== 'Done' && d.dueDate >= today() && d.dueDate <= next14).length;
-  const highValue = await all(`SELECT m.id,m.title,c.name clientName,m.retainerBalance,m.totalBilled FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE COALESCE(m.totalBilled,0)+COALESCE(m.retainerBalance,0) >= 1000000`);
+  const scope = matterAccessScopeSql(req);
+  const highValue = await isBillingVisibleFor(req) ? await all(`SELECT m.id,m.title,c.name clientName,m.retainerBalance,m.totalBilled FROM matters m LEFT JOIN clients c ON c.id=m.clientId WHERE COALESCE(m.totalBilled,0)+COALESCE(m.retainerBalance,0) >= 1000000 AND ${scope.sql}`, scope.params) : [];
   res.json([
     { tone: overdue ? 'danger' : 'info', title: 'Deadline control', summary: overdue ? `${overdue} overdue deadline(s) require immediate review.` : `${soon} deadline(s) fall within the next 14 days.`, action: 'Open the Deadline Center daily and mark resolved items as done.' },
     { tone: 'warning', title: 'KRA and statutory filings', summary: 'Keep monthly VAT/PAYE and annual return obligations visible as statutory deadlines.', action: 'Add recurring statutory deadlines for VAT, PAYE, NSSF/SHIF and company annual returns where applicable.' },
@@ -7695,26 +7717,15 @@ app.get('/api/legal-deadline-suggestions', requireStaff, async (req, res) => {
       return res.status(403).json({ error: 'Client access denied' });
     }
   }
-  const conditions = [];
-  const params = [];
-  if (matterId) { conditions.push('matterId=?'); params.push(matterId); }
-  if (clientId) { conditions.push('clientId=?'); params.push(clientId); }
-  if (status) { conditions.push('status=?'); params.push(status); }
-  if (ruleId) { conditions.push('ruleId=?'); params.push(ruleId); }
-  const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
-  const rows = await all(`SELECT * FROM legal_deadline_suggestions ${where} ORDER BY suggestedDueDate ASC, createdAt DESC`, params);
-  // Advocates only see suggestions they can reach when no accessible filter was applied.
-  let visible = rows;
-  if (req.user.role === 'advocate' && !matterId && !clientId) {
-    const filtered = [];
-    for (const row of rows) {
-      if (row.matterId) { if (await canAccessMatter(req, row.matterId)) filtered.push(row); }
-      else if (row.clientId) { if (await canAccessClient(req, row.clientId)) filtered.push(row); }
-      else if (row.createdBy === req.user.userId) filtered.push(row);
-    }
-    visible = filtered;
-  }
-  res.json(visible.map(publicLegalDeadlineSuggestion));
+  const scope = deadlineAccessScopeSql(req, 's', { suggestion: true });
+  const conditions = [scope.sql];
+  const params = [...scope.params];
+  if (matterId) { conditions.push('s.matterId=?'); params.push(matterId); }
+  if (clientId) { conditions.push('s.clientId=?'); params.push(clientId); }
+  if (status) { conditions.push('s.status=?'); params.push(status); }
+  if (ruleId) { conditions.push('s.ruleId=?'); params.push(ruleId); }
+  const rows = await all(`SELECT s.* FROM legal_deadline_suggestions s WHERE ${conditions.join(' AND ')} ORDER BY s.suggestedDueDate ASC, s.createdAt DESC`, params);
+  res.json(rows.map(publicLegalDeadlineSuggestion));
 });
 
 app.post('/api/legal-deadline-suggestions', requireStaff, async (req, res) => {
@@ -8775,16 +8786,15 @@ app.delete('/api/matters/:matterId/checklist-items/:id', requireAdvocateOrAdmin,
 });
 
 app.get('/api/tasks', requireStaff, async (req, res) => {
-  let query = 'SELECT * FROM tasks';
-  const params = [];
-  if (req.user?.role === 'advocate') {
-    query += ' WHERE assignee=? OR id IN (SELECT t.id FROM tasks t JOIN matters m ON m.id=t.matterId WHERE m.assignedTo=?)';
-    params.push(req.user.fullName || '', req.user.fullName || '');
-  }
-  query += ' ORDER BY dueDate';
-  res.json(await all(query, params));
+  const scope = taskAccessScopeSql(req);
+  const conditions = [scope.sql], params = [...scope.params];
+  if (req.query.matterId) { conditions.push('t.matterId=?'); params.push(req.query.matterId); }
+  res.json(await all(`SELECT t.* FROM tasks t WHERE ${conditions.join(' AND ')} ORDER BY t.dueDate`, params));
 });
-app.post('/api/tasks', requireStaff, async (req, res) => { const id = genId('T'); await run('INSERT INTO tasks (id,matterId,title,completed,assignee,dueDate,auto_generated) VALUES (?,?,?,?,?,?,?)', [id, req.body.matterId, req.body.title, req.body.completed ? 1 : 0, req.body.assignee || '', req.body.dueDate || '', 0]); const task = await get('SELECT * FROM tasks WHERE id=?', [id]); await logAudit(req, 'create', 'task', id, `Created task ${task.title}`); res.json(task); });
+app.post('/api/tasks', requireStaff, async (req, res) => {
+  const association = await validateWorkflowAssociation(req, { matterId: req.body.matterId }, { requireMatter: true });
+  if (association.error) return res.status(association.status).json({ error: association.error });
+  const id = genId('T'); await run('INSERT INTO tasks (id,matterId,title,completed,assignee,dueDate,auto_generated) VALUES (?,?,?,?,?,?,?)', [id, req.body.matterId, req.body.title, req.body.completed ? 1 : 0, req.body.assignee || '', req.body.dueDate || '', 0]); const task = await get('SELECT * FROM tasks WHERE id=?', [id]); await logAudit(req, 'create', 'task', id, `Created task ${task.title}`); res.json(task); });
 app.patch('/api/tasks/:id', requireAdvocateOrAdmin, async (req, res) => {
   if (!(await canAccessTask(req, req.params.id))) {
     await recordAuditEvent(req, { action: 'forbidden_task_access', entityType: 'task', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
@@ -8888,16 +8898,17 @@ app.delete('/api/time-entries/:id', requireAdvocateOrAdmin, async (req, res) => 
 });
 
 app.get('/api/appearances', requireStaff, async (req, res) => {
-  let query = 'SELECT * FROM appearances';
-  const params = [];
-  if (req.user?.role === 'advocate') {
-    query += ' WHERE attorney=? OR id IN (SELECT a.id FROM appearances a JOIN matters m ON m.id=a.matterId WHERE m.assignedTo=?)';
-    params.push(req.user.fullName || '', req.user.fullName || '');
-  }
-  query += ' ORDER BY date';
-  res.json(await all(query, params));
+  const scope = appearanceAccessScopeSql(req);
+  const conditions = [scope.sql], params = [...scope.params];
+  if (req.query.matterId) { conditions.push('a.matterId=?'); params.push(req.query.matterId); }
+  res.json(await all(`SELECT a.* FROM appearances a WHERE ${conditions.join(' AND ')} ORDER BY a.date`, params));
 });
-app.get('/api/appearances/upcoming', requireStaff, async (req, res) => res.json(await all('SELECT * FROM appearances WHERE date>=? ORDER BY date LIMIT 20', [today()])));
+app.get('/api/appearances/upcoming', requireStaff, async (req, res) => {
+  const scope = appearanceAccessScopeSql(req);
+  const conditions = [scope.sql, 'a.date>=?'], params = [...scope.params, today()];
+  if (req.query.matterId) { conditions.push('a.matterId=?'); params.push(req.query.matterId); }
+  res.json(await all(`SELECT a.* FROM appearances a WHERE ${conditions.join(' AND ')} ORDER BY a.date LIMIT 20`, params));
+});
 app.get('/api/appearances/:id', requireStaff, async (req, res) => {
   if (!(await canAccessAppearance(req, req.params.id))) {
     await recordAuditEvent(req, { action: 'forbidden_appearance_access', entityType: 'appearance', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
@@ -9042,10 +9053,13 @@ app.get('/api/appearances/:id/documents', requireStaff, async (req, res) => {
     await recordAuditEvent(req, { action: 'forbidden_appearance_document_access', entityType: 'appearance', entityId: req.params.id, metadata: { reason: 'insufficient permissions', route: 'appearance_document_list' } }).catch(() => {});
     return res.status(403).json({ error: 'Appearance access denied' });
   }
+  const matterScope = matterRecordAccessScopeSql(req, 'd');
+  const attachmentScope = messageAttachmentAccessScopeSql(req, 'd');
   const rows = await all(`SELECT ad.id, ad.appearanceId, ad.documentId, ad.matterId, ad.label, ad.createdBy, ad.createdAt,
       d.displayName, d.name docName, d.type docType, d.date docDate
     FROM appearance_documents ad JOIN documents d ON d.id=ad.documentId
-    WHERE ad.appearanceId=? AND d.deletedAt IS NULL ORDER BY ad.createdAt ASC`, [req.params.id]);
+    WHERE ad.appearanceId=? AND ad.matterId=? AND d.matterId=ad.matterId AND d.deletedAt IS NULL
+      AND ${matterScope.sql} AND (COALESCE(d.messageId,'')='' OR (${attachmentScope.sql})) ORDER BY ad.createdAt ASC`, [req.params.id, appearance.matterId, ...matterScope.params, ...attachmentScope.params]);
   res.json(rows.map(publicAppearanceDocumentLink));
 });
 app.post('/api/appearances/:id/documents', requireAdvocateOrAdmin, async (req, res) => {
@@ -9099,11 +9113,25 @@ function normalizeAppearanceAttendanceStatus(value) {
   const status = typeof value === 'string' && value.trim() ? value.trim().toLowerCase() : 'scheduled';
   return APPEARANCE_ATTENDANCE_STATUSES.has(status) ? status : null;
 }
-app.post('/api/appearances', requireAdvocateOrAdmin, async (req, res) => { const id = genId('EV'); await run('INSERT INTO appearances (id,matterId,title,date,time,type,location,meetingLink,attorney,prepNote,outcome) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [id, req.body.matterId, req.body.title, req.body.date, req.body.time || '9:00 AM', req.body.type || 'Hearing', req.body.location || '', req.body.meetingLink || '', req.body.attorney || '', req.body.prepNote || '', req.body.outcome || '']); const event = await get('SELECT * FROM appearances WHERE id=?', [id]); await logAudit(req, 'create', 'appearance', id, `Scheduled ${event.type || 'appearance'} ${event.title || ''} on ${event.date}`); res.json(event); });
+app.post('/api/appearances', requireAdvocateOrAdmin, async (req, res) => {
+  const association = await validateWorkflowAssociation(req, { matterId: req.body.matterId }, { requireMatter: true });
+  if (association.error) return res.status(association.status).json({ error: association.error });
+  const id = genId('EV'); await run('INSERT INTO appearances (id,matterId,title,date,time,type,location,meetingLink,attorney,prepNote,outcome) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [id, req.body.matterId, req.body.title, req.body.date, req.body.time || '9:00 AM', req.body.type || 'Hearing', req.body.location || '', req.body.meetingLink || '', req.body.attorney || '', req.body.prepNote || '', req.body.outcome || '']); const event = await get('SELECT * FROM appearances WHERE id=?', [id]); await logAudit(req, 'create', 'appearance', id, `Scheduled ${event.type || 'appearance'} ${event.title || ''} on ${event.date}`); res.json(event); });
 app.patch('/api/appearances/:id', requireAdvocateOrAdmin, async (req, res) => {
   if (!(await canAccessAppearance(req, req.params.id))) {
     await recordAuditEvent(req, { action: 'forbidden_appearance_access', entityType: 'appearance', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
     return res.status(403).json({ error: 'Appearance access denied' });
+  }
+  const existing = await get('SELECT * FROM appearances WHERE id=?', [req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'Appearance not found' });
+  if (req.body.matterId !== undefined && req.body.matterId !== existing.matterId) {
+    // Delegated editing stays local to the record. Moving it also requires
+    // authority over both matters and cannot orphan preparation/document links.
+    if (!(await canAccessMatter(req, existing.matterId))) return res.status(403).json({ error: 'Matter access denied' });
+    const association = await validateWorkflowAssociation(req, { matterId: req.body.matterId }, { requireMatter: true });
+    if (association.error) return res.status(association.status).json({ error: association.error });
+    const linked = await get('SELECT id FROM appearance_prep_items WHERE appearanceId=? UNION ALL SELECT id FROM appearance_documents WHERE appearanceId=? LIMIT 1', [existing.id, existing.id]);
+    if (linked) return res.status(409).json({ error: 'Appearance with preparation items or document links cannot change matter' });
   }
   const fields = ['matterId','title','date','time','type','location','meetingLink','attorney','prepNote','outcome','attendanceStatus','appearedBy','clientAttended','attendanceNote'];
   const updates = fields.filter(f => req.body[f] !== undefined);
@@ -13123,7 +13151,7 @@ app.get('/api/search', requireStaff, async (req, res) => {
 });
 
 app.post('/api/mpesa/stk-push', requireStaff, async (req, res) => { const id = genId('MPESA'); await run('INSERT INTO integrations_log (id,type,matterId,clientId,recipient,message,status,createdAt) VALUES (?,?,?,?,?,?,?,?)', [id, 'mpesa', req.body.matterId || '', req.body.clientId || '', req.body.phone || '', `STK push amount ${req.body.amount}`, 'Queued', new Date().toISOString()]); res.json({ id, status: 'Queued', checkoutRequestId: `ws_CO_${Date.now()}`, message: 'STK push queued. Add Daraja credentials for live payments.' }); });
-app.post('/api/whatsapp/reminders', requireStaff, async (req, res) => { const rows = await all(`SELECT a.matterId,a.title,a.date,a.time,m.clientId,m.title matterTitle,c.name clientName,c.phone FROM appearances a LEFT JOIN matters m ON m.id=a.matterId LEFT JOIN clients c ON c.id=m.clientId WHERE a.date BETWEEN ? AND ?`, [today(), addDays(Number(req.body.days || 3))]); const reminders = rows.map(r => ({ id: genId('WA'), matterId: r.matterId, clientName: r.clientName, phone: r.phone, message: `Reminder: ${r.title} for ${r.matterTitle} is on ${r.date} at ${r.time || 'TBA'}.`, status: r.phone ? 'Queued' : 'Missing phone' })); res.json({ count: reminders.length, reminders }); });
+app.post('/api/whatsapp/reminders', requireStaff, async (req, res) => { const scope = matterRecordAccessScopeSql(req, 'a'); const rows = await all(`SELECT a.matterId,a.title,a.date,a.time,m.clientId,m.title matterTitle,c.name clientName,c.phone FROM appearances a LEFT JOIN matters m ON m.id=a.matterId LEFT JOIN clients c ON c.id=m.clientId WHERE (${scope.sql}) AND a.date BETWEEN ? AND ?`, [...scope.params, today(), addDays(Number(req.body.days || 3))]); const reminders = rows.map(r => ({ id: genId('WA'), matterId: r.matterId, clientName: r.clientName, phone: r.phone, message: `Reminder: ${r.title} for ${r.matterTitle} is on ${r.date} at ${r.time || 'TBA'}.`, status: r.phone ? 'Queued' : 'Missing phone' })); res.json({ count: reminders.length, reminders }); });
 app.get('/api/exports/:type.:format', requireStaff, async (req, res) => {
   const exportType = req.params.type;
   const format = req.params.format;

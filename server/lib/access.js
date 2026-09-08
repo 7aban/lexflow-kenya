@@ -160,28 +160,70 @@ module.exports = ({ get, all }) => {
     return true; // admin/assistant
   };
 
+  // Delegation authorizes only this task/appearance, never its parent matter.
+  const delegatedRecordAccessScopeSql = (req, alias, delegateColumn) => {
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(alias)) throw new Error('Invalid delegated record alias');
+    if (['admin', 'assistant'].includes(req.user?.role)) return { sql: '1=1', params: [] };
+    if (req.user?.role !== 'advocate') return { sql: '1=0', params: [] };
+    const scope = matterAccessScopeSql(req, 'delegated_m');
+    return {
+      sql: `EXISTS (SELECT 1 FROM matters delegated_m WHERE delegated_m.id=${alias}.matterId AND (${alias}.${delegateColumn}=? OR ${scope.sql}))`,
+      params: [req.user.fullName || '', ...scope.params],
+    };
+  };
+  const taskAccessScopeSql = (req, alias = 't') => delegatedRecordAccessScopeSql(req, alias, 'assignee');
+  const appearanceAccessScopeSql = (req, alias = 'a') => delegatedRecordAccessScopeSql(req, alias, 'attorney');
   const canAccessTask = async (req, taskId) => {
     if (!taskId) return false;
-    if (req.user?.role === 'client') return false; // clients don't access tasks directly
-    if (req.user?.role === 'advocate') {
-      const task = await get(`SELECT t.id FROM tasks t
-        JOIN matters m ON m.id=t.matterId
-        WHERE t.id=? AND (t.assignee=? OR m.assignedTo=?)`, [taskId, req.user.fullName || '', req.user.fullName || '']);
-      return Boolean(task);
-    }
-    return true; // admin/assistant
+    const scope = taskAccessScopeSql(req);
+    return Boolean(await get(`SELECT t.id FROM tasks t WHERE t.id=? AND ${scope.sql}`, [taskId, ...scope.params]));
   };
-
   const canAccessAppearance = async (req, appearanceId) => {
     if (!appearanceId) return false;
-    if (req.user?.role === 'client') return false; // clients don't access appearances directly
-    if (req.user?.role === 'advocate') {
-      const appearance = await get(`SELECT a.id FROM appearances a
-        JOIN matters m ON m.id=a.matterId
-        WHERE a.id=? AND (a.attorney=? OR m.assignedTo=?)`, [appearanceId, req.user.fullName || '', req.user.fullName || '']);
-      return Boolean(appearance);
+    const scope = appearanceAccessScopeSql(req);
+    return Boolean(await get(`SELECT a.id FROM appearances a WHERE a.id=? AND ${scope.sql}`, [appearanceId, ...scope.params]));
+  };
+
+  // Fully unlinked manual deadlines retain shared-staff access. Client-only
+  // deadlines use client access; a broken matter link cannot fall back to it.
+  const deadlineAccessScopeSql = (req, alias = 'd', { suggestion = false } = {}) => {
+    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(alias)) throw new Error('Invalid deadline alias');
+    if (['admin', 'assistant'].includes(req.user?.role)) return { sql: '1=1', params: [] };
+    if (req.user?.role !== 'advocate') return { sql: '1=0', params: [] };
+    const matterScope = matterAccessScopeSql(req, 'deadline_m');
+    const clientScope = clientAccessScopeSql(req, 'deadline_c');
+    return {
+      sql: `((COALESCE(${alias}.matterId,'')<>'' AND EXISTS (SELECT 1 FROM matters deadline_m
+        WHERE deadline_m.id=${alias}.matterId AND ${matterScope.sql}
+        AND (COALESCE(${alias}.clientId,'')='' OR ${alias}.clientId=deadline_m.clientId)))
+        OR (COALESCE(${alias}.matterId,'')='' AND ((COALESCE(${alias}.clientId,'')<>'' AND EXISTS
+          (SELECT 1 FROM clients deadline_c WHERE deadline_c.id=${alias}.clientId AND ${clientScope.sql}))
+          OR (COALESCE(${alias}.clientId,'')=''${suggestion ? ` AND ${alias}.createdBy=?` : ''}))))`,
+      params: [...matterScope.params, ...clientScope.params, ...(suggestion ? [req.user.userId || ''] : [])],
+    };
+  };
+  const canAccessDeadline = async (req, deadlineId) => {
+    const scope = deadlineAccessScopeSql(req);
+    return Boolean(await get(`SELECT d.id FROM deadlines d WHERE d.id=? AND ${scope.sql}`, [deadlineId, ...scope.params]));
+  };
+
+  // Validate persisted destinations before any write; supplied delegation is
+  // never evidence of permission to attach a new resource to a matter.
+  const validateWorkflowAssociation = async (req, { matterId = '', clientId = '' }, { requireMatter = false } = {}) => {
+    if (![matterId, clientId].every(value => value === null || typeof value === 'string')) return { status: 400, error: 'matterId and clientId must be strings or null' };
+    if (requireMatter && !matterId) return { status: 400, error: 'matterId is required' };
+    if (matterId) {
+      const matter = await get('SELECT id, clientId FROM matters WHERE id=?', [matterId]);
+      if (!matter) return { status: 404, error: 'Matter not found' };
+      if (!(await canAccessMatter(req, matterId))) return { status: 403, error: 'Matter access denied' };
+      if (clientId && clientId !== matter.clientId) return { status: 400, error: 'Client does not match matter' };
+      return { matterId, clientId: matter.clientId || '' };
     }
-    return true; // admin/assistant
+    if (clientId) {
+      if (!(await get('SELECT id FROM clients WHERE id=?', [clientId]))) return { status: 404, error: 'Client not found' };
+      if (!(await canAccessClient(req, clientId))) return { status: 403, error: 'Client access denied' };
+    }
+    return { matterId, clientId };
   };
 
   const canAccessTimeEntry = async (req, entryId) => {
@@ -216,6 +258,11 @@ module.exports = ({ get, all }) => {
   };
 
   return {
+    deadlineAccessScopeSql,
+    taskAccessScopeSql,
+    appearanceAccessScopeSql,
+    canAccessDeadline,
+    validateWorkflowAssociation,
     matterAccessScopeSql,
     clientAccessScopeSql,
     matterRecordAccessScopeSql,
