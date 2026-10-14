@@ -85,44 +85,85 @@ module.exports = ({ serverDir, backupDir, config, databasePath }) => {
     const ext = key ? '.db.enc' : '.db';
     const filename = `lawfirm-${timestamp}${ext}`;
     const backupPath = path.join(backupDir, filename);
-
-    if (key) {
+    // Keep incomplete/unverified files outside the published retention namespace.
+    const stagedPath = path.join(backupDir, `.lexflow-stage-${crypto.randomUUID()}-${filename}`);
+    let stagedOwned = false;
+    let publishedOwned = false;
+    let phase = 'creation';
+    try {
       const plaintext = await fs.readFile(source);
-      const encrypted = encryptBuffer(plaintext, key);
-      await fs.writeFile(backupPath, encrypted);
-    } else {
-      await fs.copyFile(source, backupPath);
+      const handle = await fs.open(stagedPath, 'wx');
+      stagedOwned = true;
+      try {
+        await handle.writeFile(key ? encryptBuffer(plaintext, key) : plaintext);
+      } finally {
+        await handle.close();
+      }
+      phase = 'verification';
+      const verification = await verifyBackup(stagedPath);
+      if (!verification.valid || verification.result !== 'ok') {
+        throw new Error(`Backup verification failed: ${verification.result}`);
+      }
+      phase = 'publication';
+      // Same-directory hard link publishes atomically without overwriting an older
+      // backup if another operation generated the same legacy timestamp name.
+      await fs.link(stagedPath, backupPath);
+      publishedOwned = true;
+      await fs.unlink(stagedPath);
+      stagedOwned = false;
+      const stats = await fs.stat(backupPath);
+      return {
+        success: true,
+        backupPath,
+        filename,
+        timestamp,
+        size: stats.size,
+        encrypted: !!key,
+        source,
+        verification,
+      };
+    } catch (err) {
+      err.backupPhase = phase;
+      err.backupFilename = filename;
+      const cleanupErrors = [];
+      for (const ownedPath of [stagedOwned && stagedPath, publishedOwned && backupPath].filter(Boolean)) {
+        try { await fs.unlink(ownedPath); } catch (cleanupErr) {
+          if (cleanupErr.code !== 'ENOENT') cleanupErrors.push(cleanupErr.message);
+        }
+      }
+      if (cleanupErrors.length) err.message += `; current-operation cleanup failed: ${cleanupErrors.join('; ')}`;
+      throw err;
     }
-
-    const stats = await fs.stat(backupPath);
-    return {
-      success: true,
-      backupPath,
-      filename,
-      timestamp,
-      size: stats.size,
-      encrypted: !!key,
-      source,
-    };
   }
 
   async function rotateBackups(maxBackups = config.BACKUP_RETENTION_COUNT) {
-    const files = (await fs.readdir(backupDir))
+    const candidates = (await fs.readdir(backupDir))
       .filter(f => f.startsWith('lawfirm-') && (f.endsWith('.db') || f.endsWith('.db.enc')))
       .map(f => ({
         filename: f,
         path: path.join(backupDir, f),
-        mtime: fs.stat(path.join(backupDir, f)).then(s => s.mtimeMs).catch(() => 0),
       }));
-    for (const f of files) f.mtime = await f.mtime;
+    const files = [];
+    const skipped = [];
+    // Historical names alone do not prove verification. Never count or delete
+    // an artifact that cannot be verified with the current configuration.
+    for (const f of candidates) {
+      try {
+        await verifyBackup(f.path);
+        f.mtime = (await fs.stat(f.path)).mtimeMs;
+        files.push(f);
+      } catch (err) {
+        skipped.push({ filename: f.filename, reason: err.message });
+      }
+    }
     files.sort((a, b) => a.mtime - b.mtime);
     let removed = 0;
     while (files.length > maxBackups) {
       const oldest = files.shift();
-      await fs.unlink(oldest.path).catch(() => {});
+      await fs.unlink(oldest.path);
       removed += 1;
     }
-    return { removed, remaining: files.length };
+    return { removed, remaining: files.length, skipped };
   }
 
   async function verifyBackup(backupPath) {
@@ -137,13 +178,10 @@ module.exports = ({ serverDir, backupDir, config, databasePath }) => {
         const plaintext = decryptBuffer(encryptedData, key);
         const os = require('os');
         const path = require('path');
-        tempDbPath = path.join(os.tmpdir(), `lexflow-verify-${Date.now()}.db`);
-        await fs.writeFile(tempDbPath, plaintext);
+        tempDbPath = path.join(os.tmpdir(), `lexflow-verify-${crypto.randomUUID()}.db`);
+        const handle = await fs.open(tempDbPath, 'wx');
         cleanup = true;
-        // Clean up possible WAL/SHM files created when SQLite opens the temp DB
-        for (const ext of ['-wal', '-shm', '.db-wal', '.db-shm']) {
-          try { await fs.unlink(tempDbPath + ext); } catch (e) {}
-        }
+        try { await handle.writeFile(plaintext); } finally { await handle.close(); }
       }
       // Ensure file exists and is readable
       await fs.access(tempDbPath, fs.constants.R_OK);
@@ -153,13 +191,15 @@ module.exports = ({ serverDir, backupDir, config, databasePath }) => {
         const db = new sqlite3.Database(tempDbPath, sqlite3.OPEN_READONLY, (err) => {
           if (err) return reject(new Error(`Cannot open backup: ${err.message}`));
           db.get("PRAGMA integrity_check", (err2, row) => {
-            db.close();
-            if (err2) return reject(new Error(`Integrity check failed: ${err2.message}`));
-            if (row && String(row.integrity_check || '').toLowerCase() === 'ok') {
-              resolve({ valid: true, result: 'ok' });
-            } else {
-              reject(new Error(`Backup is corrupted: ${JSON.stringify(row)}`));
-            }
+            db.close(closeErr => {
+              if (err2) return reject(new Error(`Integrity check failed: ${err2.message}`));
+              if (closeErr) return reject(new Error(`Cannot close backup: ${closeErr.message}`));
+              if (row && String(row.integrity_check || '').toLowerCase() === 'ok') {
+                resolve({ valid: true, result: 'ok' });
+              } else {
+                reject(new Error(`Backup is corrupted: ${JSON.stringify(row)}`));
+              }
+            });
           });
         });
       });
