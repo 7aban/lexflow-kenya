@@ -1,7 +1,7 @@
-const { authenticate, requireAdmin, requireAdvocateOrAdmin, requireStaff } = require('./auth');
+const { createAuthenticate, requireAdmin, requireAdvocateOrAdmin, requireStaff } = require('./auth');
 
 module.exports = {
-  authenticate,
+  createAuthenticate,
   requireAdmin,
   requireAdvocateOrAdmin,
   requireStaff

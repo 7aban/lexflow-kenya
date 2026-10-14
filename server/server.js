@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const crypto = require('crypto');
 const { hashPassword, verifyPassword } = require('./lib/passwords');
@@ -9,7 +8,7 @@ const PDFDocument = require('pdfkit');
 const { PDFDocument: PDFLibDocument, degrees, StandardFonts, rgb, PDFName, PDFString } = require('pdf-lib');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const { authenticate, requireAdmin, requireAdvocateOrAdmin, requireStaff } = require('./middleware');
+const { createAuthenticate, requireAdmin, requireAdvocateOrAdmin, requireStaff } = require('./middleware');
 const { validate } = require('./middleware/validation');
 const { loginValidation, registerValidation, invitationValidation } = require('./validation/auth.validation');
 const { createClientValidation } = require('./validation/client.validation');
@@ -17,6 +16,7 @@ const { createMatterValidation } = require('./validation/matter.validation');
 const { generateInvoiceValidation } = require('./validation/invoice.validation');
 const { genId, today, addDays, invoiceNumber, money } = require('./lib/utils');
 const createDb = require('./lib/db');
+const { openDatabase, initializationError } = require('./lib/databaseInitialization');
 const createAccess = require('./lib/access');
 const { createDocumentExplorer, DocumentExplorerError } = require('./lib/documentExplorer');
 const createLogging = require('./lib/logging');
@@ -38,8 +38,16 @@ const { MAX_FOLDER_DEPTH, createFolderHierarchy, isClientUploadsFolderName } = r
 const { FolderMoveError, createFolderMovement } = require('./lib/folderMovement');
 
 const app = express();
-const db = new sqlite3.Database(config.DATABASE_PATH);
-const { run, get, all } = createDb(db);
+const { db, opened } = openDatabase(config.DATABASE_PATH);
+const { run, get, all } = createDb(db, { configure: false });
+let authDb;
+let databaseOpened = false;
+let authDatabaseOpened = false;
+const authenticate = createAuthenticate(() => authDb);
+// Also gate imported apps (tests/embedders), including health and public login.
+app.use((_req, res, next) => {
+  dbReady.then(() => next(), () => res.status(503).json({ error: 'Database unavailable' }));
+});
 const folderHierarchy = createFolderHierarchy({ get });
 const folderMovement = createFolderMovement({ databasePath: config.DATABASE_PATH });
 const { deadlineAccessScopeSql, taskAccessScopeSql, appearanceAccessScopeSql, canAccessDeadline, validateWorkflowAssociation, matterAccessScopeSql, clientAccessScopeSql, matterRecordAccessScopeSql, communicationAccessScopeSql, canAccessCommunication, messageAttachmentAccessScopeSql, canAccessMatter, canAccessClient, canAccessInvoice, canAccessTask, canAccessTimeEntry, canAccessAppearance, canAccessNotice, canAccessConversation, canAccessDocument, canAccessDocumentRequest, isBillingVisibleFor } = createAccess({ get });
@@ -13199,10 +13207,27 @@ app.get('/health', (_req, res) => {
 });
 
 // Initialize database when module is loaded (required by tests and by server start)
-const dbReady = initDb().catch(err => {
-  console.error('Database initialisation failed', err);
-  if (require.main === module) process.exit(1);
+const dbReady = opened.then(async () => {
+  databaseOpened = true;
+  // Await these statements so invalid/unwritable files fail through dbReady.
+  await run('PRAGMA journal_mode=WAL');
+  await run('PRAGMA busy_timeout=5000');
+  await initDb();
+  // Preserve auth's separate read-only view of committed user/session state.
+  const authConnection = openDatabase(config.DATABASE_PATH, { readOnly: true });
+  authDb = authConnection.db;
+  await authConnection.opened;
+  authDatabaseOpened = true;
+}).catch(async err => {
+  // SQLite close callbacks need an opened connection. A failed open must not
+  // leave readiness pending or let the CLI exit successfully without a log.
+  // Ignore cleanup errors so the original initialization failure is preserved.
+  if (authDatabaseOpened) await new Promise(resolve => authDb.close(() => resolve()));
+  if (databaseOpened) await new Promise(resolve => db.close(() => resolve()));
+  throw initializationError(err);
 });
+// Mark the rejection handled without changing the rejected readiness contract.
+dbReady.catch(() => {});
 
 module.exports = { app, config, dbReady, repairClientUserLinks };
 
@@ -13213,7 +13238,7 @@ if (require.main === module) {
       startReminderJobs(getFirmSettings);
     });
   }).catch(err => {
-    console.error('Database initialisation failed', err);
+    console.error(`Database initialisation failed [${err.code}]: ${err.message}`);
     process.exit(1);
   });
 }
