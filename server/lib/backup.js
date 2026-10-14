@@ -54,7 +54,7 @@ async function checkpointWal(dbPath) {
   });
 }
 
-module.exports = ({ serverDir, backupDir, config, databasePath }) => {
+module.exports = ({ serverDir, backupDir, config, databasePath, snapshotTimeoutMs = 90000 }) => {
   // Resolve the backup source: prefer the explicitly configured databasePath
   // (config.DATABASE_PATH at runtime) and fall back to the legacy server/lawfirm.db
   // location only when no databasePath is provided (test helpers that pass serverDir).
@@ -62,6 +62,53 @@ module.exports = ({ serverDir, backupDir, config, databasePath }) => {
 
   function ensureBackupDir() {
     return fs.mkdir(backupDir, { recursive: true });
+  }
+
+  async function createSnapshot(snapshotPath) {
+    const deadline = Date.now() + snapshotTimeoutMs;
+    const checkDeadline = () => {
+      if (Date.now() >= deadline) throw new Error('SQLite snapshot readiness deadline exceeded');
+    };
+    const db = await new Promise((resolve, reject) => {
+      const connection = new sqlite3.Database(resolvedDatabasePath, sqlite3.OPEN_READONLY,
+        err => err ? reject(err) : resolve(connection));
+    });
+    let backup;
+    let finished = false;
+    try {
+      db.configure('busyTimeout', 1000);
+      await new Promise((resolve, reject) => db.exec('BEGIN', err => err ? reject(err) : resolve()));
+      // Materialize this connection's read snapshot before copying any pages.
+      // Other WAL readers cannot force this fresh transaction onto their older view.
+      await new Promise((resolve, reject) => db.get('SELECT name FROM sqlite_master LIMIT 1',
+        err => err ? reject(err) : resolve()));
+      const boundaryAt = new Date().toISOString();
+      checkDeadline();
+      await new Promise((resolve, reject) => {
+        backup = db.backup(snapshotPath, err => err ? reject(err) : resolve());
+        // Use explicit finish, including on BUSY/LOCKED and failed steps.
+        backup.retryErrors = [];
+      });
+      let done = false;
+      while (!done) {
+        checkDeadline();
+        done = await new Promise((resolve, reject) => backup.step(128,
+          (err, complete) => err ? reject(err) : resolve(complete)));
+        checkDeadline();
+        if (backup.failed) throw new Error('SQLite snapshot copy failed');
+        if (!done) await new Promise(resolve => setImmediate(resolve));
+      }
+      if (!backup.completed || backup.remaining !== 0) {
+        throw new Error('SQLite snapshot copy incomplete');
+      }
+      await new Promise(resolve => backup.finish(resolve));
+      finished = true;
+      return { mechanism: 'sqlite-online-backup', boundaryAt };
+    } finally {
+      // Await queued native work before releasing handles or removing the snapshot.
+      if (backup && !finished && backup.idle) await new Promise(resolve => backup.finish(resolve));
+      await new Promise((resolve, reject) => db.close(err => err ? reject(err) : resolve()));
+    }
   }
 
   async function createBackup() {
@@ -74,13 +121,6 @@ module.exports = ({ serverDir, backupDir, config, databasePath }) => {
     const msPart = String(now.getMilliseconds()).padStart(3, '0');
     const timestamp = `${datePart}-${timePart}${msPart}`;
 
-    // WAL-safe checkpoint before backup
-    try {
-      await checkpointWal(source);
-    } catch (e) {
-      console.error('WAL checkpoint warning:', e.message);
-    }
-
     const key = config.BACKUP_KEY;
     const ext = key ? '.db.enc' : '.db';
     const filename = `lawfirm-${timestamp}${ext}`;
@@ -89,9 +129,13 @@ module.exports = ({ serverDir, backupDir, config, databasePath }) => {
     const stagedPath = path.join(backupDir, `.lexflow-stage-${crypto.randomUUID()}-${filename}`);
     let stagedOwned = false;
     let publishedOwned = false;
-    let phase = 'creation';
+    let snapshotDir;
+    let phase = 'snapshot';
     try {
-      const plaintext = await fs.readFile(source);
+      snapshotDir = await fs.mkdtemp(path.join(backupDir, '.lexflow-snapshot-'));
+      const snapshot = await createSnapshot(path.join(snapshotDir, 'snapshot.db'));
+      const plaintext = await fs.readFile(path.join(snapshotDir, 'snapshot.db'));
+      phase = 'creation';
       const handle = await fs.open(stagedPath, 'wx');
       stagedOwned = true;
       try {
@@ -99,6 +143,8 @@ module.exports = ({ serverDir, backupDir, config, databasePath }) => {
       } finally {
         await handle.close();
       }
+      await fs.rm(snapshotDir, { recursive: true });
+      snapshotDir = null;
       phase = 'verification';
       const verification = await verifyBackup(stagedPath);
       if (!verification.valid || verification.result !== 'ok') {
@@ -121,11 +167,17 @@ module.exports = ({ serverDir, backupDir, config, databasePath }) => {
         encrypted: !!key,
         source,
         verification,
+        snapshot,
       };
     } catch (err) {
       err.backupPhase = phase;
       err.backupFilename = filename;
       const cleanupErrors = [];
+      if (snapshotDir) {
+        try { await fs.rm(snapshotDir, { recursive: true, force: true }); } catch (cleanupErr) {
+          cleanupErrors.push(cleanupErr.message);
+        }
+      }
       for (const ownedPath of [stagedOwned && stagedPath, publishedOwned && backupPath].filter(Boolean)) {
         try { await fs.unlink(ownedPath); } catch (cleanupErr) {
           if (cleanupErr.code !== 'ENOENT') cleanupErrors.push(cleanupErr.message);
