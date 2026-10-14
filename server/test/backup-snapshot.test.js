@@ -23,6 +23,7 @@ async function fixture(options = {}) {
   const backups = path.join(dir, 'backups'); fs.mkdirSync(backups);
   const database = path.join(dir, 'synthetic.db');
   const db = await open(database);
+  await exec(db, require('./helpers/lexflow-restore-fixture'));
   await exec(db, "CREATE TABLE sample(id INTEGER PRIMARY KEY,txt TEXT,num REAL,bytes BLOB); INSERT INTO sample VALUES(1,'initial',42.125,X'00FF8041');");
   await close(db);
   const helper = makeHelper({ serverDir: dir, databasePath: database, backupDir: backups,
