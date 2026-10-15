@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { styles } from '../theme.jsx';
 import { Field } from './ui.jsx';
 import { useWorkSessions, WORK_ACTIVITIES, workClock } from '../lib/workSessions.jsx';
+import DailyWorkReview from './DailyWorkReview.jsx';
 
 const rowStyle = { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, minWidth: 0 };
 export function WorkTimerLauncher({ style }) {
@@ -10,10 +11,14 @@ export function WorkTimerLauncher({ style }) {
     {work.running ? 'Running' : 'Timekeeper'} · {workClock(work.running?.accumulatedSeconds ?? work.selected?.accumulatedSeconds ?? 0)}
   </button>;
 }
-export default function PersistentWorkTimer({ matters = [], tasks = [], showRate = true }) {
+export default function PersistentWorkTimer({ matters = [], tasks = [], showRate = true, user, token, dataVersion, onOpenMatter }) {
   const work = useWorkSessions();
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [tick, setTick] = useState(Date.now());
   useEffect(() => { const timer = setInterval(() => setTick(Date.now()), 1000); return () => clearInterval(timer); }, []);
+  // Existing app refreshes follow manual creation/editing and session recording.
+  // Other tabs invalidate their review; receiving this never triggers app refresh.
+  useEffect(() => { if (dataVersion) work?.announceTimeEntriesChanged(); }, [dataVersion]);
   if (!work) return null;
   const { selected, running, busy, ready } = work;
   const active = work.sessions.filter(row => row.status !== 'recorded');
@@ -30,6 +35,7 @@ export default function PersistentWorkTimer({ matters = [], tasks = [], showRate
           {selected?.status === 'paused' && !selected.recoveryRequired && <button style={styles.primaryButton} disabled={busy || !ready} onClick={() => work.setComposer({ type: 'record', session: selected })}>Record Time</button>}
           <button style={styles.ghostButton} onClick={() => work.setExpanded(value => !value)} aria-expanded={work.expanded}>Sessions ({active.length})</button>
           <button style={styles.ghostButton} disabled={busy || !ready} onClick={() => work.openStart()}>Start Work</button>
+          <button style={styles.ghostButton} onClick={() => setReviewOpen(true)}>Daily Work Review</button>
         </div>
       </div>
       {running && selected?.id !== running.id && <div style={{ fontSize: 12, marginTop: 6 }}>Running: {matterTitle(running.matterId)} <button style={styles.tinyButton} onClick={() => work.setSelectedId(running.id)}>Show running session</button></div>}
@@ -38,6 +44,7 @@ export default function PersistentWorkTimer({ matters = [], tasks = [], showRate
       {work.error && <div role="alert" style={{ marginTop: 6, fontSize: 13 }}>{work.error} <button style={styles.tinyButton} disabled={busy} onClick={() => work.refresh()}>Reconnect / reload</button></div>}
       {work.notice && <div role="status" style={{ marginTop: 6, fontSize: 13 }}>{work.notice}</div>}
     </section>
+    <DailyWorkReview open={reviewOpen} onClose={() => setReviewOpen(false)} user={user} token={token} dataVersion={dataVersion} matters={matters} work={work} tick={tick} onOpenMatter={options => { setReviewOpen(false); onOpenMatter?.(options); }} />
     {work.composer && <WorkDialog key={`${work.composer.type}-${work.composer.session?.id || work.composer.matterId || ''}-${work.composer.taskId || ''}`} work={work} matters={matters} tasks={tasks} showRate={showRate} />}
   </>;
 }

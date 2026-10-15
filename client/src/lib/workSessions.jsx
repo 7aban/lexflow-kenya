@@ -99,7 +99,7 @@ export function WorkSessionProvider({ user, token, onRecorded, children }) {
         setNotice('Time recorded once.'); recorded(row.matterId);
       }
       if (action !== 'confirm') setComposer(null);
-      channel.current?.postMessage('changed');
+      channel.current?.postMessage({ action });
       return updated;
     } catch (failure) {
       if (!alive.current) return false;
@@ -149,6 +149,7 @@ export function WorkSessionProvider({ user, token, onRecorded, children }) {
     }, CONFIRM_INTERVAL_MS);
     return () => {
       alive.current = false; clearTimeout(initialRefresh); clearInterval(heartbeat); controllers.current.forEach(controller => controller.abort()); channel.current?.close();
+      channel.current = null;
       window.removeEventListener('online', reconnect); window.removeEventListener('focus', reconnect);
       document.removeEventListener('visibilitychange', reconnect); window.removeEventListener('storage', storage);
     };
@@ -156,6 +157,7 @@ export function WorkSessionProvider({ user, token, onRecorded, children }) {
   const running = sessions.find(row => row.status === 'running');
   const selected = sessions.find(row => row.id === selectedId && row.status !== 'recorded');
   return <WorkSessions.Provider value={{ sessions, running, selected, selectedId, setSelectedId, busy, error, notice, ready, sampledAt,
+    announceTimeEntriesChanged: () => channel.current?.postMessage({ action: 'record' }),
     refresh, perform, composer, setComposer, expanded, setExpanded,
     openStart: (values = {}) => { setComposer({ type: 'start', ...values }); setExpanded(true); } }}>{children}</WorkSessions.Provider>;
 }

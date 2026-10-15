@@ -2882,6 +2882,22 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
   const [templateSaving, setTemplateSaving] = useState(false);
   const [applyingTemplate, setApplyingTemplate] = useState(false);
   const timekeeperFocusHandled = useRef(null);
+  const dailyTimeFocusHandled = useRef(null);
+  const matterDetailRequest = useRef(0);
+  useEffect(() => {
+    if (!canManage || !detail || detail.id !== focus?.matterId || !['manual-time', 'edit-time'].includes(focus?.mode) || dailyTimeFocusHandled.current === focus.ts) return;
+    const entry = focus.mode === 'edit-time' ? (detail.timeEntries || []).find(row => row.id === focus.timeEntryId) : null;
+    if (focus.mode === 'edit-time' && !entry) return;
+    dailyTimeFocusHandled.current = focus.ts;
+    setCockpitSection('tasks');
+    if (entry) setEditingTime({ ...entry });
+    else setMatterTimeFormOpen(true);
+    const timer = setTimeout(() => {
+      const target = entry ? document.querySelector('.lf-time-entry-cards') : document.getElementById('matter-section-time');
+      target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [focus?.matterId, focus?.mode, focus?.timeEntryId, focus?.ts, detail, canManage]);
   const missingMatterFocusHandled = useRef(null);
   const clientMatterFocusHandled = useRef(null);
   const matterDetailRef = useRef(null);
@@ -3062,6 +3078,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
   }, [detail?.id, cockpitSection]);
 
   async function loadDetail(id) {
+    const request = ++matterDetailRequest.current;
     setLoading(true);
     try {
       const [matter, smartTips, links] = await Promise.all([
@@ -3069,14 +3086,15 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
         api(`/matters/${id}/suggestions`),
         getMatterWorkMetadataLinks(id).catch(() => []),
       ]);
+      if (request !== matterDetailRequest.current) return;
       setDetail(matter);
       setSuggestions(Array.isArray(smartTips) ? smartTips : []);
       setWorkMetadataLinks(Array.isArray(links) ? links : []);
       onMatterOpened?.(id);
     } catch (err) {
-      notify({ type: 'danger', message: err.message });
+      if (request === matterDetailRequest.current) notify({ type: 'danger', message: err.message });
     } finally {
-      setLoading(false);
+      if (request === matterDetailRequest.current) setLoading(false);
     }
   }
   async function loadChecklistTemplates() {

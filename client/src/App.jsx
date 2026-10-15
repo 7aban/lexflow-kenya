@@ -397,7 +397,7 @@ export default function App() {
     const safeView = visibleViewSet.has(nextView) ? nextView : 'Dashboard';
     setView(safeView);
     if (safeView === 'Matters' && (options.matterId || options.section || options.clientId)) {
-      setMatterFocus({ matterId: options.matterId || '', section: options.section || '', clientId: options.clientId || '', mode: options.mode || '', folderId: options.folderId || '', documentId: options.documentId || '', ts: Date.now() });
+      setMatterFocus({ matterId: options.matterId || '', section: options.section || '', clientId: options.clientId || '', mode: options.mode || '', timeEntryId: options.timeEntryId || '', folderId: options.folderId || '', documentId: options.documentId || '', ts: Date.now() });
     }
     if (safeView === 'Clients' && options.clientId) setClientFocus({ clientId: options.clientId, ts: Date.now() });
     if (safeView === 'Tasks' && options.taskId) setTaskFocus({ taskId: options.taskId, ts: Date.now() });
@@ -916,7 +916,7 @@ export default function App() {
           </div>
         </header>
 
-        <PersistentWorkTimer matters={data.matters} tasks={data.tasks} showRate={user?.role !== 'advocate' || Number(data.firmSettings?.advocateBillingVisibility ?? 1) !== 0} />
+        <PersistentWorkTimer user={user} token={session.token} dataVersion={data} onOpenMatter={options => navigateToView('Matters', options)} matters={data.matters} tasks={data.tasks} showRate={user?.role !== 'advocate' || Number(data.firmSettings?.advocateBillingVisibility ?? 1) !== 0} />
         <div className="lf-page-inner" style={styles.pageInner}>
           <div className="lf-page-header" style={styles.pageHeader}>
             <div className="lf-page-crumb" style={styles.pageCrumb}>{themedFirm.name || 'LexFlow Kenya'}</div>

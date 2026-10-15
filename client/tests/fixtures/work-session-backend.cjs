@@ -13,14 +13,21 @@ module.exports = async function syntheticBackend() {
   let child, db;
   const env = { ...process.env, NODE_ENV: 'test', DATABASE_PATH: databasePath, JWT_SECRET: 'synthetic-browser-104b-key', LEXFLOW_DISABLE_RATE_LIMIT: 'true', CORS_ORIGINS: 'http://127.0.0.1:5184' };
   async function boot() {
-    const code = `const {app,dbReady}=require(${JSON.stringify(path.join(server, 'server'))});dbReady.then(()=>app.listen(5294,'127.0.0.1',()=>process.send('ready'))).catch(e=>{console.error(e.code);process.exit(1)});`;
+    const started = Date.now();
+    const logRoot = process.env.LEXFLOW_104B_EVIDENCE || dir;
+    const prefix = path.join(logRoot, `backend-${path.basename(dir)}-${started}`);
+    const event = (stage, details = {}) => fs.appendFileSync(`${prefix}.jsonl`, JSON.stringify({ stage, at: new Date().toISOString(), elapsedMs: Date.now() - started, ...details }) + '\n');
+    event('launch', { executable: process.execPath, cwd: server, databasePath, nodeOptions: env.NODE_OPTIONS || '', readiness: 'IPC ready after dbReady and app.listen callback', timeoutMs: 15000 });
+    const code = `console.log('fixture:child-start',process.version,process.cwd());const {app,dbReady}=require(${JSON.stringify(path.join(server, 'server'))});console.log('fixture:module-loaded');dbReady.then(()=>{console.log('fixture:database-ready');app.listen(5294,'127.0.0.1',()=>{console.log('fixture:listening');process.send('ready')}).once('error',e=>{console.error(e.stack);process.exit(1)});}).catch(e=>{console.error(e.stack);process.exit(1)});`;
     child = spawn(process.execPath, ['-e', code], { env, cwd: server, stdio: ['ignore', 'pipe', 'pipe', 'ipc'], windowsHide: true });
     let output = '';
-    child.stdout.on('data', data => { output += data; }); child.stderr.on('data', data => { output += data; });
+    child.once('spawn', () => event('spawn', { pid: child.pid }));
+    child.once('exit', (exitCode, signal) => event('exit', { exitCode, signal }));
+    for (const stream of ['stdout', 'stderr']) child[stream].on('data', data => { output += data; fs.appendFileSync(`${prefix}.${stream}.log`, data); event(stream, { text: data.toString() }); });
     await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error(`Synthetic backend startup failed: ${output}`)), 15000);
-      child.once('message', () => { clearTimeout(timeout); resolve(); });
-      child.once('error', e => { clearTimeout(timeout); reject(e); });
+      const timeout = setTimeout(() => { event('readiness-timeout', { pid: child.pid, exitCode: child.exitCode, signalCode: child.signalCode }); reject(new Error(`Synthetic backend startup failed: ${output}`)); }, 15000);
+      child.once('message', message => { event('readiness-message', { message }); clearTimeout(timeout); message === 'ready' ? resolve() : reject(new Error('Unexpected synthetic backend readiness message')); });
+      child.once('error', e => { event('error', { message: e.message }); clearTimeout(timeout); reject(e); });
       child.once('exit', code => { clearTimeout(timeout); reject(new Error(`Synthetic backend exited ${code}: ${output}`)); });
     });
   }
@@ -28,7 +35,7 @@ module.exports = async function syntheticBackend() {
     if (!child || child.exitCode !== null || child.signalCode !== null) return;
     const exited = new Promise(resolve => child.once('exit', resolve)); child.kill(); await exited;
   }
-  await boot();
+  try { await boot(); } catch (error) { await stop(); throw error; }
   db = new sqlite3.Database(databasePath);
   const sql = createDb(db);
   const password = await hashPassword('Synthetic104B!Password');
