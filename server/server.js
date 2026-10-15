@@ -18,6 +18,7 @@ const { genId, today, addDays, invoiceNumber, money } = require('./lib/utils');
 const createDb = require('./lib/db');
 const { openDatabase, initializationError } = require('./lib/databaseInitialization');
 const createAccess = require('./lib/access');
+const { initializeWorkSessions, registerWorkSessionRoutes } = require('./lib/workSessions');
 const { createDocumentExplorer, DocumentExplorerError } = require('./lib/documentExplorer');
 const createLogging = require('./lib/logging');
 const createNotifications = require('./lib/notifications');
@@ -8825,6 +8826,8 @@ app.delete('/api/tasks/:id', requireAdvocateOrAdmin, async (req, res) => {
   res.json({ id: req.params.id, deleted: true });
 });
 
+registerWorkSessionRoutes(app, { databasePath: config.DATABASE_PATH, requireStaff });
+
 app.get('/api/time-entries', requireStaff, async (req, res) => {
   let query = 'SELECT * FROM time_entries';
   const params = [];
@@ -13213,6 +13216,7 @@ const dbReady = opened.then(async () => {
   await run('PRAGMA journal_mode=WAL');
   await run('PRAGMA busy_timeout=5000');
   await initDb();
+  await initializeWorkSessions({ run });
   // Preserve auth's separate read-only view of committed user/session state.
   const authConnection = openDatabase(config.DATABASE_PATH, { readOnly: true });
   authDb = authConnection.db;
