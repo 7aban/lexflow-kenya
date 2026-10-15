@@ -135,7 +135,11 @@ export async function api(path, options = {}) {
     emitAuthFailure();
     throw new AuthExpiredError();
   }
-  if (!response.ok) throw new Error(body?.error || `Request failed (${response.status})`);
+  if (!response.ok) {
+    const error = new Error(body?.error || `Request failed (${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
   return body;
 }
 

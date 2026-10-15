@@ -5,6 +5,8 @@ import { globalSearch } from './api.js';
 import { defaultFirmSettings, styles, StyleTag, theme, loadAndApplyFirmTheme, resolveReadableTheme } from './theme.jsx';
 import { Logo, Skeleton, Toast, Alert } from './components/ui.jsx';
 import LoginPage from './components/LoginPage.jsx';
+import { WorkSessionProvider } from './lib/workSessions.jsx';
+import PersistentWorkTimer, { WorkTimerLauncher } from './components/PersistentWorkTimer.jsx';
 import ViewErrorBoundary from './components/ViewErrorBoundary.jsx';
 import OAuthCallback from './views/OAuthCallback.jsx';
 import AcceptInvitation from './views/AcceptInvitation.jsx';
@@ -789,6 +791,7 @@ export default function App() {
   };
 
   return (
+    <WorkSessionProvider key={`${user?.id}:${session.token}`} user={user} token={session.token} onRecorded={refresh}>
     <div className="lf-app-shell" style={{ ...styles.shell, ...shellThemeVars }}>
       <StyleTag />
       <aside className="lf-desktop-sidebar" style={styles.sidebar}>
@@ -900,20 +903,7 @@ export default function App() {
             )}
           </div>
           <div className="lf-top-actions" style={styles.topActions}>
-            <button
-              type="button"
-              className="lf-topbar-timer"
-              onClick={() => navigateToView('Matters', { section: 'tasks' })}
-              style={timerTopbarStyle}
-              aria-label="Open time logging - log hours or start a task timer"
-              title="Open time logging - log hours or start a task timer"
-            >
-              <span style={styles.liveDot} />
-              <div>
-                <div style={{ fontWeight: 700, fontSize: viewportWidth <= 640 ? 12 : 13 }}>Timekeeper</div>
-                {viewportWidth > 640 && <div style={{ color: 'rgba(255,255,255,.5)', fontSize: 10.5, marginTop: 2 }}>Log billable time</div>}
-              </div>
-            </button>
+            <WorkTimerLauncher style={timerTopbarStyle} />
             <NotificationBell notifications={notifications} open={notificationsOpen} setOpen={setNotificationsOpen} onOpen={openNotification} />
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
               <button type="button" className="lf-topbar-icon-btn" aria-label={loading ? 'Refreshing data' : 'Refresh data'} title="Refresh data" onClick={refresh} disabled={loading} style={styles.iconButton}>
@@ -926,6 +916,7 @@ export default function App() {
           </div>
         </header>
 
+        <PersistentWorkTimer matters={data.matters} tasks={data.tasks} showRate={user?.role !== 'advocate' || Number(data.firmSettings?.advocateBillingVisibility ?? 1) !== 0} />
         <div className="lf-page-inner" style={styles.pageInner}>
           <div className="lf-page-header" style={styles.pageHeader}>
             <div className="lf-page-crumb" style={styles.pageCrumb}>{themedFirm.name || 'LexFlow Kenya'}</div>
@@ -959,6 +950,7 @@ export default function App() {
       </main>
       <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
+    </WorkSessionProvider>
   );
 }
 

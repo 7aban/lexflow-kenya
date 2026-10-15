@@ -6,7 +6,8 @@ import { appendBrandingModeToPath, defaultFirmSettings, defaultOutputBrandingMod
 import { getFirmTheme, previewFirmTheme, updateFirmTheme, resetFirmTheme, getThemePresets, getUsers, reassignMatter } from '../api.js';
 import { ActionGroup, Badge, Card, ConfirmModal, Empty, Field, kes, MeetingLink, nextCourtDate, ProfileTooltip, safeHttpUrl, Skeleton, statusTone, Sub, Table, isInvoiceOverdue, invoiceDisplayStatus, invoiceDueDistanceText, invoiceDueDistanceDays } from '../components/ui.jsx';
 import MatterDocuments from '../components/MatterDocuments.jsx';
-import TaskTimer, { taskTimerActive } from '../components/TaskTimer.jsx';
+import TaskTimer from '../components/TaskTimer.jsx';
+import { useWorkSessions } from '../lib/workSessions.jsx';
 
 const BILLABLE_TIME_GUIDANCE = 'Billable time may be included in hourly invoices. Non-billable time is tracked for workload and productivity but excluded from hourly invoice generation.';
 const AVATAR_ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp'];
@@ -2861,7 +2862,12 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
   const [invoiceDueDateOverride, setInvoiceDueDateOverride] = useState('');
   const [matterInvoiceBrandingMode, setMatterInvoiceBrandingMode] = useState(defaultOutputBrandingMode(data.firmSettings || defaultFirmSettings));
   const [matterInvoiceBrandingTouched, setMatterInvoiceBrandingTouched] = useState(false);
-  const [taskTimer, setTaskTimer] = useState(null);
+  const workSessions = useWorkSessions();
+  useEffect(() => {
+    const recorded = event => { if (event.detail?.matterId === selectedId) void loadDetail(selectedId); };
+    window.addEventListener('lexflow:work-recorded', recorded);
+    return () => window.removeEventListener('lexflow:work-recorded', recorded);
+  }, [selectedId]);
   const [advocates, setAdvocates] = useState([]);
   const [matterUsers, setMatterUsers] = useState(null);
   const [reassignTo, setReassignTo] = useState('');
@@ -3351,6 +3357,7 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
           {!loading && detail && (
             <div className="lf-matter-detail-workspace" style={{ ...styles.detailStack, minWidth: 0 }}>
               <div style={styles.chips}>
+                {workSessions && <button type="button" style={styles.primaryButton} disabled={workSessions.busy || !workSessions.ready} onClick={() => workSessions.openStart({ matterId: detail.id })}>Start Work</button>}
                 <Badge tone="blue">{detail.stage || 'Intake'}</Badge>
                 <Badge tone={detail.priority === 'High' ? 'red' : detail.priority === 'Low' ? 'green' : 'amber'}>{detail.priority || 'Medium'} risk</Badge>
                 <span>{detail.reference || detail.caseNo || detail.id}</span>
@@ -3415,8 +3422,8 @@ export function Matters({ data, canManage, reload, notify, focus, onNavigate, on
                           </form>
                         ) : <button type="button" style={{ ...styles.primaryButton, fontSize: 12, padding: '6px 12px', marginBottom: 12 }} onClick={() => setMatterTaskFormOpen(true)}>Create task</button>
                       )}
-                      <Sub title="Open tasks"><TaskEditorList tasks={(detail.tasks || []).filter(task => !task.completed)} entries={detail.timeEntries || []} matter={detail} canManage={canManage} canViewBilling={canViewBilling} editingTask={editingTask} setEditingTask={setEditingTask} saveTask={saveTask} taskTimer={taskTimer} setTaskTimer={setTaskTimer} notify={notify} onTimerSaved={async () => { await loadDetail(detail.id); await reload(); }} confirmDelete={task => setConfirm({ title: 'Delete task?', message: 'Delete this task?', onConfirm: () => deleteTaskRecord(task) })} emptyTitle="No open tasks for this matter yet." emptyText="Add a task above to track pending work." /></Sub>
-                      <Sub title="Completed tasks"><TaskEditorList tasks={(detail.tasks || []).filter(task => task.completed)} entries={detail.timeEntries || []} matter={detail} canManage={canManage} canViewBilling={canViewBilling} editingTask={editingTask} setEditingTask={setEditingTask} saveTask={saveTask} taskTimer={taskTimer} setTaskTimer={setTaskTimer} notify={notify} onTimerSaved={async () => { await loadDetail(detail.id); await reload(); }} confirmDelete={task => setConfirm({ title: 'Delete task?', message: 'Delete this task?', onConfirm: () => deleteTaskRecord(task) })} emptyTitle="No completed tasks yet." emptyText="Tasks you mark done will appear here." /></Sub>
+                      <Sub title="Open tasks"><TaskEditorList tasks={(detail.tasks || []).filter(task => !task.completed)} entries={detail.timeEntries || []} matter={detail} canManage={canManage} canViewBilling={canViewBilling} editingTask={editingTask} setEditingTask={setEditingTask} saveTask={saveTask} notify={notify} onTimerSaved={async () => { await loadDetail(detail.id); await reload(); }} confirmDelete={task => setConfirm({ title: 'Delete task?', message: 'Delete this task?', onConfirm: () => deleteTaskRecord(task) })} emptyTitle="No open tasks for this matter yet." emptyText="Add a task above to track pending work." /></Sub>
+                      <Sub title="Completed tasks"><TaskEditorList tasks={(detail.tasks || []).filter(task => task.completed)} entries={detail.timeEntries || []} matter={detail} canManage={canManage} canViewBilling={canViewBilling} editingTask={editingTask} setEditingTask={setEditingTask} saveTask={saveTask} notify={notify} onTimerSaved={async () => { await loadDetail(detail.id); await reload(); }} confirmDelete={task => setConfirm({ title: 'Delete task?', message: 'Delete this task?', onConfirm: () => deleteTaskRecord(task) })} emptyTitle="No completed tasks yet." emptyText="Tasks you mark done will appear here." /></Sub>
                     </Sub>
                   </div>
                   <div style={{ minWidth: 0, maxWidth: '100%' }}>
@@ -7765,7 +7772,8 @@ function MatterChecklistPanel({ items = [], templates = [], canManage, canToggle
   );
 }
 
-function TaskEditorList({ tasks, entries = [], matter, matters = null, canManage, canViewBilling = true, editingTask, setEditingTask, saveTask, toggle, confirmDelete, taskTimer, setTaskTimer, notify, onTimerSaved, emptyTitle = 'No tasks yet.', emptyText = 'Once records exist, they will appear here.' }) {
+function TaskEditorList({ tasks, entries = [], matter, matters = null, canManage, canViewBilling = true, editingTask, setEditingTask, saveTask, toggle, confirmDelete, notify, onTimerSaved, emptyTitle = 'No tasks yet.', emptyText = 'Once records exist, they will appear here.' }) {
+  const workSessions = useWorkSessions();
   if (!tasks.length) return <Empty title={emptyTitle} text={emptyText} />;
   // LOCAL-PILOT-FIX-15: on the global Tasks page each row shows which matter (and
   // client) the work belongs to. Inside a matter workspace `matters` stays null.
@@ -7780,14 +7788,14 @@ function TaskEditorList({ tasks, entries = [], matter, matters = null, canManage
         <tbody>{tasks.map(task => {
           const editing = editingTask?.id === task.id;
           const taskEntries = entries.filter(entry => entry.taskId === task.id);
-          const isTiming = taskTimerActive(taskTimer, task.id);
+          const isTiming = workSessions?.sessions.some(session => session.taskId === task.id && session.status === 'running');
           return (
             <tr key={task.id} id={`task-${task.id}`} style={{ borderLeft: `4px solid ${isTiming ? theme.green : 'transparent'}`, transition: 'border-color .18s ease, background .18s ease' }}>
               <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}>{editing ? <><input style={styles.input} value={editingTask.title || ''} onChange={e => setEditingTask({ ...editingTask, title: e.target.value })} placeholder="e.g. File statement of defence" list="task-suggestions" /><datalist id="task-suggestions"><option value="File pleadings" /><option value="Serve summons" /><option value="Draft agreement" /><option value="Prepare affidavit" /><option value="Attend court" /><option value="Legal research" /><option value="Client meeting" /><option value="Review documents" /><option value="Update client" /><option value="File application" /><option value="Prepare submissions" /><option value="Witness preparation" /><option value="Settlement discussions" /><option value="Obtain orders" /><option value="Taxation of costs" /></datalist></> : <div style={{ display: 'grid', gap: 4 }}><strong style={{ fontSize: 13.5 }}>{task.title}</strong>{matterById && task.matterId && matterById.get(task.matterId) && <small style={{ color: theme.muted, fontSize: 12 }}>{matterById.get(task.matterId).title}{matterById.get(task.matterId).clientName ? ` — ${matterById.get(task.matterId).clientName}` : ''}</small>}{taskEntries.length > 0 && <small style={{ color: theme.muted, fontSize: 12 }}>{taskEntries.reduce((sum, entry) => sum + Number(entry.hours || 0), 0).toFixed(2)} hours logged from {taskEntries.length} entr{taskEntries.length === 1 ? 'y' : 'ies'}</small>}</div>}</td>
               <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}>{editing ? <input style={styles.input} value={editingTask.assignee || ''} onChange={e => setEditingTask({ ...editingTask, assignee: e.target.value })} /> : <span style={{ fontWeight: 500 }}>{task.assignee || '-'}</span>}</td>
               <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}>{editing ? <input type="date" style={styles.input} value={editingTask.dueDate || ''} onChange={e => setEditingTask({ ...editingTask, dueDate: e.target.value })} /> : <span>{task.dueDate || '-'}</span>}</td>
               <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}><Badge tone={task.completed ? 'green' : 'amber'}>{task.completed ? 'Done' : 'Open'}</Badge></td>
-              <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}>{canManage && matter ? <TaskTimer task={{ ...task, timeEntries: taskEntries }} matterId={matter.id} matterRate={canViewBilling ? matter.billingRate || 15000 : 0} showRate={canViewBilling} timer={taskTimer} setTimer={setTaskTimer} notify={notify} onSaved={onTimerSaved} /> : '-'}</td>
+              <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}>{canManage && matter ? <TaskTimer task={{ ...task, timeEntries: taskEntries }} matterId={matter.id} matterRate={canViewBilling ? matter.billingRate || 15000 : 0} showRate={canViewBilling} notify={notify} onSaved={onTimerSaved} /> : '-'}</td>
               <td style={{ padding: warmCellPad, verticalAlign: 'middle' }}>{canManage ? editing ? <ActionGroup actions={[['Save', () => saveTask(task, editingTask)], ['Cancel', () => setEditingTask(null)]]} /> : <ActionGroup actions={[[task.completed ? 'Reopen' : 'Mark done', () => toggle ? toggle(task) : saveTask(task, { completed: !task.completed })], ['Edit', () => setEditingTask({ ...task })], ['Delete', () => confirmDelete(task)]]} /> : '-'}</td>
             </tr>
           );
