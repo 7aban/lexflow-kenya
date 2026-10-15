@@ -19,6 +19,7 @@ const createDb = require('./lib/db');
 const { openDatabase, initializationError } = require('./lib/databaseInitialization');
 const createAccess = require('./lib/access');
 const { initializeWorkSessions, registerWorkSessionRoutes } = require('./lib/workSessions');
+const { nairobiWorkDate, validWorkDate, manualPerformer, dailyWorkReview } = require('./lib/dailyWorkReview');
 const { createDocumentExplorer, DocumentExplorerError } = require('./lib/documentExplorer');
 const createLogging = require('./lib/logging');
 const createNotifications = require('./lib/notifications');
@@ -1621,6 +1622,7 @@ createdAt TEXT NOT NULL
   await ensureColumn('reminder_logs', 'invoiceId', 'TEXT');
   await ensureColumn('time_entries', 'taskId', 'TEXT');
   await ensureColumn('time_entries', 'billable', 'INTEGER DEFAULT 1');
+  await ensureColumn('time_entries', 'performedByUserId', 'TEXT REFERENCES users(id)');
   await run('UPDATE time_entries SET billable=1 WHERE billable IS NULL');
   await ensureColumn('users', 'isActive', 'INTEGER DEFAULT 1');
   await ensureColumn('users', 'avatar', 'BLOB');
@@ -8828,6 +8830,12 @@ app.delete('/api/tasks/:id', requireAdvocateOrAdmin, async (req, res) => {
 
 registerWorkSessionRoutes(app, { databasePath: config.DATABASE_PATH, requireStaff });
 
+app.get('/api/daily-work-review', requireStaff, async (req, res) => {
+  const date = req.query.date === undefined ? nairobiWorkDate() : req.query.date;
+  if (!validWorkDate(date)) return res.status(400).json({ error: 'Invalid work date; use YYYY-MM-DD' });
+  res.json(await dailyWorkReview({ all, matterAccessScopeSql }, req, date));
+});
+
 app.get('/api/time-entries', requireStaff, async (req, res) => {
   let query = 'SELECT * FROM time_entries';
   const params = [];
@@ -8868,8 +8876,12 @@ app.post('/api/time-entries', requireStaff, async (req, res) => {
   }
   const billable = normalizeBillable(req.body.billable, 1);
   if (billable === null) return res.status(400).json({ error: 'Invalid billable value' });
+  const date = req.body.date === undefined ? nairobiWorkDate() : req.body.date;
+  if (!validWorkDate(date)) return res.status(400).json({ error: 'Invalid work date; use YYYY-MM-DD' });
+  const performer = await manualPerformer({ get, canAccessMatter }, req);
+  if (performer.error) return res.status(performer.status).json({ error: performer.error });
   const id = genId('TIME');
-  await run('INSERT INTO time_entries (id,matterId,taskId,attorney,date,hours,activity,description,rate,billed,billable) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [id, req.body.matterId, taskId, req.body.attorney || req.user.fullName || '', req.body.date || today(), Number(req.body.hours || 0), req.body.activity || '', req.body.description || '', Number(req.body.rate || 0), req.body.billed ? 1 : 0, billable]);
+  await run('INSERT INTO time_entries (id,matterId,taskId,attorney,date,hours,activity,description,rate,billed,billable,performedByUserId) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', [id, req.body.matterId, taskId, performer.attorney, date, Number(req.body.hours || 0), req.body.activity || '', req.body.description || '', Number(req.body.rate || 0), req.body.billed ? 1 : 0, billable, performer.performedByUserId]);
   const entry = await get('SELECT * FROM time_entries WHERE id=?', [id]);
   await logAudit(req, 'create', 'time_entry', id, `Logged ${entry.hours} hour(s) for matter ${entry.matterId}${entry.taskId ? ` task ${entry.taskId}` : ''}`);
   res.json(entry);
@@ -8879,9 +8891,23 @@ app.patch('/api/time-entries/:id', requireAdvocateOrAdmin, async (req, res) => {
     await recordAuditEvent(req, { action: 'forbidden_time_entry_access', entityType: 'time_entry', entityId: req.params.id, metadata: { reason: 'insufficient permissions' } }).catch(() => {});
     return res.status(403).json({ error: 'Time entry access denied' });
   }
+  // No historical attribution/backfill editing contract is introduced here.
+  // The existing editor echoes the full row. Accept an unchanged ID (including
+  // null) as read-only metadata, but never use PATCH to assign or backfill it.
+  const currentEntry = await get('SELECT attorney,performedByUserId FROM time_entries WHERE id=?', [req.params.id]);
+  if (!currentEntry) return res.status(404).json({ error: 'Time entry not found' });
+  if (req.body.performedByUserId !== undefined && req.body.performedByUserId !== currentEntry.performedByUserId) {
+    return res.status(400).json({ error: 'Stable performer attribution is only accepted on creation' });
+  }
   const fields = ['matterId','taskId','attorney','date','hours','activity','description','rate','billed','billable'];
   const updates = fields.filter(f => req.body[f] !== undefined);
   if (!updates.length) return res.status(400).json({ error: 'No supported fields supplied' });
+  if (updates.includes('date') && !validWorkDate(req.body.date)) return res.status(400).json({ error: 'Invalid work date; use YYYY-MM-DD' });
+  const performerChanged = updates.includes('attorney') && currentEntry && req.body.attorney !== currentEntry.attorney;
+  if (performerChanged && await get("SELECT id FROM work_sessions WHERE timeEntryId=? AND status='recorded'", [req.params.id])) {
+    return res.status(409).json({ error: 'A session-recorded performer cannot be reassigned' });
+  }
+  if (performerChanged) { updates.push('performedByUserId'); }
   const billable = updates.includes('billable') ? normalizeBillable(req.body.billable) : undefined;
   if (updates.includes('billable') && billable === null) return res.status(400).json({ error: 'Invalid billable value' });
   const oldEntry = updates.includes('billable') ? await get('SELECT billable FROM time_entries WHERE id=?', [req.params.id]) : null;
@@ -8891,7 +8917,7 @@ app.patch('/api/time-entries/:id', requireAdvocateOrAdmin, async (req, res) => {
     if (!task) return res.status(400).json({ error: 'Task not found' });
     if (task.matterId !== matterId) return res.status(400).json({ error: 'Task does not belong to this matter' });
   }
-  await run(`UPDATE time_entries SET ${updates.map(f => `${f}=?`).join(',')} WHERE id=?`, [...updates.map(f => ['hours','rate'].includes(f) ? Number(req.body[f] || 0) : f === 'billed' ? (req.body[f] ? 1 : 0) : f === 'billable' ? billable : req.body[f]), req.params.id]);
+  await run(`UPDATE time_entries SET ${updates.map(f => `${f}=?`).join(',')} WHERE id=?`, [...updates.map(f => f === 'performedByUserId' ? null : ['hours','rate'].includes(f) ? Number(req.body[f] || 0) : f === 'billed' ? (req.body[f] ? 1 : 0) : f === 'billable' ? billable : req.body[f]), req.params.id]);
   const entry = await get('SELECT * FROM time_entries WHERE id=?', [req.params.id]);
   const billableChanged = entry && oldEntry && updates.includes('billable') && Number(oldEntry.billable) !== Number(entry.billable);
   if (entry) await logAudit(req, req.body.billed !== undefined ? 'bill_toggle' : billableChanged ? 'billable_toggle' : 'update', 'time_entry', req.params.id, `${req.body.billed !== undefined ? (entry.billed ? 'Marked billed' : 'Marked unbilled') : billableChanged ? `Marked ${entry.billable ? 'billable' : 'non-billable'}` : 'Updated'} time entry for matter ${entry.matterId}`);

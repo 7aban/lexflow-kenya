@@ -4,7 +4,8 @@ const sqlite3 = require('sqlite3');
 const createDb = require('./db');
 const createAccess = require('./access');
 const createAudit = require('./audit');
-const { genId, today } = require('./utils');
+const { genId } = require('./utils');
+const { nairobiWorkDate, validWorkDate } = require('./dailyWorkReview');
 
 const ACTIVITIES = ['Legal Research', 'Drafting', 'Court Attendance', 'Client Communication', 'Document Review', 'Filing', 'Preparation', 'Other'];
 const CONFIRMATION_WINDOW_SECONDS = 120;
@@ -263,12 +264,12 @@ function createWorkSessions({ databasePath, now = Date.now }) {
         if (typeof body.billable !== 'boolean') fail(400, 'Explicit billable choice is required');
         const rate = body.rate === undefined ? 0 : body.rate;
         if (typeof rate !== 'number' || !Number.isFinite(rate) || rate < 0 || (!visible && rate !== 0)) fail(400, 'Invalid rate');
-        const date = body.date === undefined ? today() : body.date;
-        if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date) fail(400, 'Invalid date');
+        const date = body.date === undefined ? nairobiWorkDate(c.at) : body.date;
+        if (!validWorkDate(date)) fail(400, 'Invalid date');
         const entryId = genId('TIME');
-        await c.run(`INSERT INTO time_entries (id,matterId,taskId,attorney,date,hours,activity,description,rate,billed,billable)
-          VALUES (?,?,?,?,?,?,?,?,?,0,?)`, [entryId, row.matterId, row.taskId || '', c.req.user.fullName || '', date,
-          row.accumulatedSeconds / 3600, row.activity, row.description, rate, body.billable ? 1 : 0]);
+        await c.run(`INSERT INTO time_entries (id,matterId,taskId,attorney,date,hours,activity,description,rate,billed,billable,performedByUserId)
+          VALUES (?,?,?,?,?,?,?,?,?,0,?,?)`, [entryId, row.matterId, row.taskId || '', c.req.user.fullName || '', date,
+          row.accumulatedSeconds / 3600, row.activity, row.description, rate, body.billable ? 1 : 0, row.userId]);
         await save(c, row, { status: 'recorded', timeEntryId: entryId }, 'record');
         entry = await c.get('SELECT * FROM time_entries WHERE id=?', [entryId]);
       }

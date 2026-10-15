@@ -122,7 +122,7 @@ test('existing manual time-entry request/response and fractional hours remain un
   const input = { matterId: '104A-A', taskId: '104A-TA', attorney: '104A Advocate A', date: '2026-10-15', hours: 0.1234567, activity: 'Drafting', description: 'Manual entry', rate: 7500, billable: true };
   const response = await api('post', '/time-entries', input);
   expect(response.status).toBe(200);
-  expect(response.body).toEqual({ ...input, id: expect.stringMatching(/^TIME-/), billable: 1, billed: 0 });
+  expect(response.body).toEqual({ ...input, id: expect.stringMatching(/^TIME-/), billable: 1, billed: 0, performedByUserId: null });
   expect((await api('get', `/time-entries/${response.body.id}`)).body).toEqual(response.body);
   expect((await sql.get('SELECT COUNT(*) n FROM work_sessions')).n).toBe(0);
 });

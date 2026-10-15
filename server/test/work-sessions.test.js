@@ -76,7 +76,7 @@ beforeEach(async () => {
   await sql.run('CREATE TABLE tasks(id TEXT PRIMARY KEY,matterId TEXT,assignee TEXT)');
   await sql.run('CREATE TABLE firm_settings(advocateBillingVisibility INTEGER)');
   await sql.run('INSERT INTO firm_settings VALUES (1)');
-  await sql.run('CREATE TABLE time_entries(id TEXT PRIMARY KEY,matterId TEXT,taskId TEXT,attorney TEXT,date TEXT,hours REAL,activity TEXT,description TEXT,rate REAL,billed INTEGER,billable INTEGER)');
+  await sql.run('CREATE TABLE time_entries(id TEXT PRIMARY KEY,matterId TEXT,taskId TEXT,attorney TEXT,date TEXT,hours REAL,activity TEXT,description TEXT,rate REAL,billed INTEGER,billable INTEGER,performedByUserId TEXT)');
   for (const [id, name, role] of [['a', 'Advocate A', 'advocate'], ['b', 'Advocate B', 'advocate'], ['admin', 'Admin', 'admin'], ['assistant', 'Assistant', 'assistant'], ['portal', 'Client', 'client']]) {
     await sql.run('INSERT INTO users VALUES (?,?,?,1)', [id, name, role]);
   }
