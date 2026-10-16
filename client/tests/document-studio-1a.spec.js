@@ -30,13 +30,12 @@ async function login(page) {
   await page.getByRole('button', { name: 'Sign in securely', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Start Work', exact: true })).toBeVisible();
   await page.goto('/#/staff/document-studio');
-  await expect(page.getByRole('button', { name: 'Open tool', exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open Merge PDFs', exact: true })).toBeVisible();
 }
 
 async function openTool(page, name) {
-  const title = page.locator('strong').filter({ hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) }).first();
-  const card = title.locator('..').locator('..');
-  await card.getByRole('button', { name: /^(Open tool|Continue)$/ }).click();
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  await page.getByRole('button', { name: new RegExp(`^(Open|Continue) ${escaped}$`) }).click();
   await expect(panel(page)).toBeVisible();
 }
 

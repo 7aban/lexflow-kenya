@@ -84,7 +84,10 @@ export default function DocumentToolCards({ onOpenMerge, onOpenRotate, onOpenExt
               </div>
               <span style={{ fontSize: 13, color: theme.muted, lineHeight: 1.5 }}>{tool.description}</span>
               <button
+                id={`document-tool-${tool.id}`}
                 type="button"
+                aria-label={`${selected ? 'Continue' : 'Open'} ${tool.title}`}
+                aria-current={selected ? 'step' : undefined}
                 disabled={!active}
                 onClick={handler}
                 style={{
@@ -98,7 +101,7 @@ export default function DocumentToolCards({ onOpenMerge, onOpenRotate, onOpenExt
                   opacity: active ? 1 : 0.75,
                 }}
               >
-                {selected ? 'Continue' : active ? 'Open tool' : 'Not available yet'}
+                {selected ? 'Continue' : active ? 'Open' : 'Not available yet'}
               </button>
             </div>
           );

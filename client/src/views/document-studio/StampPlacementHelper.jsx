@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { styles, theme } from '../../theme.jsx';
 import PdfStampCanvas from './PdfStampCanvas.jsx';
 
@@ -24,6 +24,7 @@ export default function StampPlacementHelper({
   onPageChange,
 }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const advancedId = useId();
 
   function applyPreset(p) {
     if (disabled) return;
@@ -95,28 +96,29 @@ export default function StampPlacementHelper({
 
       <div>
         <button
+          id={`${advancedId}-toggle`}
           type="button"
+          aria-expanded={showAdvanced}
+          aria-controls={advancedId}
           onClick={() => setShowAdvanced(a => !a)}
           style={{ cursor: 'pointer', background: 'none', border: 'none', padding: 0, fontSize: 12, color: theme.blue, fontWeight: 700 }}
         >
           {showAdvanced ? '−' : '+'} Advanced placement
         </button>
-        {showAdvanced && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(140px, 100%), 1fr))', gap: 10, marginTop: 10 }}>
-            <label style={{ ...styles.field, minWidth: 0 }}>
-              <span style={{ fontSize: 12, color: theme.muted }}>X (pt from left)</span>
-              <input type="number" style={styles.input} value={stampX} onChange={onXChange} disabled={disabled} />
-            </label>
-            <label style={{ ...styles.field, minWidth: 0 }}>
-              <span style={{ fontSize: 12, color: theme.muted }}>Y (pt from bottom)</span>
-              <input type="number" style={styles.input} value={stampY} onChange={onYChange} disabled={disabled} />
-            </label>
-            <label style={{ ...styles.field, minWidth: 0 }}>
-              <span style={{ fontSize: 12, color: theme.muted }}>Width (pt)</span>
-              <input type="number" min="1" max="2000" style={styles.input} value={stampWidth} onChange={onWidthChange} disabled={disabled} />
-            </label>
-          </div>
-        )}
+        <div id={advancedId} role="region" aria-labelledby={`${advancedId}-toggle`} hidden={!showAdvanced} style={{ display: showAdvanced ? 'grid' : 'none', gridTemplateColumns: 'repeat(auto-fit, minmax(min(140px, 100%), 1fr))', gap: 10, marginTop: 10 }}>
+          <label style={{ ...styles.field, minWidth: 0 }}>
+            <span style={{ fontSize: 12, color: theme.muted }}>X (pt from left)</span>
+            <input type="number" style={styles.input} value={stampX} onChange={onXChange} disabled={disabled} />
+          </label>
+          <label style={{ ...styles.field, minWidth: 0 }}>
+            <span style={{ fontSize: 12, color: theme.muted }}>Y (pt from bottom)</span>
+            <input type="number" style={styles.input} value={stampY} onChange={onYChange} disabled={disabled} />
+          </label>
+          <label style={{ ...styles.field, minWidth: 0 }}>
+            <span style={{ fontSize: 12, color: theme.muted }}>Width (pt)</span>
+            <input type="number" min="1" max="2000" style={styles.input} value={stampWidth} onChange={onWidthChange} disabled={disabled} />
+          </label>
+        </div>
       </div>
 
       <div style={{ fontSize: 11, color: theme.muted, fontStyle: 'italic' }}>

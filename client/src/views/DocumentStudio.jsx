@@ -257,6 +257,19 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
   const [signatureAssetBusy, setSignatureAssetBusy] = useState('');
 
   const panelRef = useRef(null);
+  const workflowHeadingRef = useRef(null);
+  const originatingToolRef = useRef(null);
+  const signatureUploadRef = useRef(null);
+  const stampUploadRef = useRef(null);
+  const [assetUploadStatus, setAssetUploadStatus] = useState('');
+  const [navigationRequest, setNavigationRequest] = useState(0);
+
+  useEffect(() => {
+    if (!toolsOpen || !selectedTool) return;
+    const heading = workflowHeadingRef.current;
+    heading?.focus({ preventScroll: true });
+    heading?.scrollIntoView({ block: 'center' });
+  }, [toolsOpen, selectedTool, navigationRequest]);
   const mergePanelRef = useRef(null);
   const rotatePanelRef = useRef(null);
   const extractPanelRef = useRef(null);
@@ -512,6 +525,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
+    setAssetUploadStatus(`Selected file: ${file.name}`);
     if (file.type === 'image/webp') {
       notify?.({ type: 'danger', message: PDF_SIGNATURE_IMAGE_MESSAGE });
       return;
@@ -524,6 +538,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
       notify?.({ type: 'danger', message: 'Image exceeds 512 KB limit.' });
       return;
     }
+    setAssetUploadStatus(`Uploading ${file.name}...`);
     const busyKey = `upload-${kind}`;
     setSignatureAssetBusy(busyKey);
     try {
@@ -538,9 +553,11 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
         },
       });
       notify?.({ type: 'success', message: kind === 'stamp' ? 'Firm stamp image uploaded.' : 'Visual signature image uploaded.' });
+      setAssetUploadStatus(`Selected file: ${file.name}`);
       await loadSignatureAssets();
     } catch (err) {
       notify?.({ type: 'danger', message: err.message || 'Could not upload image.' });
+      setAssetUploadStatus(`Selected file: ${file.name} (upload failed)`);
     } finally {
       setSignatureAssetBusy('');
     }
@@ -612,9 +629,10 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
   }
 
   function openTools(toolId) {
+    originatingToolRef.current = document.getElementById(`document-tool-${toolId}`);
     setToolsOpen(true);
     if (toolId) handleSelectTool(toolId);
-    scrollToRef(toolsSectionRef);
+    setNavigationRequest(value => value + 1);
   }
 
   function openMatterDocuments() {
@@ -657,7 +675,6 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     } else {
       setSignatureTargetInfo({ status: 'stale' });
     }
-    setTimeout(() => stampPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
   }
 
   async function runPreview() {
@@ -701,6 +718,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setRotateSaveSuccess('');
     if (!rotateDocumentId) {
       setRotateError('Select a PDF document.');
+      notify?.({ type: 'danger', message: 'Select a PDF document.' });
       return;
     }
     setRotateLoading(true);
@@ -722,10 +740,12 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setRotateSaveSuccess('');
     if (!rotateDocumentId) {
       setRotateSaveError('Select a PDF document.');
+      notify?.({ type: 'danger', message: 'Select a PDF document.' });
       return;
     }
     if (!rotateMatterId) {
       setRotateSaveError('Select a matter first.');
+      notify?.({ type: 'danger', message: 'Select a matter first.' });
       return;
     }
     setRotateSaveLoading(true);
@@ -768,10 +788,12 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setExtractSaveSuccess('');
     if (!extractDocumentId) {
       setExtractError('Select a PDF document.');
+      notify?.({ type: 'danger', message: 'Select a PDF document.' });
       return;
     }
     if (!extractRanges.trim()) {
       setExtractError('Enter page ranges such as 1-3,5.');
+      notify?.({ type: 'danger', message: 'Enter page ranges such as 1-3,5.' });
       return;
     }
     setExtractLoading(true);
@@ -793,14 +815,17 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setExtractSaveSuccess('');
     if (!extractDocumentId) {
       setExtractSaveError('Select a PDF document.');
+      notify?.({ type: 'danger', message: 'Select a PDF document.' });
       return;
     }
     if (!extractMatterId) {
       setExtractSaveError('Select a matter first.');
+      notify?.({ type: 'danger', message: 'Select a matter first.' });
       return;
     }
     if (!extractRanges.trim()) {
       setExtractSaveError('Enter page ranges such as 1-3,5.');
+      notify?.({ type: 'danger', message: 'Enter page ranges such as 1-3,5.' });
       return;
     }
     setExtractSaveLoading(true);
@@ -843,10 +868,12 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setSplitSaveSuccess('');
     if (!splitDocumentId) {
       setSplitError('Select a PDF document.');
+      notify?.({ type: 'danger', message: 'Select a PDF document.' });
       return;
     }
     if (!splitOrder.trim()) {
       setSplitError('Enter the new page order such as 3,1,2.');
+      notify?.({ type: 'danger', message: 'Enter the new page order such as 3,1,2.' });
       return;
     }
     setSplitLoading(true);
@@ -868,14 +895,17 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setSplitSaveSuccess('');
     if (!splitDocumentId) {
       setSplitSaveError('Select a PDF document.');
+      notify?.({ type: 'danger', message: 'Select a PDF document.' });
       return;
     }
     if (!splitMatterId) {
       setSplitSaveError('Select a matter first.');
+      notify?.({ type: 'danger', message: 'Select a matter first.' });
       return;
     }
     if (!splitOrder.trim()) {
       setSplitSaveError('Enter the new page order such as 3,1,2.');
+      notify?.({ type: 'danger', message: 'Enter the new page order such as 3,1,2.' });
       return;
     }
     setSplitSaveLoading(true);
@@ -933,10 +963,12 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setImagesSaveSuccess('');
     if (selectedImageDocumentIds.length < 1) {
       setImagesError('Select at least 1 image document.');
+      notify?.({ type: 'danger', message: 'Select at least 1 image document.' });
       return;
     }
     if (selectedImageDocumentIds.length > 10) {
       setImagesError('Select no more than 10 images.');
+      notify?.({ type: 'danger', message: 'Select no more than 10 images.' });
       return;
     }
     setImagesLoading(true);
@@ -958,14 +990,17 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setImagesSaveSuccess('');
     if (selectedImageDocumentIds.length < 1) {
       setImagesSaveError('Select at least 1 image document.');
+      notify?.({ type: 'danger', message: 'Select at least 1 image document.' });
       return;
     }
     if (selectedImageDocumentIds.length > 10) {
       setImagesSaveError('Select no more than 10 images.');
+      notify?.({ type: 'danger', message: 'Select no more than 10 images.' });
       return;
     }
     if (!imagesMatterId) {
       setImagesSaveError('Select a matter first.');
+      notify?.({ type: 'danger', message: 'Select a matter first.' });
       return;
     }
     setImagesSaveLoading(true);
@@ -1008,10 +1043,12 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setDeleteSaveSuccess('');
     if (!deleteDocumentId) {
       setDeleteError('Select a PDF document.');
+      notify?.({ type: 'danger', message: 'Select a PDF document.' });
       return;
     }
     if (!deletePages.trim()) {
       setDeleteError('Enter pages to remove.');
+      notify?.({ type: 'danger', message: 'Enter pages to remove.' });
       return;
     }
     setDeleteLoading(true);
@@ -1033,14 +1070,17 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setDeleteSaveSuccess('');
     if (!deleteDocumentId) {
       setDeleteSaveError('Select a PDF document.');
+      notify?.({ type: 'danger', message: 'Select a PDF document.' });
       return;
     }
     if (!deleteMatterId) {
       setDeleteSaveError('Select a matter first.');
+      notify?.({ type: 'danger', message: 'Select a matter first.' });
       return;
     }
     if (!deletePages.trim()) {
       setDeleteSaveError('Enter pages to remove.');
+      notify?.({ type: 'danger', message: 'Enter pages to remove.' });
       return;
     }
     setDeleteSaveLoading(true);
@@ -1083,6 +1123,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setPaginateSaveSuccess('');
     if (!paginateDocumentId) {
       setPaginateError('Select a PDF document.');
+      notify?.({ type: 'danger', message: 'Select a PDF document.' });
       return;
     }
     setPaginateLoading(true);
@@ -1104,10 +1145,12 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setPaginateSaveSuccess('');
     if (!paginateDocumentId) {
       setPaginateSaveError('Select a PDF document.');
+      notify?.({ type: 'danger', message: 'Select a PDF document.' });
       return;
     }
     if (!paginateMatterId) {
       setPaginateSaveError('Select a matter first.');
+      notify?.({ type: 'danger', message: 'Select a matter first.' });
       return;
     }
     setPaginateSaveLoading(true);
@@ -1203,14 +1246,17 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setBundleSaveSuccess('');
     if (selectedBundleDocumentIds.length < 2) {
       setBundleError('Select at least 2 PDF documents.');
+      notify?.({ type: 'danger', message: 'Select at least 2 PDF documents.' });
       return;
     }
     if (selectedBundleDocumentIds.length > 10) {
       setBundleError('Select no more than 10 PDF documents.');
+      notify?.({ type: 'danger', message: 'Select no more than 10 PDF documents.' });
       return;
     }
     if (!bundleMatterId) {
       setBundleError('Select a matter first.');
+      notify?.({ type: 'danger', message: 'Select a matter first.' });
       return;
     }
     setBundleLoading(true);
@@ -1233,14 +1279,17 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setBundleSaveSuccess('');
     if (selectedBundleDocumentIds.length < 2) {
       setBundleSaveError('Select at least 2 PDF documents.');
+      notify?.({ type: 'danger', message: 'Select at least 2 PDF documents.' });
       return;
     }
     if (selectedBundleDocumentIds.length > 10) {
       setBundleSaveError('Select no more than 10 PDF documents.');
+      notify?.({ type: 'danger', message: 'Select no more than 10 PDF documents.' });
       return;
     }
     if (!bundleMatterId) {
       setBundleSaveError('Select a matter first.');
+      notify?.({ type: 'danger', message: 'Select a matter first.' });
       return;
     }
     setBundleSaveLoading(true);
@@ -1318,10 +1367,12 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setStampSaveSuccess('');
     if (!stampDocumentId) {
       setStampError('Select a PDF document.');
+      notify?.({ type: 'danger', message: 'Select a PDF document.' });
       return;
     }
     if (!stampAssetId) {
       setStampError('Select a signature or stamp asset.');
+      notify?.({ type: 'danger', message: 'Select a signature or stamp asset.' });
       return;
     }
     if (selectedStampAssetBlocked) {
@@ -1347,14 +1398,17 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setStampSaveSuccess('');
     if (!stampDocumentId) {
       setStampSaveError('Select a PDF document.');
+      notify?.({ type: 'danger', message: 'Select a PDF document.' });
       return;
     }
     if (!stampAssetId) {
       setStampSaveError('Select a signature or stamp asset.');
+      notify?.({ type: 'danger', message: 'Select a signature or stamp asset.' });
       return;
     }
     if (!stampMatterId) {
       setStampSaveError('Select a matter first.');
+      notify?.({ type: 'danger', message: 'Select a matter first.' });
       return;
     }
     if (selectedStampAssetBlocked) {
@@ -1401,6 +1455,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setTenthSaveSuccess('');
     if (!tenthDocumentId) {
       setTenthError('Select a PDF document.');
+      notify?.({ type: 'danger', message: 'Select a PDF document.' });
       return;
     }
     setTenthLoading(true);
@@ -1422,10 +1477,12 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setTenthSaveSuccess('');
     if (!tenthDocumentId) {
       setTenthSaveError('Select a PDF document.');
+      notify?.({ type: 'danger', message: 'Select a PDF document.' });
       return;
     }
     if (!tenthMatterId) {
       setTenthSaveError('Select a matter first.');
+      notify?.({ type: 'danger', message: 'Select a matter first.' });
       return;
     }
     setTenthSaveLoading(true);
@@ -1493,10 +1550,12 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setSaveSuccess('');
     if (selectedMergeDocumentIds.length < 2) {
       setMergeError('Select at least 2 PDF documents.');
+      notify?.({ type: 'danger', message: 'Select at least 2 PDF documents.' });
       return;
     }
     if (selectedMergeDocumentIds.length > 10) {
       setMergeError('Select no more than 10 PDF documents.');
+      notify?.({ type: 'danger', message: 'Select no more than 10 PDF documents.' });
       return;
     }
     setMergeLoading(true);
@@ -1518,14 +1577,17 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setSaveSuccess('');
     if (selectedMergeDocumentIds.length < 2) {
       setSaveError('Select at least 2 PDF documents.');
+      notify?.({ type: 'danger', message: 'Select at least 2 PDF documents.' });
       return;
     }
     if (selectedMergeDocumentIds.length > 10) {
       setSaveError('Select no more than 10 PDF documents.');
+      notify?.({ type: 'danger', message: 'Select no more than 10 PDF documents.' });
       return;
     }
     if (!mergeMatterId) {
       setSaveError('Select a matter first.');
+      notify?.({ type: 'danger', message: 'Select a matter first.' });
       return;
     }
     setSaveLoading(true);
@@ -1548,11 +1610,16 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     if (!matters.length && !mattersLoading) loadMatters();
   }
 
-  if (loading) return <Skeleton />;
+  function returnToTools() {
+    setToolsOpen(false);
+    const control = originatingToolRef.current || document.getElementById(`document-tool-${selectedTool}`);
+    if (control?.isConnected) {
+      control.focus({ preventScroll: true });
+      control.scrollIntoView({ block: 'center' });
+    }
+  }
 
-  if (error) return <Alert tone="danger">{error}</Alert>;
-
-  const hint = templates.length === 1 ? '1 template configured' : `${templates.length} templates configured`;
+  const hint = loading ? 'Loading templates' : error ? 'Templates unavailable' : templates.length === 1 ? '1 template configured' : `${templates.length} templates configured`;
   const selectedMergeDocuments = selectedMergeDocumentIds
     .map(id => mergeDocuments.find(doc => doc.id === id))
     .filter(Boolean);
@@ -1602,6 +1669,21 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
   const signingAssetsSummary = signatureAssetsLoading
     ? 'Loading saved signing assets...'
     : `${personalSignatureAssets.length} signature image${personalSignatureAssets.length === 1 ? '' : 's'} and ${firmStampAssets.length} firm stamp${firmStampAssets.length === 1 ? '' : 's'} saved.`;
+
+  // Announce progress and selection guidance here; results use the existing toast once.
+  const workflowState = {
+    merge: [mergeMatterId, selectedMergeDocumentIds.length >= 2, mergeDocsLoading, mergeLoading, saveLoading, 'Select at least 2 PDF documents (up to 10).'],
+    rotate: [rotateMatterId, rotateDocumentId, rotateDocsLoading, rotateLoading, rotateSaveLoading, 'Select a PDF document.'],
+    extract: [extractMatterId, extractDocumentId && extractRanges.trim(), extractDocsLoading, extractLoading, extractSaveLoading, 'Select a PDF document and enter page ranges.'],
+    split: [splitMatterId, splitDocumentId && splitOrder.trim(), splitDocsLoading, splitLoading, splitSaveLoading, 'Select a PDF document and enter the page order.'],
+    images: [imagesMatterId, selectedImageDocumentIds.length >= 1, imagesDocsLoading, imagesLoading, imagesSaveLoading, 'Select at least 1 image document (up to 10).'],
+    delete: [deleteMatterId, deleteDocumentId && deletePages.trim(), deleteDocsLoading, deleteLoading, deleteSaveLoading, 'Select a PDF document and enter pages to remove.'],
+    paginate: [paginateMatterId, paginateDocumentId, paginateDocsLoading, paginateLoading, paginateSaveLoading, 'Select a PDF document.'],
+    bundle: [bundleMatterId, selectedBundleDocumentIds.length >= 2, bundleDocsLoading, bundleLoading, bundleSaveLoading, 'Select at least 2 PDF documents (up to 10).'],
+    stamp: [stampMatterId, stampDocumentId && stampAssetId, stampDocsLoading, stampLoading, stampSaveLoading, 'Select a PDF document and a signature / stamp asset.'],
+    tenth: [tenthMatterId, tenthDocumentId, tenthDocsLoading, tenthLoading, tenthSaveLoading, 'Select a PDF document.'],
+  }[selectedTool];
+  const workflowStatus = !workflowState ? '' : workflowState[3] ? 'Processing PDF...' : workflowState[4] ? 'Saving PDF...' : mattersLoading ? 'Loading matters...' : workflowState[2] ? 'Loading documents...' : !workflowState[0] ? 'Select a matter first.' : !workflowState[1] ? workflowState[5] : '';
 
   function renderSignatureAssetRows(assets, canManage) {
     if (signatureAssetsLoading) return <Skeleton />;
@@ -1654,7 +1736,8 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
   }
 
   return (
-    <div style={{ display: 'grid', gap: 16, minWidth: 0 }}>
+    <div className="lf-document-studio" style={{ display: 'grid', gap: 16, minWidth: 0 }}>
+      <style>{`.lf-document-studio button:focus-visible, .lf-document-studio h3:focus { outline: 2px solid ${theme.forest}; outline-offset: 3px; }`}</style>
       <Card title="Document Studio">
         <div style={{ display: 'grid', gap: 14, minWidth: 0 }}>
           <DocumentToolCards
@@ -1676,175 +1759,11 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
         </div>
       </Card>
 
-      <div ref={signatureSectionRef} style={{ minWidth: 0, order: 3 }}>
-      <Card title="More document tools">
-        <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
-          <div style={{ ...themedPanelStyle, padding: '12px 14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))', gap: 12, alignItems: 'center', minWidth: 0 }}>
-            <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
-              <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Manage signing assets</strong>
-              <span style={{ fontSize: 13, ...mutedPanelTextStyle, lineHeight: 1.45 }}>{signingAssetsSummary}</span>
-              <span style={{ fontSize: 12, ...mutedPanelTextStyle, lineHeight: 1.45 }}>PNG/JPEG images can be placed visually on PDFs. This is not a certified electronic signature.</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setSigningAssetsOpen(open => !open)}
-              aria-expanded={signingAssetsOpen}
-              aria-controls="signing-assets-panel"
-              style={{ ...styles.ghostButton, minHeight: 36, whiteSpace: 'nowrap' }}
-            >
-              {signingAssetsOpen ? 'Close' : 'Manage signing assets'}
-            </button>
-          </div>
-
-          {signingAssetsOpen && (
-          <div id="signing-assets-panel" style={{ display: 'grid', gap: 14, minWidth: 0 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))', gap: 14, minWidth: 0 }}>
-              <div style={signaturePanelStyle}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-                  <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
-                    <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Visual signature image</strong>
-                    <span style={{ fontSize: 12, ...mutedPanelTextStyle }}>Personal reusable PNG/JPEG image asset</span>
-                  </div>
-                  <label style={{ ...styles.primaryButton, opacity: signatureAssetBusy === 'upload-signature' ? 0.65 : 1, cursor: signatureAssetBusy === 'upload-signature' ? 'not-allowed' : 'pointer' }}>
-                    {signatureAssetBusy === 'upload-signature' ? 'Uploading...' : 'Upload signature image'}
-                    <input type="file" accept="image/png,image/jpeg" style={{ display: 'none' }} disabled={Boolean(signatureAssetBusy)} onChange={event => uploadSignatureAsset('signature', event)} />
-                  </label>
-                </div>
-                {renderSignatureAssetRows(personalSignatureAssets, true)}
-              </div>
-
-              <div style={signaturePanelStyle}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-                  <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
-                    <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Firm stamp image</strong>
-                    <span style={{ fontSize: 12, ...mutedPanelTextStyle }}>Firm reusable PNG/JPEG image asset</span>
-                  </div>
-                  {isAdmin && (
-                    <label style={{ ...styles.primaryButton, opacity: signatureAssetBusy === 'upload-stamp' ? 0.65 : 1, cursor: signatureAssetBusy === 'upload-stamp' ? 'not-allowed' : 'pointer' }}>
-                      {signatureAssetBusy === 'upload-stamp' ? 'Uploading...' : 'Upload stamp image'}
-                      <input type="file" accept="image/png,image/jpeg" style={{ display: 'none' }} disabled={Boolean(signatureAssetBusy)} onChange={event => uploadSignatureAsset('stamp', event)} />
-                    </label>
-                  )}
-                </div>
-                {renderSignatureAssetRows(firmStampAssets, isAdmin)}
-              </div>
-            </div>
-            {signatureAssetsError && <Alert tone="danger">{signatureAssetsError}</Alert>}
-          </div>
-          )}
-        </div>
-      </Card>
-      </div>
-
-      <div ref={templatesSectionRef} style={{ minWidth: 0, order: 4 }}>
-      <Card title="Manage templates">
-        <button
-          type="button"
-          onClick={() => setTemplatesOpen(open => !open)}
-          aria-expanded={templatesOpen}
-          aria-controls="document-templates-panel"
-          style={{ ...styles.ghostButton, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, width: '100%', textAlign: 'left', minHeight: 40, marginBottom: templatesOpen ? 14 : 0 }}
-        >
-          <span style={{ display: 'grid', gap: 2, minWidth: 0 }}>
-            <span style={{ fontWeight: 600, fontSize: 13, color: theme.ink }}>{templatesOpen ? 'Hide templates ▲' : 'Manage templates ▼'}</span>
-            <span style={{ fontSize: 12, color: theme.muted, lineHeight: 1.45 }}>{hint}.</span>
-          </span>
-        </button>
-        {templatesOpen && (
-        <div id="document-templates-panel" style={{ display: 'grid', gap: 14, minWidth: 0 }}>
-        {templates.length === 0 ? (
-          <Empty title="No templates configured" text="Contact your administrator." />
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(280px, 100%), 1fr))', gap: 16, padding: '8px 0', minWidth: 0 }}>
-            {templates.map(t => (
-              <div key={t.id} style={{ border: `1px solid ${previewTemplate?.id === t.id ? theme.blue : theme.line}`, borderRadius: 10, padding: '16px 18px', background: '#fff', display: 'grid', gap: 8, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: 14, color: theme.ink, wordBreak: 'break-word' }}>{t.name}</div>
-                {t.description && (
-                  <div style={{ fontSize: 13, color: theme.muted, lineHeight: 1.5 }}>{t.description}</div>
-                )}
-                {(t.practiceArea || t.category) && (
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
-                    {t.practiceArea && <Badge tone="blue">{t.practiceArea}</Badge>}
-                    {t.category && <Badge tone="blue">{t.category}</Badge>}
-                  </div>
-                )}
-                <div style={{ marginTop: 4 }}>
-                  <button
-                    type="button"
-                    style={{ ...styles.ghostButton, fontSize: 12, padding: '5px 12px' }}
-                    onClick={() => previewTemplate?.id === t.id ? closePreview() : openPreview(t)}
-                  >
-                    {previewTemplate?.id === t.id ? 'Close Preview' : 'Preview'}
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <TemplatePreviewPanel
-          previewTemplate={previewTemplate}
-          matters={matters}
-          mattersLoading={mattersLoading}
-          mattersError={mattersError}
-          selectedMatterId={selectedMatterId}
-          setSelectedMatterId={setSelectedMatterId}
-          previewResult={previewResult}
-          setPreviewResult={setPreviewResult}
-          previewError={previewError}
-          setPreviewError={setPreviewError}
-          previewLoading={previewLoading}
-          runPreview={runPreview}
-          onClose={closePreview}
-          panelRef={panelRef}
-        />
-        </div>
-        )}
-      </Card>
-      </div>
-
-      {CHECKLISTS_UI_ENABLED && <Card title="Checklist Templates" hint="Operational workflow templates — not pleadings or generated documents">
-        <div style={{ display: 'grid', gap: 10, minWidth: 0 }}>
-          <span style={{ fontSize: 13, color: theme.ink }}>Create reusable task/checklist templates for common legal workflows, then apply them to matters.</span>
-          <span style={{ fontSize: 12, color: theme.muted }}>These are step-by-step working checklists (e.g. Civil suit filing, Appeal preparation, Conveyancing completion, Client onboarding / KYC, Hearing preparation) — they do not generate documents.</span>
-          <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#F9FAFB', padding: '10px 12px', display: 'grid', gap: 4 }}>
-            <strong style={{ fontSize: 12, color: theme.ink }}>How this works</strong>
-            <span style={{ fontSize: 12, color: theme.muted }}>Step 1: Create a reusable template (Matters page, Checklist Templates card — administrators).</span>
-            <span style={{ fontSize: 12, color: theme.muted }}>Step 2: Add checklist items — one clear action per item.</span>
-            <span style={{ fontSize: 12, color: theme.muted }}>Step 3: Apply it to a matter from the matter's Tasks section.</span>
-            <span style={{ fontSize: 12, color: theme.muted }}>Step 4: Track completion in the matter workspace.</span>
-          </div>
-          {checklistTemplatesLoading ? <Skeleton /> : checklistTemplatesError ? (
-            <Alert tone="danger">{checklistTemplatesError}</Alert>
-          ) : checklistTemplates.length ? (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(280px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
-              {checklistTemplates.map(template => (
-                <div key={template.id} style={{ border: `1px solid ${theme.line}`, borderRadius: 10, padding: '14px 16px', background: '#fff', display: 'grid', gap: 6, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: 14, color: theme.ink, wordBreak: 'break-word' }}>{template.name}</div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    <Badge tone="blue">{template.practiceArea || 'General'}</Badge>
-                    <Badge tone="green">{(template.items || []).length} step{(template.items || []).length === 1 ? '' : 's'}</Badge>
-                  </div>
-                  {template.description ? <div style={{ fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>{template.description}</div> : null}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <Empty title="No checklist templates yet" text="Create your first reusable checklist from the Matters page — for example a Civil suit filing checklist." />
-          )}
-          {onNavigate && (
-            <div>
-              <button type="button" style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 12px' }} onClick={() => onNavigate('Matters')}>
-                {isAdmin ? 'Manage checklist templates in Matters' : 'Open Matters to apply a template'}
-              </button>
-            </div>
-          )}
-        </div>
-      </Card>}
-
-      <div ref={toolsSectionRef} style={{ minWidth: 0, order: 1 }}>
+      <div ref={toolsSectionRef} style={{ minWidth: 0 }}>
       <Card title="Selected workflow">
         <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
+          {mattersError && <div role="alert"><Alert tone="danger">{mattersError}</Alert></div>}
+          {selectedTool && <button type="button" style={{ ...styles.ghostButton, justifySelf: 'start' }} onClick={returnToTools}>Back to tools</button>}
           {!selectedTool && (
             <Empty title="No tool selected" text="Select a document tool above." />
           )}
@@ -1862,6 +1781,8 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
 
           {toolsOpen && selectedTool && (
           <div id="document-tools-panel" style={{ display: 'grid', gap: 16, minWidth: 0 }}>
+            <div role="status" aria-atomic="true" style={{ fontSize: 12, color: theme.muted }}>{workflowStatus}</div>
+
            {selectedTool === 'merge' && (
           <div
             ref={mergePanelRef}
@@ -1869,7 +1790,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
-                <strong style={{ fontSize: 14, color: theme.ink }}>Merge PDFs</strong>
+                <h3 ref={workflowHeadingRef} tabIndex={-1} style={{ fontSize: 14, color: theme.ink, margin: 0 }}>Merge PDFs</h3>
                 <span style={{ fontSize: 12, color: theme.muted }}>Download to device or save to matter</span>
               </div>
               <Badge tone="green">Available</Badge>
@@ -1925,8 +1846,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
               )}
             </div>
 
-            {mattersError && <Alert tone="danger">{mattersError}</Alert>}
-            {mergeDocsError && <Alert tone="danger">{mergeDocsError}</Alert>}
+            {mergeDocsError && <div role="alert"><Alert tone="danger">{mergeDocsError}</Alert></div>}
             {mergeError && <Alert tone="danger">{mergeError}</Alert>}
             {mergeSuccess && <Alert tone="success">{mergeSuccess}</Alert>}
             {saveError && <Alert tone="danger">{saveError}</Alert>}
@@ -2004,7 +1924,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
-                <strong style={{ fontSize: 14, color: theme.ink }}>Rotate PDF</strong>
+                <h3 ref={workflowHeadingRef} tabIndex={-1} style={{ fontSize: 14, color: theme.ink, margin: 0 }}>Rotate PDF</h3>
                 <span style={{ fontSize: 12, color: theme.muted }}>Rotates every page by the selected angle from its current orientation. Download to device or save to matter.</span>
               </div>
               <Badge tone="green">Available</Badge>
@@ -2094,7 +2014,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
               )}
             </div>
 
-            {rotateDocsError && <Alert tone="danger">{rotateDocsError}</Alert>}
+            {rotateDocsError && <div role="alert"><Alert tone="danger">{rotateDocsError}</Alert></div>}
             {rotateError && <Alert tone="danger">{rotateError}</Alert>}
             {rotateSuccess && <Alert tone="success">{rotateSuccess}</Alert>}
             {rotateSaveError && <Alert tone="danger">{rotateSaveError}</Alert>}
@@ -2109,7 +2029,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
-                <strong style={{ fontSize: 14, color: theme.ink }}>Extract pages</strong>
+                <h3 ref={workflowHeadingRef} tabIndex={-1} style={{ fontSize: 14, color: theme.ink, margin: 0 }}>Extract pages</h3>
                 <span style={{ fontSize: 12, color: theme.muted }}>Download to device or save to matter</span>
               </div>
               <Badge tone="green">Available</Badge>
@@ -2197,7 +2117,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
               )}
             </div>
 
-            {extractDocsError && <Alert tone="danger">{extractDocsError}</Alert>}
+            {extractDocsError && <div role="alert"><Alert tone="danger">{extractDocsError}</Alert></div>}
             {extractError && <Alert tone="danger">{extractError}</Alert>}
             {extractSuccess && <Alert tone="success">{extractSuccess}</Alert>}
             {extractSaveError && <Alert tone="danger">{extractSaveError}</Alert>}
@@ -2212,7 +2132,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
-                <strong style={{ fontSize: 14, color: theme.ink }}>Reorder / Select Pages</strong>
+                <h3 ref={workflowHeadingRef} tabIndex={-1} style={{ fontSize: 14, color: theme.ink, margin: 0 }}>Reorder / Select Pages</h3>
                 <span style={{ fontSize: 12, color: theme.muted }}>Creates one output PDF with the selected pages in the specified order.</span>
               </div>
               <Badge tone="green">Available</Badge>
@@ -2300,7 +2220,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
               )}
             </div>
 
-            {splitDocsError && <Alert tone="danger">{splitDocsError}</Alert>}
+            {splitDocsError && <div role="alert"><Alert tone="danger">{splitDocsError}</Alert></div>}
             {splitError && <Alert tone="danger">{splitError}</Alert>}
             {splitSuccess && <Alert tone="success">{splitSuccess}</Alert>}
             {splitSaveError && <Alert tone="danger">{splitSaveError}</Alert>}
@@ -2315,7 +2235,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
-                <strong style={{ fontSize: 14, color: theme.ink }}>Images to PDF</strong>
+                <h3 ref={workflowHeadingRef} tabIndex={-1} style={{ fontSize: 14, color: theme.ink, margin: 0 }}>Images to PDF</h3>
                 <span style={{ fontSize: 12, color: theme.muted }}>Download to device or save to matter</span>
               </div>
               <Badge tone="green">Available</Badge>
@@ -2423,7 +2343,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
               </div>
             )}
 
-            {imagesDocsError && <Alert tone="danger">{imagesDocsError}</Alert>}
+            {imagesDocsError && <div role="alert"><Alert tone="danger">{imagesDocsError}</Alert></div>}
             {imagesError && <Alert tone="danger">{imagesError}</Alert>}
             {imagesSuccess && <Alert tone="success">{imagesSuccess}</Alert>}
             {imagesSaveError && <Alert tone="danger">{imagesSaveError}</Alert>}
@@ -2438,7 +2358,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
-                <strong style={{ fontSize: 14, color: theme.ink }}>Delete pages</strong>
+                <h3 ref={workflowHeadingRef} tabIndex={-1} style={{ fontSize: 14, color: theme.ink, margin: 0 }}>Delete pages</h3>
                 <span style={{ fontSize: 12, color: theme.muted }}>Download to device or save to matter</span>
               </div>
               <Badge tone="green">Available</Badge>
@@ -2526,7 +2446,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
               )}
             </div>
 
-            {deleteDocsError && <Alert tone="danger">{deleteDocsError}</Alert>}
+            {deleteDocsError && <div role="alert"><Alert tone="danger">{deleteDocsError}</Alert></div>}
             {deleteError && <Alert tone="danger">{deleteError}</Alert>}
             {deleteSuccess && <Alert tone="success">{deleteSuccess}</Alert>}
             {deleteSaveError && <Alert tone="danger">{deleteSaveError}</Alert>}
@@ -2545,7 +2465,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
-                <strong style={{ fontSize: 14, color: theme.ink }}>Add page numbers / paginate bundle</strong>
+                <h3 ref={workflowHeadingRef} tabIndex={-1} style={{ fontSize: 14, color: theme.ink, margin: 0 }}>Add page numbers / paginate bundle</h3>
                 <span style={{ fontSize: 12, color: theme.muted }}>Download to device or save to matter</span>
               </div>
               <Badge tone="green">Available</Badge>
@@ -2648,7 +2568,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
               )}
             </div>
 
-            {paginateDocsError && <Alert tone="danger">{paginateDocsError}</Alert>}
+            {paginateDocsError && <div role="alert"><Alert tone="danger">{paginateDocsError}</Alert></div>}
             {paginateError && <Alert tone="danger">{paginateError}</Alert>}
             {paginateSuccess && <Alert tone="success">{paginateSuccess}</Alert>}
             {paginateSaveError && <Alert tone="danger">{paginateSaveError}</Alert>}
@@ -2667,7 +2587,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
-                <strong style={{ fontSize: 14, color: theme.ink }}>Court bundle prep</strong>
+                <h3 ref={workflowHeadingRef} tabIndex={-1} style={{ fontSize: 14, color: theme.ink, margin: 0 }}>Court bundle prep</h3>
                 <span style={{ fontSize: 12, color: theme.muted }}>Download to device or save to matter</span>
               </div>
               <Badge tone="green">Available</Badge>
@@ -2820,7 +2740,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
               )}
             </div>
 
-            {bundleDocsError && <Alert tone="danger">{bundleDocsError}</Alert>}
+            {bundleDocsError && <div role="alert"><Alert tone="danger">{bundleDocsError}</Alert></div>}
             {bundleError && <Alert tone="danger">{bundleError}</Alert>}
             {bundleSuccess && <Alert tone="success">{bundleSuccess}</Alert>}
             {bundleSaveError && <Alert tone="danger">{bundleSaveError}</Alert>}
@@ -3029,7 +2949,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
-                <strong style={{ fontSize: 14, color: theme.ink }}>Sign / stamp PDF</strong>
+                <h3 ref={workflowHeadingRef} tabIndex={-1} style={{ fontSize: 14, color: theme.ink, margin: 0 }}>Sign / stamp PDF</h3>
                 <span style={{ fontSize: 12, color: theme.muted }}>Download to device or save to matter</span>
               </div>
               <Badge tone="green">Available</Badge>
@@ -3165,7 +3085,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
               )}
             </div>
 
-            {stampDocsError && <Alert tone="danger">{stampDocsError}</Alert>}
+            {stampDocsError && <div role="alert"><Alert tone="danger">{stampDocsError}</Alert></div>}
             {stampError && <Alert tone="danger">{stampError}</Alert>}
             {stampSuccess && <Alert tone="success">{stampSuccess}</Alert>}
             {stampSaveError && <Alert tone="danger">{stampSaveError}</Alert>}
@@ -3180,7 +3100,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
-                <strong style={{ fontSize: 14, color: theme.ink }}>Tenth-line overlay (approximate)</strong>
+                <h3 ref={workflowHeadingRef} tabIndex={-1} style={{ fontSize: 14, color: theme.ink, margin: 0 }}>Tenth-line overlay (approximate)</h3>
                 <span style={{ fontSize: 12, color: theme.muted }}>Download to device or save to matter</span>
               </div>
               <Badge tone="green">Available</Badge>
@@ -3273,7 +3193,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
               )}
             </div>
 
-            {tenthDocsError && <Alert tone="danger">{tenthDocsError}</Alert>}
+            {tenthDocsError && <div role="alert"><Alert tone="danger">{tenthDocsError}</Alert></div>}
             {tenthError && <Alert tone="danger">{tenthError}</Alert>}
             {tenthSuccess && <Alert tone="success">{tenthSuccess}</Alert>}
             {tenthSaveError && <Alert tone="danger">{tenthSaveError}</Alert>}
@@ -3285,6 +3205,177 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
         </div>
       </Card>
       </div>
+      <div ref={signatureSectionRef} style={{ minWidth: 0 }}>
+      <Card title="More document tools">
+        <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
+          <div style={{ ...themedPanelStyle, padding: '12px 14px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))', gap: 12, alignItems: 'center', minWidth: 0 }}>
+            <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
+              <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Manage signing assets</strong>
+              <span style={{ fontSize: 13, ...mutedPanelTextStyle, lineHeight: 1.45 }}>{signingAssetsSummary}</span>
+              <span style={{ fontSize: 12, ...mutedPanelTextStyle, lineHeight: 1.45 }}>PNG/JPEG images can be placed visually on PDFs. This is not a certified electronic signature.</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSigningAssetsOpen(open => !open)}
+              aria-expanded={signingAssetsOpen}
+              aria-controls="signing-assets-panel"
+              style={{ ...styles.ghostButton, minHeight: 36, whiteSpace: 'nowrap' }}
+            >
+              {signingAssetsOpen ? 'Close' : 'Manage signing assets'}
+            </button>
+          </div>
+
+          {signingAssetsOpen && (
+          <div id="signing-assets-panel" style={{ display: 'grid', gap: 14, minWidth: 0 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))', gap: 14, minWidth: 0 }}>
+              <div style={signaturePanelStyle}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                    <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Visual signature image</strong>
+                    <span style={{ fontSize: 12, ...mutedPanelTextStyle }}>Personal reusable PNG/JPEG image asset</span>
+                  </div>
+                  <button type="button" disabled={Boolean(signatureAssetBusy)} onClick={() => signatureUploadRef.current?.click()} style={{ ...styles.primaryButton, opacity: signatureAssetBusy === 'upload-signature' ? 0.65 : 1 }}>
+                    {signatureAssetBusy === 'upload-signature' ? 'Uploading...' : 'Upload signature image'}
+                  </button>
+                  <input ref={signatureUploadRef} aria-label="Signature image file" type="file" accept="image/png,image/jpeg" style={{ display: 'none' }} disabled={Boolean(signatureAssetBusy)} onChange={event => uploadSignatureAsset('signature', event)} />
+                </div>
+                {renderSignatureAssetRows(personalSignatureAssets, true)}
+              </div>
+
+              <div style={signaturePanelStyle}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
+                    <strong style={{ fontSize: 14, color: 'var(--lf-card-text, #101827)' }}>Firm stamp image</strong>
+                    <span style={{ fontSize: 12, ...mutedPanelTextStyle }}>Firm reusable PNG/JPEG image asset</span>
+                  </div>
+                  {isAdmin && (
+                    <>
+                    <button type="button" disabled={Boolean(signatureAssetBusy)} onClick={() => stampUploadRef.current?.click()} style={{ ...styles.primaryButton, opacity: signatureAssetBusy === 'upload-stamp' ? 0.65 : 1 }}>
+                      {signatureAssetBusy === 'upload-stamp' ? 'Uploading...' : 'Upload stamp image'}
+                    </button>
+                    <input ref={stampUploadRef} aria-label="Stamp image file" type="file" accept="image/png,image/jpeg" style={{ display: 'none' }} disabled={Boolean(signatureAssetBusy)} onChange={event => uploadSignatureAsset('stamp', event)} />
+                    </>
+                  )}
+                </div>
+                {renderSignatureAssetRows(firmStampAssets, isAdmin)}
+              </div>
+            </div>
+            <div style={{ fontSize: 12, color: theme.muted }}>{assetUploadStatus}</div>
+            <div role="status" aria-atomic="true">{signatureAssetBusy.startsWith('upload-') ? 'Uploading image...' : ''}</div>
+            {signatureAssetsError && <div role="alert"><Alert tone="danger">{signatureAssetsError}</Alert></div>}
+          </div>
+          )}
+        </div>
+      </Card>
+      </div>
+
+      <div ref={templatesSectionRef} style={{ minWidth: 0 }}>
+      <Card title="Manage templates">
+        <button
+          type="button"
+          onClick={() => setTemplatesOpen(open => !open)}
+          aria-expanded={templatesOpen}
+          aria-controls="document-templates-panel"
+          style={{ ...styles.ghostButton, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, width: '100%', textAlign: 'left', minHeight: 40, marginBottom: templatesOpen ? 14 : 0 }}
+        >
+          <span style={{ display: 'grid', gap: 2, minWidth: 0 }}>
+            <span style={{ fontWeight: 600, fontSize: 13, color: theme.ink }}>{templatesOpen ? 'Hide templates ▲' : 'Manage templates ▼'}</span>
+            <span style={{ fontSize: 12, color: theme.muted, lineHeight: 1.45 }}>{hint}.</span>
+          </span>
+        </button>
+        {error && <Alert tone="danger">Templates unavailable: {error} PDF tools remain available.</Alert>}
+        {templatesOpen && (
+        <div id="document-templates-panel" style={{ display: 'grid', gap: 14, minWidth: 0 }}>
+        {loading ? <Skeleton /> : error ? null : templates.length === 0 ? (
+          <Empty title="No templates configured" text="Contact your administrator." />
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(280px, 100%), 1fr))', gap: 16, padding: '8px 0', minWidth: 0 }}>
+            {templates.map(t => (
+              <div key={t.id} style={{ border: `1px solid ${previewTemplate?.id === t.id ? theme.blue : theme.line}`, borderRadius: 10, padding: '16px 18px', background: '#fff', display: 'grid', gap: 8, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 14, color: theme.ink, wordBreak: 'break-word' }}>{t.name}</div>
+                {t.description && (
+                  <div style={{ fontSize: 13, color: theme.muted, lineHeight: 1.5 }}>{t.description}</div>
+                )}
+                {(t.practiceArea || t.category) && (
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
+                    {t.practiceArea && <Badge tone="blue">{t.practiceArea}</Badge>}
+                    {t.category && <Badge tone="blue">{t.category}</Badge>}
+                  </div>
+                )}
+                <div style={{ marginTop: 4 }}>
+                  <button
+                    type="button"
+                    style={{ ...styles.ghostButton, fontSize: 12, padding: '5px 12px' }}
+                    onClick={() => previewTemplate?.id === t.id ? closePreview() : openPreview(t)}
+                  >
+                    {previewTemplate?.id === t.id ? 'Close Preview' : 'Preview'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <TemplatePreviewPanel
+          previewTemplate={previewTemplate}
+          matters={matters}
+          mattersLoading={mattersLoading}
+          mattersError={mattersError}
+          selectedMatterId={selectedMatterId}
+          setSelectedMatterId={setSelectedMatterId}
+          previewResult={previewResult}
+          setPreviewResult={setPreviewResult}
+          previewError={previewError}
+          setPreviewError={setPreviewError}
+          previewLoading={previewLoading}
+          runPreview={runPreview}
+          onClose={closePreview}
+          panelRef={panelRef}
+        />
+        </div>
+        )}
+      </Card>
+      </div>
+
+      {CHECKLISTS_UI_ENABLED && <Card title="Checklist Templates" hint="Operational workflow templates — not pleadings or generated documents">
+        <div style={{ display: 'grid', gap: 10, minWidth: 0 }}>
+          <span style={{ fontSize: 13, color: theme.ink }}>Create reusable task/checklist templates for common legal workflows, then apply them to matters.</span>
+          <span style={{ fontSize: 12, color: theme.muted }}>These are step-by-step working checklists (e.g. Civil suit filing, Appeal preparation, Conveyancing completion, Client onboarding / KYC, Hearing preparation) — they do not generate documents.</span>
+          <div style={{ border: `1px solid ${theme.line}`, borderRadius: 8, background: '#F9FAFB', padding: '10px 12px', display: 'grid', gap: 4 }}>
+            <strong style={{ fontSize: 12, color: theme.ink }}>How this works</strong>
+            <span style={{ fontSize: 12, color: theme.muted }}>Step 1: Create a reusable template (Matters page, Checklist Templates card — administrators).</span>
+            <span style={{ fontSize: 12, color: theme.muted }}>Step 2: Add checklist items — one clear action per item.</span>
+            <span style={{ fontSize: 12, color: theme.muted }}>Step 3: Apply it to a matter from the matter's Tasks section.</span>
+            <span style={{ fontSize: 12, color: theme.muted }}>Step 4: Track completion in the matter workspace.</span>
+          </div>
+          {checklistTemplatesLoading ? <Skeleton /> : checklistTemplatesError ? (
+            <Alert tone="danger">{checklistTemplatesError}</Alert>
+          ) : checklistTemplates.length ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(280px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
+              {checklistTemplates.map(template => (
+                <div key={template.id} style={{ border: `1px solid ${theme.line}`, borderRadius: 10, padding: '14px 16px', background: '#fff', display: 'grid', gap: 6, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: theme.ink, wordBreak: 'break-word' }}>{template.name}</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <Badge tone="blue">{template.practiceArea || 'General'}</Badge>
+                    <Badge tone="green">{(template.items || []).length} step{(template.items || []).length === 1 ? '' : 's'}</Badge>
+                  </div>
+                  {template.description ? <div style={{ fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>{template.description}</div> : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <Empty title="No checklist templates yet" text="Create your first reusable checklist from the Matters page — for example a Civil suit filing checklist." />
+          )}
+          {onNavigate && (
+            <div>
+              <button type="button" style={{ ...styles.ghostButton, fontSize: 12, padding: '6px 12px' }} onClick={() => onNavigate('Matters')}>
+                {isAdmin ? 'Manage checklist templates in Matters' : 'Open Matters to apply a template'}
+              </button>
+            </div>
+          )}
+        </div>
+      </Card>}
+
     </div>
   );
 }
