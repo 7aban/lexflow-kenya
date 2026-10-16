@@ -258,6 +258,64 @@ export async function postDownloadWithAuth(path, body = {}, fallbackFilename = '
   return attachDownloadWarnings(blob, response);
 }
 
+// Computer workflows retain this exact Blob for repeated downloads and saving.
+// Existing stored-document download helpers keep their signatures and behavior.
+export function downloadCompletedPdf(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+export async function processComputerPdf(operation, files, { degrees, filename }, signal) {
+  const route = { rotate: 'rotate-pdf', merge: 'merge-pdfs' }[operation];
+  if (!route) throw new Error('Unsupported computer PDF operation');
+  const session = readSession();
+  if (!session?.token) throw new AuthExpiredError();
+  let body = { files: [], filename, ...(operation === 'rotate' ? { degrees } : {}) };
+  for (const file of files) {
+    signal?.throwIfAborted();
+    const dataUrl = await fileToDataUrl(file);
+    body.files.push({ name: file.name, mimeType: 'application/pdf', data: dataUrl.slice(dataUrl.indexOf(',') + 1) });
+  }
+  signal?.throwIfAborted();
+  let encoded = JSON.stringify(body);
+  body = null;
+  const response = await fetch(`${API_BASE}/document-tools/${route}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` }, body: encoded, signal,
+  });
+  encoded = null;
+  if (response.status === 401) {
+    clearSession();
+    emitAuthFailure();
+    throw new AuthExpiredError();
+  }
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(response.status === 429 && payload.code === 'computer_pdf_busy'
+      ? 'Another PDF operation is running. Wait a moment, then try processing again.'
+      : payload.error || `PDF processing failed (${response.status})`);
+  }
+  const blob = await response.blob();
+  signal?.throwIfAborted();
+  blob.lexflowFilename = filenameFromDisposition(response.headers.get('Content-Disposition') || '', filename || `${operation === 'rotate' ? 'rotated' : 'merged'}-document.pdf`);
+  downloadCompletedPdf(blob, blob.lexflowFilename);
+  return attachDownloadWarnings(blob, response);
+}
+
+export async function saveCompletedPdf(matterId, blob, filename, signal) {
+  signal?.throwIfAborted();
+  const data = await fileToDataUrl(blob);
+  signal?.throwIfAborted();
+  return api(`/matters/${encodeURIComponent(matterId)}/documents`, {
+    method: 'POST', signal, body: { name: filename, mimeType: 'application/pdf', data, clientVisible: false },
+  });
+}
+
 // PRODUCT-27C: fetch a document's raw bytes (no browser download) so PDF.js can
 // render it client-side for click-to-place stamping. Uses the same Bearer-token
 // pattern as the other authenticated fetch helpers and returns an ArrayBuffer.

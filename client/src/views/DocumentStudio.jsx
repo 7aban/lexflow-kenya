@@ -5,6 +5,7 @@ import { Alert, Badge, Card, Empty, Skeleton } from '../components/ui.jsx';
 import DocumentToolCards from './document-studio/DocumentToolCards.jsx';
 import TemplatePreviewPanel from './document-studio/TemplatePreviewPanel.jsx';
 import StampPlacementHelper from './document-studio/StampPlacementHelper.jsx';
+import { processComputerPdf, downloadCompletedPdf, saveCompletedPdf } from '../lib/apiClient.js';
 
 function matterLabel(matter = {}) {
   const base = matter.title || matter.reference || matter.caseNumber || `Matter ${matter.id}`;
@@ -56,6 +57,172 @@ function SignatureAssetPreview({ asset }) {
   return (
     <div style={{ border: '1px solid var(--lf-card-border, var(--lf-border, #E5E7EB))', borderRadius: 8, background: 'color-mix(in srgb, var(--lf-card, #fff) 88%, var(--lf-background, #FAFAF9))', minHeight: 96, display: 'grid', placeItems: 'center', padding: 12, overflow: 'hidden' }}>
       {url ? <img src={url} alt={`${asset.label || 'Signature asset'} preview`} style={{ maxWidth: '100%', maxHeight: 120, objectFit: 'contain' }} /> : <span style={{ fontSize: 12, color: 'var(--lf-card-muted, var(--lf-text-muted, #697386))' }}>No image selected</span>}
+    </div>
+  );
+}
+
+const COMPUTER_PDF_INPUT_LIMIT = 20 * 1024 * 1024;
+
+function computerFileSize(bytes) {
+  return bytes < 1024 ? `${bytes} bytes` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KiB` : `${(bytes / (1024 * 1024)).toFixed(2)} MiB`;
+}
+
+function focusPdfControl(control) {
+  control?.focus({ preventScroll: true });
+  control?.scrollIntoView({ block: 'center' });
+}
+
+// Mounted only for the active computer workflow. Files and results never enter
+// storage or a shared cache; changing workflow/source unmounts and aborts it.
+function ComputerPdfWorkflow({ operation, matters, mattersLoading, canSave }) {
+  const [files, setFiles] = useState([]);
+  const [filename, setFilename] = useState(operation === 'rotate' ? 'rotated-document.pdf' : 'merged-document.pdf');
+  const [angle, setAngle] = useState(90);
+  const [result, setResult] = useState(null);
+  const [phase, setPhase] = useState('idle');
+  const [error, setError] = useState('');
+  const [saveError, setSaveError] = useState('');
+  const [showSave, setShowSave] = useState(false);
+  const [matterId, setMatterId] = useState('');
+  const [saved, setSaved] = useState(null);
+  const generation = useRef(0);
+  const controller = useRef(null);
+  const fileInput = useRef(null);
+  const resultHeading = useRef(null);
+  const destination = useRef(null);
+  const mounted = useRef(true);
+  const fileKeys = useRef(new WeakMap());
+  const nextFileKey = useRef(0);
+  const saving = phase === 'saving';
+  const processing = phase === 'processing';
+  const validCount = operation === 'rotate' ? files.length === 1 : files.length >= 2 && files.length <= 10;
+  const totalBytes = files.reduce((total, file) => total + file.size, 0);
+  const current = version => mounted.current && generation.current === version;
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; generation.current++; controller.current?.abort(); };
+  }, []);
+  useEffect(() => { if (result) focusPdfControl(resultHeading.current); }, [result]);
+  useEffect(() => { if (showSave) focusPdfControl(destination.current); }, [showSave]);
+
+  function invalidate() {
+    generation.current++;
+    controller.current?.abort();
+    controller.current = null;
+    setResult(null); setSaved(null); setError(''); setSaveError(''); setShowSave(false); setPhase('idle');
+  }
+
+  function chooseFiles(event) {
+    const selected = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!selected.length) return;
+    invalidate();
+    setFiles([]);
+    if ((operation === 'rotate' && selected.length !== 1) || selected.length > 10) {
+      setError(operation === 'rotate' ? 'Choose exactly one PDF.' : 'Choose no more than 10 PDFs.'); return;
+    }
+    if (selected.some(file => !/\.pdf$/i.test(file.name) || (file.type && file.type !== 'application/pdf'))) {
+      setError('Choose PDF files only.'); return;
+    }
+    if (selected.reduce((sum, file) => sum + file.size, 0) > COMPUTER_PDF_INPUT_LIMIT) {
+      setError('Combined PDF size must be 20 MiB or less.'); return;
+    }
+    if (selected.some(file => file.size === 0)) { setError('Choose nonempty PDF files.'); return; }
+    selected.forEach(file => fileKeys.current.set(file, nextFileKey.current++));
+    setFiles(selected);
+  }
+
+  function removeFile(index) {
+    invalidate(); setFiles(currentFiles => currentFiles.filter((_, i) => i !== index));
+    focusPdfControl(fileInput.current);
+  }
+  function moveFile(index, direction) {
+    invalidate();
+    setFiles(currentFiles => {
+      const next = [...currentFiles];
+      [next[index], next[index + direction]] = [next[index + direction], next[index]];
+      return next;
+    });
+  }
+  async function process() {
+    if (!validCount || processing || saving || result) return;
+    invalidate();
+    const version = generation.current;
+    const abort = new AbortController(); controller.current = abort;
+    setPhase('processing');
+    try {
+      const blob = await processComputerPdf(operation, files, { degrees: angle, filename }, abort.signal);
+      if (current(version)) { setResult({ blob, filename: blob.lexflowFilename }); setPhase('complete'); }
+    } catch (failure) {
+      if (current(version) && failure.name !== 'AbortError') { setError(failure.message || 'Could not process PDF.'); setPhase('idle'); }
+    } finally { if (current(version)) controller.current = null; }
+  }
+
+  async function save() {
+    if (!result || !matterId || !canSave || saving) return;
+    const version = generation.current;
+    const abort = new AbortController(); controller.current = abort;
+    setSaveError(''); setSaved(null); setPhase('saving');
+    try {
+      const document = await saveCompletedPdf(matterId, result.blob, result.filename, abort.signal);
+      if (current(version)) setSaved(document);
+    } catch (failure) {
+      if (current(version) && failure.name !== 'AbortError') setSaveError(failure.message || 'Could not save PDF. The completed result is still available to download.');
+    } finally { if (current(version)) { setPhase('complete'); controller.current = null; } }
+  }
+
+  const status = processing ? 'Processing PDF...' : saving ? 'Saving PDF...' : saved ? `Saved ${saved.displayName || saved.name || result.filename} to matter documents.` : result ? 'PDF complete. Download started. The result is also available below.' : files.length ? `${files.length} PDF${files.length === 1 ? '' : 's'} selected. ${validCount ? 'Ready to process.' : 'Select at least 2 PDFs.'}` : 'Choose PDFs from your computer. No matter is required.';
+  return (
+    <div data-testid="computer-pdf-workflow" style={{ display: 'grid', gap: 14, minWidth: 0 }}>
+      <div style={{ fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>Computer source files are used for this operation only. They have not been saved to a matter.</div>
+      <div role="status" aria-live="polite" aria-atomic="true" style={{ fontSize: 12, color: theme.muted }}>{status}</div>
+      <label style={{ ...styles.field, minWidth: 0 }}>
+        <span style={{ fontSize: 12, color: theme.muted }}>{operation === 'rotate' ? 'Computer PDF' : 'Computer PDFs (in merge order)'}</span>
+        <input ref={fileInput} type="file" accept=".pdf,application/pdf" multiple={operation === 'merge'} onChange={chooseFiles} disabled={saving} style={{ ...styles.input, minWidth: 0, maxWidth: '100%' }} />
+      </label>
+      <div style={{ fontSize: 12, color: theme.muted }}>{files.length}/{operation === 'rotate' ? 1 : 10} selected · {computerFileSize(totalBytes)} total · 20 MiB maximum</div>
+      {!!files.length && <ol aria-label="Selected computer PDFs" style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 8, minWidth: 0 }}>
+        {files.map((file, index) => <li key={fileKeys.current.get(file)} style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: 10, display: 'grid', gap: 8, minWidth: 0, background: theme.goldPale }}>
+          <span style={{ overflowWrap: 'anywhere', fontSize: 13, color: theme.ink }}>{index + 1}. {file.name} <span style={{ color: theme.muted }}>({computerFileSize(file.size)})</span></span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {operation === 'merge' && <>
+              <button type="button" style={styles.tinyButton} aria-label={`Move PDF ${index + 1} up`} disabled={index === 0 || saving} onClick={() => moveFile(index, -1)}>Up</button>
+              <button type="button" style={styles.tinyButton} aria-label={`Move PDF ${index + 1} down`} disabled={index === files.length - 1 || saving} onClick={() => moveFile(index, 1)}>Down</button>
+            </>}
+            <button type="button" style={styles.dangerTinyButton} aria-label={`Remove PDF ${index + 1}`} disabled={saving} onClick={() => removeFile(index)}>Remove</button>
+          </div>
+        </li>)}
+      </ol>}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
+        {operation === 'rotate' && <label style={{ ...styles.field, minWidth: 0 }}><span style={{ fontSize: 12, color: theme.muted }}>Rotation</span><select style={styles.input} value={angle} disabled={saving} onChange={event => { invalidate(); setAngle(Number(event.target.value)); }}>
+          <option value={90}>90° clockwise</option><option value={180}>180°</option><option value={270}>270° clockwise (90° counter-clockwise)</option>
+        </select></label>}
+        <label style={{ ...styles.field, minWidth: 0 }}><span style={{ fontSize: 12, color: theme.muted }}>Output filename</span><input style={styles.input} value={filename} maxLength={180} disabled={saving} onChange={event => { invalidate(); setFilename(event.target.value); }} /></label>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+        <button type="button" style={styles.primaryButton} disabled={!validCount || processing || saving || !!result} onClick={process}>{processing ? 'Processing...' : operation === 'rotate' ? 'Rotate and Download' : 'Merge and Download'}</button>
+        <button type="button" style={styles.ghostButton} disabled={saving || (!files.length && !error)} onClick={() => { invalidate(); setFiles([]); if (fileInput.current) fileInput.current.value = ''; focusPdfControl(fileInput.current); }}>Clear selection</button>
+      </div>
+      {error && <div role="alert"><Alert tone="danger">{error}</Alert></div>}
+      {result && <section aria-label="Completed PDF result" style={{ border: `1px solid ${theme.line}`, borderRadius: 8, padding: 12, display: 'grid', gap: 12, minWidth: 0 }}>
+        <h4 ref={resultHeading} tabIndex={-1} style={{ margin: 0, color: theme.ink }}>Completed PDF</h4>
+        <span style={{ overflowWrap: 'anywhere', fontSize: 13 }}>{result.filename} ({computerFileSize(result.blob.size)})</span>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+          <button type="button" style={styles.primaryButton} onClick={() => downloadCompletedPdf(result.blob, result.filename)}>Download result</button>
+          {canSave && <button type="button" style={styles.ghostButton} disabled={saving} aria-expanded={showSave} onClick={() => setShowSave(true)}>Save to matter</button>}
+        </div>
+        {!canSave && <span style={{ fontSize: 12, color: theme.muted }}>Saving to matter documents requires an advocate or administrator.</span>}
+        {showSave && canSave && <div style={{ display: 'grid', gap: 10, minWidth: 0 }}>
+          <label style={{ ...styles.field, minWidth: 0 }}><span style={{ fontSize: 12, color: theme.muted }}>Destination matter</span><select ref={destination} style={styles.input} value={matterId} disabled={mattersLoading || saving} onChange={event => { setMatterId(event.target.value); setSaveError(''); setSaved(null); }}>
+            <option value="">{mattersLoading ? 'Loading matters...' : 'Select a destination matter'}</option>
+            {matters.map(matter => <option key={matter.id} value={matter.id}>{matterLabel(matter)}</option>)}
+          </select></label>
+          <span style={{ fontSize: 12, color: theme.muted, overflowWrap: 'anywhere' }}>Save {result.filename} as an internal matter document. Computer source files will not be saved.</span>
+          <button type="button" style={{ ...styles.primaryButton, justifySelf: 'start' }} disabled={!matterId || saving || !!saved} onClick={save}>{saving ? 'Saving...' : 'Save completed PDF'}</button>
+        </div>}
+        {saveError && <div role="alert"><Alert tone="danger">{saveError} The completed PDF remains available to download.</Alert></div>}
+      </section>}
     </div>
   );
 }
@@ -248,6 +415,15 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
 
   const [toolsOpen, setToolsOpen] = useState(false);
   const [selectedTool, setSelectedTool] = useState(null);
+  const [mergeSource, setMergeSource] = useState('matter');
+  const [rotateSource, setRotateSource] = useState('matter');
+  const pendingPdfSourceFocus = useRef(null);
+  useEffect(() => {
+    const pending = pendingPdfSourceFocus.current;
+    if (!pending) return;
+    pendingPdfSourceFocus.current = null;
+    focusPdfControl(document.querySelector(`input[name="${pending.tool}-pdf-source"][value="${pending.source}"]`));
+  }, [mergeSource, rotateSource]);
   const [signingAssetsOpen, setSigningAssetsOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [signatureAssets, setSignatureAssets] = useState([]);
@@ -1619,6 +1795,29 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     }
   }
 
+  function switchPdfSource(tool, source) {
+    pendingPdfSourceFocus.current = { tool, source };
+    if (tool === 'merge') {
+      setMergeSource(source); setMergeMatterId(''); setMergeDocuments([]); setSelectedMergeDocumentIds([]);
+      setMergeError(null); setMergeSuccess(''); setSaveError(null); setSaveSuccess('');
+    } else {
+      setRotateSource(source); setRotateMatterId(''); setRotateDocuments([]); setRotateDocumentId('');
+      setRotateError(null); setRotateSuccess(''); setRotateSaveError(null); setRotateSaveSuccess('');
+    }
+  }
+
+  function pdfSourceChoices(tool, source, busy) {
+    return <fieldset style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+      <legend style={{ fontSize: 12, color: theme.muted, marginBottom: 8 }}>PDF source</legend>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+        {['computer', 'matter'].map(value => <label key={value} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: theme.ink, cursor: 'pointer' }}>
+          <input type="radio" name={`${tool}-pdf-source`} value={value} checked={source === value} disabled={busy} onChange={() => switchPdfSource(tool, value)} />
+          Choose from {value}
+        </label>)}
+      </div>
+    </fieldset>;
+  }
+
   const hint = loading ? 'Loading templates' : error ? 'Templates unavailable' : templates.length === 1 ? '1 template configured' : `${templates.length} templates configured`;
   const selectedMergeDocuments = selectedMergeDocumentIds
     .map(id => mergeDocuments.find(doc => doc.id === id))
@@ -1684,6 +1883,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     tenth: [tenthMatterId, tenthDocumentId, tenthDocsLoading, tenthLoading, tenthSaveLoading, 'Select a PDF document.'],
   }[selectedTool];
   const workflowStatus = !workflowState ? '' : workflowState[3] ? 'Processing PDF...' : workflowState[4] ? 'Saving PDF...' : mattersLoading ? 'Loading matters...' : workflowState[2] ? 'Loading documents...' : !workflowState[0] ? 'Select a matter first.' : !workflowState[1] ? workflowState[5] : '';
+  const computerSourceActive = (selectedTool === 'merge' && mergeSource === 'computer') || (selectedTool === 'rotate' && rotateSource === 'computer');
 
   function renderSignatureAssetRows(assets, canManage) {
     if (signatureAssetsLoading) return <Skeleton />;
@@ -1781,7 +1981,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
 
           {toolsOpen && selectedTool && (
           <div id="document-tools-panel" style={{ display: 'grid', gap: 16, minWidth: 0 }}>
-            <div role="status" aria-atomic="true" style={{ fontSize: 12, color: theme.muted }}>{workflowStatus}</div>
+            {!computerSourceActive && <div role="status" aria-atomic="true" style={{ fontSize: 12, color: theme.muted }}>{workflowStatus}</div>}
 
            {selectedTool === 'merge' && (
           <div
@@ -1795,6 +1995,9 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
               </div>
               <Badge tone="green">Available</Badge>
             </div>
+
+            {mergeSource === 'computer' && pdfSourceChoices('merge', mergeSource, mergeLoading || saveLoading)}
+            {mergeSource === 'computer' ? <ComputerPdfWorkflow key="computer-merge" operation="merge" matters={matters} mattersLoading={mattersLoading} canSave={isAdvocateOrAdmin} /> : <>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, alignItems: 'end', minWidth: 0 }}>
               <label style={{ ...styles.field, minWidth: 0 }}>
@@ -1811,6 +2014,8 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                   ))}
                 </select>
               </label>
+
+              {pdfSourceChoices('merge', mergeSource, mergeLoading || saveLoading)}
 
               <label style={{ ...styles.field, minWidth: 0 }}>
                 <span style={{ fontSize: 12, color: theme.muted }}>Output filename</span>
@@ -1914,6 +2119,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                 </div>
               </div>
             )}
+            </>}
           </div>
           )}
 
@@ -1930,6 +2136,9 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
               <Badge tone="green">Available</Badge>
             </div>
 
+            {rotateSource === 'computer' && pdfSourceChoices('rotate', rotateSource, rotateLoading || rotateSaveLoading)}
+            {rotateSource === 'computer' ? <ComputerPdfWorkflow key="computer-rotate" operation="rotate" matters={matters} mattersLoading={mattersLoading} canSave={isAdvocateOrAdmin} /> : <>
+
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, alignItems: 'end', minWidth: 0 }}>
               <label style={{ ...styles.field, minWidth: 0 }}>
                 <span style={{ fontSize: 12, color: theme.muted }}>Matter</span>
@@ -1945,6 +2154,8 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                   ))}
                 </select>
               </label>
+
+              {pdfSourceChoices('rotate', rotateSource, rotateLoading || rotateSaveLoading)}
 
               <label style={{ ...styles.field, minWidth: 0 }}>
                 <span style={{ fontSize: 12, color: theme.muted }}>PDF document</span>
@@ -2019,6 +2230,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             {rotateSuccess && <Alert tone="success">{rotateSuccess}</Alert>}
             {rotateSaveError && <Alert tone="danger">{rotateSaveError}</Alert>}
             {rotateSaveSuccess && <Alert tone="success">{rotateSaveSuccess}</Alert>}
+            </>}
           </div>
           )}
 
