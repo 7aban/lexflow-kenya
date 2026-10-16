@@ -9773,7 +9773,7 @@ app.post('/api/document-tools/rotate-pdf', requireStaff, async (req, res) => {
 
     const pages = sourcePdf.getPages();
     for (const page of pages) {
-      page.setRotation(degrees(degreesValue));
+      page.setRotation(degrees(((page.getRotation().angle + degreesValue) % 360 + 360) % 360));
     }
 
     const rotatedBytes = await sourcePdf.save();
@@ -9843,7 +9843,7 @@ app.post('/api/document-tools/rotate-pdf/save', requireAdvocateOrAdmin, async (r
 
     const pages = sourcePdf.getPages();
     for (const page of pages) {
-      page.setRotation(degrees(degreesValue));
+      page.setRotation(degrees(((page.getRotation().angle + degreesValue) % 360 + 360) % 360));
     }
 
     const rotatedBytes = await sourcePdf.save();

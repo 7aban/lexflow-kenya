@@ -1406,10 +1406,10 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
     setTenthLoading(true);
     try {
       await tenthLinePdf(tenthDocumentId, tenthStartNumber, tenthFilename);
-      setTenthSuccess('Tenth-lined PDF downloaded.');
-      notify?.({ type: 'success', message: 'Tenth-lined PDF downloaded.' });
+      setTenthSuccess('PDF with approximate line markers downloaded.');
+      notify?.({ type: 'success', message: 'PDF with approximate line markers downloaded.' });
     } catch (err) {
-      const message = err.message || 'Could not add tenth-line numbering.';
+      const message = err.message || 'Could not apply line-marker overlay.';
       setTenthError(message);
       notify?.({ type: 'danger', message });
     } finally {
@@ -1434,7 +1434,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
       setTenthSaveSuccess('Saved to matter documents. Open the matter Documents tab to view it.');
       notify?.({ type: 'success', message: 'Saved to matter documents. Open the matter Documents tab to view it.' });
     } catch (err) {
-      const message = err.message || 'Could not save tenth-lined PDF.';
+      const message = err.message || 'Could not save PDF with line-marker overlay.';
       setTenthSaveError(message);
       notify?.({ type: 'danger', message });
     } finally {
@@ -2005,7 +2005,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
                 <strong style={{ fontSize: 14, color: theme.ink }}>Rotate PDF</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Download to device or save to matter</span>
+                <span style={{ fontSize: 12, color: theme.muted }}>Rotates every page by the selected angle from its current orientation. Download to device or save to matter.</span>
               </div>
               <Badge tone="green">Available</Badge>
             </div>
@@ -2212,8 +2212,8 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
-                <strong style={{ fontSize: 14, color: theme.ink }}>Split / reorder pages</strong>
-                <span style={{ fontSize: 12, color: theme.muted }}>Download to device or save to matter</span>
+                <strong style={{ fontSize: 14, color: theme.ink }}>Reorder / Select Pages</strong>
+                <span style={{ fontSize: 12, color: theme.muted }}>Creates one output PDF with the selected pages in the specified order.</span>
               </div>
               <Badge tone="green">Available</Badge>
             </div>
@@ -2262,7 +2262,7 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
                   placeholder="3,1,2"
                   disabled={splitLoading || splitSaveLoading}
                 />
-                <span style={{ fontSize: 11, color: theme.muted, marginTop: 4 }}>Enter the new page order, for example 3,1,2 or 1-3,5.</span>
+                <span style={{ fontSize: 11, color: theme.muted, marginTop: 4 }}>Enter the new page order, for example 3,1,2 or 1-3,5. Creates one PDF, not separate files.</span>
               </label>
 
               <label style={{ ...styles.field, minWidth: 0 }}>
@@ -3180,14 +3180,14 @@ export default function DocumentStudio({ notify, onNavigate, onOpenMatterDocumen
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
               <div style={{ display: 'grid', gap: 3, minWidth: 0 }}>
-                <strong style={{ fontSize: 14, color: theme.ink }}>Tenth-lining / appellate formatting</strong>
+                <strong style={{ fontSize: 14, color: theme.ink }}>Tenth-line overlay (approximate)</strong>
                 <span style={{ fontSize: 12, color: theme.muted }}>Download to device or save to matter</span>
               </div>
               <Badge tone="green">Available</Badge>
             </div>
 
             <div style={{ border: `1px solid ${theme.line}`, borderRadius: 6, background: '#FAFAF9', padding: '8px 12px', fontSize: 12, color: theme.muted, lineHeight: 1.5 }}>
-              Adds appellate-style right-margin markers at every tenth line. This overlays visual markers on the PDF and does not reflow or alter the original document.
+              Adds approximate right-margin markers at fixed spacing; it does not detect actual text lines. Alignment depends on page margins and line spacing, so scanned PDFs and irregular layouts may not align. Inspect the generated PDF before relying on it for court filing; this tool does not check court formatting rules.
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12, alignItems: 'end', minWidth: 0 }}>

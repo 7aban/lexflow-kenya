@@ -14,8 +14,8 @@ const documentToolCards = [
   },
   {
     id: 'split',
-    title: 'Split / reorder pages',
-    description: 'Reorder or select pages for a new PDF.',
+    title: 'Reorder / Select Pages',
+    description: 'Select and reorder pages into one output PDF.',
   },
   {
     id: 'delete',
@@ -25,7 +25,7 @@ const documentToolCards = [
   {
     id: 'rotate',
     title: 'Rotate pages',
-    description: 'Correct page orientation.',
+    description: 'Rotate every page from its current orientation.',
   },
   {
     id: 'paginate',
@@ -49,25 +49,25 @@ const documentToolCards = [
   },
   {
     id: 'tenth',
-    title: 'Tenth-lining / appellate formatting',
-    description: 'Format documents for appellate filing.',
+    title: 'Tenth-line overlay (approximate)',
+    description: 'Approximate fixed-spacing markers; check alignment.',
   },
 ];
 
-const activeToolNames = new Set(['Merge PDFs', 'Rotate pages', 'Extract pages', 'Split / reorder pages', 'Delete pages', 'Add page numbers / paginate bundle', 'Court bundle prep', 'Images to PDF', 'Sign / stamp PDF', 'Tenth-lining / appellate formatting']);
+const activeToolNames = new Set(['Merge PDFs', 'Rotate pages', 'Extract pages', 'Reorder / Select Pages', 'Delete pages', 'Add page numbers / paginate bundle', 'Court bundle prep', 'Images to PDF', 'Sign / stamp PDF', 'Tenth-line overlay (approximate)']);
 
 export default function DocumentToolCards({ onOpenMerge, onOpenRotate, onOpenExtract, onOpenSplit, onOpenDelete, onOpenPaginate, onOpenBundle, onOpenImages, onOpenStamp, onOpenTenth, selectedTool }) {
   const openHandlers = {
     'Merge PDFs': onOpenMerge,
     'Rotate pages': onOpenRotate,
     'Extract pages': onOpenExtract,
-    'Split / reorder pages': onOpenSplit,
+    'Reorder / Select Pages': onOpenSplit,
     'Delete pages': onOpenDelete,
     'Add page numbers / paginate bundle': onOpenPaginate,
     'Court bundle prep': onOpenBundle,
     'Images to PDF': onOpenImages,
     'Sign / stamp PDF': onOpenStamp,
-    'Tenth-lining / appellate formatting': onOpenTenth,
+    'Tenth-line overlay (approximate)': onOpenTenth,
   };
 
   return (
