@@ -38,6 +38,7 @@ const { STAFF_FIELDS, pickSettings, serializeTheme, serializeFirmSettings, norma
 const { buildTemplateMergeContext, mergeTemplateMarkup } = require('./lib/templateMerge');
 const { MAX_FOLDER_DEPTH, createFolderHierarchy, isClientUploadsFolderName } = require('./lib/folderHierarchy');
 const { FolderMoveError, createFolderMovement } = require('./lib/folderMovement');
+const { BODY_BYTES: COMPUTER_PDF_BODY_BYTES, hasOwn, byteLimit, outputByteLimit, decodeComputerFiles, createProcessingGate, DocumentToolInputError } = require('./lib/documentToolInputs');
 
 const app = express();
 const { db, opened } = openDatabase(config.DATABASE_PATH);
@@ -113,6 +114,43 @@ const UPLOAD_BODY_PATHS = [
 const isUploadBodyPath = requestPath => UPLOAD_BODY_PATHS.some(pattern => pattern.test(requestPath));
 const standardJsonParser = express.json({ limit: config.JSON_BODY_LIMIT });
 const uploadJsonParser = express.json({ limit: config.UPLOAD_BODY_LIMIT });
+const computerPdfGate = createProcessingGate(1);
+const computerPdfOutputLimit = outputByteLimit(config.UPLOAD_MAX_FILE_MB, config.UPLOAD_BODY_LIMIT);
+const isComputerPdfPath = req => req.method === 'POST' && /^\/api\/document-tools\/(rotate-pdf|merge-pdfs)\/?$/i.test(req.path);
+const rememberPdfBodySize = (req, _res, buffer) => { req.documentToolBodyBytes = buffer.length; };
+const smallPdfJsonParser = express.json({ limit: config.JSON_BODY_LIMIT, verify: rememberPdfBodySize });
+const computerPdfJsonParser = express.json({ limit: COMPUTER_PDF_BODY_BYTES, verify: rememberPdfBodySize });
+const computerPdfBusy = res => res.status(429).set('Retry-After', '1').json({ error: 'Computer PDF processing is busy. Try again shortly.', code: 'computer_pdf_busy' });
+// Only these two POST routes accept large bodies. Authenticate before parsing;
+// reserve large/chunked admissions before buffering, without queuing requests.
+app.use((req, res, next) => {
+  if (!isComputerPdfPath(req)) return next();
+  res.set('Cache-Control', 'no-store');
+  authenticate(req, res, () => {
+    if (req.aborted || res.destroyed) return;
+    if (!['admin', 'advocate', 'assistant'].includes(req.user?.role)) return res.status(403).json({ error: 'Staff access required' });
+    const length = req.headers['content-length'];
+    const small = typeof length === 'string' && /^\d+$/.test(length) && Number(length) <= byteLimit(config.JSON_BODY_LIMIT);
+    if (!small && !computerPdfGate.acquire(req, res)) return computerPdfBusy(res);
+    (small ? smallPdfJsonParser : computerPdfJsonParser)(req, res, err => {
+      if (err) {
+        computerPdfGate.releaseParsing(req);
+        if (req.aborted || res.destroyed) return;
+        const tooLarge = err.type === 'entity.too.large';
+        return res.status(tooLarge ? 413 : err.status === 415 ? 415 : 400).json({
+          error: tooLarge ? 'Request body is too large.' : 'Invalid PDF processing JSON request.',
+          code: tooLarge ? 'payload_too_large' : 'invalid_pdf_request',
+        });
+      }
+      if (!hasOwn(req.body, 'files')) {
+        computerPdfGate.releaseParsing(req);
+        // Stored-ID requests retain their original JSON ceiling, even chunked.
+        if (req.documentToolBodyBytes > byteLimit(config.JSON_BODY_LIMIT)) return res.status(413).json({ error: 'Request body is too large.', code: 'payload_too_large' });
+      }
+      next();
+    });
+  });
+});
 app.use((req, res, next) => (isUploadBodyPath(req.path) ? uploadJsonParser : standardJsonParser)(req, res, next));
 // Clear JSON 413 instead of Express's default HTML error page. File-type and
 // visibility policy are still enforced by the individual routes.
@@ -9482,6 +9520,7 @@ app.post('/api/matters/:id/documents', async (req, res) => {
       return res.status(403).json({ error: 'Matter access denied' });
     }
   }
+  if (!(await get('SELECT id FROM matters WHERE id=?', [req.params.id]))) return res.status(404).json({ error: 'Matter not found' });
   const { name, mimeType, data, displayName } = req.body;
   if (!name || !data) return res.status(400).json({ error: 'name and data are required' });
   const allowed = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
@@ -9550,7 +9589,71 @@ app.get('/api/documents/:id/download', async (req, res) => {
   res.send(doc.content);
 });
 
+// Stateless computer inputs use the same PDF engine, relative-rotation formula,
+// filename sanitizer and response contract as stored-document downloads.
+async function downloadComputerPdf(req, res, operation) {
+  if (req.aborted || res.destroyed) return;
+  const lease = computerPdfGate.acquire(req, res);
+  if (!lease) return computerPdfBusy(res);
+  if (!lease.start()) return;
+  let inputCount = 0;
+  let inputBytes = 0;
+  try {
+    const input = decodeComputerFiles(req.body, operation);
+    inputCount = input.files.length;
+    inputBytes = input.inputBytes;
+    const angle = req.body.degrees;
+    if (operation === 'rotate' && ![90, 180, 270].includes(angle)) throw new DocumentToolInputError('degrees must be 90, 180, or 270');
+    let output;
+    try {
+      const pdfs = [];
+      for (const content of input.files) {
+        const pdf = await PDFLibDocument.load(content, { ignoreEncryption: false, throwOnInvalidObject: true });
+        if (pdf.getPageCount() < 1) throw new Error('Empty PDF');
+        pdfs.push(pdf);
+      }
+      if (operation === 'rotate') {
+        const pdf = pdfs[0];
+        for (const page of pdf.getPages()) page.setRotation(degrees(((page.getRotation().angle + angle) % 360 + 360) % 360));
+        output = Buffer.from(await pdf.save());
+      } else {
+        const pdf = await PDFLibDocument.create();
+        for (const source of pdfs) {
+          const pages = await pdf.copyPages(source, source.getPageIndices());
+          pages.forEach(page => pdf.addPage(page));
+        }
+        output = Buffer.from(await pdf.save());
+      }
+    } catch {
+      throw new DocumentToolInputError('Could not process PDF — it may be corrupt or encrypted');
+    }
+    if (output.length > computerPdfOutputLimit) throw new DocumentToolInputError('Generated PDF exceeds the supported permanent-upload size limit', 413, 'computer_pdf_output_too_large');
+    const filename = cleanPdfDownloadName(req.body.filename || (operation === 'rotate' ? 'rotated-document.pdf' : 'merged-document.pdf'));
+    await recordAuditEvent(req, {
+      action: `document_tool_${operation}_pdf_downloaded`, entityType: 'document_tool',
+      metadata: { source: 'computer', operation, outcome: 'processed', inputCount, inputBytes, outputBytes: output.length },
+    }).catch(() => {});
+    if (!res.destroyed) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Cache-Control', 'no-store');
+      res.send(output);
+    }
+  } catch (error) {
+    const status = error instanceof DocumentToolInputError ? error.status : 500;
+    await recordAuditEvent(req, {
+      action: 'document_tool_computer_pdf_failed', entityType: 'document_tool',
+      metadata: { source: 'computer', operation, outcome: status < 500 ? 'rejected' : 'failed', inputCount, inputBytes, status },
+    }).catch(() => {});
+    if (!res.destroyed) res.status(status).json({ error: error instanceof DocumentToolInputError ? error.message : 'Unable to process computer PDF', ...(error instanceof DocumentToolInputError ? { code: error.code } : {}) });
+  } finally {
+    // The transport may already be closed; computation and auditing are done.
+    lease.finish();
+  }
+}
+
 app.post('/api/document-tools/merge-pdfs', requireStaff, async (req, res) => {
+  if (hasOwn(req.body, 'files')) return downloadComputerPdf(req, res, 'merge');
   try {
     const documentIds = Array.isArray(req.body?.documentIds)
       ? req.body.documentIds.map(id => String(id || '').trim()).filter(Boolean)
@@ -9744,6 +9847,7 @@ app.post('/api/document-tools/merge-pdfs/save', requireAdvocateOrAdmin, async (r
 });
 
 app.post('/api/document-tools/rotate-pdf', requireStaff, async (req, res) => {
+  if (hasOwn(req.body, 'files')) return downloadComputerPdf(req, res, 'rotate');
   try {
     const { documentId, degrees: rawDegrees, filename: rawFilename } = req.body || {};
 
